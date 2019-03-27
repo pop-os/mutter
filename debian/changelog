@@ -1,4 +1,4 @@
-mutter (3.32.0-1ubuntu1) UNRELEASED; urgency=medium
+mutter (3.32.0-1ubuntu1) disco; urgency=medium
 
   * debian/control:
     - Update VCS flags to point to launchpad
@@ -7,7 +7,7 @@ mutter (3.32.0-1ubuntu1) UNRELEASED; urgency=medium
   * debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
     - X11: Add support for fractional scaling using Randr (LP: #1820850)
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 27 Mar 2019 06:38:30 +0100
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 27 Mar 2019 06:48:11 +0100
 
 mutter (3.32.0-1) experimental; urgency=medium
 
