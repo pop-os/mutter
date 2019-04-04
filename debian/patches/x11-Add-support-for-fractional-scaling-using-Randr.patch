@@ -11,15 +11,14 @@ Date:   Wed Apr 3 18:57:28 2019 -0400
 
 Add scaling support using randr under x11.
 
+Origin: https://gitlab.gnome.org/3v1n0/mutter/commits/xrandr-scaling
 Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/mutter/+bug/1820850
 Forwarded: No, forwarding is in progress and planned though
 ---
  data/meson.build                               |   7 +
  data/org.gnome.mutter.gschema.xml.in           |   5 +
  data/org.gnome.mutter.x11.gschema.xml.in       |  30 ++
- meson.build                                    |   2 +-
  src/backends/meta-crtc.h                       |   1 +
- src/backends/meta-logical-monitor.c            |  36 +--
  src/backends/meta-monitor-config-manager.c     | 150 +++++++++-
  src/backends/meta-monitor-config-migration.c   |  15 +-
  src/backends/meta-monitor-config-store.c       |   1 +
@@ -38,17 +37,13 @@ Forwarded: No, forwarding is in progress and planned though
  src/backends/x11/meta-monitor-manager-xrandr.c | 399 +++++++++++++++++--------
  src/backends/x11/meta-monitor-manager-xrandr.h |   4 +-
  src/backends/x11/meta-output-xrandr.c          |   5 +-
- src/compositor/compositor-private.h            |   2 +
- src/compositor/compositor.c                    |  96 +++++-
- src/core/boxes-private.h                       |   8 +
- src/core/boxes.c                               |  53 ++++
- src/core/display.c                             |   3 +-
+ src/compositor/compositor.c                    |  54 ++++
+ src/core/boxes-private.h                       |   4 +
+ src/core/boxes.c                               |  21 ++
  src/core/window.c                              |  19 ++
- src/meta/compositor.h                          |   5 +
- src/meta/display.h                             |   8 +-
  src/org.gnome.Mutter.DisplayConfig.xml         |   5 +
  src/tests/meta-monitor-manager-test.c          |  14 +-
- 34 files changed, 1354 insertions(+), 303 deletions(-)
+ 28 files changed, 1269 insertions(+), 254 deletions(-)
  create mode 100644 data/org.gnome.mutter.x11.gschema.xml.in
 
 diff --git a/data/meson.build b/data/meson.build
@@ -121,19 +116,6 @@ index 0000000..3696659
 +  </schema>
 +
 +</schemalist>
-diff --git a/meson.build b/meson.build
-index cafbde4..afcbd31 100644
---- a/meson.build
-+++ b/meson.build
-@@ -9,7 +9,7 @@ mutter_plugin_api_version = '3'
- libmutter_api_version = '4'
- 
- # generic version requirements
--glib_req = '>= 2.53.2'
-+glib_req = '>= 2.56'
- gi_req = '>= 0.9.5'
- gtk3_req = '>= 3.19.8'
- gdk_pixbuf_req = '>= 2.0'
 diff --git a/src/backends/meta-crtc.h b/src/backends/meta-crtc.h
 index ddacfea..8d16455 100644
 --- a/src/backends/meta-crtc.h
@@ -146,58 +128,6 @@ index ddacfea..8d16455 100644
  
    MetaLogicalMonitor *logical_monitor;
  
-diff --git a/src/backends/meta-logical-monitor.c b/src/backends/meta-logical-monitor.c
-index 99a35f7..a2d8f41 100644
---- a/src/backends/meta-logical-monitor.c
-+++ b/src/backends/meta-logical-monitor.c
-@@ -45,6 +45,7 @@
- #include "backends/meta-backend-private.h"
- #include "backends/meta-crtc.h"
- #include "backends/meta-output.h"
-+#include "core/boxes-private.h"
- 
- G_DEFINE_TYPE (MetaLogicalMonitor, meta_logical_monitor, G_TYPE_OBJECT)
- 
-@@ -302,37 +303,6 @@ meta_logical_monitor_has_neighbor (MetaLogicalMonitor   *logical_monitor,
-                                    MetaLogicalMonitor   *neighbor,
-                                    MetaDisplayDirection  neighbor_direction)
- {
--  switch (neighbor_direction)
--    {
--    case META_DISPLAY_RIGHT:
--      if (neighbor->rect.x == (logical_monitor->rect.x +
--                               logical_monitor->rect.width) &&
--          meta_rectangle_vert_overlap (&neighbor->rect,
--                                       &logical_monitor->rect))
--        return TRUE;
--      break;
--    case META_DISPLAY_LEFT:
--      if (logical_monitor->rect.x == (neighbor->rect.x +
--                                      neighbor->rect.width) &&
--          meta_rectangle_vert_overlap (&neighbor->rect,
--                                       &logical_monitor->rect))
--        return TRUE;
--      break;
--    case META_DISPLAY_UP:
--      if (logical_monitor->rect.y == (neighbor->rect.y +
--                                      neighbor->rect.height) &&
--          meta_rectangle_horiz_overlap (&neighbor->rect,
--                                        &logical_monitor->rect))
--        return TRUE;
--      break;
--    case META_DISPLAY_DOWN:
--      if (neighbor->rect.y == (logical_monitor->rect.y +
--                               logical_monitor->rect.height) &&
--          meta_rectangle_horiz_overlap (&neighbor->rect,
--                                        &logical_monitor->rect))
--        return TRUE;
--      break;
--    }
--
--  return FALSE;
-+  return meta_rectangle_has_neighbor (&logical_monitor->rect, &neighbor->rect,
-+                                      (MetaSide) neighbor_direction);
- }
 diff --git a/src/backends/meta-monitor-config-manager.c b/src/backends/meta-monitor-config-manager.c
 index 771c57f..5d620a3 100644
 --- a/src/backends/meta-monitor-config-manager.c
@@ -2751,47 +2681,35 @@ index 515389d..3bc7f0b 100644
      return;
  
    tile_atom = XInternAtom (xdisplay, "TILE", FALSE);
-diff --git a/src/compositor/compositor-private.h b/src/compositor/compositor-private.h
-index 0f92d42..13a8a6a 100644
---- a/src/compositor/compositor-private.h
-+++ b/src/compositor/compositor-private.h
-@@ -13,6 +13,8 @@
- 
- struct _MetaCompositor
- {
-+  GObject         parent;
-+
-   MetaDisplay    *display;
- 
-   guint           pre_paint_func_id;
 diff --git a/src/compositor/compositor.c b/src/compositor/compositor.c
-index 0854a19..7fc2943 100644
+index 0854a19..e412784 100644
 --- a/src/compositor/compositor.c
 +++ b/src/compositor/compositor.c
-@@ -86,6 +86,8 @@
- #include "wayland/meta-wayland-private.h"
- #endif
+@@ -92,6 +92,11 @@ on_presented (ClutterStage     *stage,
+               ClutterFrameInfo *frame_info,
+               MetaCompositor   *compositor);
  
-+G_DEFINE_TYPE (MetaCompositor, meta_compositor, G_TYPE_OBJECT)
++static void
++on_redirected_monitor_changed (MetaWindow     *window,
++                               int             old_monitor,
++                               MetaCompositor *compositor);
 +
- static void
- on_presented (ClutterStage     *stage,
-               CoglFrameEvent    event,
-@@ -131,11 +133,8 @@ meta_switch_workspace_completed (MetaCompositor *compositor)
- void
- meta_compositor_destroy (MetaCompositor *compositor)
+ static gboolean
+ is_modal (MetaDisplay *display)
  {
--  clutter_threads_remove_repaint_func (compositor->pre_paint_func_id);
--  clutter_threads_remove_repaint_func (compositor->post_paint_func_id);
--
--  if (compositor->have_x11_sync_object)
--    meta_sync_ring_destroy ();
-+  g_object_run_dispose (G_OBJECT (compositor));
-+  g_object_unref (compositor);
- }
+@@ -134,6 +139,11 @@ meta_compositor_destroy (MetaCompositor *compositor)
+   clutter_threads_remove_repaint_func (compositor->pre_paint_func_id);
+   clutter_threads_remove_repaint_func (compositor->post_paint_func_id);
  
- static void
-@@ -635,16 +634,54 @@ meta_shape_cow_for_window (MetaCompositor *compositor,
++  if (compositor->unredirected_window)
++    g_signal_handlers_disconnect_by_func (compositor->unredirected_window,
++                                          on_redirected_monitor_changed,
++                                          compositor);
++
+   if (compositor->have_x11_sync_object)
+     meta_sync_ring_destroy ();
+ }
+@@ -635,16 +645,54 @@ meta_shape_cow_for_window (MetaCompositor *compositor,
      }
  }
  
@@ -2846,81 +2764,21 @@ index 0854a19..7fc2943 100644
        meta_window_actor_set_unredirected (window_actor, FALSE);
      }
  
-@@ -654,6 +691,13 @@ set_unredirected_window (MetaCompositor *compositor,
+@@ -654,6 +702,12 @@ set_unredirected_window (MetaCompositor *compositor,
    if (compositor->unredirected_window != NULL)
      {
        MetaWindowActor *window_actor = META_WINDOW_ACTOR (meta_window_get_compositor_private (compositor->unredirected_window));
 +
 +      meta_monitor_manager_disable_scale_for_monitor (monitor_manager,
 +                                                      window->monitor);
-+      g_signal_connect_object (window, "monitor-changed",
-+                               G_CALLBACK (on_redirected_monitor_changed),
-+                               compositor, 0);
++      g_signal_connect (window, "monitor-changed",
++                        G_CALLBACK (on_redirected_monitor_changed), compositor);
 +
        meta_window_actor_set_unredirected (window_actor, TRUE);
      }
  }
-@@ -1274,12 +1318,20 @@ on_shadow_factory_changed (MetaShadowFactory *factory,
- MetaCompositor *
- meta_compositor_new (MetaDisplay *display)
- {
--  MetaBackend *backend = meta_get_backend ();
--  ClutterBackend *clutter_backend = meta_backend_get_clutter_backend (backend);
-   MetaCompositor *compositor;
- 
--  compositor = g_new0 (MetaCompositor, 1);
-+  compositor = g_object_new (META_TYPE_COMPOSITOR, NULL);
-   compositor->display = display;
-+
-+  return compositor;
-+}
-+
-+static void
-+meta_compositor_init (MetaCompositor *compositor)
-+{
-+  MetaBackend *backend = meta_get_backend ();
-+  ClutterBackend *clutter_backend = meta_backend_get_clutter_backend (backend);
-+
-   compositor->context = clutter_backend->cogl_context;
- 
-   g_signal_connect (meta_shadow_factory_get_default (),
-@@ -1297,7 +1349,33 @@ meta_compositor_new (MetaDisplay *display)
-                                            meta_post_paint_func,
-                                            compositor,
-                                            NULL);
--  return compositor;
-+}
-+
-+static void
-+meta_compositor_dispose (GObject *gobject)
-+{
-+  MetaCompositor *compositor = META_COMPOSITOR (gobject);
-+
-+  g_clear_handle_id (&compositor->pre_paint_func_id,
-+                     clutter_threads_remove_repaint_func);
-+  g_clear_handle_id (&compositor->post_paint_func_id,
-+                     clutter_threads_remove_repaint_func);
-+
-+  if (compositor->have_x11_sync_object)
-+    {
-+      meta_sync_ring_destroy ();
-+      compositor->have_x11_sync_object = FALSE;
-+    }
-+
-+  G_OBJECT_CLASS (meta_compositor_parent_class)->dispose (gobject);
-+}
-+
-+static void
-+meta_compositor_class_init (MetaCompositorClass *klass)
-+{
-+  GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
-+
-+  gobject_class->dispose = meta_compositor_dispose;
- }
- 
- /**
 diff --git a/src/core/boxes-private.h b/src/core/boxes-private.h
-index 24c596b..bb88083 100644
+index 24c596b..f92837a 100644
 --- a/src/core/boxes-private.h
 +++ b/src/core/boxes-private.h
 @@ -157,6 +157,10 @@ gboolean meta_rectangle_overlaps_with_region (
@@ -2934,17 +2792,8 @@ index 24c596b..bb88083 100644
  /* Make the rectangle small enough to fit into one of the spanning_rects,
   * but make it no smaller than min_size.
   */
-@@ -284,4 +288,8 @@ void meta_rectangle_crop_and_scale (const MetaRectangle *rect,
-                                     int                  dst_height,
-                                     MetaRectangle       *dest);
- 
-+gboolean meta_rectangle_has_neighbor (const MetaRectangle *rect,
-+                                      const MetaRectangle *neighbor,
-+                                      MetaSide             neighbor_side);
-+
- #endif /* META_BOXES_PRIVATE_H */
 diff --git a/src/core/boxes.c b/src/core/boxes.c
-index 87f2d5d..b7d6abc 100644
+index 87f2d5d..95978c1 100644
 --- a/src/core/boxes.c
 +++ b/src/core/boxes.c
 @@ -911,6 +911,27 @@ meta_rectangle_overlaps_with_region (const GList         *spanning_rects,
@@ -2975,56 +2824,6 @@ index 87f2d5d..b7d6abc 100644
  
  void
  meta_rectangle_clamp_to_fit_into_region (const GList         *spanning_rects,
-@@ -2201,3 +2222,35 @@ meta_rectangle_crop_and_scale (const MetaRectangle *rect,
- 
-   meta_rectangle_from_clutter_rect (&tmp, META_ROUNDING_STRATEGY_GROW, dest);
- }
-+
-+gboolean
-+meta_rectangle_has_neighbor (const MetaRectangle *rect,
-+                             const MetaRectangle *neighbor,
-+                             MetaSide             neighbor_side)
-+{
-+  switch (neighbor_side)
-+    {
-+    case META_SIDE_RIGHT:
-+      if (neighbor->x == (rect->x + rect->width) &&
-+          meta_rectangle_vert_overlap (neighbor, rect))
-+        return TRUE;
-+      break;
-+    case META_SIDE_LEFT:
-+      if (rect->x == (neighbor->x + neighbor->width) &&
-+          meta_rectangle_vert_overlap (neighbor, rect))
-+        return TRUE;
-+      break;
-+    case META_SIDE_TOP:
-+      if (rect->y == (neighbor->y + neighbor->height) &&
-+          meta_rectangle_horiz_overlap (neighbor, rect))
-+        return TRUE;
-+      break;
-+    case META_SIDE_BOTTOM:
-+      if (neighbor->y == (rect->y + rect->height) &&
-+          meta_rectangle_horiz_overlap (neighbor, rect))
-+        return TRUE;
-+      break;
-+    }
-+
-+  return FALSE;
-+}
-diff --git a/src/core/display.c b/src/core/display.c
-index e1477d3..0a55d90 100644
---- a/src/core/display.c
-+++ b/src/core/display.c
-@@ -946,8 +946,7 @@ meta_display_close (MetaDisplay *display,
-   g_hash_table_destroy (display->wayland_windows);
-   g_hash_table_destroy (display->stamps);
- 
--  if (display->compositor)
--    meta_compositor_destroy (display->compositor);
-+  g_clear_object (&display->compositor);
- 
-   if (display->x11_display)
-     {
 diff --git a/src/core/window.c b/src/core/window.c
 index 62b2df8..d1cf7c3 100644
 --- a/src/core/window.c
@@ -3069,41 +2868,6 @@ index 62b2df8..d1cf7c3 100644
    if (old)
      g_signal_emit_by_name (window->display, "window-left-monitor",
                             old->number, window);
-diff --git a/src/meta/compositor.h b/src/meta/compositor.h
-index 31d14dd..7fad05b 100644
---- a/src/meta/compositor.h
-+++ b/src/meta/compositor.h
-@@ -28,6 +28,11 @@
- #include <meta/window.h>
- #include <meta/workspace.h>
- 
-+#define META_TYPE_COMPOSITOR (meta_compositor_get_type ())
-+
-+META_EXPORT
-+G_DECLARE_FINAL_TYPE (MetaCompositor, meta_compositor, META, COMPOSITOR, GObject)
-+
- /**
-  * MetaCompEffect:
-  * @META_COMP_EFFECT_CREATE: The window is newly created
-diff --git a/src/meta/display.h b/src/meta/display.h
-index 1703920..0eb1629 100644
---- a/src/meta/display.h
-+++ b/src/meta/display.h
-@@ -226,10 +226,10 @@ void meta_display_set_cursor (MetaDisplay *display,
-  */
- typedef enum
- {
--  META_DISPLAY_UP,
--  META_DISPLAY_DOWN,
--  META_DISPLAY_LEFT,
--  META_DISPLAY_RIGHT
-+  META_DISPLAY_UP = META_DIRECTION_UP,
-+  META_DISPLAY_DOWN = META_DIRECTION_DOWN,
-+  META_DISPLAY_LEFT = META_DIRECTION_LEFT,
-+  META_DISPLAY_RIGHT = META_DIRECTION_RIGHT,
- } MetaDisplayDirection;
- 
- META_EXPORT
 diff --git a/src/org.gnome.Mutter.DisplayConfig.xml b/src/org.gnome.Mutter.DisplayConfig.xml
 index 3abfa15..4ec6cd4 100644
 --- a/src/org.gnome.Mutter.DisplayConfig.xml
