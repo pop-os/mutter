@@ -6,6 +6,7 @@ mutter (3.32.0-1ubuntu2) UNRELEASED; urgency=medium
     - Update screen size only after monitors modes have been derived
       (LP: #1822616)
     - Trigger a monitors rebuild only if scale has changed (LP: #1823485)
+    - Only update UI scaling when output scaling is enabled (LP: #1822478)
 
  -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 03 Apr 2019 19:19:59 -0400
 
