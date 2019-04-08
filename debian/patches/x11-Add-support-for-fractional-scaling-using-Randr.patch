@@ -23,7 +23,7 @@ Forwarded: No, forwarding is in progress and planned though
  src/backends/meta-settings-private.h           |   9 +
  src/backends/meta-settings.c                   |  76 +++-
  src/backends/native/meta-monitor-manager-kms.c |  44 ++-
- src/backends/x11/meta-crtc-xrandr.c            |  87 ++++-
+ src/backends/x11/meta-crtc-xrandr.c            |  86 ++++-
  src/backends/x11/meta-crtc-xrandr.h            |  13 +-
  src/backends/x11/meta-gpu-xrandr.c             |  89 ++++-
  src/backends/x11/meta-gpu-xrandr.h             |   4 +
@@ -36,7 +36,7 @@ Forwarded: No, forwarding is in progress and planned though
  src/core/window.c                              |  19 +
  src/org.gnome.Mutter.DisplayConfig.xml         |   5 +
  src/tests/meta-monitor-manager-test.c          |  14 +-
- 28 files changed, 1368 insertions(+), 260 deletions(-)
+ 28 files changed, 1367 insertions(+), 260 deletions(-)
  create mode 100644 data/org.gnome.mutter.x11.gschema.xml.in
 
 diff --git a/data/meson.build b/data/meson.build
@@ -1708,7 +1708,7 @@ index c9a3cab..da3a619 100644
    if (meta_settings_is_experimental_feature_enabled (
          settings,
 diff --git a/src/backends/x11/meta-crtc-xrandr.c b/src/backends/x11/meta-crtc-xrandr.c
-index d201b85..7aa1b6c 100644
+index d201b85..212a424 100644
 --- a/src/backends/x11/meta-crtc-xrandr.c
 +++ b/src/backends/x11/meta-crtc-xrandr.c
 @@ -36,6 +36,7 @@
@@ -1727,7 +1727,7 @@ index d201b85..7aa1b6c 100644
  
  gboolean
  meta_crtc_xrandr_set_config (MetaCrtc            *crtc,
-@@ -97,6 +99,62 @@ meta_crtc_xrandr_set_config (MetaCrtc            *crtc,
+@@ -97,6 +99,61 @@ meta_crtc_xrandr_set_config (MetaCrtc            *crtc,
    *out_timestamp = reply->timestamp;
    free (reply);
  
@@ -1771,11 +1771,10 @@ index d201b85..7aa1b6c 100644
 +  else
 +    scale_filter = FilterFast;
 +
-+  transform_cookie = xcb_randr_set_crtc_transform (xcb_conn, xrandr_crtc,
-+                                                   transformation,
-+                                                   strlen (scale_filter),
-+                                                   scale_filter,
-+                                                   0, NULL);
++  transform_cookie =
++    xcb_randr_set_crtc_transform_checked (xcb_conn, xrandr_crtc, transformation,
++                                          strlen (scale_filter), scale_filter,
++                                          0, NULL);
 +
 +  xcb_error = xcb_request_check (xcb_conn, transform_cookie);
 +  if (xcb_error)
@@ -1790,7 +1789,7 @@ index d201b85..7aa1b6c 100644
    return TRUE;
  }
  
-@@ -171,11 +229,31 @@ meta_monitor_transform_from_xrandr_all (Rotation rotation)
+@@ -171,11 +228,31 @@ meta_monitor_transform_from_xrandr_all (Rotation rotation)
    return ret;
  }
  
@@ -1826,7 +1825,7 @@ index d201b85..7aa1b6c 100644
  {
    MetaCrtc *crtc;
    unsigned int i;
-@@ -194,6 +272,7 @@ meta_create_xrandr_crtc (MetaGpuXrandr      *gpu_xrandr,
+@@ -194,6 +271,7 @@ meta_create_xrandr_crtc (MetaGpuXrandr      *gpu_xrandr,
      meta_monitor_transform_from_xrandr (xrandr_crtc->rotation);
    crtc->all_transforms =
      meta_monitor_transform_from_xrandr_all (xrandr_crtc->rotations);
