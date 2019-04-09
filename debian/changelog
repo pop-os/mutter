@@ -1,4 +1,4 @@
-mutter (3.32.0-1ubuntu2) UNRELEASED; urgency=medium
+mutter (3.32.0-1ubuntu2) disco; urgency=medium
 
   * debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
     - Don't invert the screen size when rotation is enabled (LP: #1822513)
