@@ -1,4 +1,4 @@
-mutter (3.32.0+git20190410-1ubuntu1) UNRELEASED; urgency=medium
+mutter (3.32.0+git20190410-1ubuntu1) disco; urgency=medium
 
   * Merge with debian git snapshot (LP: #1820542), remaining changes:
     + debian/control:
@@ -10,7 +10,7 @@ mutter (3.32.0+git20190410-1ubuntu1) UNRELEASED; urgency=medium
   * d/p/x11-Add-support-for-fractional-scaling-using-Randr.patch:
     - Refreshed.
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 10 Apr 2019 18:00:01 -0500
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 10 Apr 2019 20:12:29 -0500
 
 mutter (3.32.0+git20190410-1) experimental; urgency=medium
 
