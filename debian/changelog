@@ -14,6 +14,9 @@ mutter (3.30.2-7) UNRELEASED; urgency=medium
       Fix the sense of the check for keyboard accessibility features.
       Previously, they were enabled when disabled in gnome-control-center
       and vice versa.
+  * d/libmutter-3-0.symbols: Add meta_gpu_kms_get_current_time_ns,
+    which was added in 3.30.2-2 by
+    d/p/Sync-to-the-hardware-refresh-rate-not-just-60.00Hz.patch
 
  -- Simon McVittie <smcv@debian.org>  Sat, 27 Apr 2019 19:48:48 +0100
 
