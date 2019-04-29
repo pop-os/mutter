@@ -1,5 +1,5 @@
 From: =?utf-8?b?Ik1hcmNvIFRyZXZpc2FuIChUcmV2acOxbyki?= <mail@3v1n0.net>
-Date: Wed, 3 Apr 2019 19:18:03 -0400
+Date: Wed, 3 Apr 2019 17:18:03 -0600
 Subject: x11-Add-support-for-fractional-scaling-using-Randr
 
 Add scaling support using randr under x11.
@@ -724,7 +724,7 @@ index cdb8f42..bf586ea 100644
                     meta_monitor_manager_get_capabilities (MetaMonitorManager *manager);
  
 diff --git a/src/backends/meta-monitor-manager.c b/src/backends/meta-monitor-manager.c
-index 2d898c7..a78fb37 100644
+index 2d898c7..d8cf3ae 100644
 --- a/src/backends/meta-monitor-manager.c
 +++ b/src/backends/meta-monitor-manager.c
 @@ -110,8 +110,18 @@ static gboolean
@@ -838,7 +838,7 @@ index 2d898c7..a78fb37 100644
  
 -  if (!monitor || !meta_monitor_is_active (monitor))
 -    monitor = meta_monitor_manager_get_active_monitor (manager);
-+  if (monitor)
++  if (monitor && meta_monitor_is_active (monitor))
 +    {
 +      scale = calculate_monitor_scale (manager, monitor);
 +      if (meta_monitor_manager_is_scale_supported_by_other_monitors (manager,

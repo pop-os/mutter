@@ -11,6 +11,8 @@ mutter (3.32.1-1ubuntu1) UNRELEASED; urgency=medium
     + debian/gbp.conf: update branch to point to ubuntu/master
     + debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
       - X11: Add support for fractional scaling using Randr
+  * d/p/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+    - Fixed crash on calculation of global scale (LP: #1826933)
 
  -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Mon, 29 Apr 2019 16:08:24 -0500
 
