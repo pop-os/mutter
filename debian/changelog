@@ -1,3 +1,27 @@
+mutter (3.32.1-1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge with debian
+    - Update to 3.32.1 upstream version (LP: #1826936)
+    - Fix applications aren't focused in Wayland session (LP: #1826176)
+    - Fix crash on hotplugging a dock with a monitor (LP: #1826182)
+    Remaining changes:
+    + debian/control:
+      - Update VCS flags to point to launchpad
+      - Update maintainer to ubuntu
+    + debian/gbp.conf: update branch to point to ubuntu/master
+    + debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+      - X11: Add support for fractional scaling using Randr
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Mon, 29 Apr 2019 16:08:24 -0500
+
+mutter (3.32.1-1) experimental; urgency=medium
+
+  * New upstream release
+  * debian/patches: disable mousekeys with Numlock ON to match the
+    documentation (cherry picked from the 3.32 branch)
+
+ -- Laurent Bigonville <bigon@debian.org>  Mon, 22 Apr 2019 21:57:33 +0200
+
 mutter (3.32.0+git20190410-2) experimental; urgency=medium
 
   [ Gunnar Hjalmarsson ]
