@@ -1,3 +1,10 @@
+mutter (3.32.1-2ubuntu1~19.04.1) UNRELEASED; urgency=medium
+
+  * Backport from eoan to disco
+  * Update VCS metadata
+
+ -- Iain Lane <iain.lane@canonical.com>  Wed, 01 May 2019 11:27:48 +0100
+
 mutter (3.32.1-2ubuntu1) eoan; urgency=medium
 
   * Merge with debian
