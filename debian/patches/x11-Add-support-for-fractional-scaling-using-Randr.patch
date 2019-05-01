@@ -1,5 +1,5 @@
 From: =?utf-8?b?Ik1hcmNvIFRyZXZpc2FuIChUcmV2acOxbyki?= <mail@3v1n0.net>
-Date: Wed, 3 Apr 2019 19:18:03 -0400
+Date: Wed, 3 Apr 2019 17:18:03 -0600
 Subject: x11-Add-support-for-fractional-scaling-using-Randr
 
 Add scaling support using randr under x11.
@@ -30,13 +30,13 @@ Forwarded: No, forwarding is in progress and planned though
  src/backends/x11/meta-monitor-manager-xrandr.c | 485 ++++++++++++++++++-------
  src/backends/x11/meta-monitor-manager-xrandr.h |   4 +-
  src/backends/x11/meta-output-xrandr.c          |   5 +-
- src/compositor/compositor.c                    |  54 +++
+ src/compositor/compositor.c                    |  57 +++
  src/core/boxes-private.h                       |   4 +
  src/core/boxes.c                               |  21 ++
  src/core/window.c                              |  19 +
  src/org.gnome.Mutter.DisplayConfig.xml         |   5 +
  src/tests/meta-monitor-manager-test.c          |  14 +-
- 28 files changed, 1358 insertions(+), 260 deletions(-)
+ 28 files changed, 1361 insertions(+), 260 deletions(-)
  create mode 100644 data/org.gnome.mutter.x11.gschema.xml.in
 
 diff --git a/data/meson.build b/data/meson.build
@@ -724,7 +724,7 @@ index cdb8f42..bf586ea 100644
                     meta_monitor_manager_get_capabilities (MetaMonitorManager *manager);
  
 diff --git a/src/backends/meta-monitor-manager.c b/src/backends/meta-monitor-manager.c
-index 2d898c7..a78fb37 100644
+index 2d898c7..d8cf3ae 100644
 --- a/src/backends/meta-monitor-manager.c
 +++ b/src/backends/meta-monitor-manager.c
 @@ -110,8 +110,18 @@ static gboolean
@@ -838,7 +838,7 @@ index 2d898c7..a78fb37 100644
  
 -  if (!monitor || !meta_monitor_is_active (monitor))
 -    monitor = meta_monitor_manager_get_active_monitor (manager);
-+  if (monitor)
++  if (monitor && meta_monitor_is_active (monitor))
 +    {
 +      scale = calculate_monitor_scale (manager, monitor);
 +      if (meta_monitor_manager_is_scale_supported_by_other_monitors (manager,
@@ -2832,12 +2832,12 @@ index 515389d..3bc7f0b 100644
  
    tile_atom = XInternAtom (xdisplay, "TILE", FALSE);
 diff --git a/src/compositor/compositor.c b/src/compositor/compositor.c
-index 0854a19..e412784 100644
+index f47889f..28f2b4f 100644
 --- a/src/compositor/compositor.c
 +++ b/src/compositor/compositor.c
-@@ -92,6 +92,11 @@ on_presented (ClutterStage     *stage,
-               ClutterFrameInfo *frame_info,
-               MetaCompositor   *compositor);
+@@ -96,6 +96,11 @@ static void
+ on_top_window_actor_destroyed (MetaWindowActor *window_actor,
+                                MetaCompositor  *compositor);
  
 +static void
 +on_redirected_monitor_changed (MetaWindow     *window,
@@ -2847,19 +2847,22 @@ index 0854a19..e412784 100644
  static gboolean
  is_modal (MetaDisplay *display)
  {
-@@ -134,6 +139,11 @@ meta_compositor_destroy (MetaCompositor *compositor)
-   clutter_threads_remove_repaint_func (compositor->pre_paint_func_id);
-   clutter_threads_remove_repaint_func (compositor->post_paint_func_id);
+@@ -146,6 +151,14 @@ meta_compositor_destroy (MetaCompositor *compositor)
+       compositor->top_window_actor = NULL;
+     }
  
 +  if (compositor->unredirected_window)
-+    g_signal_handlers_disconnect_by_func (compositor->unredirected_window,
-+                                          on_redirected_monitor_changed,
-+                                          compositor);
++    {
++      g_signal_handlers_disconnect_by_func (compositor->unredirected_window,
++                                            on_redirected_monitor_changed,
++                                            compositor);
++      compositor->unredirected_window = NULL;
++    }
 +
-   if (compositor->have_x11_sync_object)
-     meta_sync_ring_destroy ();
- }
-@@ -635,16 +645,54 @@ meta_shape_cow_for_window (MetaCompositor *compositor,
+   g_clear_pointer (&compositor->window_group, clutter_actor_destroy);
+   g_clear_pointer (&compositor->top_window_group, clutter_actor_destroy);
+   g_clear_pointer (&compositor->feedback_group, clutter_actor_destroy);
+@@ -652,16 +665,54 @@ meta_shape_cow_for_window (MetaCompositor *compositor,
      }
  }
  
@@ -2914,7 +2917,7 @@ index 0854a19..e412784 100644
        meta_window_actor_set_unredirected (window_actor, FALSE);
      }
  
-@@ -654,6 +702,12 @@ set_unredirected_window (MetaCompositor *compositor,
+@@ -671,6 +722,12 @@ set_unredirected_window (MetaCompositor *compositor,
    if (compositor->unredirected_window != NULL)
      {
        MetaWindowActor *window_actor = META_WINDOW_ACTOR (meta_window_get_compositor_private (compositor->unredirected_window));
