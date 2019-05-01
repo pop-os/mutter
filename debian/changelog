@@ -1,6 +1,5 @@
-mutter (3.32.1-1ubuntu1) UNRELEASED; urgency=medium
+mutter (3.32.1-2ubuntu1) UNRELEASED; urgency=medium
 
-  [ Marco Trevisan (Treviño) ]
   * Merge with debian
     - Update to 3.32.1 upstream version (LP: #1826936)
     - Fix applications aren't focused in Wayland session (LP: #1826176)
@@ -15,11 +14,19 @@ mutter (3.32.1-1ubuntu1) UNRELEASED; urgency=medium
   * d/p/x11-Add-support-for-fractional-scaling-using-Randr.patch:
     - Fixed crash on calculation of global scale (LP: #1826933)
 
-  [ Iain Lane ]
-  * 0-initialize a struct we'll be memcmp()ing. Cherry-pick from upstream
-    stable branch.
-
  -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Mon, 29 Apr 2019 16:08:24 -0500
+
+mutter (3.32.1-2) experimental; urgency=medium
+
+  * Cherry-pick patches from upstream gnome-3-32 branch:
+    - compositor-Destroy-window-actors-list-on-destruction.patch,
+      compositor-Disconnect-from-stage-signals-on-destruction.patch: Fix crash
+      when exiting. (LP: #1813716)
+    - 0-initialize a struct we'll be memcmp()ing.
+  * Reorder patch series so upstream patches come first (no conflicts, no
+    refreshing required).
+
+ -- Iain Lane <laney@debian.org>  Wed, 01 May 2019 09:34:30 +0100
 
 mutter (3.32.1-1) experimental; urgency=medium
 
