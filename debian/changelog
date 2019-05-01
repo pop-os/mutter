@@ -1,4 +1,4 @@
-mutter (3.32.1-2ubuntu1) UNRELEASED; urgency=medium
+mutter (3.32.1-2ubuntu1) eoan; urgency=medium
 
   * Merge with debian
     - Update to 3.32.1 upstream version (LP: #1826936)
@@ -14,7 +14,7 @@ mutter (3.32.1-2ubuntu1) UNRELEASED; urgency=medium
   * d/p/x11-Add-support-for-fractional-scaling-using-Randr.patch:
     - Fixed crash on calculation of global scale (LP: #1826933)
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Mon, 29 Apr 2019 16:08:24 -0500
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 01 May 2019 11:08:08 +0100
 
 mutter (3.32.1-2) experimental; urgency=medium
 
