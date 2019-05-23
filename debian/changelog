@@ -1,3 +1,9 @@
+mutter (3.32.1-2ubuntu1~19.04.1pop1) disco; urgency=medium
+
+  * Backport Mutter frame skip patch to fix stutter 
+
+ -- Michael Aaron Murphy <michael@system76.com>  Thu, 23 May 2019 17:07:03 -0600
+
 mutter (3.32.1-2ubuntu1~19.04.1) disco; urgency=medium
 
   * Backport from eoan to disco

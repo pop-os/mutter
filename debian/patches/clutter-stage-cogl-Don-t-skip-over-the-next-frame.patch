@@ -1,0 +1,152 @@
+From 45244852acc214a7a9d01dc96896ad0c079b437c Mon Sep 17 00:00:00 2001
+From: Daniel van Vugt <daniel.van.vugt@canonical.com>
+Date: Fri, 2 Nov 2018 15:47:58 +0800
+Subject: [PATCH] clutter/stage-cogl: Don't skip over the next frame
+
+The `last_presentation_time` is usually a little in the past (although
+sometimes in the future depending on the driver). When it's over 2ms
+(`sync_delay`) in the past that would trigger the while loop to count up so
+that the next `update_time` is in the future.
+
+The problem with that is for common values of `last_presentation_time`
+which are only a few milliseconds ago, incrementing `update_time` by
+`refresh_interval` also means counting past the next physical frame that
+we haven't rendered yet. And so mutter would skip that frame.
+
+**Example**
+
+Given:
+```
+  last_presentation_time = now - 3ms
+  sync_delay = 2ms
+  refresh_interval = 16ms
+  next_presentation_time = last_presentation_time + refresh_interval
+                         = now + 13ms
+
+          -3ms now        +13ms           +29ms           +45ms
+        ----|--+------------|---------------|---------------|----
+            :               :
+  last_presentation_time  next_presentation_time
+```
+
+Old algorithm:
+```
+  update_time = last_presentation_time + sync_delay
+              = now - 1ms
+  while (update_time < now)
+        (now - 1ms   < now)
+    update_time = now - 1ms + 16ms
+  update_time = now + 15ms
+  next_presentation_time = now + 13ms
+  available_render_time = next_presentation_time - max(now, update_time)
+                        = (now + 13ms) - (now + 15ms)
+                        = -2ms  so the next frame will be skipped.
+
+          -3ms now        +13ms           +29ms           +45ms
+        ----|--+------------|-+-------------|---------------|----
+            :               : :
+            :               : update_time (too late)
+            :               :
+  last_presentation_time  next_presentation_time (a missed frame)
+
+```
+
+New algorithm:
+```
+  min_render_time_allowed = refresh_interval / 2
+                          = 8ms
+  max_render_time_allowed = refresh_interval - sync_delay
+                          = 14ms
+  target_presentation_time = last_presentation_time + refresh_interval
+                           = now - 3ms + 16ms
+                           = now + 13ms
+  while (target_presentation_time - min_render_time_allowed < now)
+        (now + 13ms - 8ms < now)
+        (5ms < 0ms)
+    # loop is never entered
+  update_time = target_presentation_time - max_render_time_allowed
+              = now + 13ms - 14ms
+              = now - 1ms
+  next_presentation_time = now + 13ms
+  available_render_time = next_presentation_time - max(now, update_time)
+                        = (now + 13ms) - now
+                        = 13ms  which is plenty of render time.
+
+          -3ms now        +13ms           +29ms           +45ms
+        ----|-++------------|---------------|---------------|----
+            : :             :
+            : update_time   :
+            :               :
+  last_presentation_time  next_presentation_time
+```
+
+The reason nobody noticed these missed frames very often was because
+mutter has some accidental workarounds built-in:
+
+ * Prior to 3.32, the offending code was only reachable in Xorg sessions.
+   It was never reached in Wayland sessions because it hadn't been
+   implemented yet (till e9e4b2b72).
+
+ * Even though Wayland support is now implemented the native backend
+   provides a `last_presentation_time` much faster than Xorg sessions
+   (being in the same process) and so is less likely to spuriously enter
+   the while loop to miss a frame.
+
+ * For Xorg sessions we are accidentally triple buffering (#334). This
+   is a good way to avoid the missed frames, but is also an accident.
+
+ * `sync_delay` is presently just high enough (2ms by coincidence is very
+   close to common values of `now - last_presentation_time`) to push the
+   `update_time` into the future in some cases, which avoids entering the
+   while loop. This is why the same missed frames problem was also noticed
+   when experimenting with `sync_delay = 0`.
+
+v2: adjust variable names and code style.
+
+Fixes: https://bugzilla.gnome.org/show_bug.cgi?id=789186
+       and most of https://gitlab.gnome.org/GNOME/mutter/issues/571
+
+https://gitlab.gnome.org/GNOME/mutter/merge_requests/520
+---
+ clutter/clutter/cogl/clutter-stage-cogl.c | 17 ++++++++++++++---
+ 1 file changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/clutter/clutter/cogl/clutter-stage-cogl.c b/clutter/clutter/cogl/clutter-stage-cogl.c
+index 2a2a17e05..1ed7e01c4 100644
+--- a/clutter/clutter/cogl/clutter-stage-cogl.c
++++ b/clutter/clutter/cogl/clutter-stage-cogl.c
+@@ -152,6 +152,9 @@ clutter_stage_cogl_schedule_update (ClutterStageWindow *stage_window,
+   gint64 now;
+   float refresh_rate;
+   gint64 refresh_interval;
++  int64_t min_render_time_allowed;
++  int64_t max_render_time_allowed;
++  int64_t next_presentation_time;
+ 
+   if (stage_cogl->update_time != -1)
+     return;
+@@ -184,10 +187,18 @@ clutter_stage_cogl_schedule_update (ClutterStageWindow *stage_window,
+   if (refresh_interval == 0)
+     refresh_interval = 16667; /* 1/60th second */
+ 
+-  stage_cogl->update_time = stage_cogl->last_presentation_time + 1000 * sync_delay;
++  min_render_time_allowed = refresh_interval / 2;
++  max_render_time_allowed = refresh_interval - 1000 * sync_delay;
+ 
+-  while (stage_cogl->update_time < now)
+-    stage_cogl->update_time += refresh_interval;
++  if (min_render_time_allowed > max_render_time_allowed)
++    min_render_time_allowed = max_render_time_allowed;
++
++  next_presentation_time = stage_cogl->last_presentation_time + refresh_interval;
++
++  while (next_presentation_time < now + min_render_time_allowed)
++    next_presentation_time += refresh_interval;
++
++  stage_cogl->update_time = next_presentation_time - max_render_time_allowed;
+ }
+ 
+ static gint64
+-- 
+2.20.1
+
