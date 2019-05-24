@@ -9,3 +9,5 @@ meson-add-back-default_driver-option.patch
 debian/synaptics-support.patch
 x11-Add-support-for-fractional-scaling-using-Randr.patch
 clutter-stage-cogl-Don-t-skip-over-the-next-frame.patch
+geometry_picking.patch
+deliver_events_sooner.patch
