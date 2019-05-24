@@ -1,5 +1,35 @@
+From ae8fc6146b14c1905a99a0e929d1f192f2ed050a Mon Sep 17 00:00:00 2001
+From: Daniel van Vugt <daniel.van.vugt@canonical.com>
+Date: Wed, 18 Jul 2018 17:37:44 +0800
+Subject: [PATCH] clutter: Deliver events sooner when possible.
+
+Previously all events would be queued and their processing deferred till
+the next master clock tick, at which point supersesed input events would
+be dropped and only the latest of each type used. This was great for
+minimizing CPU usage but had two drawbacks:
+
+ * Clients would receive the next input event after it is already too
+   late to make it to the next compositor frame.
+ * Clients would receive a lower resolution event stream than the hardware
+   is capable of.
+
+We now instead scale performance dynamically according to available time.
+If there is enough idle time available then that will be used to deliver
+events immediately without delay. Otherwise event delivery will scale down
+to the old minimal-CPU behaviour.
+
+This allows clients to receive input events sufficiently in advance of the
+next compositor frame that they can respond and redraw with one frame
+lower latency than before. It also allows clients higher resolution input,
+in case they are able to use it.
+
+https://gitlab.gnome.org/GNOME/mutter/merge_requests/168
+---
+ clutter/clutter/clutter-stage.c | 49 +++++++++++++++++++++++++++------
+ 1 file changed, 41 insertions(+), 8 deletions(-)
+
 diff --git a/clutter/clutter/clutter-stage.c b/clutter/clutter/clutter-stage.c
-index 7b33922854024c09ef1bd10033262ca449780e75..34ad049f3b726e069bde5547c7e70e3ebf9d5290 100644
+index 7b3392285..34ad049f3 100644
 --- a/clutter/clutter/clutter-stage.c
 +++ b/clutter/clutter/clutter-stage.c
 @@ -119,6 +119,7 @@ struct _ClutterStagePrivate
@@ -93,4 +123,7 @@ index 7b33922854024c09ef1bd10033262ca449780e75..34ad049f3b726e069bde5547c7e70e3e
    priv->min_size_changed = FALSE;
    priv->sync_delay = -1;
  
+-- 
+2.21.0
+
 

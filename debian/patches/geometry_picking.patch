@@ -1,5 +1,66 @@
+From bfdf54fa14950c6471d44da4e1114bd26aff26e0 Mon Sep 17 00:00:00 2001
+From: Daniel van Vugt <daniel.van.vugt@canonical.com>
+Date: Thu, 2 Aug 2018 19:03:30 +0800
+Subject: [PATCH] Geometric (OpenGL-less) picking
+
+Redesign picking to avoid using OpenGL. Previously picking involved
+several GL operations per mouse movement, but now the GPU/GL isn't
+used at all.
+
+By avoiding OpenGL and the graphics driver we also reduce CPU usage.
+Despite reimplementing the logic on the CPU, it still takes less CPU
+time than going through GL did.
+
+This new approach also dramatically reduces the number of picking paint
+cycles required for cursor movement since the pickability of the entire
+screen is calculated and cached. The cache is only invalidated when the
+screen contents change so for typical desktop usage where the screen is
+mostly idle, cursor movement doesn't incur anywhere near as many paint
+cycles as it used to.
+
+Performance before and after on an Intel i7-7700, tested with two
+different GPUs and drivers:
+
+|         | Intel CPU | Intel GPU | Nvidia CPU | Nvidia GPU |
+| ------: | --------: | --------: | ---------: | ---------: |
+| Moving around a standard 125Hz mouse:                     |
+| Before  |       10% |        1% |        10% |         0% |
+| After   |        6% |        0% |         6% |         0% |
+| Moving around a window:                                   |
+| Before  |       31% |        6% |   83% [^1] |         7% |
+| After   |       27% |        6% |   44% [^2] |         7% |
+
+[^1]: visibly stuttering on Nvidia
+[^2]: visibly smooth on Nvidia
+
+Closes: https://gitlab.gnome.org/GNOME/mutter/issues/154
+
+Helps significantly with: https://gitlab.gnome.org/GNOME/mutter/issues/283
+                      and https://gitlab.gnome.org/GNOME/mutter/issues/590
+---
+ clutter/clutter/clutter-actor-box.c          |  22 ++
+ clutter/clutter/clutter-actor-private.h      |   2 -
+ clutter/clutter/clutter-actor.c              | 255 +++++++++----
+ clutter/clutter/clutter-actor.h              |   4 +
+ clutter/clutter/clutter-debug.h              |   3 +-
+ clutter/clutter/clutter-main.c               | 120 ------
+ clutter/clutter/clutter-private.h            |   5 -
+ clutter/clutter/clutter-stage-private.h      |  16 +-
+ clutter/clutter/clutter-stage-window.c       |  18 -
+ clutter/clutter/clutter-stage-window.h       |   8 -
+ clutter/clutter/clutter-stage.c              | 380 +++++++++----------
+ clutter/clutter/clutter-types.h              |   6 +
+ clutter/clutter/cogl/clutter-stage-cogl.c    |  50 ---
+ clutter/clutter/deprecated/clutter-texture.c |  93 +----
+ clutter/tests/conform/actor-pick.c           |  99 +----
+ clutter/tests/conform/meson.build            |   1 -
+ clutter/tests/conform/texture.c              |  84 ----
+ src/compositor/meta-surface-actor.c          |  27 +-
+ 18 files changed, 410 insertions(+), 783 deletions(-)
+ delete mode 100644 clutter/tests/conform/texture.c
+
 diff --git a/clutter/clutter/clutter-actor-box.c b/clutter/clutter/clutter-actor-box.c
-index 6871274c5d19e02aabb52e595a6d3b8462b8eb62..13d6313885fc1f2beeca2a0b9c17f612fae6ef50 100644
+index 6871274c5..13d631388 100644
 --- a/clutter/clutter/clutter-actor-box.c
 +++ b/clutter/clutter/clutter-actor-box.c
 @@ -337,6 +337,28 @@ clutter_actor_box_contains (const ClutterActorBox *box,
@@ -32,7 +93,7 @@ index 6871274c5d19e02aabb52e595a6d3b8462b8eb62..13d6313885fc1f2beeca2a0b9c17f612
   * clutter_actor_box_from_vertices:
   * @box: a #ClutterActorBox
 diff --git a/clutter/clutter/clutter-actor-private.h b/clutter/clutter/clutter-actor-private.h
-index c44f6342fdc277223183fb47cf7fb61a58020ca9..9bf1a3049318dc3f249874525143ae05af30baee 100644
+index c44f6342f..9bf1a3049 100644
 --- a/clutter/clutter/clutter-actor-private.h
 +++ b/clutter/clutter/clutter-actor-private.h
 @@ -297,8 +297,6 @@ const gchar *                   _clutter_actor_get_debug_name
@@ -45,7 +106,7 @@ index c44f6342fdc277223183fb47cf7fb61a58020ca9..9bf1a3049318dc3f249874525143ae05
                                                                                           gboolean      repeat);
  void                            _clutter_actor_shader_post_paint                        (ClutterActor *actor);
 diff --git a/clutter/clutter/clutter-actor.c b/clutter/clutter/clutter-actor.c
-index 3c48e4e9aece0b253676f678c9acad388bea8f42..09be5c6cce46882d050d0587396a49f7ac426aac 100644
+index 3c48e4e9a..09be5c6cc 100644
 --- a/clutter/clutter/clutter-actor.c
 +++ b/clutter/clutter/clutter-actor.c
 @@ -729,8 +729,6 @@ struct _ClutterActorPrivate
@@ -398,7 +459,7 @@ index 3c48e4e9aece0b253676f678c9acad388bea8f42..09be5c6cce46882d050d0587396a49f7
    priv->show_on_set_parent = TRUE;
    priv->resource_scale = -1.0f;
 diff --git a/clutter/clutter/clutter-actor.h b/clutter/clutter/clutter-actor.h
-index 7d2168af199e029984852ae8c82c1f69a6175bc4..b1abff86df4d0dbd6c959c9ca9f1427028a577ca 100644
+index 7d2168af1..b1abff86d 100644
 --- a/clutter/clutter/clutter-actor.h
 +++ b/clutter/clutter/clutter-actor.h
 @@ -902,6 +902,10 @@ void                            clutter_actor_bind_model_with_properties
@@ -413,7 +474,7 @@ index 7d2168af199e029984852ae8c82c1f69a6175bc4..b1abff86df4d0dbd6c959c9ca9f14270
  
  #endif /* __CLUTTER_ACTOR_H__ */
 diff --git a/clutter/clutter/clutter-debug.h b/clutter/clutter/clutter-debug.h
-index 2462385f65c4b769c65923ce0ebc33d863d110db..3744c648fb63a586598049acf394c9f67d5a6c05 100644
+index 2462385f6..3744c648f 100644
 --- a/clutter/clutter/clutter-debug.h
 +++ b/clutter/clutter/clutter-debug.h
 @@ -29,8 +29,7 @@ typedef enum
@@ -427,7 +488,7 @@ index 2462385f65c4b769c65923ce0ebc33d863d110db..3744c648fb63a586598049acf394c9f6
  
  typedef enum
 diff --git a/clutter/clutter/clutter-main.c b/clutter/clutter/clutter-main.c
-index fbae4d99593e8d34815782222951eab8288b60c0..e70d630cde7f90306f88723929a5c65d046322cd 100644
+index fbae4d995..e70d630cd 100644
 --- a/clutter/clutter/clutter-main.c
 +++ b/clutter/clutter/clutter-main.c
 @@ -130,7 +130,6 @@ static const GDebugKey clutter_debug_keys[] = {
@@ -565,7 +626,7 @@ index fbae4d99593e8d34815782222951eab8288b60c0..e70d630cde7f90306f88723929a5c65d
  clutter_context_get_pango_fontmap (void)
  {
 diff --git a/clutter/clutter/clutter-private.h b/clutter/clutter/clutter-private.h
-index d4706808e71e184e4031ad6dfb026295d29a5457..6c7aba998bd93cc61e6d3cf8843b4391ab7f1e38 100644
+index d4706808e..6c7aba998 100644
 --- a/clutter/clutter/clutter-private.h
 +++ b/clutter/clutter/clutter-private.h
 @@ -210,11 +210,6 @@ gboolean      _clutter_feature_init (GError **error);
@@ -581,7 +642,7 @@ index d4706808e71e184e4031ad6dfb026295d29a5457..6c7aba998bd93cc61e6d3cf8843b4391
  
  /* use this function as the accumulator if you have a signal with
 diff --git a/clutter/clutter/clutter-stage-private.h b/clutter/clutter/clutter-stage-private.h
-index 4799c29e135944770574947f9283ce0b001babc0..7f25d05b3fe4ed3501d938d0b33bbb13ec2e90f4 100644
+index 4799c29e1..7f25d05b3 100644
 --- a/clutter/clutter/clutter-stage-private.h
 +++ b/clutter/clutter/clutter-stage-private.h
 @@ -74,6 +74,15 @@ gint64    _clutter_stage_get_update_time                  (ClutterStage *stage);
@@ -615,7 +676,7 @@ index 4799c29e135944770574947f9283ce0b001babc0..7f25d05b3fe4ed3501d938d0b33bbb13
                                                            ClutterInputDevice *device,
                                                            ClutterActor       *actor);
 diff --git a/clutter/clutter/clutter-stage-window.c b/clutter/clutter/clutter-stage-window.c
-index e8fa976a7de046920cb42b72e764e1063e08348f..4c4ef9d643d14e7a871b7fea52622552348e0058 100644
+index e8fa976a7..4c4ef9d64 100644
 --- a/clutter/clutter/clutter-stage-window.c
 +++ b/clutter/clutter/clutter-stage-window.c
 @@ -293,24 +293,6 @@ _clutter_stage_window_redraw (ClutterStageWindow *window)
@@ -644,7 +705,7 @@ index e8fa976a7de046920cb42b72e764e1063e08348f..4c4ef9d643d14e7a871b7fea52622552
  _clutter_stage_window_can_clip_redraws (ClutterStageWindow *window)
  {
 diff --git a/clutter/clutter/clutter-stage-window.h b/clutter/clutter/clutter-stage-window.h
-index 6c3601745f19c726fbc1d3f2b112e97156061f62..aa0c5f71ccbb23b565678bb73e2c49b6f97a315f 100644
+index 6c3601745..aa0c5f71c 100644
 --- a/clutter/clutter/clutter-stage-window.h
 +++ b/clutter/clutter/clutter-stage-window.h
 @@ -68,10 +68,6 @@ struct _ClutterStageWindowInterface
@@ -670,7 +731,7 @@ index 6c3601745f19c726fbc1d3f2b112e97156061f62..aa0c5f71ccbb23b565678bb73e2c49b6
  
  GList *           _clutter_stage_window_get_views               (ClutterStageWindow *window);
 diff --git a/clutter/clutter/clutter-stage.c b/clutter/clutter/clutter-stage.c
-index 9e267e9c9dd3ecde26c58b0f5d3a92f79c128b29..0dca908df0d5922224e273d22800a85d57baa806 100644
+index 9e267e9c9..0dca908df 100644
 --- a/clutter/clutter/clutter-stage.c
 +++ b/clutter/clutter/clutter-stage.c
 @@ -103,6 +103,14 @@ struct _ClutterStageQueueRedrawEntry
@@ -1136,7 +1197,7 @@ index 9e267e9c9dd3ecde26c58b0f5d3a92f79c128b29..0dca908df0d5922224e273d22800a85d
  _clutter_stage_add_pointer_drag_actor (ClutterStage       *stage,
                                         ClutterInputDevice *device,
 diff --git a/clutter/clutter/clutter-types.h b/clutter/clutter/clutter-types.h
-index 0f0fb1c2aca26581a5dc5f0e4ab3ed88d847c121..2bbf7deda5705a203cb96506ef64d590d012bec4 100644
+index 0f0fb1c2a..2bbf7deda 100644
 --- a/clutter/clutter/clutter-types.h
 +++ b/clutter/clutter/clutter-types.h
 @@ -540,6 +540,12 @@ CLUTTER_EXPORT
@@ -1153,7 +1214,7 @@ index 0f0fb1c2aca26581a5dc5f0e4ab3ed88d847c121..2bbf7deda5705a203cb96506ef64d590
  void             clutter_actor_box_from_vertices (ClutterActorBox       *box,
                                                    const ClutterVertex    verts[]);
 diff --git a/clutter/clutter/cogl/clutter-stage-cogl.c b/clutter/clutter/cogl/clutter-stage-cogl.c
-index 1ed7e01c46fff0541a95e3460ce5fb11e7e4b9b3..37bbb3ee1c417d21970233c81c34e07182b3465f 100644
+index 1ed7e01c4..37bbb3ee1 100644
 --- a/clutter/clutter/cogl/clutter-stage-cogl.c
 +++ b/clutter/clutter/cogl/clutter-stage-cogl.c
 @@ -967,55 +967,6 @@ clutter_stage_cogl_redraw (ClutterStageWindow *stage_window)
@@ -1221,7 +1282,7 @@ index 1ed7e01c46fff0541a95e3460ce5fb11e7e4b9b3..37bbb3ee1c417d21970233c81c34e071
  
  static void
 diff --git a/clutter/clutter/deprecated/clutter-texture.c b/clutter/clutter/deprecated/clutter-texture.c
-index 7eae4ee462a8318e532e607017db4bd8693ee845..62e65445873c279008421eba1dcb8854347b4d6e 100644
+index 7eae4ee46..62e654458 100644
 --- a/clutter/clutter/deprecated/clutter-texture.c
 +++ b/clutter/clutter/deprecated/clutter-texture.c
 @@ -572,83 +572,6 @@ gen_texcoords_and_draw_cogl_rectangle (ClutterActor    *self,
@@ -1357,7 +1418,7 @@ index 7eae4ee462a8318e532e607017db4bd8693ee845..62e65445873c279008421eba1dcb8854
  
    /* NB: actors are expected to call clutter_actor_queue_redraw when
 diff --git a/clutter/tests/conform/actor-pick.c b/clutter/tests/conform/actor-pick.c
-index 969b4920ac0193013541b49bf4199d186adb33e1..2bf5954c7379386d67468a5e6360a737f4e288e7 100644
+index 969b4920a..2bf5954c7 100644
 --- a/clutter/tests/conform/actor-pick.c
 +++ b/clutter/tests/conform/actor-pick.c
 @@ -5,7 +5,6 @@
@@ -1496,7 +1557,7 @@ index 969b4920ac0193013541b49bf4199d186adb33e1..2bf5954c7379386d67468a5e6360a737
                  clutter_stage_get_actor_at_pos (CLUTTER_STAGE (state->stage),
                                                  CLUTTER_PICK_ALL,
 diff --git a/clutter/tests/conform/meson.build b/clutter/tests/conform/meson.build
-index 5d0df7acde7e904593415196646eb3e3598f8308..87eafd7db783834712ce93e8d41082b88d9082d9 100644
+index 5d0df7acd..87eafd7db 100644
 --- a/clutter/tests/conform/meson.build
 +++ b/clutter/tests/conform/meson.build
 @@ -39,7 +39,6 @@ clutter_conform_tests_deprecated_tests = [
@@ -1509,7 +1570,7 @@ index 5d0df7acde7e904593415196646eb3e3598f8308..87eafd7db783834712ce93e8d41082b8
  clutter_conform_tests = []
 diff --git a/clutter/tests/conform/texture.c b/clutter/tests/conform/texture.c
 deleted file mode 100644
-index 392fd5c47e3df95ff766001ae6a562ecbd2d693e..0000000000000000000000000000000000000000
+index 392fd5c47..000000000
 --- a/clutter/tests/conform/texture.c
 +++ /dev/null
 @@ -1,84 +0,0 @@
@@ -1598,7 +1659,7 @@ index 392fd5c47e3df95ff766001ae6a562ecbd2d693e..00000000000000000000000000000000
 -  CLUTTER_TEST_UNIT ("/texture/pick-with-alpha", texture_pick_with_alpha)
 -)
 diff --git a/src/compositor/meta-surface-actor.c b/src/compositor/meta-surface-actor.c
-index ca4ca19a99e75c5ab5ec7b401a362406002014a6..814199145a4d3418ee896ebf870998c94157fa7a 100644
+index ca4ca19a9..814199145 100644
 --- a/src/compositor/meta-surface-actor.c
 +++ b/src/compositor/meta-surface-actor.c
 @@ -70,38 +70,23 @@ meta_surface_actor_pick (ClutterActor       *actor,
@@ -1646,3 +1707,7 @@ index ca4ca19a99e75c5ab5ec7b401a362406002014a6..814199145a4d3418ee896ebf870998c9
      }
  
    clutter_actor_iter_init (&iter, actor);
+-- 
+2.21.0
+
+
