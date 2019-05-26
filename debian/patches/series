@@ -12,3 +12,5 @@ clutter-stage-cogl-Don-t-skip-over-the-next-frame.patch
 geometry_picking.patch
 deliver_events_sooner.patch
 add_detail_to_captured_event_signal.patch
+avoid_stage_relayouts.patch
+
