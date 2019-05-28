@@ -75,7 +75,7 @@ Vcs-Browser: https://git.launchpad.net/~ubuntu-desktop/ubuntu/+source/mutter
 Vcs-Git: https://git.launchpad.net/~ubuntu-desktop/ubuntu/+source/mutter -b ubuntu/disco
 
 Package: mutter
-Architecture: any
+Architecture: amd64
 Depends: gnome-settings-daemon-common,
          gsettings-desktop-schemas (>= 3.31.0),
          mutter-common (>= ${source:Version}),
@@ -98,7 +98,7 @@ Description: lightweight GTK+ window manager
 
 Package: gir1.2-mutter-4
 Section: introspection
-Architecture: any
+Architecture: amd64
 Multi-Arch: same
 Depends: libmutter-4-0 (= ${binary:Version}),
          ${gir:Depends},
@@ -118,7 +118,7 @@ Description: GObject introspection data for Mutter
 
 Package: libmutter-4-0
 Section: libs
-Architecture: any
+Architecture: amd64
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
 Depends: gsettings-desktop-schemas (>= 3.15.92),
@@ -141,7 +141,7 @@ Description: window manager library from the Mutter window manager
 
 Package: libmutter-4-dev
 Section: libdevel
-Architecture: any
+Architecture: amd64
 Multi-Arch: same
 Depends: gir1.2-mutter-4 (= ${binary:Version}),
          gsettings-desktop-schemas-dev,
