@@ -1,0 +1,81 @@
+From 4faeb12731b81ce617042973155cc4b5737e1133 Mon Sep 17 00:00:00 2001
+From: Daniel van Vugt <daniel.van.vugt@canonical.com>
+Date: Mon, 29 Oct 2018 19:05:46 +0800
+Subject: [PATCH] clutter/stage-cogl: Reschedule update on present
+
+If an update (new frame) had been scheduled already before
+`_clutter_stage_cogl_presented` was called then that means it was
+scheduled for the wrong time. Because the `last_presentation_time` has
+changed since then. And using an `update_time` based on an outdated
+presentation time results in scheduling frames too early, filling the
+buffer queue (triple buffering or worse) and high visual latency.
+
+So if we do receive a presentation event when an update is already
+scheduled, remember to reschedule the update based on the newer
+`last_presentation_time`. This way we avoid overfilling the buffer queue
+and limit ourselves to double buffering for less visible lag.
+
+Closes: https://gitlab.gnome.org/GNOME/mutter/issues/334
+
+Prerequisite: https://gitlab.gnome.org/GNOME/mutter/merge_requests/520
+
+https://gitlab.gnome.org/GNOME/mutter/merge_requests/281
+---
+ clutter/clutter/cogl/clutter-stage-cogl.c | 16 ++++++++++++++++
+ clutter/clutter/cogl/clutter-stage-cogl.h |  2 ++
+ 2 files changed, 18 insertions(+)
+
+Index: mutter/clutter/clutter/cogl/clutter-stage-cogl.c
+===================================================================
+--- mutter.orig/clutter/clutter/cogl/clutter-stage-cogl.c
++++ mutter/clutter/clutter/cogl/clutter-stage-cogl.c
+@@ -78,6 +78,10 @@ enum
+ };
+ 
+ static void
++clutter_stage_cogl_schedule_update (ClutterStageWindow *stage_window,
++                                    gint                sync_delay);
++
++static void
+ clutter_stage_cogl_unrealize (ClutterStageWindow *stage_window)
+ {
+   CLUTTER_NOTE (BACKEND, "Unrealizing Cogl stage [%p]", stage_window);
+@@ -122,6 +126,16 @@ _clutter_stage_cogl_presented (ClutterSt
+     }
+ 
+   _clutter_stage_presented (stage_cogl->wrapper, frame_event, frame_info);
++
++  if (frame_event == COGL_FRAME_EVENT_COMPLETE &&
++      stage_cogl->update_time != -1)
++    {
++      ClutterStageWindow *stage_window = CLUTTER_STAGE_WINDOW (stage_cogl);
++
++      stage_cogl->update_time = -1;
++      clutter_stage_cogl_schedule_update (stage_window,
++                                          stage_cogl->last_sync_delay);
++    }
+ }
+ 
+ static gboolean
+@@ -159,6 +173,8 @@ clutter_stage_cogl_schedule_update (Clut
+   if (stage_cogl->update_time != -1)
+     return;
+ 
++  stage_cogl->last_sync_delay = sync_delay;
++
+   now = g_get_monotonic_time ();
+ 
+   if (sync_delay < 0)
+Index: mutter/clutter/clutter/cogl/clutter-stage-cogl.h
+===================================================================
+--- mutter.orig/clutter/clutter/cogl/clutter-stage-cogl.h
++++ mutter/clutter/clutter/cogl/clutter-stage-cogl.h
+@@ -59,6 +59,8 @@ struct _ClutterStageCogl
+    * junk frames to start with. */
+   unsigned int frame_count;
+ 
++  gint last_sync_delay;
++
+   cairo_rectangle_int_t bounding_redraw_clip;
+ 
+   guint initialized_redraw_clip : 1;
