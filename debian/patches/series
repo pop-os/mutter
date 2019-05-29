@@ -14,3 +14,4 @@ deliver_events_sooner.patch
 add_detail_to_captured_event_signal.patch
 avoid_stage_relayouts.patch
 reschedule_update_on_present.patch
+cogl-enable-egl_img-context-priority.patch
