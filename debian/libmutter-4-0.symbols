@@ -3071,7 +3071,6 @@ libmutter-cogl-4.so.0 libmutter-4-0 #MINVER#
  cogl_xlib_renderer_request_reset_on_video_memory_purge@Base 3.29.4
  cogl_xlib_renderer_set_event_retrieval_enabled@Base 3.29.4
  cogl_xlib_renderer_set_foreign_display@Base 3.29.4
- cogl_xlib_renderer_set_threaded_swap_wait_enabled@Base 3.29.4
  cogl_xlib_set_display@Base 3.29.4
 libmutter-cogl-gles2-4.so.0 libmutter-4-0 #MINVER#
 libmutter-cogl-pango-4.so.0 libmutter-4-0 #MINVER#
