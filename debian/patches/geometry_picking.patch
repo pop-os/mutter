@@ -1,4 +1,4 @@
-From bfdf54fa14950c6471d44da4e1114bd26aff26e0 Mon Sep 17 00:00:00 2001
+From eddfdfcd091d8977ed3145a8ec573a5abe0bdce1 Mon Sep 17 00:00:00 2001
 From: Daniel van Vugt <daniel.van.vugt@canonical.com>
 Date: Thu, 2 Aug 2018 19:03:30 +0800
 Subject: [PATCH] Geometric (OpenGL-less) picking
@@ -106,7 +106,7 @@ index c44f6342f..9bf1a3049 100644
                                                                                           gboolean      repeat);
  void                            _clutter_actor_shader_post_paint                        (ClutterActor *actor);
 diff --git a/clutter/clutter/clutter-actor.c b/clutter/clutter/clutter-actor.c
-index 3c48e4e9a..09be5c6cc 100644
+index 1fd6663b2..ba70b49cd 100644
 --- a/clutter/clutter/clutter-actor.c
 +++ b/clutter/clutter/clutter-actor.c
 @@ -729,8 +729,6 @@ struct _ClutterActorPrivate
@@ -488,10 +488,10 @@ index 2462385f6..3744c648f 100644
  
  typedef enum
 diff --git a/clutter/clutter/clutter-main.c b/clutter/clutter/clutter-main.c
-index fbae4d995..e70d630cd 100644
+index 66bc88de0..aecd22db7 100644
 --- a/clutter/clutter/clutter-main.c
 +++ b/clutter/clutter/clutter-main.c
-@@ -130,7 +130,6 @@ static const GDebugKey clutter_debug_keys[] = {
+@@ -131,7 +131,6 @@ static const GDebugKey clutter_debug_keys[] = {
  
  static const GDebugKey clutter_pick_debug_keys[] = {
    { "nop-picking", CLUTTER_DEBUG_NOP_PICKING },
@@ -499,7 +499,7 @@ index fbae4d995..e70d630cd 100644
  };
  
  static const GDebugKey clutter_paint_debug_keys[] = {
-@@ -532,125 +531,6 @@ clutter_get_motion_events_enabled (void)
+@@ -533,125 +532,6 @@ clutter_get_motion_events_enabled (void)
    return _clutter_context_get_motion_events_enabled ();
  }
  
@@ -731,10 +731,10 @@ index 6c3601745..aa0c5f71c 100644
  
  GList *           _clutter_stage_window_get_views               (ClutterStageWindow *window);
 diff --git a/clutter/clutter/clutter-stage.c b/clutter/clutter/clutter-stage.c
-index 9e267e9c9..0dca908df 100644
+index f5189c5c8..5a8d2be16 100644
 --- a/clutter/clutter/clutter-stage.c
 +++ b/clutter/clutter/clutter-stage.c
-@@ -103,6 +103,14 @@ struct _ClutterStageQueueRedrawEntry
+@@ -104,6 +104,14 @@ struct _ClutterStageQueueRedrawEntry
    ClutterPaintVolume clip;
  };
  
@@ -749,7 +749,7 @@ index 9e267e9c9..0dca908df 100644
  struct _ClutterStagePrivate
  {
    /* the stage implementation */
-@@ -136,7 +144,10 @@ struct _ClutterStagePrivate
+@@ -137,7 +145,10 @@ struct _ClutterStagePrivate
    GTimer *fps_timer;
    gint32 timer_n_frames;
  
@@ -761,7 +761,7 @@ index 9e267e9c9..0dca908df 100644
  
  #ifdef CLUTTER_ENABLE_DEBUG
    gulong redraw_count;
-@@ -322,6 +333,135 @@ clutter_stage_get_preferred_height (ClutterActor *self,
+@@ -323,6 +334,135 @@ clutter_stage_get_preferred_height (ClutterActor *self,
      *natural_height_p = geom.height;
  }
  
@@ -897,7 +897,7 @@ index 9e267e9c9..0dca908df 100644
  static inline void
  queue_full_redraw (ClutterStage *stage)
  {
-@@ -632,6 +772,12 @@ clutter_stage_do_paint_view (ClutterStage                *stage,
+@@ -633,6 +773,12 @@ clutter_stage_do_paint_view (ClutterStage                *stage,
    float viewport[4];
    cairo_rectangle_int_t geom;
  
@@ -910,7 +910,7 @@ index 9e267e9c9..0dca908df 100644
    _clutter_stage_window_get_geometry (priv->impl, &geom);
  
    viewport[0] = priv->viewport[0];
-@@ -1393,40 +1539,6 @@ clutter_stage_get_redraw_clip_bounds (ClutterStage          *stage,
+@@ -1409,40 +1555,6 @@ clutter_stage_get_redraw_clip_bounds (ClutterStage          *stage,
      }
  }
  
@@ -951,7 +951,7 @@ index 9e267e9c9..0dca908df 100644
  static ClutterActor *
  _clutter_stage_do_pick_on_view (ClutterStage     *stage,
                                  gint              x,
-@@ -1434,140 +1546,47 @@ _clutter_stage_do_pick_on_view (ClutterStage     *stage,
+@@ -1450,140 +1562,47 @@ _clutter_stage_do_pick_on_view (ClutterStage     *stage,
                                  ClutterPickMode   mode,
                                  ClutterStageView *view)
  {
@@ -1120,8 +1120,8 @@ index 9e267e9c9..0dca908df 100644
 +  return CLUTTER_ACTOR (stage);
  }
  
- static ClutterStageView *
-@@ -1880,7 +1899,9 @@ clutter_stage_finalize (GObject *object)
+ /**
+@@ -1899,7 +1918,9 @@ clutter_stage_finalize (GObject *object)
  
    g_array_free (priv->paint_volume_stack, TRUE);
  
@@ -1132,7 +1132,7 @@ index 9e267e9c9..0dca908df 100644
  
    if (priv->fps_timer != NULL)
      g_timer_destroy (priv->fps_timer);
-@@ -2380,7 +2401,9 @@ clutter_stage_init (ClutterStage *self)
+@@ -2399,7 +2420,9 @@ clutter_stage_init (ClutterStage *self)
    priv->paint_volume_stack =
      g_array_new (FALSE, FALSE, sizeof (ClutterPaintVolume));
  
@@ -1143,7 +1143,7 @@ index 9e267e9c9..0dca908df 100644
  }
  
  /**
-@@ -4204,6 +4227,12 @@ _clutter_stage_queue_actor_redraw (ClutterStage                 *stage,
+@@ -4229,6 +4252,12 @@ _clutter_stage_queue_actor_redraw (ClutterStage                 *stage,
    CLUTTER_NOTE (CLIPPING, "stage_queue_actor_redraw (actor=%s, clip=%p): ",
                  _clutter_actor_get_debug_name (actor), clip);
  
@@ -1156,7 +1156,7 @@ index 9e267e9c9..0dca908df 100644
    if (!priv->redraw_pending)
      {
        ClutterMasterClock *master_clock;
-@@ -4464,39 +4493,6 @@ _clutter_stage_get_active_framebuffer (ClutterStage *stage)
+@@ -4489,39 +4518,6 @@ _clutter_stage_get_active_framebuffer (ClutterStage *stage)
    return stage->priv->active_framebuffer;
  }
  
@@ -1214,11 +1214,11 @@ index 0f0fb1c2a..2bbf7deda 100644
  void             clutter_actor_box_from_vertices (ClutterActorBox       *box,
                                                    const ClutterVertex    verts[]);
 diff --git a/clutter/clutter/cogl/clutter-stage-cogl.c b/clutter/clutter/cogl/clutter-stage-cogl.c
-index 1ed7e01c4..37bbb3ee1 100644
+index 5b6eeb8bf..b29adc627 100644
 --- a/clutter/clutter/cogl/clutter-stage-cogl.c
 +++ b/clutter/clutter/cogl/clutter-stage-cogl.c
-@@ -967,55 +967,6 @@ clutter_stage_cogl_redraw (ClutterStageWindow *stage_window)
-   stage_cogl->frame_count++;
+@@ -1001,55 +1001,6 @@ clutter_stage_cogl_redraw (ClutterStageWindow *stage_window)
+   COGL_TRACE_END (ClutterStageCoglRedraw);
  }
  
 -static void
@@ -1273,7 +1273,7 @@ index 1ed7e01c4..37bbb3ee1 100644
  static void
  clutter_stage_window_iface_init (ClutterStageWindowInterface *iface)
  {
-@@ -1033,7 +984,6 @@ clutter_stage_window_iface_init (ClutterStageWindowInterface *iface)
+@@ -1067,7 +1018,6 @@ clutter_stage_window_iface_init (ClutterStageWindowInterface *iface)
    iface->ignoring_redraw_clips = clutter_stage_cogl_ignoring_redraw_clips;
    iface->get_redraw_clip_bounds = clutter_stage_cogl_get_redraw_clip_bounds;
    iface->redraw = clutter_stage_cogl_redraw;
@@ -1710,4 +1710,4 @@ index ca4ca19a9..814199145 100644
 -- 
 2.21.0
 
-
+<Paste>
