@@ -1,3 +1,15 @@
+mutter (3.32.2+git20190711-2ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge with debian. Remaining changes:
+    + debian/control:
+      - Update VCS flags to point to launchpad
+      - Update maintainer to ubuntu
+    + debian/gbp.conf: update branch to point to ubuntu/master
+    + debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+      - X11: Add support for fractional scaling using Randr
+
+ -- Iain Lane <iain.lane@canonical.com>  Fri, 19 Jul 2019 16:58:39 +0100
+
 mutter (3.32.2+git20190711-2) experimental; urgency=medium
 
   * d/p/window-x11-Focus-a-window-in-the-active-workspace-as-take.patch:
