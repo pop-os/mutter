@@ -41,6 +41,9 @@ window-x11-Use-any-focusable-window-as-fallback-delayed-f.patch
 window-x11-Focus-a-window-in-the-active-workspace-as-take.patch
 window-x11-Remove-double-definition-of-MetaStack.patch
 wayland-output-Set-user-data-of-xdg_output-resource.patch
+renderer-native-Use-g_set_error-instead-of-_cogl_set_erro.patch
+renderer-native-Make-sure-we-re-not-destroying-an-active-.patch
+renderer-native-Fix-EGLSurface-destruction-order.patch
 theme-use-gtk_render_icon_suface-to-paint-button-icon.patch
 theme-load-icons-as-Gtk-does-with-fallback-and-RTL-suppor.patch
 bgo768531_workaround-startup-notifications.patch

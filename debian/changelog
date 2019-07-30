@@ -58,6 +58,11 @@ mutter (3.30.2-8) UNRELEASED; urgency=medium
     Add meta_stack_get_default_focus_candidates(), which is added by a
     patch
   * d/gbp.conf: Set branch to debian/unstable
+  * d/p/renderer-native-Use-g_set_error-instead-of-_cogl_set_erro.patch,
+    d/p/renderer-native-Make-sure-we-re-not-destroying-an-active-.patch,
+    d/p/renderer-native-Fix-EGLSurface-destruction-order.patch:
+    Backport patches from upstream gnome-3-32 branch to fix another
+    use-after-free crash that can be triggered by suspend/resume
 
  -- Simon McVittie <smcv@debian.org>  Tue, 30 Jul 2019 08:29:38 +0100
 
