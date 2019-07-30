@@ -51,6 +51,9 @@ mutter (3.30.2-8) UNRELEASED; urgency=medium
       d/p/test-client-Add-x11-events-GSource-handler.patch,
       d/p/tests-Add-accept_take_focus-command.patch:
       Improve test coverage related to the above bug fixes
+  * d/p/wayland-output-Set-user-data-of-xdg_output-resource.patch:
+    Backport patch from 3.32.1 to fix use-after-free in Wayland monitor
+    management (potentially fixes #932428, #932767, #932781)
 
  -- Simon McVittie <smcv@debian.org>  Tue, 30 Jul 2019 08:29:38 +0100
 
