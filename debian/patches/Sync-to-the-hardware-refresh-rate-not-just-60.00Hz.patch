@@ -267,7 +267,7 @@ index 5f77f19..3e3f45c 100644
  
  void meta_gpu_kms_flip_closure_container_free (MetaGpuKmsFlipClosureContainer *closure_container);
 diff --git a/src/backends/native/meta-renderer-native.c b/src/backends/native/meta-renderer-native.c
-index f58e6b3..24d6b8b 100644
+index b3976d4..980206a 100644
 --- a/src/backends/native/meta-renderer-native.c
 +++ b/src/backends/native/meta-renderer-native.c
 @@ -60,8 +60,9 @@
