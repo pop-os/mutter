@@ -1,5 +1,6 @@
-mutter (3.30.2-8) UNRELEASED; urgency=medium
+mutter (3.30.2-8) unstable; urgency=medium
 
+  * Team upload
   * Update to upstream gnome-3-30 branch at 3.30.2-42-g2a81dc45e
     - d/p/clutter-x11-Consider-remapped-keys-when-guessing-the-keyc.patch:
       Fix repeated inputs from extended characters (long-press) in
@@ -64,7 +65,7 @@ mutter (3.30.2-8) UNRELEASED; urgency=medium
     Backport patches from upstream gnome-3-32 branch to fix another
     use-after-free crash that can be triggered by suspend/resume
 
- -- Simon McVittie <smcv@debian.org>  Tue, 30 Jul 2019 08:29:38 +0100
+ -- Simon McVittie <smcv@debian.org>  Tue, 30 Jul 2019 10:40:38 +0100
 
 mutter (3.30.2-7) unstable; urgency=medium
 
