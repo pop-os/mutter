@@ -1,3 +1,9 @@
+mutter (3.30.2-9) UNRELEASED; urgency=medium
+
+  * d/libmutter-3-0.bug-control: Include GL drivers in bug reports
+
+ -- Simon McVittie <smcv@debian.org>  Sun, 04 Aug 2019 13:42:52 +0100
+
 mutter (3.30.2-8) unstable; urgency=medium
 
   * Team upload
