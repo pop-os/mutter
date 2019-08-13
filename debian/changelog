@@ -1,4 +1,4 @@
-mutter (3.33.90-1ubuntu1) UNRELEASED; urgency=medium
+mutter (3.33.90-1ubuntu1~pre2) eoan; urgency=medium
 
   * Merge with debian. Remaining changes:
     + debian/control:
