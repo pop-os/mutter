@@ -120,6 +120,20 @@
                                         framebuffers instead of window content,
                                         to manage HiDPI monitors. Does not
                                         require a restart.
+        • “rt-scheduler”              — makes mutter request a low priority
+                                        real-time scheduling. The executable
+                                        or user must have CAP_SYS_NICE.
+                                        Requires a restart.
+        • “autostart-xwayland”        — initializes Xwayland lazily if there are
+                                        X11 clients. Requires restart.
+      </description>
+    </key>
+
+    <key name="locate-pointer-key" type="s">
+      <default>'Control_L'</default>
+      <summary>Modifier to use to locate the pointer</summary>
+      <description>
+        This key will initiate the “locate pointer” action.
       </description>
     </key>
 

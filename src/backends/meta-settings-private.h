@@ -33,6 +33,8 @@ typedef enum _MetaExperimentalFeature
   META_EXPERIMENTAL_FEATURE_NONE = 0,
   META_EXPERIMENTAL_FEATURE_SCALE_MONITOR_FRAMEBUFFER = (1 << 0),
   META_EXPERIMENTAL_FEATURE_KMS_MODIFIERS  = (1 << 1),
+  META_EXPERIMENTAL_FEATURE_RT_SCHEDULER = (1 << 2),
+  META_EXPERIMENTAL_FEATURE_AUTOSTART_XWAYLAND  = (1 << 3),
 } MetaExperimentalFeature;
 
 #define META_TYPE_SETTINGS (meta_settings_get_type ())
@@ -65,6 +67,6 @@ void meta_settings_get_xwayland_grab_patterns (MetaSettings  *settings,
                                                GPtrArray    **whitelist_patterns,
                                                GPtrArray    **blacklist_patterns);
 
-gboolean  meta_settings_are_xwayland_grabs_allowed (MetaSettings *settings);
+gboolean meta_settings_are_xwayland_grabs_allowed (MetaSettings *settings);
 
 #endif /* META_SETTINGS_PRIVATE_H */

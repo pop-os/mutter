@@ -39,6 +39,7 @@
 #include "backends/x11/cm/meta-cursor-sprite-xfixes.h"
 #include "cogl/cogl.h"
 #include "clutter/clutter.h"
+#include "meta-marshal.h"
 #include "meta/main.h"
 #include "meta/meta-x11-errors.h"
 #include "meta/util.h"
@@ -50,6 +51,7 @@ enum
 {
   CURSOR_CHANGED,
   CURSOR_MOVED,
+  VISIBILITY_CHANGED,
   LAST_SIGNAL
 };
 
@@ -165,14 +167,32 @@ meta_cursor_tracker_class_init (MetaCursorTrackerClass *klass)
                                           NULL, NULL, NULL,
                                           G_TYPE_NONE, 0);
 
+  /**
+   * MetaCursorTracker::cursor-moved:
+   * @cursor: The #MetaCursorTracker
+   * @x: The new X coordinate of the cursor
+   * @y: The new Y coordinate of the cursor
+   *
+   * Notifies when the cursor has moved to a new location.
+   */
   signals[CURSOR_MOVED] = g_signal_new ("cursor-moved",
                                         G_TYPE_FROM_CLASS (klass),
                                         G_SIGNAL_RUN_LAST,
                                         0,
-                                        NULL, NULL, NULL,
+                                        NULL, NULL,
+                                        meta_marshal_VOID__FLOAT_FLOAT,
                                         G_TYPE_NONE, 2,
                                         G_TYPE_FLOAT,
                                         G_TYPE_FLOAT);
+  g_signal_set_va_marshaller (signals[CURSOR_MOVED],
+                              G_TYPE_FROM_CLASS (klass),
+                              meta_marshal_VOID__FLOAT_FLOATv);
+
+  signals[VISIBILITY_CHANGED] = g_signal_new ("visibility-changed",
+                                              G_TYPE_FROM_CLASS (klass),
+                                              G_SIGNAL_RUN_LAST,
+                                              0, NULL, NULL, NULL,
+                                              G_TYPE_NONE, 0);
 }
 
 /**
@@ -418,6 +438,12 @@ meta_cursor_tracker_get_pointer (MetaCursorTracker   *tracker,
     get_pointer_position_gdk (x, y, (int*)mods);
 }
 
+gboolean
+meta_cursor_tracker_get_pointer_visible (MetaCursorTracker *tracker)
+{
+  return tracker->is_showing;
+}
+
 void
 meta_cursor_tracker_set_pointer_visible (MetaCursorTracker *tracker,
                                          gboolean           visible)
@@ -427,6 +453,8 @@ meta_cursor_tracker_set_pointer_visible (MetaCursorTracker *tracker,
   tracker->is_showing = visible;
 
   sync_cursor (tracker);
+
+  g_signal_emit (tracker, signals[VISIBILITY_CHANGED], 0);
 }
 
 MetaCursorSprite *

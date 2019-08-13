@@ -30,7 +30,6 @@
 
 #include "clutter/clutter.h"
 #include "clutter/wayland/clutter-wayland-compositor.h"
-#include "clutter/wayland/clutter-wayland-surface.h"
 #include "core/main-private.h"
 #include "wayland/meta-wayland-data-device.h"
 #include "wayland/meta-wayland-dma-buf.h"
@@ -362,6 +361,12 @@ meta_wayland_override_display_name (const char *display_name)
   _display_name_override = g_strdup (display_name);
 }
 
+static const char *
+meta_wayland_get_xwayland_auth_file (MetaWaylandCompositor *compositor)
+{
+  return compositor->xwayland_manager.auth_file;
+}
+
 void
 meta_wayland_init (void)
 {
@@ -413,9 +418,9 @@ meta_wayland_init (void)
   meta_wayland_eglstream_controller_init (compositor);
 #endif
 
-  if (meta_should_autostart_x11_display ())
+  if (meta_get_x11_display_policy () != META_DISPLAY_POLICY_DISABLED)
     {
-      if (!meta_xwayland_start (&compositor->xwayland_manager, compositor->wayland_display))
+      if (!meta_xwayland_init (&compositor->xwayland_manager, compositor->wayland_display))
         g_error ("Failed to start X Wayland");
     }
 
@@ -438,8 +443,11 @@ meta_wayland_init (void)
       compositor->display_name = g_strdup (display_name);
     }
 
-  if (meta_should_autostart_x11_display ())
-    set_gnome_env ("DISPLAY", meta_wayland_get_xwayland_display_name (compositor));
+  if (meta_get_x11_display_policy () != META_DISPLAY_POLICY_DISABLED)
+    {
+      set_gnome_env ("DISPLAY", meta_wayland_get_xwayland_display_name (compositor));
+      set_gnome_env ("XAUTHORITY", meta_wayland_get_xwayland_auth_file (compositor));
+    }
 
   set_gnome_env ("WAYLAND_DISPLAY", meta_wayland_get_wayland_display_name (compositor));
 }
@@ -463,7 +471,7 @@ meta_wayland_finalize (void)
 
   compositor = meta_wayland_compositor_get_default ();
 
-  meta_xwayland_stop (&compositor->xwayland_manager);
+  meta_xwayland_shutdown (&compositor->xwayland_manager);
   g_clear_pointer (&compositor->display_name, g_free);
 }
 

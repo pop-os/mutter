@@ -606,22 +606,6 @@ meta_init (void)
     meta_fatal ("Can't specify both SM save file and SM client id\n");
 
   meta_main_loop = g_main_loop_new (NULL, FALSE);
-
-  /*
-   * We need to make sure the first client connecting to the X server
-   * (e.g. Xwayland started from meta_wayland_init() above) is a permanent one,
-   * so prepare the GDK X11 connection now already. Without doing this, if
-   * there are any functionality that relies on X11 after here before
-   * meta_display_open(), the X server will terminate itself when such a client
-   * disconnects before the permanent GDK client connects.
-   */
-  if (meta_should_autostart_x11_display ())
-    {
-      GError *error = NULL;
-
-      if (!meta_x11_init_gdk_display (&error))
-        g_error ("Failed to open X11 display: %s", error->message);
-    }
 }
 
 /**
@@ -733,15 +717,27 @@ prefs_changed_callback (MetaPreference pref,
     }
 }
 
-gboolean
-meta_should_autostart_x11_display (void)
+MetaDisplayPolicy
+meta_get_x11_display_policy (void)
 {
   MetaBackend *backend = meta_get_backend ();
-  gboolean wants_x11 = TRUE;
+
+  if (META_IS_BACKEND_X11_CM (backend))
+    return META_DISPLAY_POLICY_MANDATORY;
 
 #ifdef HAVE_WAYLAND
-  wants_x11 = !opt_no_x11;
+  if (meta_is_wayland_compositor ())
+    {
+      MetaSettings *settings = meta_backend_get_settings (backend);
+
+      if (opt_no_x11)
+        return META_DISPLAY_POLICY_DISABLED;
+
+      if (meta_settings_is_experimental_feature_enabled (settings,
+                                                         META_EXPERIMENTAL_FEATURE_AUTOSTART_XWAYLAND))
+        return META_DISPLAY_POLICY_ON_DEMAND;
+    }
 #endif
 
-  return META_IS_BACKEND_X11_CM (backend) || wants_x11;
+  return META_DISPLAY_POLICY_MANDATORY;
 }

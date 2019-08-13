@@ -433,7 +433,7 @@
  *
  * #ClutterActor allows accessing properties of #ClutterAction,
  * #ClutterEffect, and #ClutterConstraint instances associated to an actor
- * instance for animation purposes.
+ * instance for animation purposes, as well as its #ClutterLayoutManager.
  *
  * In order to access a specific #ClutterAction or a #ClutterConstraint
  * property it is necessary to set the #ClutterActorMeta:name property on the
@@ -456,6 +456,13 @@
  * using an explicit transition. The `rect` actor has a binding constraint
  * on the `origin` actor, and in its initial state is overlapping the actor
  * to which is bound to.
+ *
+ * As the actor has only one #ClutterLayoutManager, the syntax for accessing its
+ * properties is simpler:
+ *
+ * |[
+ *   @layout.<property-name>
+ * ]|
  *
  * |[<!-- language="C" -->
  * constraint = clutter_bind_constraint_new (origin, CLUTTER_BIND_X, 0.0);
@@ -806,6 +813,9 @@ struct _ClutterActorPrivate
   ClutterActorCreateChildFunc create_child_func;
   gpointer create_child_data;
   GDestroyNotify create_child_notify;
+
+  guint resolution_changed_id;
+  guint font_changed_id;
 
   /* bitfields: KEEP AT THE END */
 
@@ -5983,6 +5993,7 @@ clutter_actor_dispose (GObject *object)
 {
   ClutterActor *self = CLUTTER_ACTOR (object);
   ClutterActorPrivate *priv = self->priv;
+  ClutterBackend *backend = clutter_get_default_backend ();
 
   CLUTTER_NOTE (MISC, "Dispose actor (name='%s', ref_count:%d) of type '%s'",
 		_clutter_actor_get_debug_name (self),
@@ -6017,6 +6028,18 @@ clutter_actor_dispose (GObject *object)
       /* can't be mapped or realized with no parent */
       g_assert (!CLUTTER_ACTOR_IS_MAPPED (self));
       g_assert (!CLUTTER_ACTOR_IS_REALIZED (self));
+    }
+
+  if (priv->resolution_changed_id)
+    {
+      g_signal_handler_disconnect (backend, priv->resolution_changed_id);
+      priv->resolution_changed_id = 0;
+    }
+
+  if (priv->font_changed_id)
+    {
+      g_signal_handler_disconnect (backend, priv->font_changed_id);
+      priv->font_changed_id = 0;
     }
 
   g_clear_object (&priv->pango_context);
@@ -8833,9 +8856,9 @@ _clutter_actor_queue_redraw_full (ClutterActor             *self,
    *
    * later during _clutter_stage_do_update(), once relayouting is done
    * and the scenegraph has been updated we will call:
-   * _clutter_stage_finish_queue_redraws().
+   * clutter_stage_maybe_finish_queue_redraws().
    *
-   * _clutter_stage_finish_queue_redraws() will call
+   * clutter_stage_maybe_finish_queue_redraws() will call
    * _clutter_actor_finish_queue_redraw() for each listed actor.
    *
    * Note: actors *are* allowed to queue further redraws during this
@@ -10090,6 +10113,9 @@ clutter_actor_allocate (ClutterActor           *self,
                  self, _clutter_actor_get_debug_name (self));
       return;
     }
+
+  if (!clutter_actor_is_visible (self))
+    return;
 
   priv = self->priv;
 
@@ -14900,6 +14926,30 @@ clutter_scriptable_iface_init (ClutterScriptableIface *iface)
   iface->set_custom_property = clutter_actor_set_custom_property;
 }
 
+static gboolean
+get_layout_from_animation_property (ClutterActor  *actor,
+                                    const gchar   *name,
+                                    gchar        **name_p)
+{
+  g_auto (GStrv) tokens = NULL;
+
+  if (!g_str_has_prefix (name, "@layout"))
+    return FALSE;
+
+  tokens = g_strsplit (name, ".", -1);
+  if (tokens == NULL || g_strv_length (tokens) != 2)
+    {
+      CLUTTER_NOTE (ANIMATION, "Invalid property name '%s'",
+                    name + 1);
+      return FALSE;
+    }
+
+  if (name_p != NULL)
+    *name_p = g_strdup (tokens[1]);
+
+  return TRUE;
+}
+
 static ClutterActorMeta *
 get_meta_from_animation_property (ClutterActor  *actor,
                                   const gchar   *name,
@@ -14962,18 +15012,31 @@ static GParamSpec *
 clutter_actor_find_property (ClutterAnimatable *animatable,
                              const gchar       *property_name)
 {
+  ClutterActor *actor = CLUTTER_ACTOR (animatable);
   ClutterActorMeta *meta = NULL;
   GObjectClass *klass = NULL;
   GParamSpec *pspec = NULL;
   gchar *p_name = NULL;
+  gboolean use_layout;
 
-  meta = get_meta_from_animation_property (CLUTTER_ACTOR (animatable),
-                                           property_name,
-                                           &p_name);
+  use_layout = get_layout_from_animation_property (actor,
+                                                   property_name,
+                                                   &p_name);
+
+  if (!use_layout)
+    meta = get_meta_from_animation_property (actor,
+                                             property_name,
+                                             &p_name);
 
   if (meta != NULL)
     {
       klass = G_OBJECT_GET_CLASS (meta);
+
+      pspec = g_object_class_find_property (klass, p_name);
+    }
+  else if (use_layout)
+    {
+      klass = G_OBJECT_GET_CLASS (actor->priv->layout_manager);
 
       pspec = g_object_class_find_property (klass, p_name);
     }
@@ -14994,15 +15057,24 @@ clutter_actor_get_initial_state (ClutterAnimatable *animatable,
                                  const gchar       *property_name,
                                  GValue            *initial)
 {
+  ClutterActor *actor = CLUTTER_ACTOR (animatable);
   ClutterActorMeta *meta = NULL;
   gchar *p_name = NULL;
+  gboolean use_layout;
 
-  meta = get_meta_from_animation_property (CLUTTER_ACTOR (animatable),
-                                           property_name,
-                                           &p_name);
+  use_layout = get_layout_from_animation_property (actor,
+                                                   property_name,
+                                                   &p_name);
+
+  if (!use_layout)
+    meta = get_meta_from_animation_property (actor,
+                                             property_name,
+                                             &p_name);
 
   if (meta != NULL)
     g_object_get_property (G_OBJECT (meta), p_name, initial);
+  else if (use_layout)
+    g_object_get_property (G_OBJECT (actor->priv->layout_manager), p_name, initial);
   else
     g_object_get_property (G_OBJECT (animatable), property_name, initial);
 
@@ -15155,12 +15227,21 @@ clutter_actor_set_final_state (ClutterAnimatable *animatable,
   ClutterActor *actor = CLUTTER_ACTOR (animatable);
   ClutterActorMeta *meta = NULL;
   gchar *p_name = NULL;
+  gboolean use_layout;
 
-  meta = get_meta_from_animation_property (actor,
-                                           property_name,
-                                           &p_name);
+  use_layout = get_layout_from_animation_property (actor,
+                                                   property_name,
+                                                   &p_name);
+
+  if (!use_layout)
+    meta = get_meta_from_animation_property (actor,
+                                             property_name,
+                                             &p_name);
+
   if (meta != NULL)
     g_object_set_property (G_OBJECT (meta), p_name, final);
+  else if (use_layout)
+    g_object_set_property (G_OBJECT (actor->priv->layout_manager), p_name, final);
   else
     {
       GObjectClass *obj_class = G_OBJECT_GET_CLASS (animatable);
@@ -15884,10 +15965,12 @@ clutter_actor_get_pango_context (ClutterActor *self)
     {
       priv->pango_context = clutter_actor_create_pango_context (self);
 
-      g_signal_connect_object (backend, "resolution-changed",
-                               G_CALLBACK (update_pango_context), priv->pango_context, 0);
-      g_signal_connect_object (backend, "font-changed",
-                               G_CALLBACK (update_pango_context), priv->pango_context, 0);
+      priv->resolution_changed_id =
+        g_signal_connect_object (backend, "resolution-changed",
+                                 G_CALLBACK (update_pango_context), priv->pango_context, 0);
+      priv->font_changed_id =
+        g_signal_connect_object (backend, "font-changed",
+                                 G_CALLBACK (update_pango_context), priv->pango_context, 0);
     }
   else
     update_pango_context (backend, priv->pango_context);
@@ -17533,7 +17616,7 @@ _clutter_actor_get_paint_volume_real (ClutterActor *self,
                l != NULL && l->data != priv->current_effect;
                l = l->next)
             {
-              if (!_clutter_effect_get_paint_volume (l->data, pv))
+              if (!_clutter_effect_modify_paint_volume (l->data, pv))
                 {
                   clutter_paint_volume_free (pv);
                   CLUTTER_NOTE (CLIPPING, "Bail from get_paint_volume (%s): "
@@ -17551,7 +17634,7 @@ _clutter_actor_get_paint_volume_real (ClutterActor *self,
           /* otherwise, get the cumulative volume */
           effects = _clutter_meta_group_peek_metas (priv->effects);
           for (l = effects; l != NULL; l = l->next)
-            if (!_clutter_effect_get_paint_volume (l->data, pv))
+            if (!_clutter_effect_modify_paint_volume (l->data, pv))
               {
                 clutter_paint_volume_free (pv);
                 CLUTTER_NOTE (CLIPPING, "Bail from get_paint_volume (%s): "

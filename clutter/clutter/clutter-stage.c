@@ -72,9 +72,11 @@
 #include "clutter-private.h"
 #include "clutter-stage-manager-private.h"
 #include "clutter-stage-private.h"
+#include "clutter-stage-view-private.h"
 #include "clutter-private.h"
 
 #include "cogl/cogl.h"
+#include "cogl/cogl-trace.h"
 
 /* <private>
  * ClutterStageHint:
@@ -147,13 +149,13 @@ struct _ClutterStagePrivate
   gpointer paint_data;
   GDestroyNotify paint_notify;
 
+  cairo_rectangle_int_t view_clip;
+
   int update_freeze_count;
 
   guint relayout_pending       : 1;
   guint redraw_pending         : 1;
-  guint is_fullscreen          : 1;
   guint is_cursor_visible      : 1;
-  guint is_user_resizable      : 1;
   guint use_fog                : 1;
   guint throttle_motion_events : 1;
   guint use_alpha              : 1;
@@ -169,28 +171,27 @@ enum
   PROP_0,
 
   PROP_COLOR,
-  PROP_FULLSCREEN_SET,
-  PROP_OFFSCREEN,
   PROP_CURSOR_VISIBLE,
   PROP_PERSPECTIVE,
   PROP_TITLE,
-  PROP_USER_RESIZABLE,
   PROP_USE_FOG,
   PROP_FOG,
   PROP_USE_ALPHA,
   PROP_KEY_FOCUS,
   PROP_NO_CLEAR_HINT,
-  PROP_ACCEPT_FOCUS
+  PROP_ACCEPT_FOCUS,
+  PROP_LAST
 };
+
+static GParamSpec *obj_props[PROP_LAST] = { NULL, };
 
 enum
 {
-  FULLSCREEN,
-  UNFULLSCREEN,
   ACTIVATE,
   DEACTIVATE,
   DELETE_EVENT,
   AFTER_PAINT,
+  PAINT_VIEW,
   PRESENTED,
 
   LAST_SIGNAL
@@ -403,40 +404,37 @@ clutter_stage_allocate (ClutterActor           *self,
                                     flags | CLUTTER_DELEGATE_LAYOUT);
 
       /* Ensure the window is sized correctly */
-      if (!priv->is_fullscreen)
+      if (priv->min_size_changed)
         {
-          if (priv->min_size_changed)
-            {
-              gfloat min_width, min_height;
-              gboolean min_width_set, min_height_set;
+          gfloat min_width, min_height;
+          gboolean min_width_set, min_height_set;
 
-              g_object_get (G_OBJECT (self),
-                            "min-width", &min_width,
-                            "min-width-set", &min_width_set,
-                            "min-height", &min_height,
-                            "min-height-set", &min_height_set,
-                            NULL);
+          g_object_get (G_OBJECT (self),
+                        "min-width", &min_width,
+                        "min-width-set", &min_width_set,
+                        "min-height", &min_height,
+                        "min-height-set", &min_height_set,
+                        NULL);
 
-              if (!min_width_set)
-                min_width = 1;
-              if (!min_height_set)
-                min_height = 1;
+          if (!min_width_set)
+            min_width = 1;
+          if (!min_height_set)
+            min_height = 1;
 
-              if (width < min_width)
-                width = min_width;
-              if (height < min_height)
-                height = min_height;
+          if (width < min_width)
+            width = min_width;
+          if (height < min_height)
+            height = min_height;
 
-              priv->min_size_changed = FALSE;
-            }
+          priv->min_size_changed = FALSE;
+        }
 
-          if (window_size.width != CLUTTER_NEARBYINT (width) ||
-              window_size.height != CLUTTER_NEARBYINT (height))
-            {
-              _clutter_stage_window_resize (priv->impl,
-                                            CLUTTER_NEARBYINT (width),
-                                            CLUTTER_NEARBYINT (height));
-            }
+      if (window_size.width != CLUTTER_NEARBYINT (width) ||
+          window_size.height != CLUTTER_NEARBYINT (height))
+        {
+          _clutter_stage_window_resize (priv->impl,
+                                        CLUTTER_NEARBYINT (width),
+                                        CLUTTER_NEARBYINT (height));
         }
     }
   else
@@ -688,7 +686,22 @@ _clutter_stage_paint_view (ClutterStage                *stage,
   if (!priv->impl)
     return;
 
-  clutter_stage_do_paint_view (stage, view, clip);
+  COGL_TRACE_BEGIN_SCOPED (ClutterStagePaintView, "Paint (view)");
+
+  priv->view_clip = *clip;
+
+  if (g_signal_has_handler_pending (stage, stage_signals[PAINT_VIEW],
+                                    0, TRUE))
+    g_signal_emit (stage, stage_signals[PAINT_VIEW], 0, view);
+  else
+    CLUTTER_STAGE_GET_CLASS (stage)->paint_view (stage, view);
+
+  priv->view_clip = (cairo_rectangle_int_t) { 0 };
+}
+
+void
+_clutter_stage_emit_after_paint (ClutterStage *stage)
+{
   g_signal_emit (stage, stage_signals[AFTER_PAINT], 0);
 }
 
@@ -829,7 +842,7 @@ clutter_stage_emit_key_focus_event (ClutterStage *stage,
   else
     g_signal_emit_by_name (priv->key_focused_actor, "key-focus-out");
 
-  g_object_notify (G_OBJECT (stage), "key-focus");
+  g_object_notify_by_pspec (G_OBJECT (stage), obj_props[PROP_KEY_FOCUS]);
 }
 
 static void
@@ -842,40 +855,6 @@ static void
 clutter_stage_real_deactivate (ClutterStage *stage)
 {
   clutter_stage_emit_key_focus_event (stage, FALSE);
-}
-
-static void
-clutter_stage_real_fullscreen (ClutterStage *stage)
-{
-  ClutterStagePrivate *priv = stage->priv;
-  cairo_rectangle_int_t geom;
-  ClutterActorBox box;
-
-  /* we need to force an allocation here because the size
-   * of the stage might have been changed by the backend
-   *
-   * this is a really bad solution to the issues caused by
-   * the fact that fullscreening the stage on the X11 backends
-   * is really an asynchronous operation
-   */
-  _clutter_stage_window_get_geometry (priv->impl, &geom);
-
-  box.x1 = 0;
-  box.y1 = 0;
-  box.x2 = geom.width;
-  box.y2 = geom.height;
-
-  /* we need to blow the caching on the Stage size, given that
-   * we're about to force an allocation, because if anything
-   * ends up querying the size of the stage during the allocate()
-   * call, like constraints or signal handlers, we'll get into an
-   * inconsistent state: the stage will report the old cached size,
-   * but the allocation will be updated anyway.
-   */
-  clutter_actor_set_size (CLUTTER_ACTOR (stage), -1.0, -1.0);
-  clutter_actor_allocate (CLUTTER_ACTOR (stage),
-                          &box,
-                          CLUTTER_ALLOCATION_NONE);
 }
 
 void
@@ -1225,11 +1204,17 @@ _clutter_stage_do_update (ClutterStage *stage)
   if (!CLUTTER_ACTOR_IS_REALIZED (stage))
     return FALSE;
 
+  COGL_TRACE_BEGIN_SCOPED (ClutterStageDoUpdate, "Update");
+
   /* NB: We need to ensure we have an up to date layout *before* we
    * check or clear the pending redraws flag since a relayout may
    * queue a redraw.
    */
+  COGL_TRACE_BEGIN (ClutterStageRelayout, "Layout");
+
   _clutter_stage_maybe_relayout (CLUTTER_ACTOR (stage));
+
+  COGL_TRACE_END (ClutterStageRelayout);
 
   if (!priv->redraw_pending)
     return FALSE;
@@ -1237,9 +1222,12 @@ _clutter_stage_do_update (ClutterStage *stage)
   if (stage_was_relayout)
     pointers = _clutter_stage_check_updated_pointers (stage);
 
-  clutter_stage_maybe_finish_queue_redraws (stage);
+  COGL_TRACE_BEGIN (ClutterStagePaint, "Paint");
 
+  clutter_stage_maybe_finish_queue_redraws (stage);
   clutter_stage_do_redraw (stage);
+
+  COGL_TRACE_END (ClutterStagePaint);
 
   /* reset the guard, so that new redraws are possible */
   priv->redraw_pending = FALSE;
@@ -1254,11 +1242,15 @@ _clutter_stage_do_update (ClutterStage *stage)
     }
 #endif /* CLUTTER_ENABLE_DEBUG */
 
+  COGL_TRACE_BEGIN (ClutterStagePick, "Pick");
+
   while (pointers)
     {
       _clutter_input_device_update (pointers->data, NULL, TRUE);
       pointers = g_slist_delete_link (pointers, pointers);
     }
+
+  COGL_TRACE_END (ClutterStagePick);
 
   return TRUE;
 }
@@ -1303,14 +1295,8 @@ clutter_stage_real_queue_redraw (ClutterActor       *actor,
     return TRUE;
 
   if (_clutter_stage_window_ignoring_redraw_clips (stage_window))
-    {
-      _clutter_stage_window_add_redraw_clip (stage_window, NULL);
-      return FALSE;
-    }
+    return FALSE;
 
-  /* Convert the clip volume into stage coordinates and then into an
-   * axis aligned stage coordinates bounding box...
-   */
   if (redraw_clip == NULL)
     {
       _clutter_stage_window_add_redraw_clip (stage_window, NULL);
@@ -1320,6 +1306,8 @@ clutter_stage_real_queue_redraw (ClutterActor       *actor,
   if (redraw_clip->is_empty)
     return TRUE;
 
+  /* Convert the clip volume into stage coordinates and then into an
+   * axis aligned stage coordinates bounding box... */
   _clutter_paint_volume_get_stage_paint_box (redraw_clip,
                                              stage,
                                              &bounding_box);
@@ -1574,10 +1562,13 @@ _clutter_stage_do_pick_on_view (ClutterStage     *stage,
   return retval;
 }
 
-static ClutterStageView *
-get_view_at (ClutterStage *stage,
-             int           x,
-             int           y)
+/**
+ * clutter_stage_get_view_at: (skip)
+ */
+ClutterStageView *
+clutter_stage_get_view_at (ClutterStage *stage,
+                           float         x,
+                           float         y)
 {
   ClutterStagePrivate *priv = stage->priv;
   GList *l;
@@ -1624,7 +1615,7 @@ _clutter_stage_do_pick (ClutterStage   *stage,
   if (x < 0 || x >= stage_width || y < 0 || y >= stage_height)
     return actor;
 
-  view = get_view_at (stage, x, y);
+  view = clutter_stage_get_view_at (stage, x, y);
   if (view)
     return _clutter_stage_do_pick_on_view (stage, x, y, mode, view);
 
@@ -1703,11 +1694,6 @@ clutter_stage_set_property (GObject      *object,
                                           clutter_value_get_color (value));
       break;
 
-    case PROP_OFFSCREEN:
-      if (g_value_get_boolean (value))
-        g_warning ("Offscreen stages are currently not supported\n");
-      break;
-
     case PROP_CURSOR_VISIBLE:
       if (g_value_get_boolean (value))
         clutter_stage_show_cursor (stage);
@@ -1721,10 +1707,6 @@ clutter_stage_set_property (GObject      *object,
 
     case PROP_TITLE:
       clutter_stage_set_title (stage, g_value_get_string (value));
-      break;
-
-    case PROP_USER_RESIZABLE:
-      clutter_stage_set_user_resizable (stage, g_value_get_boolean (value));
       break;
 
     case PROP_USE_FOG:
@@ -1777,14 +1759,6 @@ clutter_stage_get_property (GObject    *gobject,
       }
       break;
 
-    case PROP_OFFSCREEN:
-      g_value_set_boolean (value, FALSE);
-      break;
-
-    case PROP_FULLSCREEN_SET:
-      g_value_set_boolean (value, priv->is_fullscreen);
-      break;
-
     case PROP_CURSOR_VISIBLE:
       g_value_set_boolean (value, priv->is_cursor_visible);
       break;
@@ -1795,10 +1769,6 @@ clutter_stage_get_property (GObject    *gobject,
 
     case PROP_TITLE:
       g_value_set_string (value, priv->title);
-      break;
-
-    case PROP_USER_RESIZABLE:
-      g_value_set_boolean (value, priv->is_user_resizable);
       break;
 
     case PROP_USE_FOG:
@@ -1896,11 +1866,20 @@ clutter_stage_finalize (GObject *object)
 }
 
 static void
+clutter_stage_real_paint_view (ClutterStage     *stage,
+                               ClutterStageView *view)
+{
+  ClutterStagePrivate *priv = stage->priv;
+  const cairo_rectangle_int_t *clip = &priv->view_clip;
+
+  clutter_stage_do_paint_view (stage, view, clip);
+}
+
+static void
 clutter_stage_class_init (ClutterStageClass *klass)
 {
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
   ClutterActorClass *actor_class = CLUTTER_ACTOR_CLASS (klass);
-  GParamSpec *pspec;
 
   gobject_class->constructed = clutter_stage_constructed;
   gobject_class->set_property = clutter_stage_set_property;
@@ -1924,70 +1903,20 @@ clutter_stage_class_init (ClutterStageClass *klass)
   actor_class->queue_redraw = clutter_stage_real_queue_redraw;
   actor_class->apply_transform = clutter_stage_real_apply_transform;
 
-  /**
-   * ClutterStage:fullscreen:
-   *
-   * Whether the stage should be fullscreen or not.
-   *
-   * This property is set by calling clutter_stage_set_fullscreen()
-   * but since the actual implementation is delegated to the backend
-   * you should connect to the notify::fullscreen-set signal in order
-   * to get notification if the fullscreen state has been successfully
-   * achieved.
-   *
-   * Since: 1.0
-   */
-  pspec = g_param_spec_boolean ("fullscreen-set",
-                                P_("Fullscreen Set"),
-                                P_("Whether the main stage is fullscreen"),
-                                FALSE,
-                                CLUTTER_PARAM_READABLE);
-  g_object_class_install_property (gobject_class,
-                                   PROP_FULLSCREEN_SET,
-                                   pspec);
-  /**
-   * ClutterStage:offscreen:
-   *
-   * Whether the stage should be rendered in an offscreen buffer.
-   *
-   * Deprecated: 1.10: This property does not do anything.
-   */
-  pspec = g_param_spec_boolean ("offscreen",
-                                P_("Offscreen"),
-                                P_("Whether the main stage should be rendered offscreen"),
-                                FALSE,
-                                CLUTTER_PARAM_READWRITE | G_PARAM_DEPRECATED);
-  g_object_class_install_property (gobject_class,
-                                   PROP_OFFSCREEN,
-                                   pspec);
+  klass->paint_view = clutter_stage_real_paint_view;
+
   /**
    * ClutterStage:cursor-visible:
    *
    * Whether the mouse pointer should be visible
    */
-  pspec = g_param_spec_boolean ("cursor-visible",
-                                P_("Cursor Visible"),
-                                P_("Whether the mouse pointer is visible on the main stage"),
-                                TRUE,
-                                CLUTTER_PARAM_READWRITE);
-  g_object_class_install_property (gobject_class,
-                                   PROP_CURSOR_VISIBLE,
-                                   pspec);
-  /**
-   * ClutterStage:user-resizable:
-   *
-   * Whether the stage is resizable via user interaction.
-   *
-   * Since: 0.4
-   */
-  pspec = g_param_spec_boolean ("user-resizable",
-                                P_("User Resizable"),
-                                P_("Whether the stage is able to be resized via user interaction"),
-                                FALSE,
-                                CLUTTER_PARAM_READWRITE);
-  g_object_class_install_property (gobject_class,
-                                   PROP_USER_RESIZABLE,
-                                   pspec);
+  obj_props[PROP_CURSOR_VISIBLE] =
+      g_param_spec_boolean ("cursor-visible",
+                            P_("Cursor Visible"),
+                            P_("Whether the mouse pointer is visible on the main stage"),
+                            TRUE,
+                            CLUTTER_PARAM_READWRITE);
+
   /**
    * ClutterStage:color:
    *
@@ -1996,13 +1925,13 @@ clutter_stage_class_init (ClutterStageClass *klass)
    * Deprecated: 1.10: Use the #ClutterActor:background-color property of
    *   #ClutterActor instead.
    */
-  pspec = clutter_param_spec_color ("color",
-                                    P_("Color"),
-                                    P_("The color of the stage"),
-                                    &default_stage_color,
-                                    CLUTTER_PARAM_READWRITE |
-                                    G_PARAM_DEPRECATED);
-  g_object_class_install_property (gobject_class, PROP_COLOR, pspec);
+  obj_props[PROP_COLOR] =
+      clutter_param_spec_color ("color",
+                                P_("Color"),
+                                P_("The color of the stage"),
+                                &default_stage_color,
+                                CLUTTER_PARAM_READWRITE |
+                                G_PARAM_DEPRECATED);
 
   /**
    * ClutterStage:perspective:
@@ -2012,14 +1941,12 @@ clutter_stage_class_init (ClutterStageClass *klass)
    *
    * Since: 0.8
    */
-  pspec = g_param_spec_boxed ("perspective",
-                              P_("Perspective"),
-                              P_("Perspective projection parameters"),
-                              CLUTTER_TYPE_PERSPECTIVE,
-                              CLUTTER_PARAM_READWRITE);
-  g_object_class_install_property (gobject_class,
-                                   PROP_PERSPECTIVE,
-                                   pspec);
+  obj_props[PROP_PERSPECTIVE] =
+      g_param_spec_boxed ("perspective",
+                          P_("Perspective"),
+                          P_("Perspective projection parameters"),
+                          CLUTTER_TYPE_PERSPECTIVE,
+                          CLUTTER_PARAM_READWRITE);
 
   /**
    * ClutterStage:title:
@@ -2028,12 +1955,12 @@ clutter_stage_class_init (ClutterStageClass *klass)
    *
    * Since: 0.4
    */
-  pspec = g_param_spec_string ("title",
-                               P_("Title"),
-                               P_("Stage Title"),
-                               NULL,
-                               CLUTTER_PARAM_READWRITE);
-  g_object_class_install_property (gobject_class, PROP_TITLE, pspec);
+  obj_props[PROP_TITLE] =
+      g_param_spec_string ("title",
+                           P_("Title"),
+                           P_("Stage Title"),
+                           NULL,
+                           CLUTTER_PARAM_READWRITE);
 
   /**
    * ClutterStage:use-fog:
@@ -2046,12 +1973,12 @@ clutter_stage_class_init (ClutterStageClass *klass)
    *
    * Deprecated: 1.10: This property does not do anything.
    */
-  pspec = g_param_spec_boolean ("use-fog",
-                                P_("Use Fog"),
-                                P_("Whether to enable depth cueing"),
-                                FALSE,
-                                CLUTTER_PARAM_READWRITE | G_PARAM_DEPRECATED);
-  g_object_class_install_property (gobject_class, PROP_USE_FOG, pspec);
+  obj_props[PROP_USE_FOG] =
+      g_param_spec_boolean ("use-fog",
+                            P_("Use Fog"),
+                            P_("Whether to enable depth cueing"),
+                            FALSE,
+                            CLUTTER_PARAM_READWRITE | G_PARAM_DEPRECATED);
 
   /**
    * ClutterStage:fog:
@@ -2063,12 +1990,12 @@ clutter_stage_class_init (ClutterStageClass *klass)
    *
    * Deprecated: 1.10: This property does not do anything.
    */
-  pspec = g_param_spec_boxed ("fog",
-                              P_("Fog"),
-                              P_("Settings for the depth cueing"),
-                              CLUTTER_TYPE_FOG,
-                              CLUTTER_PARAM_READWRITE | G_PARAM_DEPRECATED);
-  g_object_class_install_property (gobject_class, PROP_FOG, pspec);
+  obj_props[PROP_FOG] =
+      g_param_spec_boxed ("fog",
+                          P_("Fog"),
+                          P_("Settings for the depth cueing"),
+                          CLUTTER_TYPE_FOG,
+                          CLUTTER_PARAM_READWRITE | G_PARAM_DEPRECATED);
 
   /**
    * ClutterStage:use-alpha:
@@ -2080,12 +2007,12 @@ clutter_stage_class_init (ClutterStageClass *klass)
    *
    * Since: 1.2
    */
-  pspec = g_param_spec_boolean ("use-alpha",
-                                P_("Use Alpha"),
-                                P_("Whether to honour the alpha component of the stage color"),
-                                FALSE,
-                                CLUTTER_PARAM_READWRITE);
-  g_object_class_install_property (gobject_class, PROP_USE_ALPHA, pspec);
+  obj_props[PROP_USE_ALPHA] =
+      g_param_spec_boolean ("use-alpha",
+                            P_("Use Alpha"),
+                            P_("Whether to honour the alpha component of the stage color"),
+                            FALSE,
+                            CLUTTER_PARAM_READWRITE);
 
   /**
    * ClutterStage:key-focus:
@@ -2097,12 +2024,12 @@ clutter_stage_class_init (ClutterStageClass *klass)
    *
    * Since: 1.2
    */
-  pspec = g_param_spec_object ("key-focus",
-                               P_("Key Focus"),
-                               P_("The currently key focused actor"),
-                               CLUTTER_TYPE_ACTOR,
-                               CLUTTER_PARAM_READWRITE);
-  g_object_class_install_property (gobject_class, PROP_KEY_FOCUS, pspec);
+  obj_props[PROP_KEY_FOCUS] =
+      g_param_spec_object ("key-focus",
+                           P_("Key Focus"),
+                           P_("The currently key focused actor"),
+                           CLUTTER_TYPE_ACTOR,
+                           CLUTTER_PARAM_READWRITE);
 
   /**
    * ClutterStage:no-clear-hint:
@@ -2114,12 +2041,12 @@ clutter_stage_class_init (ClutterStageClass *klass)
    *
    * Since: 1.4
    */
-  pspec = g_param_spec_boolean ("no-clear-hint",
-                                P_("No Clear Hint"),
-                                P_("Whether the stage should clear its contents"),
-                                FALSE,
-                                CLUTTER_PARAM_READWRITE);
-  g_object_class_install_property (gobject_class, PROP_NO_CLEAR_HINT, pspec);
+  obj_props[PROP_NO_CLEAR_HINT] =
+      g_param_spec_boolean ("no-clear-hint",
+                            P_("No Clear Hint"),
+                            P_("Whether the stage should clear its contents"),
+                            FALSE,
+                            CLUTTER_PARAM_READWRITE);
 
   /**
    * ClutterStage:accept-focus:
@@ -2128,46 +2055,15 @@ clutter_stage_class_init (ClutterStageClass *klass)
    *
    * Since: 1.6
    */
-  pspec = g_param_spec_boolean ("accept-focus",
-                                P_("Accept Focus"),
-                                P_("Whether the stage should accept focus on show"),
-                                TRUE,
-                                CLUTTER_PARAM_READWRITE);
-  g_object_class_install_property (gobject_class, PROP_ACCEPT_FOCUS, pspec);
+  obj_props[PROP_ACCEPT_FOCUS] =
+      g_param_spec_boolean ("accept-focus",
+                            P_("Accept Focus"),
+                            P_("Whether the stage should accept focus on show"),
+                            TRUE,
+                            CLUTTER_PARAM_READWRITE);
 
-  /**
-   * ClutterStage::fullscreen:
-   * @stage: the stage which was fullscreened
-   *
-   * The ::fullscreen signal is emitted when the stage is made fullscreen.
-   *
-   * Since: 0.6
-   */
-  stage_signals[FULLSCREEN] =
-    g_signal_new (I_("fullscreen"),
-		  G_TYPE_FROM_CLASS (gobject_class),
-		  G_SIGNAL_RUN_FIRST,
-		  G_STRUCT_OFFSET (ClutterStageClass, fullscreen),
-		  NULL, NULL,
-		  _clutter_marshal_VOID__VOID,
-		  G_TYPE_NONE, 0);
-  /**
-   * ClutterStage::unfullscreen:
-   * @stage: the stage which has left a fullscreen state.
-   *
-   * The ::unfullscreen signal is emitted when the stage leaves a fullscreen
-   * state.
-   *
-   * Since: 0.6
-   */
-  stage_signals[UNFULLSCREEN] =
-    g_signal_new (I_("unfullscreen"),
-		  G_TYPE_FROM_CLASS (gobject_class),
-		  G_SIGNAL_RUN_LAST,
-		  G_STRUCT_OFFSET (ClutterStageClass, unfullscreen),
-		  NULL, NULL,
-		  _clutter_marshal_VOID__VOID,
-		  G_TYPE_NONE, 0);
+  g_object_class_install_properties (gobject_class, PROP_LAST, obj_props);
+
   /**
    * ClutterStage::activate:
    * @stage: the stage which was activated
@@ -2252,6 +2148,28 @@ clutter_stage_class_init (ClutterStageClass *klass)
                   G_TYPE_NONE, 0);
 
   /**
+   * ClutterStage::paint-view:
+   * @stage: the stage that received the event
+   * @view: a #ClutterStageView
+   *
+   * The ::paint-view signal is emitted before a #ClutterStageView is being
+   * painted.
+   *
+   * The view is painted in the default handler. Hence, if you want to perform
+   * some action after the view is painted, like reading the contents of the
+   * framebuffer, use g_signal_connect_after() or pass %G_CONNECT_AFTER.
+   */
+  stage_signals[PAINT_VIEW] =
+    g_signal_new (I_("paint-view"),
+                  G_TYPE_FROM_CLASS (gobject_class),
+                  G_SIGNAL_RUN_LAST,
+                  G_STRUCT_OFFSET (ClutterStageClass, paint_view),
+                  NULL, NULL,
+                  _clutter_marshal_VOID__OBJECT,
+                  G_TYPE_NONE, 1,
+                  CLUTTER_TYPE_STAGE_VIEW);
+
+  /**
    * ClutterStage::presented: (skip)
    * @stage: the stage that received the event
    * @frame_event: a #CoglFrameEvent
@@ -2268,7 +2186,6 @@ clutter_stage_class_init (ClutterStageClass *klass)
                   G_TYPE_NONE, 2,
                   G_TYPE_INT, G_TYPE_POINTER);
 
-  klass->fullscreen = clutter_stage_real_fullscreen;
   klass->activate = clutter_stage_real_activate;
   klass->deactivate = clutter_stage_real_deactivate;
   klass->delete_event = clutter_stage_real_delete_event;
@@ -2319,21 +2236,12 @@ clutter_stage_init (ClutterStage *self)
 
   priv->event_queue = g_queue_new ();
 
-  priv->is_fullscreen = FALSE;
-  priv->is_user_resizable = FALSE;
   priv->is_cursor_visible = TRUE;
   priv->use_fog = FALSE;
   priv->throttle_motion_events = TRUE;
   priv->min_size_changed = FALSE;
   priv->sync_delay = -1;
-
-  /* XXX - we need to keep the invariant that calling
-   * clutter_set_motion_event_enabled() before the stage creation
-   * will cause motion event delivery to be disabled on any newly
-   * created stage. this can go away when we break API and remove
-   * deprecated functions.
-   */
-  priv->motion_events_enabled = _clutter_context_get_motion_events_enabled ();
+  priv->motion_events_enabled = TRUE;
 
   clutter_actor_set_background_color (CLUTTER_ACTOR (self),
                                       &default_stage_color);
@@ -2452,7 +2360,7 @@ clutter_stage_set_color (ClutterStage       *stage,
 {
   clutter_actor_set_background_color (CLUTTER_ACTOR (stage), color);
 
-  g_object_notify (G_OBJECT (stage), "color");
+  g_object_notify_by_pspec (G_OBJECT (stage), obj_props[PROP_COLOR]);
 }
 
 /**
@@ -2717,136 +2625,6 @@ _clutter_stage_get_viewport (ClutterStage *stage,
 }
 
 /**
- * clutter_stage_set_fullscreen:
- * @stage: a #ClutterStage
- * @fullscreen: %TRUE to to set the stage fullscreen
- *
- * Asks to place the stage window in the fullscreen or unfullscreen
- * states.
- *
- ( Note that you shouldn't assume the window is definitely full screen
- * afterward, because other entities (e.g. the user or window manager)
- * could unfullscreen it again, and not all window managers honor
- * requests to fullscreen windows.
- *
- * If you want to receive notification of the fullscreen state you
- * should either use the #ClutterStage::fullscreen and
- * #ClutterStage::unfullscreen signals, or use the notify signal
- * for the #ClutterStage:fullscreen-set property
- *
- * Since: 1.0
- */
-void
-clutter_stage_set_fullscreen (ClutterStage *stage,
-                              gboolean      fullscreen)
-{
-  ClutterStagePrivate *priv;
-
-  g_return_if_fail (CLUTTER_IS_STAGE (stage));
-
-  priv = stage->priv;
-
-  if (priv->is_fullscreen != fullscreen)
-    {
-      ClutterStageWindow *impl = CLUTTER_STAGE_WINDOW (priv->impl);
-      ClutterStageWindowInterface *iface;
-
-      iface = CLUTTER_STAGE_WINDOW_GET_IFACE (impl);
-
-      /* Only set if backend implements.
-       *
-       * Also see clutter_stage_event() for setting priv->is_fullscreen
-       * on state change event.
-       */
-      if (iface->set_fullscreen)
-	iface->set_fullscreen (impl, fullscreen);
-    }
-
-  /* If the backend did fullscreen the stage window then we need to resize
-   * the stage and update its viewport so we queue a relayout.  Note: if the
-   * fullscreen request is handled asynchronously we can't rely on this
-   * queue_relayout to update the viewport, but for example the X backend
-   * will recieve a ConfigureNotify after a successful resize which is how
-   * we ensure the viewport is updated on X.
-   */
-  clutter_actor_queue_relayout (CLUTTER_ACTOR (stage));
-}
-
-/**
- * clutter_stage_get_fullscreen:
- * @stage: a #ClutterStage
- *
- * Retrieves whether the stage is full screen or not
- *
- * Return value: %TRUE if the stage is full screen
- *
- * Since: 1.0
- */
-gboolean
-clutter_stage_get_fullscreen (ClutterStage *stage)
-{
-  g_return_val_if_fail (CLUTTER_IS_STAGE (stage), FALSE);
-
-  return stage->priv->is_fullscreen;
-}
-
-/**
- * clutter_stage_set_user_resizable:
- * @stage: a #ClutterStage
- * @resizable: whether the stage should be user resizable.
- *
- * Sets if the stage is resizable by user interaction (e.g. via
- * window manager controls)
- *
- * Since: 0.4
- */
-void
-clutter_stage_set_user_resizable (ClutterStage *stage,
-                                  gboolean      resizable)
-{
-  ClutterStagePrivate *priv;
-
-  g_return_if_fail (CLUTTER_IS_STAGE (stage));
-
-  priv = stage->priv;
-
-  if (clutter_feature_available (CLUTTER_FEATURE_STAGE_USER_RESIZE)
-      && priv->is_user_resizable != resizable)
-    {
-      ClutterStageWindow *impl = CLUTTER_STAGE_WINDOW (priv->impl);
-      ClutterStageWindowInterface *iface;
-
-      iface = CLUTTER_STAGE_WINDOW_GET_IFACE (impl);
-      if (iface->set_user_resizable)
-        {
-          priv->is_user_resizable = resizable;
-
-          iface->set_user_resizable (impl, resizable);
-
-          g_object_notify (G_OBJECT (stage), "user-resizable");
-        }
-    }
-}
-
-/**
- * clutter_stage_get_user_resizable:
- * @stage: a #ClutterStage
- *
- * Retrieves the value set with clutter_stage_set_user_resizable().
- *
- * Return value: %TRUE if the stage is resizable by the user.
- *
- * Since: 0.4
- */
-gboolean
-clutter_stage_get_user_resizable (ClutterStage *stage)
-{
-  g_return_val_if_fail (CLUTTER_IS_STAGE (stage), FALSE);
-
-  return stage->priv->is_user_resizable;
-}
-
-/**
  * clutter_stage_show_cursor:
  * @stage: a #ClutterStage
  *
@@ -2872,7 +2650,8 @@ clutter_stage_show_cursor (ClutterStage *stage)
 
           iface->set_cursor_visible (impl, TRUE);
 
-          g_object_notify (G_OBJECT (stage), "cursor-visible");
+          g_object_notify_by_pspec (G_OBJECT (stage),
+                                    obj_props[PROP_CURSOR_VISIBLE]);
         }
     }
 }
@@ -2905,7 +2684,8 @@ clutter_stage_hide_cursor (ClutterStage *stage)
 
           iface->set_cursor_visible (impl, FALSE);
 
-          g_object_notify (G_OBJECT (stage), "cursor-visible");
+          g_object_notify_by_pspec (G_OBJECT (stage),
+                                    obj_props[PROP_CURSOR_VISIBLE]);
         }
     }
 }
@@ -2948,6 +2728,8 @@ clutter_stage_read_pixels (ClutterStage *stage,
   float pixel_width;
   float pixel_height;
   uint8_t *pixels;
+
+  COGL_TRACE_BEGIN_SCOPED (ClutterStageReadPixels, "Read Pixels");
 
   g_return_val_if_fail (CLUTTER_IS_STAGE (stage), NULL);
 
@@ -3014,7 +2796,11 @@ clutter_stage_read_pixels (ClutterStage *stage,
  * @y: Y coordinate to check
  *
  * Checks the scene at the coordinates @x and @y and returns a pointer
- * to the #ClutterActor at those coordinates.
+ * to the #ClutterActor at those coordinates. The result is the actor which
+ * would be at the specified location on the next redraw, and is not
+ * necessarily that which was there on the previous redraw. This allows the
+ * function to perform chronologically correctly after any queued changes to
+ * the scene, and even if nothing has been drawn.
  *
  * By using @pick_mode it is possible to control which actors will be
  * painted and thus available.
@@ -3051,12 +2837,8 @@ gboolean
 clutter_stage_event (ClutterStage *stage,
                      ClutterEvent *event)
 {
-  ClutterStagePrivate *priv;
-
   g_return_val_if_fail (CLUTTER_IS_STAGE (stage), FALSE);
   g_return_val_if_fail (event != NULL, FALSE);
-
-  priv = stage->priv;
 
   if (event->type == CLUTTER_DELETE)
     {
@@ -3076,24 +2858,6 @@ clutter_stage_event (ClutterStage *stage,
   /* emit raw event */
   if (clutter_actor_event (CLUTTER_ACTOR (stage), event, FALSE))
     return TRUE;
-
-  if (event->stage_state.changed_mask & CLUTTER_STAGE_STATE_FULLSCREEN)
-    {
-      if (event->stage_state.new_state & CLUTTER_STAGE_STATE_FULLSCREEN)
-	{
-	  priv->is_fullscreen = TRUE;
-	  g_signal_emit (stage, stage_signals[FULLSCREEN], 0);
-
-          g_object_notify (G_OBJECT (stage), "fullscreen-set");
-	}
-      else
-	{
-	  priv->is_fullscreen = FALSE;
-	  g_signal_emit (stage, stage_signals[UNFULLSCREEN], 0);
-
-          g_object_notify (G_OBJECT (stage), "fullscreen-set");
-	}
-    }
 
   if (event->stage_state.changed_mask & CLUTTER_STAGE_STATE_ACTIVATED)
     {
@@ -3133,7 +2897,7 @@ clutter_stage_set_title (ClutterStage       *stage,
   if (CLUTTER_STAGE_WINDOW_GET_IFACE(impl)->set_title != NULL)
     CLUTTER_STAGE_WINDOW_GET_IFACE (impl)->set_title (impl, priv->title);
 
-  g_object_notify (G_OBJECT (stage), "title");
+  g_object_notify_by_pspec (G_OBJECT (stage), obj_props[PROP_TITLE]);
 }
 
 /**
@@ -3233,7 +2997,7 @@ clutter_stage_set_key_focus (ClutterStage *stage,
   else
     g_signal_emit_by_name (stage, "key-focus-in");
 
-  g_object_notify (G_OBJECT (stage), "key-focus");
+  g_object_notify_by_pspec (G_OBJECT (stage), obj_props[PROP_KEY_FOCUS]);
 }
 
 /**
@@ -3911,7 +3675,7 @@ clutter_stage_set_use_alpha (ClutterStage *stage,
 
       clutter_actor_queue_redraw (CLUTTER_ACTOR (stage));
 
-      g_object_notify (G_OBJECT (stage), "use-alpha");
+      g_object_notify_by_pspec (G_OBJECT (stage), obj_props[PROP_USE_ALPHA]);
     }
 }
 
@@ -3948,8 +3712,6 @@ clutter_stage_get_use_alpha (ClutterStage *stage)
  *
  * If the current size of @stage is smaller than the minimum size, the
  * @stage will be resized to the new @width and @height
- *
- * This function has no effect if @stage is fullscreen
  *
  * Since: 1.2
  */
@@ -4127,7 +3889,7 @@ clutter_stage_set_no_clear_hint (ClutterStage *stage,
 
   priv->stage_hints = new_hints;
 
-  g_object_notify (G_OBJECT (stage), "no-clear-hint");
+  g_object_notify_by_pspec (G_OBJECT (stage), obj_props[PROP_NO_CLEAR_HINT]);
 }
 
 /**
@@ -4369,7 +4131,7 @@ clutter_stage_set_accept_focus (ClutterStage *stage,
   if (priv->accept_focus != accept_focus)
     {
       _clutter_stage_window_set_accept_focus (priv->impl, accept_focus);
-      g_object_notify (G_OBJECT (stage), "accept-focus");
+      g_object_notify_by_pspec (G_OBJECT (stage), obj_props[PROP_ACCEPT_FOCUS]);
     }
 }
 
@@ -4635,20 +4397,6 @@ gboolean
 _clutter_stage_is_activated (ClutterStage *stage)
 {
   return (stage->priv->current_state & CLUTTER_STAGE_STATE_ACTIVATED) != 0;
-}
-
-/*< private >
- * _clutter_stage_is_fullscreen:
- * @stage: a #ClutterStage
- *
- * Checks whether the @stage state includes %CLUTTER_STAGE_STATE_FULLSCREEN.
- *
- * Return value: %TRUE if the @stage is fullscreen
- */
-gboolean
-_clutter_stage_is_fullscreen (ClutterStage *stage)
-{
-  return (stage->priv->current_state & CLUTTER_STAGE_STATE_FULLSCREEN) != 0;
 }
 
 /*< private >
