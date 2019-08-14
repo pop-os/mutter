@@ -1,4 +1,4 @@
-mutter (3.33.90-2) UNRELEASED; urgency=medium
+mutter (3.33.90-2) experimental; urgency=medium
 
   [ Marco Trevisan (Treviño) ]
   * debian/rules: Use more verbose logging, printing failure output
@@ -8,7 +8,7 @@ mutter (3.33.90-2) UNRELEASED; urgency=medium
     tests as 'flaky' and run them non-fatally.
   * rules: Add mips64el to mips arches to not run tests on
 
- -- Iain Lane <laney@debian.org>  Wed, 14 Aug 2019 16:23:51 +0100
+ -- Iain Lane <laney@debian.org>  Wed, 14 Aug 2019 16:26:24 +0100
 
 mutter (3.33.90-1) experimental; urgency=medium
 
