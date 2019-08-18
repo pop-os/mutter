@@ -27,6 +27,9 @@ destructor can remove it from the list of resources.
 
 Forwarded: https://gitlab.gnome.org/GNOME/mutter/merge_requests/538
 Origin: upstream, 3.32.1, commit:2c1a951b6e81ea583e9a83ce29343d7ffd5739d9
+Bug-Debian: https://bugs.debian.org/932428
+Bug-Debian: https://bugs.debian.org/932767
+Bug-Debian: https://bugs.debian.org/932781
 ---
  src/wayland/meta-wayland-outputs.c | 8 ++++----
  1 file changed, 4 insertions(+), 4 deletions(-)

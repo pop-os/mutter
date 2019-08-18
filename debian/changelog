@@ -3,6 +3,10 @@ mutter (3.30.2-9) UNRELEASED; urgency=medium
   * d/libmutter-3-0.bug-control: Include GL drivers in bug reports
   * d/p/renderer-native-Fix-EGLSurface-destruction-order.patch:
     Fix attribution
+  * d/p/wayland-output-Set-user-data-of-xdg_output-resource.patch:
+    Add bug references for #932428, #932767 and #932781, and retroactively
+    mark them as closed by this patch in the previous changelog entry,
+    based on feedback from bug reporters.
 
  -- Simon McVittie <smcv@debian.org>  Sun, 04 Aug 2019 13:42:52 +0100
 
@@ -62,7 +66,7 @@ mutter (3.30.2-8) unstable; urgency=medium
       Improve test coverage related to the above bug fixes
   * d/p/wayland-output-Set-user-data-of-xdg_output-resource.patch:
     Backport patch from 3.32.1 to fix use-after-free in Wayland monitor
-    management (potentially fixes #932428, #932767, #932781)
+    management (Closes: #932428, #932767, #932781)
   * d/libmutter-3-0.symbols:
     Add meta_stack_get_default_focus_candidates(), which is added by a
     patch
