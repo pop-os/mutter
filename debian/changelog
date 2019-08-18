@@ -1,14 +1,15 @@
-mutter (3.30.2-9) UNRELEASED; urgency=medium
+mutter (3.30.2-9) unstable; urgency=medium
 
+  * Team upload
   * d/libmutter-3-0.bug-control: Include GL drivers in bug reports
   * d/p/renderer-native-Fix-EGLSurface-destruction-order.patch:
     Fix attribution
   * d/p/wayland-output-Set-user-data-of-xdg_output-resource.patch:
     Add bug references for #932428, #932767 and #932781, and retroactively
     mark them as closed by this patch in the previous changelog entry,
-    based on feedback from bug reporters.
+    based on feedback from bug reporters
 
- -- Simon McVittie <smcv@debian.org>  Sun, 04 Aug 2019 13:42:52 +0100
+ -- Simon McVittie <smcv@debian.org>  Sun, 18 Aug 2019 17:23:17 +0100
 
 mutter (3.30.2-8) unstable; urgency=medium
 
