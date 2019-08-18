@@ -1,5 +1,5 @@
-From: Simon McVittie <smcv@debian.org>
-Date: Tue, 30 Jul 2019 10:37:02 +0100
+From: =?utf-8?q?Jonas_=C3=85dahl?= <jadahl@gmail.com>
+Date: Mon, 17 Jun 2019 18:16:12 +0100
 Subject: renderer/native: Fix EGLSurface destruction order
 
 Make sure to destroy the EGL surface after releasing held buffers,
