@@ -1,4 +1,4 @@
-mutter (3.33.91-1ubuntu1) UNRELEASED; urgency=medium
+mutter (3.33.91-1ubuntu1) eoan; urgency=medium
 
   [ Iain Lane ]
   * Merge with debian. Remaining changes:
@@ -13,7 +13,7 @@ mutter (3.33.91-1ubuntu1) UNRELEASED; urgency=medium
   * debian/patches: Refresh. Compositor is now a GObject, so we can use
     smarter connection
 
- -- Iain Lane <iain.lane@canonical.com>  Fri, 23 Aug 2019 21:01:28 +0100
+ -- Iain Lane <iain.lane@canonical.com>  Fri, 23 Aug 2019 21:02:03 +0100
 
 mutter (3.33.91-1) experimental; urgency=medium
 
