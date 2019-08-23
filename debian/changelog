@@ -1,3 +1,10 @@
+mutter (3.33.90-3) UNRELEASED; urgency=medium
+
+  [ Dmitry Shachnev ]
+  * Update dh_girepository argument from mutter-4 to mutter-5
+
+ -- Iain Lane <laney@debian.org>  Fri, 23 Aug 2019 12:34:55 +0100
+
 mutter (3.33.90-2) experimental; urgency=medium
 
   [ Marco Trevisan (Treviño) ]
