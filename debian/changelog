@@ -1,4 +1,4 @@
-mutter (3.33.91-1) UNRELEASED; urgency=medium
+mutter (3.33.91-1) experimental; urgency=medium
 
   [ Dmitry Shachnev ]
   * Update dh_girepository argument from mutter-4 to mutter-5
@@ -17,7 +17,7 @@ mutter (3.33.91-1) UNRELEASED; urgency=medium
     The ABI of libmutter-5-0 is *not* considered stable until the final
     release.
 
- -- Iain Lane <laney@debian.org>  Fri, 23 Aug 2019 13:16:35 +0100
+ -- Iain Lane <laney@debian.org>  Fri, 23 Aug 2019 15:15:50 +0100
 
 mutter (3.33.90-2) experimental; urgency=medium
 
