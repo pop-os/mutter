@@ -1,5 +1,5 @@
 From: =?utf-8?b?Ik1hcmNvIFRyZXZpc2FuIChUcmV2acOxbyki?= <mail@3v1n0.net>
-Date: Thu, 4 Apr 2019 01:18:03 +0200
+Date: Thu, 4 Apr 2019 02:18:03 +0300
 Subject: x11-Add-support-for-fractional-scaling-using-Randr
 
 Add scaling support using randr under x11.
@@ -30,13 +30,13 @@ Forwarded: No, forwarding is in progress and planned though
  src/backends/x11/meta-monitor-manager-xrandr.c | 483 ++++++++++++++++++-------
  src/backends/x11/meta-monitor-manager-xrandr.h |   4 +-
  src/backends/x11/meta-output-xrandr.c          |   5 +-
- src/compositor/compositor.c                    |  57 +++
+ src/compositor/meta-compositor-x11.c           |  43 +++
  src/core/boxes-private.h                       |   4 +
  src/core/boxes.c                               |  21 ++
  src/core/window.c                              |  19 +
  src/org.gnome.Mutter.DisplayConfig.xml         |   5 +
  src/tests/meta-monitor-manager-test.c          |  14 +-
- 28 files changed, 1363 insertions(+), 257 deletions(-)
+ 28 files changed, 1349 insertions(+), 257 deletions(-)
  create mode 100644 data/org.gnome.mutter.x11.gschema.xml.in
 
 diff --git a/data/meson.build b/data/meson.build
@@ -1296,10 +1296,10 @@ index 41036ca..9101752 100644
      return;
  
 diff --git a/src/backends/meta-monitor.c b/src/backends/meta-monitor.c
-index 0956c48..83944da 100644
+index 2b0aa5a..7f9c53e 100644
 --- a/src/backends/meta-monitor.c
 +++ b/src/backends/meta-monitor.c
-@@ -705,8 +705,11 @@ meta_monitor_normal_get_suggested_position (MetaMonitor *monitor,
+@@ -706,8 +706,11 @@ meta_monitor_normal_get_suggested_position (MetaMonitor *monitor,
    if (output->suggested_x < 0 && output->suggested_y < 0)
      return FALSE;
  
@@ -1313,7 +1313,7 @@ index 0956c48..83944da 100644
  
    return TRUE;
  }
-@@ -1586,8 +1589,9 @@ meta_monitor_calculate_crtc_pos (MetaMonitor          *monitor,
+@@ -1587,8 +1590,9 @@ meta_monitor_calculate_crtc_pos (MetaMonitor          *monitor,
  #define SMALLEST_4K_WIDTH 3656
  
  static float
@@ -1325,7 +1325,7 @@ index 0956c48..83944da 100644
  {
    int resolution_width, resolution_height;
    int width_mm, height_mm;
-@@ -1643,8 +1647,9 @@ out:
+@@ -1644,8 +1648,9 @@ out:
  }
  
  float
@@ -1337,7 +1337,7 @@ index 0956c48..83944da 100644
  {
    MetaBackend *backend = meta_get_backend ();
    MetaSettings *settings = meta_backend_get_settings (backend);
-@@ -1654,7 +1659,7 @@ meta_monitor_calculate_mode_scale (MetaMonitor     *monitor,
+@@ -1655,7 +1660,7 @@ meta_monitor_calculate_mode_scale (MetaMonitor     *monitor,
                                                 &global_scaling_factor))
      return global_scaling_factor;
  
@@ -1346,8 +1346,8 @@ index 0956c48..83944da 100644
  }
  
  static gboolean
-@@ -1664,6 +1669,16 @@ is_logical_size_large_enough (gint width, gint height)
-          height >= MINIMUM_LOGICAL_HEIGHT;
+@@ -1665,6 +1670,16 @@ is_logical_size_large_enough (int width,
+   return width * height >= MINIMUM_LOGICAL_AREA;
  }
  
 +static gboolean
@@ -1363,7 +1363,7 @@ index 0956c48..83944da 100644
  gboolean
  meta_monitor_mode_should_be_advertised (MetaMonitorMode *monitor_mode)
  {
-@@ -1686,21 +1701,16 @@ get_closest_scale_factor_for_resolution (float width,
+@@ -1694,21 +1709,16 @@ get_closest_scale_factor_for_resolution (float width,
    gboolean found_one;
  
    best_scale = 0;
@@ -1388,7 +1388,7 @@ index 0956c48..83944da 100644
    do
      {
        for (j = 0; j < 2; j++)
-@@ -1760,16 +1770,24 @@ meta_monitor_calculate_supported_scales (MetaMonitor                 *monitor,
+@@ -1768,16 +1778,24 @@ meta_monitor_calculate_supported_scales (MetaMonitor                 *monitor,
            float scale;
            float scale_value = i + j * SCALE_FACTORS_STEPS;
  
@@ -1630,10 +1630,10 @@ index 66f826f..ad643e9 100644
      g_signal_new ("experimental-features-changed",
                    G_TYPE_FROM_CLASS (object_class),
 diff --git a/src/backends/native/meta-monitor-manager-kms.c b/src/backends/native/meta-monitor-manager-kms.c
-index 9bac135..fa8da2e 100644
+index 26c2ddb..62b273e 100644
 --- a/src/backends/native/meta-monitor-manager-kms.c
 +++ b/src/backends/native/meta-monitor-manager-kms.c
-@@ -528,20 +528,8 @@ meta_monitor_manager_kms_is_transform_handled (MetaMonitorManager  *manager,
+@@ -542,20 +542,8 @@ meta_monitor_manager_kms_is_transform_handled (MetaMonitorManager  *manager,
    return meta_crtc_kms_is_transform_handled (crtc, transform);
  }
  
@@ -1656,7 +1656,7 @@ index 9bac135..fa8da2e 100644
  {
    MetaMonitorScalesConstraint constraints =
      META_MONITOR_SCALES_CONSTRAINT_NONE;
-@@ -549,12 +537,38 @@ meta_monitor_manager_kms_calculate_supported_scales (MetaMonitorManager
+@@ -563,12 +551,38 @@ meta_monitor_manager_kms_calculate_supported_scales (MetaMonitorManager
    switch (layout_mode)
      {
      case META_LOGICAL_MONITOR_LAYOUT_MODE_LOGICAL:
@@ -1695,7 +1695,7 @@ index 9bac135..fa8da2e 100644
    return meta_monitor_calculate_supported_scales (monitor, monitor_mode,
                                                    constraints,
                                                    n_supported_scales);
-@@ -568,7 +582,7 @@ meta_monitor_manager_kms_get_capabilities (MetaMonitorManager *manager)
+@@ -582,7 +596,7 @@ meta_monitor_manager_kms_get_capabilities (MetaMonitorManager *manager)
    MetaRenderer *renderer = meta_backend_get_renderer (backend);
    MetaRendererNative *renderer_native = META_RENDERER_NATIVE (renderer);
    MetaMonitorManagerCapability capabilities =
@@ -2827,38 +2827,19 @@ index 42f22d1..44353b0 100644
      return;
  
    tile_atom = XInternAtom (xdisplay, "TILE", FALSE);
-diff --git a/src/compositor/compositor.c b/src/compositor/compositor.c
-index cbb0ab6..dd4d4d8 100644
---- a/src/compositor/compositor.c
-+++ b/src/compositor/compositor.c
-@@ -96,6 +96,11 @@ static void
- on_top_window_actor_destroyed (MetaWindowActor *window_actor,
-                                MetaCompositor  *compositor);
+diff --git a/src/compositor/meta-compositor-x11.c b/src/compositor/meta-compositor-x11.c
+index 15be116..d8678e9 100644
+--- a/src/compositor/meta-compositor-x11.c
++++ b/src/compositor/meta-compositor-x11.c
+@@ -29,6 +29,7 @@
+ #include "clutter/x11/clutter-x11.h"
+ #include "compositor/meta-sync-ring.h"
+ #include "core/display-private.h"
++#include "core/window-private.h"
+ #include "x11/meta-x11-display-private.h"
  
-+static void
-+on_redirected_monitor_changed (MetaWindow     *window,
-+                               int             old_monitor,
-+                               MetaCompositor *compositor);
-+
- static gboolean
- is_modal (MetaDisplay *display)
- {
-@@ -155,6 +160,14 @@ meta_compositor_destroy (MetaCompositor *compositor)
-       compositor->top_window_actor_destroy_id = 0;
-     }
- 
-+  if (compositor->unredirected_window)
-+    {
-+      g_signal_handlers_disconnect_by_func (compositor->unredirected_window,
-+                                            on_redirected_monitor_changed,
-+                                            compositor);
-+      compositor->unredirected_window = NULL;
-+    }
-+
-   g_clear_pointer (&compositor->window_group, clutter_actor_destroy);
-   g_clear_pointer (&compositor->top_window_group, clutter_actor_destroy);
-   g_clear_pointer (&compositor->feedback_group, clutter_actor_destroy);
-@@ -673,16 +686,54 @@ meta_shape_cow_for_window (MetaCompositor *compositor,
+ struct _MetaCompositorX11
+@@ -199,19 +200,55 @@ shape_cow_for_window (MetaCompositorX11 *compositor_x11,
      }
  }
  
@@ -2885,47 +2866,48 @@ index cbb0ab6..dd4d4d8 100644
 +                                         compositor);
 +    }
 +  else
-+    meta_shape_cow_for_window (compositor, window);
++    shape_cow_for_window (compositor, window);
 +}
 +
  static void
- set_unredirected_window (MetaCompositor *compositor,
-                          MetaWindow     *window)
+ set_unredirected_window (MetaCompositorX11 *compositor_x11,
+                          MetaWindow        *window)
  {
 +  MetaBackend *backend;
 +  MetaMonitorManager *monitor_manager;
-+
-   if (compositor->unredirected_window == window)
+   MetaWindow *prev_unredirected_window = compositor_x11->unredirected_window;
+ 
+   if (prev_unredirected_window == window)
      return;
  
 +  backend = meta_get_backend ();
 +  monitor_manager = meta_backend_get_monitor_manager (backend);
 +
-   if (compositor->unredirected_window != NULL)
+   if (prev_unredirected_window)
      {
-       MetaWindowActor *window_actor = META_WINDOW_ACTOR (meta_window_get_compositor_private (compositor->unredirected_window));
-+
-+      g_signal_handlers_disconnect_by_func (compositor->unredirected_window,
+       MetaWindowActor *window_actor;
+ 
++      g_signal_handlers_disconnect_by_func (prev_unredirected_window,
 +                                            on_redirected_monitor_changed,
-+                                            compositor);
++                                            compositor_x11);
 +      meta_monitor_manager_disable_scale_for_monitor (monitor_manager, NULL);
 +
+       window_actor = meta_window_actor_from_window (prev_unredirected_window);
        meta_window_actor_set_unredirected (window_actor, FALSE);
      }
- 
-@@ -692,6 +743,12 @@ set_unredirected_window (MetaCompositor *compositor,
-   if (compositor->unredirected_window != NULL)
+@@ -223,6 +260,12 @@ set_unredirected_window (MetaCompositorX11 *compositor_x11,
      {
-       MetaWindowActor *window_actor = META_WINDOW_ACTOR (meta_window_get_compositor_private (compositor->unredirected_window));
-+
+       MetaWindowActor *window_actor;
+ 
 +      meta_monitor_manager_disable_scale_for_monitor (monitor_manager,
 +                                                      window->monitor);
-+      g_signal_connect (window, "monitor-changed",
-+                        G_CALLBACK (on_redirected_monitor_changed), compositor);
++      g_signal_connect_object (window, "monitor-changed",
++                               G_CALLBACK (on_redirected_monitor_changed),
++                               compositor_x11, 0);
 +
+       window_actor = meta_window_actor_from_window (window);
        meta_window_actor_set_unredirected (window_actor, TRUE);
      }
- }
 diff --git a/src/core/boxes-private.h b/src/core/boxes-private.h
 index 74f5c54..0b37f0f 100644
 --- a/src/core/boxes-private.h
@@ -2974,7 +2956,7 @@ index 25b709b..e5f4fe5 100644
  void
  meta_rectangle_clamp_to_fit_into_region (const GList         *spanning_rects,
 diff --git a/src/core/window.c b/src/core/window.c
-index 43240e5..c4371cd 100644
+index caf447f..330b148 100644
 --- a/src/core/window.c
 +++ b/src/core/window.c
 @@ -226,6 +226,7 @@ enum
