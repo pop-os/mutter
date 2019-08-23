@@ -1,5 +1,6 @@
 mutter (3.33.91-1ubuntu1) UNRELEASED; urgency=medium
 
+  [ Iain Lane ]
   * Merge with debian. Remaining changes:
     + debian/control:
       - Update VCS flags to point to launchpad
@@ -8,7 +9,11 @@ mutter (3.33.91-1ubuntu1) UNRELEASED; urgency=medium
     + debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
       - X11: Add support for fractional scaling using Randr
 
- -- Iain Lane <iain.lane@canonical.com>  Fri, 23 Aug 2019 15:23:20 +0100
+  [ Marco Trevisan (Treviño) ]
+  * debian/patches: Refresh. Compositor is now a GObject, so we can use
+    smarter connection
+
+ -- Iain Lane <iain.lane@canonical.com>  Fri, 23 Aug 2019 21:01:28 +0100
 
 mutter (3.33.91-1) experimental; urgency=medium
 
