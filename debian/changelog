@@ -1,3 +1,9 @@
+mutter (3.33.92-1) UNRELEASED; urgency=medium
+
+  * New upstream release
+
+ -- Iain Lane <laney@debian.org>  Thu, 05 Sep 2019 14:38:10 +0100
+
 mutter (3.33.91-1) experimental; urgency=medium
 
   [ Dmitry Shachnev ]
