@@ -42,7 +42,6 @@ endif
 
 override_dh_auto_configure:
 	dh_auto_configure -- \
-		--libexecdir="/usr/lib/mutter" \
 		-Dstartup_notification=true \
 		-Dgles2=true \
 		-Dgles2_libname=libGLESv2.so.2 \
