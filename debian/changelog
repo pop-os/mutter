@@ -1,4 +1,4 @@
-mutter (3.34.0-1) UNRELEASED; urgency=medium
+mutter (3.34.0-1) experimental; urgency=medium
 
   [ Simon McVittie ]
   * libmutter-5-0: Add Breaks on apparmor (<< 2.13.3-5~).
