@@ -24,6 +24,13 @@ mutter (3.34.0-1) UNRELEASED; urgency=medium
   * d/p/x11*: Cherry pick fixes from upstream to fix focus order on X11
     (LP: #1842971)
   * New upstream release
+    + Fix xdg-output v3 support
+    + Fix crash when changing decoration state
+    + Add and remove connectors on hot-plug
+  * d/p/*: Drop upstream cherry-picks
+  * d/p/build-Compile-with-ffloat-store-on-x86-32-bit.patch: Take from MR 785.
+    This fixes the testsuite on i386, which is broken because of the use of
+    x87 extended precision introducing rounding errors.
 
  -- Iain Lane <laney@debian.org>  Tue, 10 Sep 2019 11:46:06 +0100
 
