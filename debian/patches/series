@@ -1,3 +1,4 @@
+core-Split-x11-display-initialization-in-2-signals.patch
 build-Compile-with-ffloat-store-on-x86-32-bit.patch
 theme-use-gtk_render_icon_suface-to-paint-button-icon.patch
 theme-load-icons-as-Gtk-does-with-fallback-and-RTL-suppor.patch
