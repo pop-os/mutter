@@ -1,10 +1,10 @@
-mutter (3.34.0-3) UNRELEASED; urgency=medium
+mutter (3.34.0-3) experimental; urgency=medium
 
   * d/p/clutter-*: Cherry-pick from upstream to fix a crash. During
     animations, which was particularly bad when using Dash-to-Dock in
     auto-hide mode. (LP: #1841794)
 
- -- Iain Lane <laney@debian.org>  Fri, 20 Sep 2019 16:06:51 +0100
+ -- Iain Lane <laney@debian.org>  Fri, 20 Sep 2019 16:08:03 +0100
 
 mutter (3.34.0-2) experimental; urgency=medium
 
