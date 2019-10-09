@@ -1,4 +1,4 @@
-mutter (3.34.1-1) UNRELEASED; urgency=medium
+mutter (3.34.1-1) unstable; urgency=medium
 
   * New upstream release
     + Fix focusing of Java applications (LP: #1847184)
@@ -24,7 +24,7 @@ mutter (3.34.1-1) UNRELEASED; urgency=medium
     - d/p/x11-Use-the-currently-focused-X-window-for-_NET_ACTIVE_WI.patch
   * rules: Skip tests when DEB_BUILD_OPTIONS=nocheck is set
 
- -- Iain Lane <laney@debian.org>  Wed, 09 Oct 2019 11:16:58 +0100
+ -- Iain Lane <laney@debian.org>  Wed, 09 Oct 2019 11:17:08 +0100
 
 mutter (3.34.0-4) unstable; urgency=medium
 
