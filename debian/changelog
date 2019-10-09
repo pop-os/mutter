@@ -1,3 +1,15 @@
+mutter (3.34.1-1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge with debian. Remaining changes:
+    + debian/control:
+      - Update VCS flags to point to launchpad
+      - Update maintainer to ubuntu
+    + debian/gbp.conf: update branch to point to ubuntu/master
+    + debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+      - X11: Add support for fractional scaling using Randr
+
+ -- Iain Lane <iain.lane@canonical.com>  Wed, 09 Oct 2019 11:43:22 +0100
+
 mutter (3.34.1-1) unstable; urgency=medium
 
   * New upstream release
