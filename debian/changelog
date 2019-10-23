@@ -2,7 +2,7 @@ mutter (3.34.1+git20191022-1) UNRELEASED; urgency=medium
 
   * New upstream snapshot release
     + Fix night mode in wayland session (LP: #1847551)
-    + Don't emit key-focus-out events on destroyed actors(LP: #1848119)
+    + Don't emit key-focus-out events on destroyed actors (LP: #1848119)
     + Fix an headers syntax error (LP: #1841709)
     + backends: Update inhibited state for the monitor and respect that state
     + clutter-backend-x11: Don't push keymap events to clutter
