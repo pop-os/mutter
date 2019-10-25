@@ -1,3 +1,14 @@
+mutter (3.34.1+git20191022-2ubuntu1) focal; urgency=medium
+
+  * Merge with debian. Remaining changes:
+    + debian/control:
+      - Update VCS flags to point to launchpad
+    + debian/gbp.conf: update branch to point to ubuntu/master
+    + debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+      - X11: Add support for fractional scaling using Randr
+
+ -- Iain Lane <iain.lane@canonical.com>  Fri, 25 Oct 2019 18:07:22 +0100
+
 mutter (3.34.1+git20191022-2) unstable; urgency=medium
 
   * debian/patches: Update X11 focus before display focus:
@@ -5,17 +16,6 @@ mutter (3.34.1+git20191022-2) unstable; urgency=medium
       not responding" dialog (LP: #1845302)
 
  -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 25 Oct 2019 17:56:43 +0100
-
-mutter (3.34.1+git20191022-1ubuntu1) eoan; urgency=medium
-
-  * Merge with debian for SRU. Remaining changes:
-    + debian/control:
-      - Update VCS flags to point to launchpad
-    + debian/gbp.conf: update branch to point to ubuntu/master
-    + debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
-      - X11: Add support for fractional scaling using Randr
-
- -- Iain Lane <iain.lane@canonical.com>  Wed, 23 Oct 2019 12:14:12 +0100
 
 mutter (3.34.1+git20191022-1) unstable; urgency=medium
 
