@@ -1,9 +1,9 @@
-mutter (3.34.1+git20191022-2ubuntu1~19.10.1) UNRELEASED; urgency=medium
+mutter (3.34.1+git20191022-2ubuntu1~19.10.1) eoan; urgency=medium
 
   * Backport to eoan.
   * debian/control, debian/gbp.conf: Update VCS branch to ubuntu/eoan
 
- -- Iain Lane <iain.lane@canonical.com>  Fri, 25 Oct 2019 18:14:23 +0100
+ -- Iain Lane <iain.lane@canonical.com>  Fri, 25 Oct 2019 18:14:56 +0100
 
 mutter (3.34.1+git20191022-2ubuntu1) focal; urgency=medium
 
