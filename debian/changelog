@@ -2,7 +2,7 @@ mutter (3.34.1+git20191022-2) UNRELEASED; urgency=medium
 
   * debian/patches: Update X11 focus before display focus:
     - Fixes an infinite loop causing an hang when showing the "application is
-      not responding" dialog (LP: #1849769)
+      not responding" dialog (LP: #1845302)
 
  -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 25 Oct 2019 06:21:24 +0200
 
