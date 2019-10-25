@@ -7,7 +7,7 @@ mutter (3.34.1+git20191022-2ubuntu1) focal; urgency=medium
     + debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
       - X11: Add support for fractional scaling using Randr
 
- -- Iain Lane <iain.lane@canonical.com>  Fri, 25 Oct 2019 18:07:22 +0100
+ -- Iain Lane <iain.lane@canonical.com>  Fri, 25 Oct 2019 18:07:31 +0100
 
 mutter (3.34.1+git20191022-2) unstable; urgency=medium
 
