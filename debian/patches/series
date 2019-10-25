@@ -4,4 +4,5 @@ meson-add-back-default_driver-option.patch
 x11-Add-support-for-fractional-scaling-using-Randr.patch
 debian/synaptics-support.patch
 debian/tests-Tag-closed-transient-no-input-tests-as-flaky.patch
-x11-Update-X11-focus-before-updating-MetaDisplay-focus.patch
+# Disabled for causing hangs with NVIDIA
+# x11-Update-X11-focus-before-updating-MetaDisplay-focus.patch
