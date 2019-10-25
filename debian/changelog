@@ -1,3 +1,9 @@
+mutter (3.34.12ubuntu2pop1) eoan; urgency=medium
+
+  * Removed GNOME patch which is causing hangs on NVIDIA systems
+
+ -- Michael Aaron Murphy <michael@system76.com>  Fri, 25 Oct 2019 14:54:07 -0600
+
 mutter (3.34.1+git20191022-2ubuntu1) focal; urgency=medium
 
   * Merge with debian. Remaining changes:
