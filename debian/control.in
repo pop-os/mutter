@@ -74,7 +74,7 @@ Standards-Version: 4.4.0
 XS-Debian-Vcs-Git: https://salsa.debian.org/gnome-team/mutter.git
 XS-Debian-Vcs-Browser: https://salsa.debian.org/gnome-team/mutter
 Vcs-Browser: https://git.launchpad.net/~ubuntu-desktop/ubuntu/+source/mutter
-Vcs-Git: https://git.launchpad.net/~ubuntu-desktop/ubuntu/+source/mutter
+Vcs-Git: https://git.launchpad.net/~ubuntu-desktop/ubuntu/+source/mutter -b ubuntu/eoan
 
 Package: mutter
 Architecture: any
