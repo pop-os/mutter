@@ -1,3 +1,25 @@
+mutter (3.34.1+git20191107-1ubuntu1) focal; urgency=medium
+
+  * Merge with debian. Remaining changes:
+    + debian/control:
+      - Update VCS flags to point to launchpad
+    + debian/gbp.conf: update branch to point to ubuntu/master
+    + debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+      - X11: Add support for fractional scaling using Randr
+
+ -- Iain Lane <iain.lane@canonical.com>  Thu, 07 Nov 2019 11:49:31 +0000
+
+mutter (3.34.1+git20191107-1) unstable; urgency=high
+
+  * New upstream snapshot
+    - Fixes a regression from the previous upload, which caused a hang when
+      interacting with the desktop icons.
+  * x11-Update-X11-focus-before-updating-MetaDisplay-focus.patch: Drop. This
+    was a cherrry-pick that is included in this snapshot.
+  * debian/libmutter-5-0.symbols: Add new symbol in this snapshot
+
+ -- Iain Lane <laney@debian.org>  Thu, 07 Nov 2019 11:10:59 +0000
+
 mutter (3.34.1+git20191022-2ubuntu1~19.10.1) eoan; urgency=medium
 
   * Backport to eoan.
