@@ -1,3 +1,14 @@
+mutter (3.34.1+git20191107-1) unstable; urgency=high
+
+  * New upstream snapshot
+    - Fixes a regression from the previous upload, which caused a hang when
+      interacting with the desktop icons.
+  * x11-Update-X11-focus-before-updating-MetaDisplay-focus.patch: Drop. This
+    was a cherrry-pick that is included in this snapshot.
+  * debian/libmutter-5-0.symbols: Add new symbol in this snapshot
+
+ -- Iain Lane <laney@debian.org>  Thu, 07 Nov 2019 11:10:59 +0000
+
 mutter (3.34.1+git20191022-2ubuntu1) focal; urgency=medium
 
   * Merge with debian. Remaining changes:
