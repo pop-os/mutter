@@ -1,3 +1,9 @@
+mutter (3.34.1+git20191107-1) UNRELEASED; urgency=medium
+
+  * New upstream release
+
+ -- Iain Lane <laney@debian.org>  Thu, 07 Nov 2019 11:00:59 +0000
+
 mutter (3.34.1+git20191022-2) unstable; urgency=medium
 
   * debian/patches: Update X11 focus before display focus:
