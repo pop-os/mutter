@@ -1,3 +1,10 @@
+mutter (3.34.1+git20191107-1ubuntu1~19.10.1) UNRELEASED; urgency=medium
+
+  * Backport to eoan.
+  * debian/control, debian/gbp.conf: Update VCS branch to ubuntu/eoan
+
+ -- Iain Lane <iain.lane@canonical.com>  Thu, 07 Nov 2019 12:12:23 +0000
+
 mutter (3.34.1+git20191107-1ubuntu1) focal; urgency=medium
 
   * Merge with debian. Remaining changes:
@@ -19,13 +26,6 @@ mutter (3.34.1+git20191107-1) unstable; urgency=high
   * debian/libmutter-5-0.symbols: Add new symbol in this snapshot
 
  -- Iain Lane <laney@debian.org>  Thu, 07 Nov 2019 11:10:59 +0000
-
-mutter (3.34.1+git20191022-2ubuntu1~19.10.1) eoan; urgency=medium
-
-  * Backport to eoan.
-  * debian/control, debian/gbp.conf: Update VCS branch to ubuntu/eoan
-
- -- Iain Lane <iain.lane@canonical.com>  Fri, 25 Oct 2019 18:14:56 +0100
 
 mutter (3.34.1+git20191022-2ubuntu1) focal; urgency=medium
 
