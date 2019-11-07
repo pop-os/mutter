@@ -1,4 +1,4 @@
-mutter (3.34.1+git20191107-1ubuntu1) UNRELEASED; urgency=medium
+mutter (3.34.1+git20191107-1ubuntu1) focal; urgency=medium
 
   * Merge with debian. Remaining changes:
     + debian/control:
@@ -7,7 +7,7 @@ mutter (3.34.1+git20191107-1ubuntu1) UNRELEASED; urgency=medium
     + debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
       - X11: Add support for fractional scaling using Randr
 
- -- Iain Lane <iain.lane@canonical.com>  Thu, 07 Nov 2019 11:12:41 +0000
+ -- Iain Lane <iain.lane@canonical.com>  Thu, 07 Nov 2019 11:49:31 +0000
 
 mutter (3.34.1+git20191107-1) unstable; urgency=high
 
