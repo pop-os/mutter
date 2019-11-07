@@ -1,4 +1,4 @@
-mutter (3.34.1+git20191107-1) UNRELEASED; urgency=medium
+mutter (3.34.1+git20191107-1) unstable; urgency=high
 
   * New upstream snapshot
     - Fixes a regression from the previous upload, which caused a hang when
