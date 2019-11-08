@@ -1,3 +1,9 @@
+mutter (3.34.1-1ubuntu1pop2) eoan; urgency=medium
+
+  * New upstream release with necessary fixes for desktop icons
+
+ -- Michael Aaron Murphy <michael@system76.com>  Fri, 08 Nov 2019 09:50:12 -0700
+
 mutter (3.34.1+git20191107-1ubuntu1~19.10.1) eoan; urgency=medium
 
   * Backport to eoan.
