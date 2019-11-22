@@ -1,0 +1,254 @@
+From 2644e54c514377009a9d4d747874a55b387c6beb Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marco=20Trevisan=20=28Trevi=C3=B1o=29?= <mail@3v1n0.net>
+Date: Tue, 29 Oct 2019 17:48:00 +0100
+Subject: [PATCH 1/4] window: Warn if O-R window workspace state is used
+
+Override-redirect windows have no workspace by default, and can't be parent
+of a top-level window, so we must check that the parent window is not an
+O-R one when setting the workspace state.
+
+https://gitlab.gnome.org/GNOME/mutter/merge_requests/895
+---
+ src/core/window.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/core/window.c b/src/core/window.c
+index b7894ecbb..8b8c8aad5 100644
+--- a/src/core/window.c
++++ b/src/core/window.c
+@@ -1305,6 +1305,7 @@ _meta_window_shared_new (MetaDisplay         *display,
+                       "Putting window %s on same workspace as parent %s\n",
+                       window->desc, window->transient_for->desc);
+ 
++          g_warn_if_fail (!window->transient_for->override_redirect);
+           set_workspace_state (window,
+                                should_be_on_all_workspaces (window->transient_for),
+                                window->transient_for->workspace);
+-- 
+2.22.0
+
+
+From 13f10e36e4ac162f0b54fa57de24120e0e5a5453 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marco=20Trevisan=20=28Trevi=C3=B1o=29?= <mail@3v1n0.net>
+Date: Tue, 29 Oct 2019 03:54:42 +0100
+Subject: [PATCH 2/4] window: Assert we only set a NULL workspace when
+ unmanaging
+
+There might be cases in which a window might be marked as both not in all
+workspaces and with NULL workspace.
+
+So to avoid this to happen, let's just assert early instead of doing this at
+later point where the context might not be clear.
+
+Related to https://gitlab.gnome.org/GNOME/mutter/issues/885
+
+https://gitlab.gnome.org/GNOME/mutter/merge_requests/895
+---
+ src/core/window.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/window.c b/src/core/window.c
+index 8b8c8aad5..97f08fa24 100644
+--- a/src/core/window.c
++++ b/src/core/window.c
+@@ -4835,9 +4835,12 @@ set_workspace_state (MetaWindow    *window,
+ {
+   MetaWorkspaceManager *workspace_manager = window->display->workspace_manager;
+ 
+-  /* If we're on all workspaces, then our new workspace must be NULL. */
++  /* If we're on all workspaces, then our new workspace must be NULL,
++   * otherwise it must be set, unless we're unmanaging. */
+   if (on_all_workspaces)
+-    g_assert (workspace == NULL);
++    g_assert_null (workspace);
++  else
++    g_assert_true (window->unmanaging || workspace != NULL);
+ 
+   /* If this is an override-redirect window, ensure that the only
+    * times we're setting the workspace state is either during construction
+-- 
+2.22.0
+
+
+From c85fb107c0556283062f2bf9b8d990f1e2c0acae Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marco=20Trevisan=20=28Trevi=C3=B1o=29?= <mail@3v1n0.net>
+Date: Tue, 29 Oct 2019 17:14:43 +0100
+Subject: [PATCH 3/4] window-props: Don't look for parent multiple times
+
+Once we set the transient_for, we look for parent MetaWindow, so instead
+of overwriting this value for loops check, just use another function
+and avoid to look for the xwindow again when setting the MetaWindow parent.
+
+https://gitlab.gnome.org/GNOME/mutter/merge_requests/895
+---
+ src/x11/window-props.c | 33 ++++++++++++++++++++-------------
+ 1 file changed, 20 insertions(+), 13 deletions(-)
+
+diff --git a/src/x11/window-props.c b/src/x11/window-props.c
+index 48454befe..2564909a9 100644
+--- a/src/x11/window-props.c
++++ b/src/x11/window-props.c
+@@ -1625,6 +1625,22 @@ reload_wm_hints (MetaWindow    *window,
+   meta_window_queue (window, META_QUEUE_UPDATE_ICON | META_QUEUE_MOVE_RESIZE);
+ }
+ 
++static gboolean
++check_xtransient_for_loop (MetaWindow *window,
++                           MetaWindow *parent)
++{
++  while (parent)
++    {
++      if (parent == window)
++        return TRUE;
++
++      parent = meta_x11_display_lookup_x_window (parent->display->x11_display,
++                                                 parent->xtransient_for);
++    }
++
++  return FALSE;
++}
++
+ static void
+ reload_transient_for (MetaWindow    *window,
+                       MetaPropValue *value,
+@@ -1647,18 +1663,11 @@ reload_transient_for (MetaWindow    *window,
+         }
+ 
+       /* Make sure there is not a loop */
+-      while (parent)
++      if (check_xtransient_for_loop (window, parent))
+         {
+-          if (parent == window)
+-            {
+-              meta_warning ("WM_TRANSIENT_FOR window 0x%lx for %s would create loop.\n",
+-                            transient_for, window->desc);
+-              transient_for = None;
+-              break;
+-            }
+-
+-          parent = meta_x11_display_lookup_x_window (parent->display->x11_display,
+-                                                     parent->xtransient_for);
++          meta_warning ("WM_TRANSIENT_FOR window 0x%lx for %s would create a "
++                        "loop.\n", transient_for, window->desc);
++          transient_for = None;
+         }
+     }
+   else
+@@ -1679,8 +1688,6 @@ reload_transient_for (MetaWindow    *window,
+     meta_window_set_transient_for (window, NULL);
+   else
+     {
+-      parent = meta_x11_display_lookup_x_window (window->display->x11_display,
+-                                                 window->xtransient_for);
+       meta_window_set_transient_for (window, parent);
+     }
+ }
+-- 
+2.22.0
+
+
+From bacbbbd628fd68618f14bdf07ba3f9e6ccd1c038 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marco=20Trevisan=20=28Trevi=C3=B1o=29?= <mail@3v1n0.net>
+Date: Tue, 29 Oct 2019 04:22:19 +0100
+Subject: [PATCH 4/4] window-props: Don't set override redirect windows as
+ top-level parent
+
+Java applications might use override-redirect windows as parent windows for
+top-level windows, although this is not following the standard [1].
+
+In such case, the first non-override-redirect child window that is created
+was marked as being on_all_workspaces since the call to
+should_be_on_all_workspaces() returns TRUE for its parent, and this even
+though the on_all_workspaces_requested bit is unset.
+When a further child of this window was added, it was set as not having a
+workspace and not being on_all_workspaces, since the call to
+should_be_on_all_workspaces() for its parent would return FALSE (unless if
+it is in a different monitor, and the multiple-monitors workspaces are
+disabled).
+
+Since per commit 09bab98b we don't recompute the workspace if the
+on_all_workspaces bit is unset, we could end up in a case where a window can
+be nor in all the workspaces or in a specific workspace.
+
+So let's just ignore the transient_for bit for a window if that points to an
+override-redirect, using the x11 root window instead.
+
+Add a stacking test to verify this scenario (was failing before of this
+commit).
+
+Fixes https://gitlab.gnome.org/GNOME/mutter/issues/885
+https://gitlab.gnome.org/GNOME/mutter/merge_requests/895
+
+[1] https://standards.freedesktop.org/wm-spec/wm-spec-latest.html#idm140200472512128
+---
+ src/tests/meson.build                         |  1 +
+ .../set-override-redirect-parent.metatest     | 24 +++++++++++++++++++
+ src/x11/window-props.c                        |  9 +++++++
+ 3 files changed, 34 insertions(+)
+ create mode 100644 src/tests/stacking/set-override-redirect-parent.metatest
+
+diff --git a/src/tests/meson.build b/src/tests/meson.build
+index dafe67ff8..f5a132f6b 100644
+--- a/src/tests/meson.build
++++ b/src/tests/meson.build
+@@ -131,6 +131,7 @@ stacking_tests = [
+   'mixed-windows',
+   'set-parent',
+   'override-redirect',
++  'set-override-redirect-parent',
+   'set-parent-exported',
+ ]
+ 
+diff --git a/src/tests/stacking/set-override-redirect-parent.metatest b/src/tests/stacking/set-override-redirect-parent.metatest
+new file mode 100644
+index 000000000..fc99e4818
+--- /dev/null
++++ b/src/tests/stacking/set-override-redirect-parent.metatest
+@@ -0,0 +1,24 @@
++new_client 1 x11
++create 1/1 override
++show 1/1
++
++create 1/2
++set_parent 1/2 1
++show 1/2
++
++create 1/3
++set_parent 1/3 2
++show 1/3
++
++
++new_client 2 x11
++create 2/1
++show 2/1
++
++create 2/2 override
++set_parent 2/2 1
++show 2/2
++
++create 2/3
++set_parent 2/3 2
++show 2/3
+diff --git a/src/x11/window-props.c b/src/x11/window-props.c
+index 2564909a9..e1e96e0e3 100644
+--- a/src/x11/window-props.c
++++ b/src/x11/window-props.c
+@@ -1661,6 +1661,15 @@ reload_transient_for (MetaWindow    *window,
+                         transient_for, window->desc);
+           transient_for = None;
+         }
++      else if (parent->override_redirect)
++        {
++          meta_warning ("WM_TRANSIENT_FOR window %s for top-level %s is an "
++                        "override-redirect window and this is not correct "
++                        "according to the standard, so we'll fallback to "
++                        "the root window.\n", parent->desc, window->desc);
++          transient_for = parent->display->x11_display->xroot;
++          parent = NULL;
++        }
+ 
+       /* Make sure there is not a loop */
+       if (check_xtransient_for_loop (window, parent))
+-- 
+2.22.0
+
