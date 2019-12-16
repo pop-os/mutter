@@ -5,6 +5,7 @@ mutter (3.34.2-1) UNRELEASED; urgency=medium
     - d/copyright: Update
   * d/gbp.conf: Use upstream/3.34.x branch
   * Remove obsolete Lintian override
+  * Standards-Version: 4.4.1 (no changes required)
 
  -- Simon McVittie <smcv@debian.org>  Mon, 16 Dec 2019 14:23:45 +0000
 
