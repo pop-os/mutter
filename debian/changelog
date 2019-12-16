@@ -4,6 +4,7 @@ mutter (3.34.2-1) UNRELEASED; urgency=medium
     - d/libmutter-5-0.symbols: Update
     - d/copyright: Update
   * d/gbp.conf: Use upstream/3.34.x branch
+  * Remove obsolete Lintian override
 
  -- Simon McVittie <smcv@debian.org>  Mon, 16 Dec 2019 14:23:45 +0000
 
