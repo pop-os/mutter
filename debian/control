@@ -74,7 +74,7 @@ Build-Depends: debhelper-compat (= 12),
                xwayland [linux-any],
                zenity
 Rules-Requires-Root: no
-Standards-Version: 4.4.0
+Standards-Version: 4.4.1
 XS-Debian-Vcs-Git: https://salsa.debian.org/gnome-team/mutter.git
 XS-Debian-Vcs-Browser: https://salsa.debian.org/gnome-team/mutter
 Vcs-Browser: https://git.launchpad.net/~ubuntu-desktop/ubuntu/+source/mutter
