@@ -1,3 +1,21 @@
+mutter (3.34.2-1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge with debian including new upstream version 3.34.2 (LP: #1857037):
+    - Fix an hang when using DisplayLink with Wayland (LP: #1853357)
+    - Kill window effects on destroy (LP: #1844222)
+    - Fixed a crash when using various Java apps such as Intellij (LP: #1845281)
+    - Fixed a crash when handling X11 events (LP: #1846403)
+    - Fixed some double-scaling in wayland
+    - More crash and hang fixes
+    Remaining changes:
+    + debian/control:
+      - Update VCS flags to point to launchpad
+    + debian/gbp.conf: update branch to point to ubuntu/master
+    + debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+      - X11: Add support for fractional scaling using Randr
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 18 Dec 2019 20:24:40 +0100
+
 mutter (3.34.2-1) unstable; urgency=medium
 
   * Team upload
