@@ -1,4 +1,4 @@
-mutter (3.34.2-1ubuntu1) UNRELEASED; urgency=medium
+mutter (3.34.2-1ubuntu1) focal; urgency=medium
 
   * Merge with debian including new upstream version 3.34.2 (LP: #1857037):
     - Fix an hang when using DisplayLink with Wayland (LP: #1853357)
@@ -14,7 +14,7 @@ mutter (3.34.2-1ubuntu1) UNRELEASED; urgency=medium
     + debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
       - X11: Add support for fractional scaling using Randr
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 18 Dec 2019 20:24:40 +0100
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 20 Dec 2019 17:17:53 +0000
 
 mutter (3.34.2-1) unstable; urgency=medium
 
