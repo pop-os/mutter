@@ -1,6 +1,8 @@
 mutter (3.34.3-1) UNRELEASED; urgency=medium
 
   * New upstream release
+    + Fix window recording on HiDPI
+    + Fix top-left pixel being insensitive to clicks (LP: #1849135)
 
  -- Iain Lane <laney@debian.org>  Mon, 06 Jan 2020 11:17:02 +0000
 
