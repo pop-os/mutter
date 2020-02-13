@@ -202,18 +202,21 @@ clutter_paint_node_real_finalize (ClutterPaintNode *node)
 }
 
 static gboolean
-clutter_paint_node_real_pre_draw (ClutterPaintNode *node)
+clutter_paint_node_real_pre_draw (ClutterPaintNode    *node,
+                                  ClutterPaintContext *paint_context)
 {
   return FALSE;
 }
 
 static void
-clutter_paint_node_real_draw (ClutterPaintNode *node)
+clutter_paint_node_real_draw (ClutterPaintNode    *node,
+                              ClutterPaintContext *paint_context)
 {
 }
 
 static void
-clutter_paint_node_real_post_draw (ClutterPaintNode *node)
+clutter_paint_node_real_post_draw (ClutterPaintNode    *node,
+                                   ClutterPaintContext *paint_context)
 {
 }
 
@@ -997,29 +1000,30 @@ clutter_paint_node_add_primitive (ClutterPaintNode *node,
  * its children, if any.
  */
 void
-clutter_paint_node_paint (ClutterPaintNode *node)
+clutter_paint_node_paint (ClutterPaintNode    *node,
+                          ClutterPaintContext *paint_context)
 {
   ClutterPaintNodeClass *klass = CLUTTER_PAINT_NODE_GET_CLASS (node);
   ClutterPaintNode *iter;
   gboolean res;
 
-  res = klass->pre_draw (node);
+  res = klass->pre_draw (node, paint_context);
 
   if (res)
     {
-      klass->draw (node);
+      klass->draw (node, paint_context);
     }
 
   for (iter = node->first_child;
        iter != NULL;
        iter = iter->next_sibling)
     {
-      clutter_paint_node_paint (iter);
+      clutter_paint_node_paint (iter, paint_context);
     }
 
   if (res)
     {
-      klass->post_draw (node);
+      klass->post_draw (node, paint_context);
     }
 }
 
@@ -1199,9 +1203,10 @@ clutter_paint_node_get_root (ClutterPaintNode *node)
  * @node: a #ClutterPaintNode
  *
  * Retrieves the #CoglFramebuffer that @node will draw
- * into.
+ * into, if it the root node has a custom framebuffer set.
  *
- * Returns: (transfer none): a #CoglFramebuffer
+ * Returns: (transfer none): a #CoglFramebuffer or %NULL if no custom one is
+ * set.
  */
 CoglFramebuffer *
 clutter_paint_node_get_framebuffer (ClutterPaintNode *node)
@@ -1209,12 +1214,9 @@ clutter_paint_node_get_framebuffer (ClutterPaintNode *node)
   ClutterPaintNode *root = clutter_paint_node_get_root (node);
   ClutterPaintNodeClass *klass;
 
-  if (root == NULL)
-    return NULL;
-
   klass = CLUTTER_PAINT_NODE_GET_CLASS (root);
   if (klass->get_framebuffer != NULL)
     return klass->get_framebuffer (root);
-
-  return cogl_get_draw_framebuffer ();
+  else
+    return NULL;
 }

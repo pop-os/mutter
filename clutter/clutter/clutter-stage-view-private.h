@@ -20,8 +20,8 @@
 
 #include "clutter/clutter-stage-view.h"
 
-void clutter_stage_view_blit_offscreen (ClutterStageView            *view,
-                                        const cairo_rectangle_int_t *clip);
+void clutter_stage_view_after_paint (ClutterStageView            *view,
+                                     const cairo_rectangle_int_t *clip);
 
 gboolean clutter_stage_view_is_dirty_viewport (ClutterStageView *view);
 
@@ -33,5 +33,7 @@ gboolean clutter_stage_view_is_dirty_projection (ClutterStageView *view);
 void clutter_stage_view_set_dirty_projection (ClutterStageView *view,
                                               gboolean          dirty);
 
+void clutter_stage_view_add_redraw_clip (ClutterStageView      *view,
+                                         cairo_rectangle_int_t *clip);
 
 #endif /* __CLUTTER_STAGE_VIEW_PRIVATE_H__ */

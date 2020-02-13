@@ -41,10 +41,12 @@ void meta_shaped_texture_set_fallback_size (MetaShapedTexture *stex,
                                             int                fallback_width,
                                             int                fallback_height);
 cairo_region_t * meta_shaped_texture_get_opaque_region (MetaShapedTexture *stex);
+gboolean meta_shaped_texture_is_opaque (MetaShapedTexture *stex);
+gboolean meta_shaped_texture_has_alpha (MetaShapedTexture *stex);
 void meta_shaped_texture_set_transform (MetaShapedTexture    *stex,
                                         MetaMonitorTransform  transform);
 void meta_shaped_texture_set_viewport_src_rect (MetaShapedTexture *stex,
-                                                ClutterRect       *src_rect);
+                                                graphene_rect_t   *src_rect);
 void meta_shaped_texture_reset_viewport_src_rect (MetaShapedTexture *stex);
 void meta_shaped_texture_set_viewport_dst_size (MetaShapedTexture *stex,
                                                 int                dst_width,

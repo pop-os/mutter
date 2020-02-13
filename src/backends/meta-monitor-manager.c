@@ -55,6 +55,7 @@
 #include "backends/meta-output.h"
 #include "backends/x11/meta-monitor-manager-xrandr.h"
 #include "clutter/clutter.h"
+#include "core/main-private.h"
 #include "core/util-private.h"
 #include "meta/main.h"
 #include "meta/meta-x11-errors.h"
@@ -801,8 +802,8 @@ meta_monitor_manager_finalize (GObject *object)
 
   g_list_free_full (manager->logical_monitors, g_object_unref);
 
-  g_signal_handler_disconnect (manager->backend,
-                               manager->experimental_features_changed_handler_id);
+  g_clear_signal_handler (&manager->experimental_features_changed_handler_id,
+                          manager->backend);
 
   G_OBJECT_CLASS (meta_monitor_manager_parent_class)->finalize (object);
 }
@@ -1231,8 +1232,7 @@ save_config_timeout (gpointer user_data)
 static void
 cancel_persistent_confirmation (MetaMonitorManager *manager)
 {
-  g_source_remove (manager->persistent_timeout_id);
-  manager->persistent_timeout_id = 0;
+  g_clear_handle_id (&manager->persistent_timeout_id, g_source_remove);
 }
 
 static void
@@ -2505,7 +2505,7 @@ meta_monitor_manager_get_logical_monitor_at (MetaMonitorManager *manager,
     {
       MetaLogicalMonitor *logical_monitor = l->data;
 
-      if (POINT_IN_RECT (x, y, logical_monitor->rect))
+      if (META_POINT_IN_RECT (x, y, logical_monitor->rect))
         return logical_monitor;
     }
 

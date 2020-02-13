@@ -42,6 +42,8 @@
 #define __COGL_MUST_UNDEF_COGL_H_INSIDE__
 #endif
 
+#include <graphene.h>
+
 /* We currently keep gtype integration delimited in case we eventually
  * want to split it out into a separate utility library when Cogl
  * becomes a standalone project. (like cairo-gobject.so)
@@ -63,7 +65,6 @@
 #include <cogl/cogl-matrix-stack.h>
 #include <cogl/cogl-offscreen.h>
 #include <cogl/cogl-pixel-format.h>
-#include <cogl/cogl-primitives.h>
 #include <cogl/cogl-texture.h>
 #include <cogl/cogl-types.h>
 #include <cogl/cogl-version.h>
@@ -82,11 +83,9 @@
  * they enable the experimental api... */
 #include <cogl/deprecated/cogl-type-casts.h>
 
-#include <cogl/deprecated/cogl-framebuffer-deprecated.h>
 #include <cogl/deprecated/cogl-auto-texture.h>
 #include <cogl/deprecated/cogl-shader.h>
 #include <cogl/deprecated/cogl-material-compat.h>
-#include <cogl/deprecated/cogl-vertex-buffer.h>
 
 #ifdef COGL_ENABLE_MUTTER_API
 #include <cogl/cogl-mutter.h>
@@ -99,11 +98,7 @@
 #include <cogl/cogl-context.h>
 #include <cogl/cogl-buffer.h>
 #include <cogl/cogl-pixel-buffer.h>
-#include <cogl/cogl-vector.h>
-#include <cogl/cogl-euler.h>
-#include <cogl/cogl-quaternion.h>
 #include <cogl/cogl-texture-2d.h>
-#include <cogl/cogl-texture-2d-gl.h>
 #include <cogl/cogl-texture-2d-sliced.h>
 #include <cogl/cogl-sub-texture.h>
 #include <cogl/cogl-atlas-texture.h>
@@ -128,11 +123,6 @@
 /* XXX: This will definitly go away once all the Clutter winsys
  * code has been migrated down into Cogl! */
 #include <cogl/deprecated/cogl-clutter.h>
-
-/*
- * API deprecations
- */
-#include <cogl/cogl-deprecated.h>
 
 /*
  * Cogl Path api compatability

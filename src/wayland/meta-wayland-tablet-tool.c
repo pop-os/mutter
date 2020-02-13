@@ -466,7 +466,7 @@ meta_wayland_tablet_tool_free (MetaWaylandTabletTool *tool)
       wl_list_init (wl_resource_get_link (resource));
     }
 
-  g_signal_handler_disconnect (tool->default_sprite, tool->prepare_at_signal_id);
+  g_clear_signal_handler (&tool->prepare_at_signal_id, tool->default_sprite);
   g_object_unref (tool->default_sprite);
 
   g_slice_free (MetaWaylandTabletTool, tool);
@@ -989,20 +989,13 @@ static gboolean
 tablet_tool_can_grab_surface (MetaWaylandTabletTool *tool,
                               MetaWaylandSurface    *surface)
 {
-  GNode *n;
+  MetaWaylandSurface *subsurface;
 
   if (tool->focus_surface == surface)
     return TRUE;
 
-  for (n = g_node_first_child (surface->subsurface_branch_node);
-       n;
-       n = g_node_next_sibling (n))
+  META_WAYLAND_SURFACE_FOREACH_SUBSURFACE (surface, subsurface)
     {
-      MetaWaylandSurface *subsurface = n->data;
-
-      if (G_NODE_IS_LEAF (n))
-        continue;
-
       if (tablet_tool_can_grab_surface (tool, subsurface))
         return TRUE;
     }

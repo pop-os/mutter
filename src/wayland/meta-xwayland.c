@@ -739,11 +739,7 @@ window_created_cb (MetaDisplay         *display,
   g_signal_connect (window, "unmanaged",
                     G_CALLBACK (window_unmanaged_cb), manager);
 
-  if (manager->xserver_grace_period_id)
-    {
-      g_source_remove (manager->xserver_grace_period_id);
-      manager->xserver_grace_period_id = 0;
-    }
+  g_clear_handle_id (&manager->xserver_grace_period_id, g_source_remove);
 }
 
 static void
@@ -858,49 +854,6 @@ meta_xwayland_shutdown (MetaXWaylandManager *manager)
     }
 }
 
-static void
-xwayland_surface_assigned (MetaWaylandSurfaceRole *surface_role)
-{
-  MetaWaylandSurface *surface =
-    meta_wayland_surface_role_get_surface (surface_role);
-  MetaWaylandSurfaceRoleClass *surface_role_class =
-    META_WAYLAND_SURFACE_ROLE_CLASS (meta_wayland_surface_role_xwayland_parent_class);
-
-  /* See comment in xwayland_surface_commit for why we reply even though the
-   * surface may not be drawn the next frame.
-   */
-  wl_list_insert_list (&surface->compositor->frame_callbacks,
-                       &surface->pending_frame_callback_list);
-  wl_list_init (&surface->pending_frame_callback_list);
-
-  surface_role_class->assigned (surface_role);
-}
-
-static void
-xwayland_surface_commit (MetaWaylandSurfaceRole  *surface_role,
-                         MetaWaylandPendingState *pending)
-{
-  MetaWaylandSurface *surface =
-    meta_wayland_surface_role_get_surface (surface_role);
-  MetaWaylandSurfaceRoleClass *surface_role_class =
-    META_WAYLAND_SURFACE_ROLE_CLASS (meta_wayland_surface_role_xwayland_parent_class);
-
-  /* For Xwayland windows, throttling frames when the window isn't actually
-   * drawn is less useful, because Xwayland still has to do the drawing sent
-   * from the application - the throttling would only be of sending us damage
-   * messages, so we simplify and send frame callbacks after the next paint of
-   * the screen, whether the window was drawn or not.
-   *
-   * Currently it may take a few frames before we draw the window, for not
-   * completely understood reasons, and in that case, not thottling frame
-   * callbacks to drawing has the happy side effect that we avoid showing the
-   * user the initial black frame from when the window is mapped empty.
-   */
-  meta_wayland_surface_queue_pending_state_frame_callbacks (surface, pending);
-
-  surface_role_class->commit (surface_role, pending);
-}
-
 static MetaWaylandSurface *
 xwayland_surface_get_toplevel (MetaWaylandSurfaceRole *surface_role)
 {
@@ -964,8 +917,6 @@ meta_wayland_surface_role_xwayland_class_init (MetaWaylandSurfaceRoleXWaylandCla
 
   object_class->finalize = xwayland_surface_finalize;
 
-  surface_role_class->assigned = xwayland_surface_assigned;
-  surface_role_class->commit = xwayland_surface_commit;
   surface_role_class->get_toplevel = xwayland_surface_get_toplevel;
 
   actor_surface_class->get_geometry_scale = xwayland_surface_get_geometry_scale;

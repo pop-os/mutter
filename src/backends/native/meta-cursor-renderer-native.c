@@ -166,8 +166,7 @@ meta_cursor_renderer_native_finalize (GObject *object)
   MetaCursorRendererNativePrivate *priv =
     meta_cursor_renderer_native_get_instance_private (renderer);
 
-  if (priv->animation_timeout_id)
-    g_source_remove (priv->animation_timeout_id);
+  g_clear_handle_id (&priv->animation_timeout_id, g_source_remove);
 
   G_OBJECT_CLASS (meta_cursor_renderer_native_parent_class)->finalize (object);
 }
@@ -286,7 +285,7 @@ typedef struct
 {
   MetaCursorRendererNative *in_cursor_renderer_native;
   MetaLogicalMonitor *in_logical_monitor;
-  ClutterRect in_local_cursor_rect;
+  graphene_rect_t in_local_cursor_rect;
   MetaCursorSprite *in_cursor_sprite;
 
   gboolean out_painted;
@@ -306,7 +305,7 @@ update_monitor_crtc_cursor (MetaMonitor         *monitor,
     meta_cursor_renderer_native_get_instance_private (cursor_renderer_native);
   MetaCrtc *crtc;
   MetaMonitorTransform transform;
-  ClutterRect scaled_crtc_rect;
+  graphene_rect_t scaled_crtc_rect;
   float scale;
   int crtc_x, crtc_y;
   int crtc_width, crtc_height;
@@ -334,7 +333,7 @@ update_monitor_crtc_cursor (MetaMonitor         *monitor,
       crtc_height = monitor_crtc_mode->crtc_mode->height;
     }
 
-  scaled_crtc_rect = (ClutterRect) {
+  scaled_crtc_rect = (graphene_rect_t) {
     .origin = {
       .x = crtc_x / scale,
       .y = crtc_y / scale
@@ -348,9 +347,9 @@ update_monitor_crtc_cursor (MetaMonitor         *monitor,
   crtc = meta_output_get_assigned_crtc (monitor_crtc_mode->output);
 
   if (priv->has_hw_cursor &&
-      clutter_rect_intersection (&scaled_crtc_rect,
-                                 &data->in_local_cursor_rect,
-                                 NULL))
+      graphene_rect_intersection (&scaled_crtc_rect,
+                                  &data->in_local_cursor_rect,
+                                  NULL))
     {
       MetaGpuKms *gpu_kms;
       int kms_fd;
@@ -393,13 +392,13 @@ update_hw_cursor (MetaCursorRendererNative *native,
     meta_backend_get_monitor_manager (backend);
   GList *logical_monitors;
   GList *l;
-  ClutterRect rect;
+  graphene_rect_t rect;
   gboolean painted = FALSE;
 
   if (cursor_sprite)
     rect = meta_cursor_renderer_calculate_rect (renderer, cursor_sprite);
   else
-    rect = (ClutterRect) CLUTTER_RECT_INIT_ZERO;
+    rect = GRAPHENE_RECT_INIT_ZERO;
 
   logical_monitors =
     meta_monitor_manager_get_logical_monitors (monitor_manager);
@@ -413,7 +412,7 @@ update_hw_cursor (MetaCursorRendererNative *native,
       data = (UpdateCrtcCursorData) {
         .in_cursor_renderer_native = native,
         .in_logical_monitor = logical_monitor,
-        .in_local_cursor_rect = (ClutterRect) {
+        .in_local_cursor_rect = (graphene_rect_t) {
           .origin = {
             .x = rect.origin.x - logical_monitor->rect.x,
             .y = rect.origin.y - logical_monitor->rect.y
@@ -488,7 +487,7 @@ cursor_over_transformed_logical_monitor (MetaCursorRenderer *renderer,
     meta_backend_get_monitor_manager (backend);
   GList *logical_monitors;
   GList *l;
-  ClutterRect cursor_rect;
+  graphene_rect_t cursor_rect;
 
   cursor_rect = meta_cursor_renderer_calculate_rect (renderer, cursor_sprite);
 
@@ -498,17 +497,17 @@ cursor_over_transformed_logical_monitor (MetaCursorRenderer *renderer,
     {
       MetaLogicalMonitor *logical_monitor = l->data;
       MetaRectangle logical_monitor_layout;
-      ClutterRect logical_monitor_rect;
+      graphene_rect_t logical_monitor_rect;
       MetaMonitorTransform transform;
       GList *monitors, *l_mon;
 
       logical_monitor_layout =
         meta_logical_monitor_get_layout (logical_monitor);
       logical_monitor_rect =
-        meta_rectangle_to_clutter_rect (&logical_monitor_layout);
+        meta_rectangle_to_graphene_rect (&logical_monitor_layout);
 
-      if (!clutter_rect_intersection (&cursor_rect, &logical_monitor_rect,
-                                      NULL))
+      if (!graphene_rect_intersection (&cursor_rect, &logical_monitor_rect,
+                                       NULL))
         continue;
 
       monitors = meta_logical_monitor_get_monitors (logical_monitor);
@@ -546,7 +545,7 @@ can_draw_cursor_unscaled (MetaCursorRenderer *renderer,
   MetaBackend *backend = priv->backend;
   MetaMonitorManager *monitor_manager =
     meta_backend_get_monitor_manager (backend);
-  ClutterRect cursor_rect;
+  graphene_rect_t cursor_rect;
   GList *logical_monitors;
   GList *l;
   gboolean has_visible_crtc_sprite = FALSE;
@@ -565,12 +564,12 @@ can_draw_cursor_unscaled (MetaCursorRenderer *renderer,
   for (l = logical_monitors; l; l = l->next)
     {
       MetaLogicalMonitor *logical_monitor = l->data;
-      ClutterRect logical_monitor_rect =
-        meta_rectangle_to_clutter_rect (&logical_monitor->rect);
+      graphene_rect_t logical_monitor_rect =
+        meta_rectangle_to_graphene_rect (&logical_monitor->rect);
 
-      if (!clutter_rect_intersection (&cursor_rect,
-                                      &logical_monitor_rect,
-                                      NULL))
+      if (!graphene_rect_intersection (&cursor_rect,
+                                       &logical_monitor_rect,
+                                       NULL))
         continue;
 
       if (calculate_cursor_crtc_sprite_scale (cursor_sprite,
@@ -658,11 +657,7 @@ maybe_schedule_cursor_sprite_animation_frame (MetaCursorRendererNative *native,
   if (!cursor_change && priv->animation_timeout_id)
     return;
 
-  if (priv->animation_timeout_id)
-    {
-      g_source_remove (priv->animation_timeout_id);
-      priv->animation_timeout_id = 0;
-    }
+  g_clear_handle_id (&priv->animation_timeout_id, g_source_remove);
 
   if (cursor_sprite && meta_cursor_sprite_is_animated (cursor_sprite))
     {
@@ -693,7 +688,7 @@ calculate_cursor_sprite_gpus (MetaCursorRenderer *renderer,
   GList *gpus = NULL;
   GList *logical_monitors;
   GList *l;
-  ClutterRect cursor_rect;
+  graphene_rect_t cursor_rect;
 
   cursor_rect = meta_cursor_renderer_calculate_rect (renderer, cursor_sprite);
 
@@ -703,16 +698,16 @@ calculate_cursor_sprite_gpus (MetaCursorRenderer *renderer,
     {
       MetaLogicalMonitor *logical_monitor = l->data;
       MetaRectangle logical_monitor_layout;
-      ClutterRect logical_monitor_rect;
+      graphene_rect_t logical_monitor_rect;
       GList *monitors, *l_mon;
 
       logical_monitor_layout =
         meta_logical_monitor_get_layout (logical_monitor);
       logical_monitor_rect =
-        meta_rectangle_to_clutter_rect (&logical_monitor_layout);
+        meta_rectangle_to_graphene_rect (&logical_monitor_layout);
 
-      if (!clutter_rect_intersection (&cursor_rect, &logical_monitor_rect,
-                                      NULL))
+      if (!graphene_rect_intersection (&cursor_rect, &logical_monitor_rect,
+                                       NULL))
         continue;
 
       monitors = meta_logical_monitor_get_monitors (logical_monitor);

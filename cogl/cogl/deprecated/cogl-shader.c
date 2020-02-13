@@ -44,7 +44,6 @@
 static void _cogl_shader_free (CoglShader *shader);
 
 COGL_HANDLE_DEFINE (Shader, shader);
-COGL_OBJECT_DEFINE_DEPRECATED_REF_COUNTING (shader);
 
 #ifndef GL_FRAGMENT_SHADER
 #define GL_FRAGMENT_SHADER 0x8B30
@@ -71,7 +70,7 @@ cogl_create_shader (CoglShaderType type)
 {
   CoglShader *shader;
 
-  _COGL_GET_CONTEXT (ctx, COGL_INVALID_HANDLE);
+  _COGL_GET_CONTEXT (ctx, NULL);
 
   switch (type)
     {
@@ -81,11 +80,10 @@ cogl_create_shader (CoglShaderType type)
     default:
       g_warning ("Unexpected shader type (0x%08lX) given to "
                  "cogl_create_shader", (unsigned long) type);
-      return COGL_INVALID_HANDLE;
+      return NULL;
     }
 
   shader = g_slice_new (CoglShader);
-  shader->language = COGL_SHADER_LANGUAGE_GLSL;
   shader->gl_handle = 0;
   shader->compilation_pipeline = NULL;
   shader->type = type;
@@ -115,7 +113,6 @@ cogl_shader_source (CoglHandle   handle,
                     const char  *source)
 {
   CoglShader *shader;
-  CoglShaderLanguage language;
 
   _COGL_GET_CONTEXT (ctx, NO_RETVAL);
 
@@ -123,16 +120,8 @@ cogl_shader_source (CoglHandle   handle,
     return;
 
   shader = handle;
-  language = COGL_SHADER_LANGUAGE_GLSL;
-
-  /* Delete the old object if the language is changing... */
-  if (G_UNLIKELY (language != shader->language) &&
-      shader->gl_handle)
-    delete_shader (shader);
 
   shader->source = g_strdup (source);
-
-  shader->language = language;
 }
 
 void
