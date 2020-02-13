@@ -1,8 +1,25 @@
 mutter (3.35.90-1) UNRELEASED; urgency=medium
 
   * New upstream release
+    - Fix clipboard handling when an app provides multiple types (LP: #1852183)
+    - Fixed flickers around windows in Wayland sessions (LP: #1751593)
+    - Fixed white Background when using scaling in vmware (LP: #1825842)
+    - Fixed crash in meta_surface_actor_get_texture() (LP: #1859259)
+    - Fixed Subpixel font rendering in shell panels/(LP: #1836700)
+    - Using graphene (insted of cogl) for handling various primitives
+    - Lots of crash fixes and cleanups
+  * debian/patches:
+    - refreshed
+    - d/p/EGL-Include-EGL-eglmesaext.h.patch:
+      + dropped, merged upstream
+  * debian/control:
+    - build-depend on graphene (1.9.3)
+    - Add libgraphene-1.0-dev as libmutter-6-dev dependency
+    - bump build dependency on mutter 0.50
+    - bump package name to mutter-6
+  * d/libmutter-6-0.symbols: update symbols
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Thu, 13 Feb 2020 11:10:01 +0100
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Thu, 13 Feb 2020 14:16:32 +0100
 
 mutter (3.34.3-1) unstable; urgency=medium
 
