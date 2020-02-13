@@ -25,6 +25,16 @@
  *     Daniel Stone <daniels@collabora.com>
  */
 
+/**
+ * SECTION:meta-wayland-dma-buf
+ * @title: MetaWaylandDmaBuf
+ * @short_description: Handles passing DMA-BUFs in Wayland
+ *
+ * The MetaWaylandDmaBuf namespace contains several objects and functions to
+ * handle DMA-BUF buffers that are passed through from clients in Wayland (e.g.
+ * using the linux_dmabuf_unstable_v1 protocol).
+ */
+
 #include "config.h"
 
 #include "wayland/meta-wayland-dma-buf.h"
@@ -158,13 +168,11 @@ meta_wayland_dma_buf_realize_texture (MetaWaylandBuffer  *buffer,
 gboolean
 meta_wayland_dma_buf_buffer_attach (MetaWaylandBuffer  *buffer,
                                     CoglTexture       **texture,
-                                    gboolean           *changed_texture,
                                     GError            **error)
 {
   if (!meta_wayland_dma_buf_realize_texture (buffer, error))
     return FALSE;
 
-  *changed_texture = *texture != buffer->dma_buf.texture;
   cogl_clear_object (texture);
   *texture = cogl_object_ref (buffer->dma_buf.texture);
   return TRUE;
@@ -260,6 +268,17 @@ static const struct wl_buffer_interface dma_buf_buffer_impl =
   buffer_destroy,
 };
 
+/**
+ * meta_wayland_dma_buf_from_buffer:
+ * @buffer: A #MetaWaylandBuffer object
+ *
+ * Fetches the associated #MetaWaylandDmaBufBuffer from the wayland buffer.
+ * This does not *create* a new object, as this happens in the create_params
+ * request of linux_dmabuf_unstable_v1.
+ *
+ * Returns: (transfer none): The corresponding #MetaWaylandDmaBufBuffer (or
+ * %NULL if it wasn't a dma_buf-based wayland buffer)
+ */
 MetaWaylandDmaBufBuffer *
 meta_wayland_dma_buf_from_buffer (MetaWaylandBuffer *buffer)
 {
@@ -513,6 +532,15 @@ dma_buf_bind (struct wl_client *client,
   send_modifiers (resource, DRM_FORMAT_RGB565);
 }
 
+/**
+ * meta_wayland_dma_buf_init:
+ * @compositor: The #MetaWaylandCompositor
+ *
+ * Creates the global Wayland object that exposes the linux-dmabuf protocol.
+ *
+ * Returns: Whether the initialization was succesfull. If this is %FALSE,
+ * clients won't be able to use the linux-dmabuf protocol to pass buffers.
+ */
 gboolean
 meta_wayland_dma_buf_init (MetaWaylandCompositor *compositor)
 {

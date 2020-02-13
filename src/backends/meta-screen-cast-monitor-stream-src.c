@@ -145,33 +145,33 @@ is_cursor_in_stream (MetaScreenCastMonitorStreamSrc *monitor_src)
   MetaMonitor *monitor;
   MetaLogicalMonitor *logical_monitor;
   MetaRectangle logical_monitor_layout;
-  ClutterRect logical_monitor_rect;
+  graphene_rect_t logical_monitor_rect;
   MetaCursorSprite *cursor_sprite;
 
   monitor = get_monitor (monitor_src);
   logical_monitor = meta_monitor_get_logical_monitor (monitor);
   logical_monitor_layout = meta_logical_monitor_get_layout (logical_monitor);
   logical_monitor_rect =
-    meta_rectangle_to_clutter_rect (&logical_monitor_layout);
+    meta_rectangle_to_graphene_rect (&logical_monitor_layout);
 
   cursor_sprite = meta_cursor_renderer_get_cursor (cursor_renderer);
   if (cursor_sprite)
     {
-      ClutterRect cursor_rect;
+      graphene_rect_t cursor_rect;
 
       cursor_rect = meta_cursor_renderer_calculate_rect (cursor_renderer,
                                                          cursor_sprite);
-      return clutter_rect_intersection (&cursor_rect,
-                                        &logical_monitor_rect,
-                                        NULL);
+      return graphene_rect_intersection (&cursor_rect,
+                                         &logical_monitor_rect,
+                                         NULL);
     }
   else
     {
-      ClutterPoint cursor_position;
+      graphene_point_t cursor_position;
 
       cursor_position = meta_cursor_renderer_get_position (cursor_renderer);
-      return clutter_rect_contains_point (&logical_monitor_rect,
-                                          &cursor_position);
+      return graphene_rect_contains_point (&logical_monitor_rect,
+                                           &cursor_position);
     }
 }
 
@@ -282,7 +282,7 @@ meta_screen_cast_monitor_stream_src_enable (MetaScreenCastStreamSrc *src)
         g_signal_connect_after (cursor_tracker, "cursor-changed",
                                 G_CALLBACK (cursor_changed),
                                 monitor_src);
-      /* Intentional fall-through */
+      G_GNUC_FALLTHROUGH;
     case META_SCREEN_CAST_CURSOR_MODE_HIDDEN:
       monitor_src->paint_watch =
         meta_stage_watch_view (meta_stage,
@@ -331,19 +331,10 @@ meta_screen_cast_monitor_stream_src_disable (MetaScreenCastStreamSrc *src)
       uninhibit_hw_cursor (monitor_src);
     }
 
-  if (monitor_src->cursor_moved_handler_id)
-    {
-      g_signal_handler_disconnect (cursor_tracker,
-                                   monitor_src->cursor_moved_handler_id);
-      monitor_src->cursor_moved_handler_id = 0;
-    }
-
-  if (monitor_src->cursor_changed_handler_id)
-    {
-      g_signal_handler_disconnect (cursor_tracker,
-                                   monitor_src->cursor_changed_handler_id);
-      monitor_src->cursor_changed_handler_id = 0;
-    }
+  g_clear_signal_handler (&monitor_src->cursor_moved_handler_id,
+                          cursor_tracker);
+  g_clear_signal_handler (&monitor_src->cursor_changed_handler_id,
+                          cursor_tracker);
 }
 
 static gboolean
@@ -381,10 +372,10 @@ meta_screen_cast_monitor_stream_src_set_cursor_metadata (MetaScreenCastStreamSrc
   MetaMonitor *monitor;
   MetaLogicalMonitor *logical_monitor;
   MetaRectangle logical_monitor_layout;
-  ClutterRect logical_monitor_rect;
+  graphene_rect_t logical_monitor_rect;
   MetaRendererView *view;
   float view_scale;
-  ClutterPoint cursor_position;
+  graphene_point_t cursor_position;
   int x, y;
 
   cursor_sprite = meta_cursor_renderer_get_cursor (cursor_renderer);
@@ -400,7 +391,7 @@ meta_screen_cast_monitor_stream_src_set_cursor_metadata (MetaScreenCastStreamSrc
   logical_monitor = meta_monitor_get_logical_monitor (monitor);
   logical_monitor_layout = meta_logical_monitor_get_layout (logical_monitor);
   logical_monitor_rect =
-    meta_rectangle_to_clutter_rect (&logical_monitor_layout);
+    meta_rectangle_to_graphene_rect (&logical_monitor_layout);
 
   view = meta_renderer_get_view_from_logical_monitor (renderer,
                                                       logical_monitor);

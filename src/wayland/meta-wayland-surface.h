@@ -33,8 +33,6 @@
 #include "wayland/meta-wayland-pointer-constraints.h"
 #include "wayland/meta-wayland-types.h"
 
-typedef struct _MetaWaylandPendingState MetaWaylandPendingState;
-
 #define META_TYPE_WAYLAND_SURFACE (meta_wayland_surface_get_type ())
 G_DECLARE_FINAL_TYPE (MetaWaylandSurface,
                       meta_wayland_surface,
@@ -45,32 +43,28 @@ G_DECLARE_FINAL_TYPE (MetaWaylandSurface,
 G_DECLARE_DERIVABLE_TYPE (MetaWaylandSurfaceRole, meta_wayland_surface_role,
                           META, WAYLAND_SURFACE_ROLE, GObject);
 
-#define META_TYPE_WAYLAND_PENDING_STATE (meta_wayland_pending_state_get_type ())
-G_DECLARE_FINAL_TYPE (MetaWaylandPendingState,
-                      meta_wayland_pending_state,
-                      META, WAYLAND_PENDING_STATE,
-                      GObject);
+#define META_TYPE_WAYLAND_SURFACE_STATE (meta_wayland_surface_state_get_type ())
+G_DECLARE_FINAL_TYPE (MetaWaylandSurfaceState,
+                      meta_wayland_surface_state,
+                      META, WAYLAND_SURFACE_STATE,
+                      GObject)
 
 struct _MetaWaylandSurfaceRoleClass
 {
   GObjectClass parent_class;
 
   void (*assigned) (MetaWaylandSurfaceRole *surface_role);
-  void (*pre_commit) (MetaWaylandSurfaceRole  *surface_role,
-                      MetaWaylandPendingState *pending);
-  void (*commit) (MetaWaylandSurfaceRole  *surface_role,
-                  MetaWaylandPendingState *pending);
+  void (*pre_apply_state) (MetaWaylandSurfaceRole  *surface_role,
+                           MetaWaylandSurfaceState *pending);
+  void (*apply_state) (MetaWaylandSurfaceRole  *surface_role,
+                       MetaWaylandSurfaceState *pending);
   gboolean (*is_on_logical_monitor) (MetaWaylandSurfaceRole *surface_role,
                                      MetaLogicalMonitor     *logical_monitor);
   MetaWaylandSurface * (*get_toplevel) (MetaWaylandSurfaceRole *surface_role);
+  gboolean (*should_cache_state) (MetaWaylandSurfaceRole *surface_role);
 };
 
-struct _MetaWaylandSerial {
-  gboolean set;
-  uint32_t value;
-};
-
-struct _MetaWaylandPendingState
+struct _MetaWaylandSurfaceState
 {
   GObject parent;
 
@@ -99,6 +93,9 @@ struct _MetaWaylandPendingState
   MetaRectangle new_geometry;
   gboolean has_new_geometry;
 
+  gboolean has_acked_configure_serial;
+  uint32_t acked_configure_serial;
+
   /* pending min/max size in window geometry coordinates */
   gboolean has_new_min_size;
   int new_min_width;
@@ -110,7 +107,7 @@ struct _MetaWaylandPendingState
   gboolean has_new_buffer_transform;
   MetaMonitorTransform buffer_transform;
   gboolean has_new_viewport_src_rect;
-  ClutterRect viewport_src_rect;
+  graphene_rect_t viewport_src_rect;
   gboolean has_new_viewport_dst_size;
   int viewport_dst_width;
   int viewport_dst_height;
@@ -176,7 +173,9 @@ struct _MetaWaylandSurface
   } dnd;
 
   /* All the pending state that wl_surface.commit will apply. */
-  MetaWaylandPendingState *pending;
+  MetaWaylandSurfaceState *pending_state;
+  /* State cached due to inter-surface synchronization such. */
+  MetaWaylandSurfaceState *cached_state;
 
   /* Extension resources. */
   struct wl_resource *wl_subsurface;
@@ -198,7 +197,6 @@ struct _MetaWaylandSurface
      * state here.
      */
     gboolean synchronous;
-    MetaWaylandPendingState *pending;
 
     int32_t pending_x;
     int32_t pending_y;
@@ -212,7 +210,7 @@ struct _MetaWaylandSurface
     gulong destroy_handler_id;
 
     gboolean has_src_rect;
-    ClutterRect src_rect;
+    graphene_rect_t src_rect;
 
     gboolean has_dst_size;
     int dst_width;
@@ -230,8 +228,13 @@ MetaWaylandSurface *meta_wayland_surface_create (MetaWaylandCompositor *composit
                                                  struct wl_resource    *compositor_resource,
                                                  guint32                id);
 
-void                meta_wayland_surface_apply_pending_state (MetaWaylandSurface      *surface,
-                                                              MetaWaylandPendingState *pending);
+MetaWaylandSurfaceState *
+                    meta_wayland_surface_get_pending_state (MetaWaylandSurface *surface);
+
+MetaWaylandSurfaceState *
+                    meta_wayland_surface_ensure_cached_state (MetaWaylandSurface *surface);
+
+void                meta_wayland_surface_apply_cached_state (MetaWaylandSurface *surface);
 
 gboolean            meta_wayland_surface_is_effectively_synchronized (MetaWaylandSurface *surface);
 
@@ -249,12 +252,8 @@ void                meta_wayland_surface_unref_buffer_use_count (MetaWaylandSurf
 void                meta_wayland_surface_set_window (MetaWaylandSurface *surface,
                                                      MetaWindow         *window);
 
-void                meta_wayland_surface_configure_notify (MetaWaylandSurface *surface,
-                                                           int                 new_x,
-                                                           int                 new_y,
-                                                           int                 width,
-                                                           int                 height,
-                                                           MetaWaylandSerial  *sent_serial);
+void                meta_wayland_surface_configure_notify (MetaWaylandSurface             *surface,
+                                                           MetaWaylandWindowConfiguration *configuration);
 
 void                meta_wayland_surface_ping (MetaWaylandSurface *surface,
                                                guint32             serial);
@@ -273,15 +272,17 @@ void                meta_wayland_surface_update_outputs (MetaWaylandSurface *sur
 
 MetaWaylandSurface *meta_wayland_surface_get_toplevel (MetaWaylandSurface *surface);
 
+gboolean            meta_wayland_surface_should_cache_state (MetaWaylandSurface *surface);
+
 MetaWindow *        meta_wayland_surface_get_toplevel_window (MetaWaylandSurface *surface);
 
 void                meta_wayland_surface_cache_pending_frame_callbacks (MetaWaylandSurface      *surface,
-                                                                        MetaWaylandPendingState *pending);
+                                                                        MetaWaylandSurfaceState *pending);
 
 void                meta_wayland_surface_queue_pending_frame_callbacks (MetaWaylandSurface *surface);
 
 void                meta_wayland_surface_queue_pending_state_frame_callbacks (MetaWaylandSurface      *surface,
-                                                                              MetaWaylandPendingState *pending);
+                                                                              MetaWaylandSurfaceState *pending);
 
 void                meta_wayland_surface_get_relative_coordinates (MetaWaylandSurface *surface,
                                                                    float               abs_x,
@@ -326,5 +327,39 @@ void                meta_wayland_surface_notify_geometry_changed (MetaWaylandSur
 
 int                 meta_wayland_surface_get_width (MetaWaylandSurface *surface);
 int                 meta_wayland_surface_get_height (MetaWaylandSurface *surface);
+
+static inline GNode *
+meta_get_next_subsurface_sibling (GNode *n)
+{
+  GNode *next;
+
+  if (!n)
+    return NULL;
+
+  next = g_node_next_sibling (n);
+  if (!next)
+    return NULL;
+  if (!G_NODE_IS_LEAF (next))
+    return next;
+  else
+    return meta_get_next_subsurface_sibling (next);
+}
+
+static inline GNode *
+meta_get_first_subsurface_node (MetaWaylandSurface *surface)
+{
+  GNode *n;
+
+  n = g_node_first_child (surface->subsurface_branch_node);
+  if (!G_NODE_IS_LEAF (n))
+    return n;
+  else
+    return meta_get_next_subsurface_sibling (n);
+}
+
+#define META_WAYLAND_SURFACE_FOREACH_SUBSURFACE(surface, subsurface) \
+  for (GNode *G_PASTE(__n, __LINE__) = meta_get_first_subsurface_node ((surface)); \
+       (subsurface = (G_PASTE (__n, __LINE__) ? G_PASTE (__n, __LINE__)->data : NULL)); \
+       G_PASTE (__n, __LINE__) = meta_get_next_subsurface_sibling (G_PASTE (__n, __LINE__)))
 
 #endif

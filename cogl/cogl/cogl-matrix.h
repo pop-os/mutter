@@ -41,8 +41,9 @@
 #include <cogl/cogl-types.h>
 #include <cogl/cogl-macros.h>
 
-#include <cogl/cogl-quaternion.h>
 #include <glib-object.h>
+
+#include <graphene.h>
 
 G_BEGIN_DECLS
 
@@ -197,32 +198,18 @@ cogl_matrix_rotate (CoglMatrix *matrix,
 		    float z);
 
 /**
- * cogl_matrix_rotate_quaternion:
- * @matrix: A 4x4 transformation matrix
- * @quaternion: A quaternion describing a rotation
- *
- * Multiplies @matrix with a rotation transformation described by the
- * given #CoglQuaternion.
- *
- * Since: 2.0
- */
-void
-cogl_matrix_rotate_quaternion (CoglMatrix *matrix,
-                               const CoglQuaternion *quaternion);
-
-/**
  * cogl_matrix_rotate_euler:
  * @matrix: A 4x4 transformation matrix
  * @euler: A euler describing a rotation
  *
  * Multiplies @matrix with a rotation transformation described by the
- * given #CoglEuler.
+ * given #graphene_euler_t.
  *
  * Since: 2.0
  */
 void
 cogl_matrix_rotate_euler (CoglMatrix *matrix,
-                          const CoglEuler *euler);
+                          const graphene_euler_t *euler);
 
 /**
  * cogl_matrix_translate:
@@ -388,34 +375,6 @@ cogl_matrix_orthographic (CoglMatrix *matrix,
                           float far);
 
 /**
- * cogl_matrix_ortho:
- * @matrix: A 4x4 transformation matrix
- * @left: The coordinate for the left clipping plane
- * @right: The coordinate for the right clipping plane
- * @bottom: The coordinate for the bottom clipping plane
- * @top: The coordinate for the top clipping plane
- * @near: The <emphasis>distance</emphasis> to the near clipping
- *   plane (will be <emphasis>negative</emphasis> if the plane is
- *   behind the viewer)
- * @far: The <emphasis>distance</emphasis> to the far clipping
- *   plane (will be <emphasis>negative</emphasis> if the plane is
- *   behind the viewer)
- *
- * Multiplies @matrix by a parallel projection matrix.
- *
- * Deprecated: 1.10: Use cogl_matrix_orthographic()
- */
-COGL_DEPRECATED_FOR (cogl_matrix_orthographic)
-void
-cogl_matrix_ortho (CoglMatrix *matrix,
-                   float       left,
-                   float       right,
-                   float       bottom,
-                   float       top,
-                   float       near,
-                   float       far);
-
-/**
  * cogl_matrix_view_2d_in_frustum:
  * @matrix: A 4x4 transformation matrix
  * @left: coord of left vertical clipping plane
@@ -516,26 +475,15 @@ const float *
 cogl_matrix_get_array (const CoglMatrix *matrix);
 
 /**
- * cogl_matrix_init_from_quaternion:
- * @matrix: A 4x4 transformation matrix
- * @quaternion: A #CoglQuaternion
- *
- * Initializes @matrix from a #CoglQuaternion rotation.
- */
-void
-cogl_matrix_init_from_quaternion (CoglMatrix *matrix,
-                                  const CoglQuaternion *quaternion);
-
-/**
  * cogl_matrix_init_from_euler:
  * @matrix: A 4x4 transformation matrix
- * @euler: A #CoglEuler
+ * @euler: A #graphene_euler_t
  *
- * Initializes @matrix from a #CoglEuler rotation.
+ * Initializes @matrix from a #graphene_euler_t rotation.
  */
 void
 cogl_matrix_init_from_euler (CoglMatrix *matrix,
-                             const CoglEuler *euler);
+                             const graphene_euler_t *euler);
 
 /**
  * cogl_matrix_equal:

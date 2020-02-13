@@ -432,10 +432,6 @@ cogl_pipeline_get_layer_mag_filter (CoglPipeline *pipeline,
  * have 1.0,1.0. If @enable is %FALSE then the coordinates will be
  * fixed for the entire point.
  *
- * This function will only work if %COGL_FEATURE_ID_POINT_SPRITE is
- * available. If the feature is not available then the function will
- * return %FALSE and set @error.
- *
  * Return value: %TRUE if the function succeeds, %FALSE otherwise.
  * Since: 2.0
  * Stability: unstable
@@ -534,41 +530,6 @@ cogl_pipeline_set_layer_wrap_mode_t (CoglPipeline        *pipeline,
                                      CoglPipelineWrapMode mode);
 
 /**
- * cogl_pipeline_get_layer_wrap_mode_p:
- * @pipeline: A #CoglPipeline object
- * @layer_index: the layer number to change.
- *
- * Returns the wrap mode for the 'p' coordinate of texture lookups on this
- * layer.
- *
- * Return value: the wrap mode for the 'p' coordinate of texture lookups on
- * this layer.
- *
- * Since: 1.6
- * Stability: unstable
- */
-CoglPipelineWrapMode
-cogl_pipeline_get_layer_wrap_mode_p (CoglPipeline *pipeline,
-                                     int           layer_index);
-
-/**
- * cogl_pipeline_set_layer_wrap_mode_p:
- * @pipeline: A #CoglPipeline object
- * @layer_index: the layer number to change.
- * @mode: the new wrap mode
- *
- * Sets the wrap mode for the 'p' coordinate of texture lookups on
- * this layer. 'p' is the third coordinate.
- *
- * Since: 2.0
- * Stability: unstable
- */
-void
-cogl_pipeline_set_layer_wrap_mode_p (CoglPipeline        *pipeline,
-                                     int                  layer_index,
-                                     CoglPipelineWrapMode mode);
-
-/**
  * cogl_pipeline_set_layer_wrap_mode:
  * @pipeline: A #CoglPipeline object
  * @layer_index: the layer number to change.
@@ -576,9 +537,8 @@ cogl_pipeline_set_layer_wrap_mode_p (CoglPipeline        *pipeline,
  *
  * Sets the wrap mode for all three coordinates of texture lookups on
  * this layer. This is equivalent to calling
- * cogl_pipeline_set_layer_wrap_mode_s(),
- * cogl_pipeline_set_layer_wrap_mode_t() and
- * cogl_pipeline_set_layer_wrap_mode_p() separately.
+ * cogl_pipeline_set_layer_wrap_mode_s() and
+ * cogl_pipeline_set_layer_wrap_mode_t() separately.
  *
  * Since: 2.0
  * Stability: unstable

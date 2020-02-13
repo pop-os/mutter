@@ -970,8 +970,6 @@ typedef enum
 /**
  * ClutterFeatureFlags:
  * @CLUTTER_FEATURE_SWAP_THROTTLE: Set if backend throttles buffer swaps.
- * @CLUTTER_FEATURE_TEXTURE_YUV: Set if YUV based textures supported.
- * @CLUTTER_FEATURE_TEXTURE_READ_PIXELS: Set if texture pixels can be read.
  * @CLUTTER_FEATURE_STAGE_STATIC: Set if stage size if fixed (i.e framebuffer)
  * @CLUTTER_FEATURE_STAGE_CURSOR: Set if stage has a graphical cursor.
  * @CLUTTER_FEATURE_SHADERS_GLSL: Set if the backend supports GLSL shaders.
@@ -987,8 +985,6 @@ typedef enum
 typedef enum
 {
   CLUTTER_FEATURE_SWAP_THROTTLE          = (1 << 3),
-  CLUTTER_FEATURE_TEXTURE_YUV            = (1 << 4),
-  CLUTTER_FEATURE_TEXTURE_READ_PIXELS    = (1 << 5),
   CLUTTER_FEATURE_STAGE_STATIC           = (1 << 6),
   CLUTTER_FEATURE_STAGE_CURSOR           = (1 << 8),
   CLUTTER_FEATURE_SHADERS_GLSL           = (1 << 9),
@@ -1187,29 +1183,6 @@ typedef enum /*< prefix=CLUTTER_PAN >*/
   CLUTTER_PAN_AXIS_AUTO
 } ClutterPanAxis;
 
-
-/**
- * ClutterTableAlignment:
- * @CLUTTER_TABLE_ALIGNMENT_START: Align the child to the top or to the
- *   left of a cell in the table, depending on the axis
- * @CLUTTER_TABLE_ALIGNMENT_CENTER: Align the child to the center of
- *   a cell in the table
- * @CLUTTER_TABLE_ALIGNMENT_END: Align the child to the bottom or to the
- *   right of a cell in the table, depending on the axis
- *
- * The alignment policies available on each axis of the #ClutterTableLayout
- *
- * Since: 1.4
- *
- * Deprecated: 1.22: Use the alignment properties of #ClutterActor
- */
-typedef enum
-{
-  CLUTTER_TABLE_ALIGNMENT_START,
-  CLUTTER_TABLE_ALIGNMENT_CENTER,
-  CLUTTER_TABLE_ALIGNMENT_END
-} ClutterTableAlignment;
-
 /**
  * ClutterTextureFlags:
  * @CLUTTER_TEXTURE_NONE: No flags
@@ -1217,8 +1190,7 @@ typedef enum
  * @CLUTTER_TEXTURE_RGB_FLAG_PREMULT: Unused flag
  * @CLUTTER_TEXTURE_YUV_FLAG_YUV2: Unused flag
  *
- * Flags for clutter_texture_set_from_rgb_data() and
- * clutter_texture_set_from_yuv_data().
+ * Flags for clutter_texture_set_from_rgb_data().
  *
  * Since: 0.4
  *

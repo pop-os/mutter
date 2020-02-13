@@ -52,10 +52,11 @@ typedef struct _CoglFramebuffer CoglFramebuffer;
 #include <cogl/cogl-pipeline.h>
 #include <cogl/cogl-indices.h>
 #include <cogl/cogl-bitmap.h>
-#include <cogl/cogl-quaternion.h>
-#include <cogl/cogl-euler.h>
 #include <cogl/cogl-texture.h>
 #include <glib-object.h>
+#include <cairo.h>
+
+#include <graphene.h>
 
 G_BEGIN_DECLS
 
@@ -363,24 +364,9 @@ cogl_framebuffer_rotate (CoglFramebuffer *framebuffer,
                          float z);
 
 /**
- * cogl_framebuffer_rotate_quaternion:
- * @framebuffer: A #CoglFramebuffer pointer
- * @quaternion: A #CoglQuaternion
- *
- * Multiplies the current model-view matrix by one that rotates
- * according to the rotation described by @quaternion.
- *
- * Since: 2.0
- * Stability: unstable
- */
-void
-cogl_framebuffer_rotate_quaternion (CoglFramebuffer *framebuffer,
-                                    const CoglQuaternion *quaternion);
-
-/**
  * cogl_framebuffer_rotate_euler:
  * @framebuffer: A #CoglFramebuffer pointer
- * @euler: A #CoglEuler
+ * @euler: A #graphene_euler_t
  *
  * Multiplies the current model-view matrix by one that rotates
  * according to the rotation described by @euler.
@@ -390,7 +376,7 @@ cogl_framebuffer_rotate_quaternion (CoglFramebuffer *framebuffer,
  */
 void
 cogl_framebuffer_rotate_euler (CoglFramebuffer *framebuffer,
-                               const CoglEuler *euler);
+                               const graphene_euler_t *euler);
 
 /**
  * cogl_framebuffer_transform:
@@ -639,6 +625,10 @@ cogl_framebuffer_push_primitive_clip (CoglFramebuffer *framebuffer,
                                       float bounds_x2,
                                       float bounds_y2);
 
+void
+cogl_framebuffer_push_region_clip (CoglFramebuffer *framebuffer,
+                                   cairo_region_t  *region);
+
 /**
  * cogl_framebuffer_pop_clip:
  * @framebuffer: A #CoglFramebuffer pointer
@@ -853,65 +843,6 @@ cogl_framebuffer_set_stereo_mode (CoglFramebuffer *framebuffer,
 				  CoglStereoMode stereo_mode);
 
 /**
- * cogl_framebuffer_set_depth_texture_enabled:
- * @framebuffer: A #CoglFramebuffer
- * @enabled: TRUE or FALSE
- *
- * If @enabled is #TRUE, the depth buffer used when rendering to @framebuffer
- * is available as a texture. You can retrieve the texture with
- * cogl_framebuffer_get_depth_texture().
- *
- * <note>It's possible that your GPU does not support depth textures. You
- * should check the %COGL_FEATURE_ID_DEPTH_TEXTURE feature before using this
- * function.</note>
- * <note>It's not valid to call this function after the framebuffer has been
- * allocated as the creation of the depth texture is done at allocation time.
- * </note>
- *
- * Since: 1.14
- * Stability: unstable
- */
-void
-cogl_framebuffer_set_depth_texture_enabled (CoglFramebuffer *framebuffer,
-                                            gboolean enabled);
-
-/**
- * cogl_framebuffer_get_depth_texture_enabled:
- * @framebuffer: A #CoglFramebuffer
- *
- * Queries whether texture based depth buffer has been enabled via
- * cogl_framebuffer_set_depth_texture_enabled().
- *
- * Return value: %TRUE if a depth texture has been enabled, else
- *               %FALSE.
- *
- * Since: 1.14
- * Stability: unstable
- */
-gboolean
-cogl_framebuffer_get_depth_texture_enabled (CoglFramebuffer *framebuffer);
-
-/**
- * cogl_framebuffer_get_depth_texture:
- * @framebuffer: A #CoglFramebuffer
- *
- * Retrieves the depth buffer of @framebuffer as a #CoglTexture. You need to
- * call cogl_framebuffer_get_depth_texture(fb, TRUE); before using this
- * function.
- *
- * <note>Calling this function implicitely allocates the framebuffer.</note>
- * <note>The texture returned stays valid as long as the framebuffer stays
- * valid.</note>
- *
- * Returns: (transfer none): the depth texture
- *
- * Since: 1.14
- * Stability: unstable
- */
-CoglTexture *
-cogl_framebuffer_get_depth_texture (CoglFramebuffer *framebuffer);
-
-/**
  * cogl_framebuffer_set_samples_per_pixel:
  * @framebuffer: A #CoglFramebuffer framebuffer
  * @samples_per_pixel: The minimum number of samples per pixel
@@ -1056,7 +987,7 @@ cogl_framebuffer_resolve_samples_region (CoglFramebuffer *framebuffer,
                                          int height);
 
 /**
- * cogl_framebuffer_get_context: (skip)
+ * cogl_framebuffer_get_context:
  * @framebuffer: A #CoglFramebuffer
  *
  * Can be used to query the #CoglContext a given @framebuffer was
@@ -1134,8 +1065,8 @@ cogl_framebuffer_clear4f (CoglFramebuffer *framebuffer,
  * @pipeline.
  *
  * <note>This api doesn't support any of the legacy global state options such
- * as cogl_set_depth_test_enabled(), cogl_set_backface_culling_enabled() or
- * cogl_program_use()</note>
+ * as cogl_set_depth_test_enabled() or
+ * cogl_set_backface_culling_enabled().</note>
  *
  * Stability: unstable
  * Since: 1.10
@@ -1147,230 +1078,6 @@ void
 cogl_framebuffer_draw_primitive (CoglFramebuffer *framebuffer,
                                  CoglPipeline *pipeline,
                                  CoglPrimitive *primitive);
-
-/**
- * cogl_framebuffer_vdraw_attributes:
- * @framebuffer: A destination #CoglFramebuffer
- * @pipeline: A #CoglPipeline state object
- * @mode: The #CoglVerticesMode defining the topology of vertices
- * @first_vertex: The vertex offset within the given attributes to draw from
- * @n_vertices: The number of vertices to draw from the given attributes
- * @...: A set of vertex #CoglAttribute<!-- -->s defining vertex geometry
- *
- * First defines a geometry primitive by grouping a set of vertex attributes;
- * specifying a @first_vertex; a number of vertices (@n_vertices) and
- * specifying  what kind of topology the vertices have via @mode.
- *
- * Then the function draws the given @primitive geometry to the specified
- * destination @framebuffer using the graphics processing pipeline described by
- * @pipeline.
- *
- * The list of #CoglAttribute<!-- -->s define the attributes of the vertices to
- * be drawn, such as positions, colors and normals and should be %NULL
- * terminated.
- *
- * This drawing api doesn't support high-level meta texture types such
- * as #CoglTexture2DSliced so it is the user's responsibility to
- * ensure that only low-level textures that can be directly sampled by
- * a GPU such as #CoglTexture2D are associated with layers of the given
- * @pipeline.
- *
- * Stability: unstable
- * Since: 1.10
- * Deprecated: 1.16: Use #CoglPrimitive<!-- -->s and
- *                   cogl_primitive_draw() instead
- */
-COGL_DEPRECATED_FOR (cogl_primitive_draw)
-void
-cogl_framebuffer_vdraw_attributes (CoglFramebuffer *framebuffer,
-                                   CoglPipeline *pipeline,
-                                   CoglVerticesMode mode,
-                                   int first_vertex,
-                                   int n_vertices,
-                                   ...) G_GNUC_NULL_TERMINATED;
-
-/**
- * cogl_framebuffer_draw_attributes: (skip)
- * @framebuffer: A destination #CoglFramebuffer
- * @pipeline: A #CoglPipeline state object
- * @mode: The #CoglVerticesMode defining the topology of vertices
- * @first_vertex: The vertex offset within the given attributes to draw from
- * @n_vertices: The number of vertices to draw from the given attributes
- * @attributes: An array of pointers to #CoglAttribute<-- -->s defining vertex
- *              geometry
- * @n_attributes: The number of attributes in the @attributes array.
- *
- * First defines a geometry primitive by grouping a set of vertex @attributes;
- * specifying a @first_vertex; a number of vertices (@n_vertices) and
- * specifying  what kind of topology the vertices have via @mode.
- *
- * Then the function draws the given @primitive geometry to the specified
- * destination @framebuffer using the graphics processing pipeline described by
- * @pipeline.
- *
- * The list of #CoglAttribute<!-- -->s define the attributes of the vertices to
- * be drawn, such as positions, colors and normals and the number of attributes
- * is given as @n_attributes.
- *
- * This drawing api doesn't support high-level meta texture types such
- * as #CoglTexture2DSliced so it is the user's responsibility to
- * ensure that only low-level textures that can be directly sampled by
- * a GPU such as #CoglTexture2D are associated with layers of the given
- * @pipeline.
- *
- * <note>This api doesn't support any of the legacy global state options such
- * as cogl_set_depth_test_enabled(), cogl_set_backface_culling_enabled() or
- * cogl_program_use()</note>
- *
- * Stability: unstable
- * Since: 1.10
- * Deprecated: 1.16: Use #CoglPrimitive<!-- -->s and
- *                   cogl_primitive_draw() instead
- */
-COGL_DEPRECATED_FOR (cogl_primitive_draw)
-void
-cogl_framebuffer_draw_attributes (CoglFramebuffer *framebuffer,
-                                  CoglPipeline *pipeline,
-                                  CoglVerticesMode mode,
-                                  int first_vertex,
-                                  int n_vertices,
-                                  CoglAttribute **attributes,
-                                  int n_attributes);
-
-/**
- * cogl_framebuffer_vdraw_indexed_attributes: (skip)
- * @framebuffer: A destination #CoglFramebuffer
- * @pipeline: A #CoglPipeline state object
- * @mode: The #CoglVerticesMode defining the topology of vertices
- * @first_vertex: The vertex offset within the given attributes to draw from
- * @n_vertices: The number of vertices to draw from the given attributes
- * @indices: The array of indices used by the GPU to lookup attribute
- *           data for each vertex.
- * @...: A set of vertex #CoglAttribute<!-- -->s defining vertex geometry
- *
- * Behaves the same as cogl_framebuffer_vdraw_attributes() except that
- * instead of reading vertex data sequentially from the specified
- * attributes the @indices provide an indirection for how the data
- * should be indexed allowing a random access order to be
- * specified.
- *
- * For example an indices array of [0, 1, 2, 0, 2, 3] could be used
- * used to draw two triangles (@mode = %COGL_VERTICES_MODE_TRIANGLES +
- * @n_vertices = 6) but only provide attribute data for the 4 corners
- * of a rectangle. When the GPU needs to read in each of the 6
- * vertices it will read the @indices array for each vertex in
- * sequence and use the index to look up the vertex attribute data. So
- * here you can see that first and fourth vertex will point to the
- * same data and third and fifth vertex will also point to shared
- * data.
- *
- * Drawing with indices can be a good way of minimizing the size of a
- * mesh by allowing you to avoid data for duplicate vertices because
- * multiple entries in the index array can refer back to a single
- * shared vertex.
- *
- * <note>The @indices array must be at least as long as @first_vertex
- * + @n_vertices otherwise the GPU will overrun the indices array when
- * looking up vertex data.</note>
- *
- * Since it's very common to want to draw a run of rectangles using
- * indices to avoid duplicating vertex data you can use
- * cogl_get_rectangle_indices() to get a set of indices that can be
- * shared.
- *
- * This drawing api doesn't support high-level meta texture types such
- * as #CoglTexture2DSliced so it is the user's responsibility to
- * ensure that only low-level textures that can be directly sampled by
- * a GPU such as #CoglTexture2D are associated with layers of the given
- * @pipeline.
- *
- * <note>This api doesn't support any of the legacy global state
- * options such as cogl_set_depth_test_enabled(),
- * cogl_set_backface_culling_enabled() or cogl_program_use()</note>
- *
- * Stability: unstable
- * Since: 1.10
- * Deprecated: 1.16: Use #CoglPrimitive<!-- -->s and
- *                   cogl_primitive_draw() instead
- */
-COGL_DEPRECATED_FOR (cogl_primitive_draw)
-void
-cogl_framebuffer_vdraw_indexed_attributes (CoglFramebuffer *framebuffer,
-                                           CoglPipeline *pipeline,
-                                           CoglVerticesMode mode,
-                                           int first_vertex,
-                                           int n_vertices,
-                                           CoglIndices *indices,
-                                           ...) G_GNUC_NULL_TERMINATED;
-
-/**
- * cogl_framebuffer_draw_indexed_attributes: (skip)
- * @framebuffer: A destination #CoglFramebuffer
- * @pipeline: A #CoglPipeline state object
- * @mode: The #CoglVerticesMode defining the topology of vertices
- * @first_vertex: The vertex offset within the given attributes to draw from
- * @n_vertices: The number of vertices to draw from the given attributes
- * @indices: The array of indices used by the GPU to lookup attribute
- *           data for each vertex.
- * @attributes: An array of pointers to #CoglAttribute<-- -->s defining vertex
- *              geometry
- * @n_attributes: The number of attributes in the @attributes array.
- *
- * Behaves the same as cogl_framebuffer_draw_attributes() except that
- * instead of reading vertex data sequentially from the specified
- * @attributes the @indices provide an indirection for how the data
- * should be indexed allowing a random access order to be
- * specified.
- *
- * For example an indices array of [0, 1, 2, 0, 2, 3] could be used
- * used to draw two triangles (@mode = %COGL_VERTICES_MODE_TRIANGLES +
- * @n_vertices = 6) but only provide attribute data for the 4 corners
- * of a rectangle. When the GPU needs to read in each of the 6
- * vertices it will read the @indices array for each vertex in
- * sequence and use the index to look up the vertex attribute data. So
- * here you can see that first and fourth vertex will point to the
- * same data and third and fifth vertex will also point to shared
- * data.
- *
- * Drawing with indices can be a good way of minimizing the size of a
- * mesh by allowing you to avoid data for duplicate vertices because
- * multiple entries in the index array can refer back to a single
- * shared vertex.
- *
- * <note>The @indices array must be at least as long as @first_vertex
- * + @n_vertices otherwise the GPU will overrun the indices array when
- * looking up vertex data.</note>
- *
- * Since it's very common to want to draw a run of rectangles using
- * indices to avoid duplicating vertex data you can use
- * cogl_get_rectangle_indices() to get a set of indices that can be
- * shared.
- *
- * This drawing api doesn't support high-level meta texture types such
- * as #CoglTexture2DSliced so it is the user's responsibility to
- * ensure that only low-level textures that can be directly sampled by
- * a GPU such as #CoglTexture2D are associated with layers of the given
- * @pipeline.
- *
- * <note>This api doesn't support any of the legacy global state
- * options such as cogl_set_depth_test_enabled(),
- * cogl_set_backface_culling_enabled() or cogl_program_use()</note>
- *
- * Stability: unstable
- * Since: 1.10
- * Deprecated: 1.16: Use #CoglPrimitive<!-- -->s and
- *                   cogl_primitive_draw() instead
- */
-COGL_DEPRECATED_FOR (cogl_primitive_draw)
-void
-cogl_framebuffer_draw_indexed_attributes (CoglFramebuffer *framebuffer,
-                                          CoglPipeline *pipeline,
-                                          CoglVerticesMode mode,
-                                          int first_vertex,
-                                          int n_vertices,
-                                          CoglIndices *indices,
-                                          CoglAttribute **attributes,
-                                          int n_attributes);
 
 /**
  * cogl_framebuffer_draw_rectangle:
@@ -1755,19 +1462,6 @@ cogl_framebuffer_read_pixels (CoglFramebuffer *framebuffer,
                               int height,
                               CoglPixelFormat format,
                               uint8_t *pixels);
-
-/**
- * cogl_get_draw_framebuffer:
- *
- * Gets the current #CoglFramebuffer as set using
- * cogl_push_framebuffer()
- *
- * Return value: (transfer none): The current #CoglFramebuffer
- * Stability: unstable
- * Since: 1.8
- */
-CoglFramebuffer *
-cogl_get_draw_framebuffer (void);
 
 uint32_t
 cogl_framebuffer_error_quark (void);

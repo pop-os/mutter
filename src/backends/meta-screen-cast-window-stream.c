@@ -195,9 +195,8 @@ meta_screen_cast_window_stream_finalize (GObject *object)
   MetaScreenCastWindowStream *window_stream =
     META_SCREEN_CAST_WINDOW_STREAM (object);
 
-  if (window_stream->window_unmanaged_handler_id)
-    g_signal_handler_disconnect (window_stream->window,
-                                 window_stream->window_unmanaged_handler_id);
+  g_clear_signal_handler (&window_stream->window_unmanaged_handler_id,
+                          window_stream->window);
 
   G_OBJECT_CLASS (meta_screen_cast_window_stream_parent_class)->finalize (object);
 }
@@ -226,11 +225,15 @@ meta_screen_cast_window_stream_initable_init (GInitable     *initable,
                               G_CALLBACK (on_window_unmanaged),
                               window_stream);
 
+  if (meta_is_stage_views_scaled ())
+    scale = (int) ceilf (meta_logical_monitor_get_scale (logical_monitor));
+  else
+    scale = 1;
+
   /* We cannot set the stream size to the exact size of the window, because
    * windows can be resized, whereas streams cannot.
    * So we set a size equals to the size of the logical monitor for the window.
    */
-  scale = (int) ceil (meta_logical_monitor_get_scale (logical_monitor));
   window_stream->logical_width = logical_monitor->rect.width;
   window_stream->logical_height = logical_monitor->rect.height;
   window_stream->stream_width = logical_monitor->rect.width * scale;

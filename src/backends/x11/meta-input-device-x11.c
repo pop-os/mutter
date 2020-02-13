@@ -107,8 +107,7 @@ meta_input_device_x11_finalize (GObject *object)
   if (device_xi2->group_modes)
     g_array_unref (device_xi2->group_modes);
 
-  if (device_xi2->inhibit_pointer_query_timer)
-    g_source_remove (device_xi2->inhibit_pointer_query_timer);
+  g_clear_handle_id (&device_xi2->inhibit_pointer_query_timer, g_source_remove);
 #endif
 
   G_OBJECT_CLASS (meta_input_device_x11_parent_class)->finalize (object);
@@ -152,14 +151,25 @@ meta_input_device_x11_get_button_group (ClutterInputDevice *device,
 
   if (device_xi2->wacom_device)
     {
+      WacomButtonFlags flags;
+
       if (button >= libwacom_get_num_buttons (device_xi2->wacom_device))
         return -1;
 
-      return libwacom_get_button_led_group (device_xi2->wacom_device,
-                                            'A' + button);
+      flags = libwacom_get_button_flag (device_xi2->wacom_device,
+                                        'A' + button);
+
+      if (flags &
+          (WACOM_BUTTON_RING_MODESWITCH |
+           WACOM_BUTTON_TOUCHSTRIP_MODESWITCH))
+        return 0;
+      if (flags &
+          (WACOM_BUTTON_RING2_MODESWITCH |
+           WACOM_BUTTON_TOUCHSTRIP2_MODESWITCH))
+        return 1;
     }
-  else
-    return -1;
+
+  return -1;
 }
 #endif
 

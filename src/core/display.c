@@ -522,8 +522,7 @@ static void
 ping_data_free (MetaPingData *ping_data)
 {
   /* Remove the timeout */
-  if (ping_data->ping_timeout_id != 0)
-    g_source_remove (ping_data->ping_timeout_id);
+  g_clear_handle_id (&ping_data->ping_timeout_id, g_source_remove);
 
   g_free (ping_data);
 }
@@ -638,7 +637,7 @@ gesture_tracker_state_changed (MetaGestureTracker   *tracker,
     case META_SEQUENCE_ACCEPTED:
       meta_display_cancel_touch (display);
 
-      /* Intentional fall-through */
+      G_GNUC_FALLTHROUGH;
     case META_SEQUENCE_REJECTED:
       {
         MetaBackend *backend;
@@ -990,13 +989,8 @@ meta_display_close (MetaDisplay *display,
 
   g_clear_object (&display->gesture_tracker);
 
-  if (display->focus_timeout_id)
-    g_source_remove (display->focus_timeout_id);
-  display->focus_timeout_id = 0;
-
-  if (display->tile_preview_timeout_id)
-    g_source_remove (display->tile_preview_timeout_id);
-  display->tile_preview_timeout_id = 0;
+  g_clear_handle_id (&display->focus_timeout_id, g_source_remove);
+  g_clear_handle_id (&display->tile_preview_timeout_id, g_source_remove);
 
   if (display->work_area_later != 0)
     meta_later_remove (display->work_area_later);
@@ -1028,6 +1022,7 @@ meta_display_close (MetaDisplay *display,
   g_clear_object (&display->sound_player);
 
   meta_clipboard_manager_shutdown (display);
+  g_clear_object (&display->selection);
 
   g_object_unref (display);
   the_display = NULL;
@@ -1077,7 +1072,7 @@ meta_get_display (void)
 static inline gboolean
 grab_op_is_window (MetaGrabOp op)
 {
-  return GRAB_OP_GET_BASE_TYPE (op) == META_GRAB_OP_WINDOW_BASE;
+  return META_GRAB_OP_GET_BASE_TYPE (op) == META_GRAB_OP_WINDOW_BASE;
 }
 
 gboolean
@@ -1254,8 +1249,7 @@ meta_display_queue_autoraise_callback (MetaDisplay *display,
               window->desc,
               meta_prefs_get_auto_raise_delay ());
 
-  if (display->autoraise_timeout_id != 0)
-    g_source_remove (display->autoraise_timeout_id);
+  g_clear_handle_id (&display->autoraise_timeout_id, g_source_remove);
 
   display->autoraise_timeout_id =
     g_timeout_add_full (G_PRIORITY_DEFAULT,
@@ -1546,7 +1540,7 @@ find_highest_logical_monitor_scale (MetaBackend      *backend,
     meta_backend_get_monitor_manager (backend);
   MetaCursorRenderer *cursor_renderer =
     meta_backend_get_cursor_renderer (backend);
-  ClutterRect cursor_rect;
+  graphene_rect_t cursor_rect;
   GList *logical_monitors;
   GList *l;
   float highest_scale = 0.0;
@@ -1559,12 +1553,12 @@ find_highest_logical_monitor_scale (MetaBackend      *backend,
   for (l = logical_monitors; l; l = l->next)
     {
       MetaLogicalMonitor *logical_monitor = l->data;
-      ClutterRect logical_monitor_rect =
-        meta_rectangle_to_clutter_rect (&logical_monitor->rect);
+      graphene_rect_t logical_monitor_rect =
+        meta_rectangle_to_graphene_rect (&logical_monitor->rect);
 
-      if (!clutter_rect_intersection (&cursor_rect,
-                                      &logical_monitor_rect,
-                                      NULL))
+      if (!graphene_rect_intersection (&cursor_rect,
+                                       &logical_monitor_rect,
+                                       NULL))
         continue;
 
       highest_scale = MAX (highest_scale, logical_monitor->scale);
@@ -1680,7 +1674,7 @@ get_first_freefloating_window (MetaWindow *window)
 static MetaEventRoute
 get_event_route_from_grab_op (MetaGrabOp op)
 {
-  switch (GRAB_OP_GET_BASE_TYPE (op))
+  switch (META_GRAB_OP_GET_BASE_TYPE (op))
     {
     case META_GRAB_OP_NONE:
       /* begin_grab_op shouldn't be called with META_GRAB_OP_NONE. */
@@ -1817,11 +1811,7 @@ meta_display_begin_grab_op (MetaDisplay *display,
 
   meta_display_update_cursor (display);
 
-  if (display->grab_resize_timeout_id)
-    {
-      g_source_remove (display->grab_resize_timeout_id);
-      display->grab_resize_timeout_id = 0;
-    }
+  g_clear_handle_id (&display->grab_resize_timeout_id, g_source_remove);
 
   meta_topic (META_DEBUG_WINDOW_OPS,
               "Grab op %u on window %s successful\n",
@@ -1905,11 +1895,7 @@ meta_display_end_grab_op (MetaDisplay *display,
 
   meta_display_update_cursor (display);
 
-  if (display->grab_resize_timeout_id)
-    {
-      g_source_remove (display->grab_resize_timeout_id);
-      display->grab_resize_timeout_id = 0;
-    }
+  g_clear_handle_id (&display->grab_resize_timeout_id, g_source_remove);
 
   if (meta_is_wayland_compositor ())
     meta_display_sync_wayland_input_focus (display);
@@ -1973,12 +1959,6 @@ meta_display_queue_retheme_all_windows (MetaDisplay *display)
     }
 
   g_slist_free (windows);
-}
-
-void
-meta_display_retheme_all (void)
-{
-  meta_display_queue_retheme_all_windows (meta_get_display ());
 }
 
 /*
@@ -2144,11 +2124,7 @@ meta_display_pong_for_serial (MetaDisplay    *display,
                                                    ping_data);
 
           /* Remove the timeout */
-          if (ping_data->ping_timeout_id != 0)
-            {
-              g_source_remove (ping_data->ping_timeout_id);
-              ping_data->ping_timeout_id = 0;
-            }
+          g_clear_handle_id (&ping_data->ping_timeout_id, g_source_remove);
 
           meta_window_set_alive (ping_data->window, TRUE);
           ping_data_free (ping_data);
@@ -2630,12 +2606,8 @@ meta_display_sanity_check_timestamps (MetaDisplay *display,
 void
 meta_display_remove_autoraise_callback (MetaDisplay *display)
 {
-  if (display->autoraise_timeout_id != 0)
-    {
-      g_source_remove (display->autoraise_timeout_id);
-      display->autoraise_timeout_id = 0;
-      display->autoraise_window = NULL;
-    }
+  g_clear_handle_id (&display->autoraise_timeout_id, g_source_remove);
+  display->autoraise_window = NULL;
 }
 
 void
@@ -3147,8 +3119,7 @@ meta_display_update_tile_preview (MetaDisplay *display,
     }
   else
     {
-      if (display->tile_preview_timeout_id > 0)
-        g_source_remove (display->tile_preview_timeout_id);
+      g_clear_handle_id (&display->tile_preview_timeout_id, g_source_remove);
 
       meta_display_update_tile_preview_timeout ((gpointer)display);
     }
@@ -3157,8 +3128,7 @@ meta_display_update_tile_preview (MetaDisplay *display,
 void
 meta_display_hide_tile_preview (MetaDisplay *display)
 {
-  if (display->tile_preview_timeout_id > 0)
-    g_source_remove (display->tile_preview_timeout_id);
+  g_clear_handle_id (&display->tile_preview_timeout_id, g_source_remove);
 
   display->preview_tile_mode = META_TILE_NONE;
   meta_compositor_hide_tile_preview (display->compositor);

@@ -112,8 +112,8 @@ maybe_draw_cursor_sprite (MetaScreenCastWindowStreamSrc *window_src,
   MetaCursorSprite *cursor_sprite;
   CoglTexture *cursor_texture;
   MetaScreenCastWindow *screen_cast_window;
-  ClutterPoint cursor_position;
-  ClutterPoint relative_cursor_position;
+  graphene_point_t cursor_position;
+  graphene_point_t relative_cursor_position;
   cairo_surface_t *cursor_surface;
   uint8_t *cursor_surface_data;
   GError *error = NULL;
@@ -253,25 +253,14 @@ meta_screen_cast_window_stream_src_stop (MetaScreenCastWindowStreamSrc *window_s
   if (!window_src->screen_cast_window)
     return;
 
-  if (window_src->screen_cast_window_damaged_handler_id)
-    g_signal_handler_disconnect (window_src->screen_cast_window,
-                                 window_src->screen_cast_window_damaged_handler_id);
-  window_src->screen_cast_window_damaged_handler_id = 0;
-
-  if (window_src->screen_cast_window_destroyed_handler_id)
-    g_signal_handler_disconnect (window_src->screen_cast_window,
-                                 window_src->screen_cast_window_destroyed_handler_id);
-  window_src->screen_cast_window_destroyed_handler_id = 0;
-
-  if (window_src->cursor_moved_handler_id)
-    g_signal_handler_disconnect (cursor_tracker,
-                                 window_src->cursor_moved_handler_id);
-  window_src->cursor_moved_handler_id = 0;
-
-  if (window_src->cursor_changed_handler_id)
-    g_signal_handler_disconnect (cursor_tracker,
-                                 window_src->cursor_changed_handler_id);
-  window_src->cursor_changed_handler_id = 0;
+  g_clear_signal_handler (&window_src->screen_cast_window_damaged_handler_id,
+                          window_src->screen_cast_window);
+  g_clear_signal_handler (&window_src->screen_cast_window_destroyed_handler_id,
+                          window_src->screen_cast_window);
+  g_clear_signal_handler (&window_src->cursor_moved_handler_id,
+                          cursor_tracker);
+  g_clear_signal_handler (&window_src->cursor_changed_handler_id,
+                          cursor_tracker);
 }
 
 static void
@@ -298,7 +287,7 @@ is_cursor_in_stream (MetaScreenCastWindowStreamSrc *window_src)
   MetaCursorRenderer *cursor_renderer =
     meta_backend_get_cursor_renderer (backend);
   MetaCursorSprite *cursor_sprite;
-  ClutterPoint cursor_position;
+  graphene_point_t cursor_position;
   MetaScreenCastWindow *screen_cast_window;
 
   cursor_sprite = meta_cursor_renderer_get_cursor (cursor_renderer);
@@ -423,9 +412,9 @@ meta_screen_cast_window_stream_src_set_cursor_metadata (MetaScreenCastStreamSrc 
     meta_backend_get_cursor_renderer (backend);
   MetaScreenCastWindow *screen_cast_window = window_src->screen_cast_window;
   MetaCursorSprite *cursor_sprite;
-  ClutterPoint cursor_position;
+  graphene_point_t cursor_position;
   float scale;
-  ClutterPoint relative_cursor_position;
+  graphene_point_t relative_cursor_position;
   int x, y;
 
   cursor_sprite = meta_cursor_renderer_get_cursor (cursor_renderer);

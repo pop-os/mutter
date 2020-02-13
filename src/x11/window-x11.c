@@ -36,7 +36,6 @@
 #include "backends/meta-logical-monitor.h"
 #include "backends/x11/meta-backend-x11.h"
 #include "core/boxes-private.h"
-#include "core/core.h"
 #include "core/frame.h"
 #include "core/meta-workspace-manager-private.h"
 #include "core/window-private.h"
@@ -791,8 +790,8 @@ disconnect_pending_focus_window_signals (MetaWindow *window,
 static void
 meta_window_x11_delayed_focus_data_free (MetaWindowX11DelayedFocusData *data)
 {
-  g_signal_handler_disconnect (data->window, data->unmanaged_id);
-  g_signal_handler_disconnect (data->window->display, data->focused_changed_id);
+  g_clear_signal_handler (&data->unmanaged_id, data->window);
+  g_clear_signal_handler (&data->focused_changed_id, data->window->display);
 
   if (data->pending_focus_candidates)
     {
@@ -1449,6 +1448,16 @@ meta_window_x11_move_resize_internal (MetaWindow                *window,
        (window->size_hints.flags & USPosition)))
     need_configure_notify = TRUE;
 
+  /* If resizing, freeze commits - This is for Xwayland, and a no-op on Xorg */
+  if (need_resize_client || need_resize_frame)
+    {
+      if (!meta_window_x11_should_thaw_after_paint (window))
+        {
+          meta_window_x11_set_thaw_after_paint (window, TRUE);
+          meta_window_x11_freeze_commits (window);
+        }
+    }
+
   /* The rest of this function syncs our new size/pos with X as
    * efficiently as possible
    */
@@ -1598,7 +1607,7 @@ meta_window_x11_update_struts (MetaWindow *window)
                 {
                 case META_SIDE_RIGHT:
                   temp->rect.x = BOX_RIGHT(temp->rect) - thickness;
-                  /* Intentionally fall through without breaking */
+                  G_GNUC_FALLTHROUGH;
                 case META_SIDE_LEFT:
                   temp->rect.width  = thickness;
                   temp->rect.y      = strut_begin;
@@ -1606,7 +1615,7 @@ meta_window_x11_update_struts (MetaWindow *window)
                   break;
                 case META_SIDE_BOTTOM:
                   temp->rect.y = BOX_BOTTOM(temp->rect) - thickness;
-                  /* Intentionally fall through without breaking */
+                  G_GNUC_FALLTHROUGH;
                 case META_SIDE_TOP:
                   temp->rect.height = thickness;
                   temp->rect.x      = strut_begin;
@@ -1662,13 +1671,13 @@ meta_window_x11_update_struts (MetaWindow *window)
                 {
                 case META_SIDE_RIGHT:
                   temp->rect.x = BOX_RIGHT(temp->rect) - thickness;
-                  /* Intentionally fall through without breaking */
+                  G_GNUC_FALLTHROUGH;
                 case META_SIDE_LEFT:
                   temp->rect.width  = thickness;
                   break;
                 case META_SIDE_BOTTOM:
                   temp->rect.y = BOX_BOTTOM(temp->rect) - thickness;
-                  /* Intentionally fall through without breaking */
+                  G_GNUC_FALLTHROUGH;
                 case META_SIDE_TOP:
                   temp->rect.height = thickness;
                   break;
@@ -1856,6 +1865,134 @@ meta_window_x11_are_updates_frozen (MetaWindow *window)
   return FALSE;
 }
 
+/* Get layer ignoring any transient or group relationships */
+static MetaStackLayer
+get_standalone_layer (MetaWindow *window)
+{
+  MetaStackLayer layer;
+
+  switch (window->type)
+    {
+    case META_WINDOW_DESKTOP:
+      layer = META_LAYER_DESKTOP;
+      break;
+
+    case META_WINDOW_DOCK:
+      if (window->wm_state_below ||
+          (window->monitor && window->monitor->in_fullscreen))
+        layer = META_LAYER_BOTTOM;
+      else
+        layer = META_LAYER_DOCK;
+      break;
+
+    case META_WINDOW_DROPDOWN_MENU:
+    case META_WINDOW_POPUP_MENU:
+    case META_WINDOW_TOOLTIP:
+    case META_WINDOW_NOTIFICATION:
+    case META_WINDOW_COMBO:
+    case META_WINDOW_OVERRIDE_OTHER:
+      layer = META_LAYER_OVERRIDE_REDIRECT;
+      break;
+
+    default:
+      layer = meta_window_get_default_layer (window);
+      break;
+    }
+
+  return layer;
+}
+
+/* Note that this function can never use window->layer only
+ * get_standalone_layer, or we'd have issues.
+ */
+static MetaStackLayer
+get_maximum_layer_in_group (MetaWindow *window)
+{
+  GSList *members;
+  MetaGroup *group;
+  GSList *tmp;
+  MetaStackLayer max;
+  MetaStackLayer layer;
+
+  max = META_LAYER_DESKTOP;
+
+  group = meta_window_get_group (window);
+
+  if (group != NULL)
+    members = meta_group_list_windows (group);
+  else
+    members = NULL;
+
+  tmp = members;
+  while (tmp != NULL)
+    {
+      MetaWindow *w = tmp->data;
+
+      if (!w->override_redirect)
+        {
+          layer = get_standalone_layer (w);
+          if (layer > max)
+            max = layer;
+        }
+
+      tmp = tmp->next;
+    }
+
+  g_slist_free (members);
+
+  return max;
+}
+
+static MetaStackLayer
+meta_window_x11_calculate_layer (MetaWindow *window)
+{
+  MetaStackLayer layer = get_standalone_layer (window);
+
+  /* We can only do promotion-due-to-group for dialogs and other
+   * transients, or weird stuff happens like the desktop window and
+   * nautilus windows getting in the same layer, or all gnome-terminal
+   * windows getting in fullscreen layer if any terminal is
+   * fullscreen.
+   */
+  if (layer != META_LAYER_DESKTOP &&
+      meta_window_has_transient_type (window) &&
+      window->transient_for == NULL)
+    {
+      /* We only do the group thing if the dialog is NOT transient for
+       * a particular window. Imagine a group with a normal window, a dock,
+       * and a dialog transient for the normal window; you don't want the dialog
+       * above the dock if it wouldn't normally be.
+       */
+
+      MetaStackLayer group_max;
+
+      group_max = get_maximum_layer_in_group (window);
+
+      if (group_max > layer)
+        {
+          meta_topic (META_DEBUG_STACK,
+                      "Promoting window %s from layer %u to %u due to group membership\n",
+                      window->desc, layer, group_max);
+          layer = group_max;
+        }
+    }
+
+  meta_topic (META_DEBUG_STACK, "Window %s on layer %u type = %u has_focus = %d\n",
+              window->desc, layer,
+              window->type, window->has_focus);
+  return layer;
+}
+
+static void
+meta_window_x11_impl_freeze_commits (MetaWindow *window)
+{
+}
+
+static void
+meta_window_x11_impl_thaw_commits (MetaWindow *window)
+{
+}
+
 static void
 meta_window_x11_map (MetaWindow *window)
 {
@@ -1875,6 +2012,12 @@ meta_window_x11_unmap (MetaWindow *window)
   XUnmapWindow (x11_display->xdisplay, window->xwindow);
   meta_x11_error_trap_pop (x11_display);
   window->unmaps_pending ++;
+}
+
+static gboolean
+meta_window_x11_impl_always_update_shape (MetaWindow *window)
+{
+  return FALSE;
 }
 
 static void
@@ -1904,8 +2047,13 @@ meta_window_x11_class_init (MetaWindowX11Class *klass)
   window_class->is_stackable = meta_window_x11_is_stackable;
   window_class->can_ping = meta_window_x11_can_ping;
   window_class->are_updates_frozen = meta_window_x11_are_updates_frozen;
+  window_class->calculate_layer = meta_window_x11_calculate_layer;
   window_class->map = meta_window_x11_map;
   window_class->unmap = meta_window_x11_unmap;
+
+  klass->freeze_commits = meta_window_x11_impl_freeze_commits;
+  klass->thaw_commits = meta_window_x11_impl_thaw_commits;
+  klass->always_update_shape = meta_window_x11_impl_always_update_shape;
 }
 
 void
@@ -3833,27 +3981,32 @@ meta_window_x11_update_sync_request_counter (MetaWindow *window,
   window->sync_request_serial = new_counter_value;
   meta_compositor_sync_updates_frozen (window->display->compositor, window);
 
-  if (window == window->display->grab_window &&
-      meta_grab_op_is_resizing (window->display->grab_op) &&
-      new_counter_value >= window->sync_request_wait_serial &&
-      (!window->extended_sync_request_counter || new_counter_value % 2 == 0) &&
+  if (new_counter_value >= window->sync_request_wait_serial &&
       window->sync_request_timeout_id)
     {
-      meta_topic (META_DEBUG_RESIZING,
-                  "Alarm event received last motion x = %d y = %d\n",
-                  window->display->grab_latest_motion_x,
-                  window->display->grab_latest_motion_y);
 
-      g_source_remove (window->sync_request_timeout_id);
-      window->sync_request_timeout_id = 0;
+      if (!window->extended_sync_request_counter ||
+          new_counter_value % 2 == 0)
+        g_clear_handle_id (&window->sync_request_timeout_id, g_source_remove);
 
-      /* This means we are ready for another configure;
-       * no pointer round trip here, to keep in sync */
-      meta_window_update_resize (window,
-                                 window->display->grab_last_user_action_was_snap,
-                                 window->display->grab_latest_motion_x,
-                                 window->display->grab_latest_motion_y,
-                                 TRUE);
+      if (window == window->display->grab_window &&
+          meta_grab_op_is_resizing (window->display->grab_op) &&
+          (!window->extended_sync_request_counter ||
+           new_counter_value % 2 == 0))
+        {
+          meta_topic (META_DEBUG_RESIZING,
+                      "Alarm event received last motion x = %d y = %d\n",
+                      window->display->grab_latest_motion_x,
+                      window->display->grab_latest_motion_y);
+
+          /* This means we are ready for another configure;
+           * no pointer round trip here, to keep in sync */
+          meta_window_update_resize (window,
+                                     window->display->grab_last_user_action_was_snap,
+                                     window->display->grab_latest_motion_x,
+                                     window->display->grab_latest_motion_y,
+                                     TRUE);
+        }
     }
 
   /* If sync was previously disabled, turn it back on and hope
@@ -3871,4 +4024,64 @@ Window
 meta_window_x11_get_toplevel_xwindow (MetaWindow *window)
 {
   return window->frame ? window->frame->xwindow : window->xwindow;
+}
+
+void
+meta_window_x11_freeze_commits (MetaWindow *window)
+{
+  MetaWindowX11 *window_x11 = META_WINDOW_X11 (window);
+  META_WINDOW_X11_GET_CLASS (window_x11)->freeze_commits (window);
+}
+
+void
+meta_window_x11_thaw_commits (MetaWindow *window)
+{
+  MetaWindowX11 *window_x11 = META_WINDOW_X11 (window);
+  META_WINDOW_X11_GET_CLASS (window_x11)->thaw_commits (window);
+}
+
+void
+meta_window_x11_set_thaw_after_paint (MetaWindow *window,
+                                      gboolean    thaw_after_paint)
+{
+  MetaWindowX11 *window_x11 = META_WINDOW_X11 (window);
+  MetaWindowX11Private *priv = meta_window_x11_get_instance_private (window_x11);
+
+  priv->thaw_after_paint = thaw_after_paint;
+}
+
+gboolean
+meta_window_x11_should_thaw_after_paint (MetaWindow *window)
+{
+  MetaWindowX11 *window_x11 = META_WINDOW_X11 (window);
+  MetaWindowX11Private *priv = meta_window_x11_get_instance_private (window_x11);
+
+  return priv->thaw_after_paint;
+}
+
+gboolean
+meta_window_x11_always_update_shape (MetaWindow *window)
+{
+  MetaWindowX11 *window_x11 = META_WINDOW_X11 (window);
+
+  return META_WINDOW_X11_GET_CLASS (window_x11)->always_update_shape (window);
+}
+
+void
+meta_window_x11_buffer_rect_to_frame_rect (MetaWindow    *window,
+                                           MetaRectangle *buffer_rect,
+                                           MetaRectangle *frame_rect)
+
+{
+  MetaFrameBorders borders;
+
+  g_return_if_fail (window->frame);
+
+  meta_frame_calc_borders (window->frame, &borders);
+
+  *frame_rect = *buffer_rect;
+  frame_rect->x += borders.invisible.left;
+  frame_rect->y += borders.invisible.top;
+  frame_rect->width -= borders.invisible.left + borders.invisible.right;
+  frame_rect->height -= borders.invisible.top + borders.invisible.bottom;
 }

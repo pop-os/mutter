@@ -310,11 +310,7 @@ cally_actor_finalize (GObject *obj)
 
   _cally_actor_clean_action_list (cally_actor);
 
-  if (priv->action_idle_handler)
-    {
-      g_source_remove (priv->action_idle_handler);
-      priv->action_idle_handler = 0;
-    }
+  g_clear_handle_id (&priv->action_idle_handler, g_source_remove);
 
   if (priv->action_queue)
     {
@@ -657,7 +653,7 @@ cally_actor_get_extents (AtkComponent *component,
   ClutterActor *actor      = NULL;
   gint          top_level_x, top_level_y;
   gfloat        f_width, f_height;
-  ClutterVertex verts[4];
+  graphene_point3d_t verts[4];
   ClutterActor  *stage = NULL;
 
   g_return_if_fail (CALLY_IS_ACTOR (component));
