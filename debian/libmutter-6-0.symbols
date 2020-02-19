@@ -188,7 +188,6 @@ libmutter-6.so.0 libmutter-6-0 #MINVER#
  meta_idle_monitor_add_idle_watch@Base 3.28.2
  meta_idle_monitor_add_user_active_watch@Base 3.28.2
  meta_idle_monitor_get_core@Base 3.28.2
- meta_idle_monitor_get_for_device@Base 3.28.2
  meta_idle_monitor_get_idletime@Base 3.28.2
  meta_idle_monitor_get_type@Base 3.28.2
  meta_idle_monitor_remove_watch@Base 3.28.2
@@ -1758,6 +1757,7 @@ libmutter-clutter-6.so.0 libmutter-6-0 #MINVER#
  clutter_seat_get_pointer@Base 3.35.90
  clutter_seat_get_pointer_a11y_settings@Base 3.35.90
  clutter_seat_get_supported_virtual_device_types@Base 3.35.90
+ clutter_seat_get_touch_mode@Base 3.35.91
  clutter_seat_get_type@Base 3.35.90
  clutter_seat_list_devices@Base 3.35.90
  clutter_seat_set_kbd_a11y_settings@Base 3.35.90
@@ -2584,10 +2584,7 @@ libmutter-cogl-6.so.0 libmutter-6-0 #MINVER#
  cogl_set_tracing_disabled_on_thread@Base 3.33.4
  cogl_set_tracing_enabled_on_thread@Base 3.33.4
  cogl_set_tracing_enabled_on_thread_with_fd@Base 3.33.4
- cogl_shader_compile@Base 3.29.4
- cogl_shader_get_info_log@Base 3.29.4
  cogl_shader_get_type@Base 3.29.4
- cogl_shader_is_compiled@Base 3.29.4
  cogl_shader_source@Base 3.29.4
  cogl_snippet_get_declarations@Base 3.29.4
  cogl_snippet_get_gtype@Base 3.29.4
