@@ -30,6 +30,7 @@
 #include "backends/native/meta-kms-crtc.h"
 #include "backends/native/meta-kms-impl.h"
 #include "backends/native/meta-kms-page-flip-private.h"
+#include "backends/native/meta-kms-plane-private.h"
 #include "backends/native/meta-kms-plane.h"
 #include "backends/native/meta-kms-private.h"
 #include "backends/native/meta-kms-update.h"
@@ -47,6 +48,8 @@ struct _MetaKmsImplDevice
   GList *crtcs;
   GList *connectors;
   GList *planes;
+
+  MetaKmsDeviceCaps caps;
 };
 
 G_DEFINE_TYPE (MetaKmsImplDevice, meta_kms_impl_device, G_TYPE_OBJECT)
@@ -73,6 +76,12 @@ GList *
 meta_kms_impl_device_copy_planes (MetaKmsImplDevice *impl_device)
 {
   return g_list_copy (impl_device->planes);
+}
+
+const MetaKmsDeviceCaps *
+meta_kms_impl_device_get_caps (MetaKmsImplDevice *impl_device)
+{
+  return &impl_device->caps;
 }
 
 static void
@@ -136,14 +145,16 @@ meta_kms_impl_device_dispatch (MetaKmsImplDevice  *impl_device,
   return TRUE;
 }
 
-static gboolean
+static gpointer
 kms_event_dispatch_in_impl (MetaKmsImpl  *impl,
                             gpointer      user_data,
                             GError      **error)
 {
   MetaKmsImplDevice *impl_device = user_data;
+  gboolean ret;
 
-  return meta_kms_impl_device_dispatch (impl_device, error);
+  ret = meta_kms_impl_device_dispatch (impl_device, error);
+  return GINT_TO_POINTER (ret);
 }
 
 drmModePropertyPtr
@@ -174,6 +185,21 @@ meta_kms_impl_device_find_property (MetaKmsImplDevice       *impl_device,
     }
 
   return NULL;
+}
+
+static void
+init_caps (MetaKmsImplDevice *impl_device)
+{
+  int fd = impl_device->fd;
+  uint64_t cursor_width, cursor_height;
+
+  if (drmGetCap (fd, DRM_CAP_CURSOR_WIDTH, &cursor_width) == 0 &&
+      drmGetCap (fd, DRM_CAP_CURSOR_HEIGHT, &cursor_height) == 0)
+    {
+      impl_device->caps.has_cursor_size = TRUE;
+      impl_device->caps.cursor_width = cursor_width;
+      impl_device->caps.cursor_height = cursor_height;
+    }
 }
 
 static void
@@ -381,6 +407,8 @@ meta_kms_impl_device_new (MetaKmsDevice  *device,
   impl_device->device = device;
   impl_device->impl = impl;
   impl_device->fd = fd;
+
+  init_caps (impl_device);
 
   init_crtcs (impl_device, drm_resources);
   init_planes (impl_device);

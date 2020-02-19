@@ -1,5 +1,5 @@
 project('mutter', 'c',
-  version: '3.35.90',
+  version: '3.35.91',
   meson_version: '>= 0.50.0',
   license: 'GPLv2+'
 )
@@ -46,7 +46,7 @@ wayland_server_req = '>= 1.13.0'
 wayland_protocols_req = '>= 1.18'
 
 # native backend version requirements
-libinput_req = '>= 1.4'
+libinput_req = '>= 1.7'
 gbm_req = '>= 10.3'
 
 # screen cast version requirements
