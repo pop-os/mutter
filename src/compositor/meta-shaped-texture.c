@@ -36,7 +36,6 @@
 
 #include "cogl/cogl.h"
 #include "compositor/clutter-utils.h"
-#include "compositor/meta-cullable.h"
 #include "compositor/meta-texture-tower.h"
 #include "compositor/region-utils.h"
 #include "core/boxes-private.h"
@@ -1437,4 +1436,24 @@ meta_shaped_texture_get_buffer_scale (MetaShapedTexture *stex)
   g_return_val_if_fail (META_IS_SHAPED_TEXTURE (stex), 1.0);
 
   return stex->buffer_scale;
+}
+
+int
+meta_shaped_texture_get_width (MetaShapedTexture *stex)
+{
+  g_return_val_if_fail (META_IS_SHAPED_TEXTURE (stex), 0);
+
+  ensure_size_valid (stex);
+
+  return stex->dst_width;
+}
+
+int
+meta_shaped_texture_get_height (MetaShapedTexture *stex)
+{
+  g_return_val_if_fail (META_IS_SHAPED_TEXTURE (stex), 0);
+
+  ensure_size_valid (stex);
+
+  return stex->dst_height;
 }

@@ -1138,29 +1138,21 @@ meta_window_actor_get_geometry_scale (MetaWindowActor *window_actor)
 }
 
 static void
-meta_window_actor_get_frame_bounds (MetaScreenCastWindow *screen_cast_window,
-                                    MetaRectangle        *bounds)
+meta_window_actor_get_buffer_bounds (MetaScreenCastWindow *screen_cast_window,
+                                     MetaRectangle        *bounds)
 {
   MetaWindowActor *window_actor = META_WINDOW_ACTOR (screen_cast_window);
   MetaWindowActorPrivate *priv =
     meta_window_actor_get_instance_private (window_actor);
-  MetaWindow *window;
   MetaShapedTexture *stex;
-  MetaRectangle buffer_rect;
-  MetaRectangle frame_rect;
   int buffer_scale;
 
   stex = meta_surface_actor_get_texture (priv->surface);
   buffer_scale = meta_shaped_texture_get_buffer_scale (stex);
-
-  window = priv->window;
-  meta_window_get_buffer_rect (window, &buffer_rect);
-  meta_window_get_frame_rect (window, &frame_rect);
-
-  bounds->x = (int) floor ((frame_rect.x - buffer_rect.x) / (float) buffer_scale);
-  bounds->y = (int) floor ((frame_rect.y - buffer_rect.y) / (float) buffer_scale);
-  bounds->width = (int) ceil (frame_rect.width / (float) buffer_scale);
-  bounds->height = (int) ceil (frame_rect.height / (float) buffer_scale);
+  *bounds = (MetaRectangle) {
+    .width = meta_shaped_texture_get_width (stex) * buffer_scale,
+    .height = meta_shaped_texture_get_height (stex) * buffer_scale,
+  };
 }
 
 static void
@@ -1177,7 +1169,7 @@ meta_window_actor_transform_relative_position (MetaScreenCastWindow *screen_cast
   MetaRectangle bounds;
   graphene_point3d_t v1 = { 0.f, }, v2 = { 0.f, };
 
-  meta_window_actor_get_frame_bounds (screen_cast_window, &bounds);
+  meta_window_actor_get_buffer_bounds (screen_cast_window, &bounds);
 
   v1.x = CLAMP ((float) x,
                 bounds.x,
@@ -1259,31 +1251,35 @@ meta_window_actor_capture_into (MetaScreenCastWindow *screen_cast_window,
   cr_height = cairo_image_surface_get_height (image);
   cr_stride = cairo_image_surface_get_stride (image);
 
-  if (cr_width < bounds->width || cr_height < bounds->height)
+  if (cr_width == bounds->width && cr_height == bounds->height)
     {
+      memcpy (data, cr_data, cr_height * cr_stride);
+    }
+  else
+    {
+      int width = MIN (bounds->width, cr_width);
+      int height = MIN (bounds->height, cr_height);
+      int stride = width * bpp;
       uint8_t *src, *dst;
+
       src = cr_data;
       dst = data;
 
-      for (int i = 0; i < cr_height; i++)
+      for (int i = 0; i < height; i++)
         {
-          memcpy (dst, src, cr_stride);
-          if (cr_width < bounds->width)
-            memset (dst + cr_stride, 0, (bounds->width * bpp) - cr_stride);
+          memcpy (dst, src, stride);
+          if (width < bounds->width)
+            memset (dst + stride, 0, (bounds->width * bpp) - stride);
 
           src += cr_stride;
           dst += bounds->width * bpp;
         }
 
-      for (int i = cr_height; i < bounds->height; i++)
+      for (int i = height; i < bounds->height; i++)
         {
           memset (dst, 0, bounds->width * bpp);
           dst += bounds->width * bpp;
         }
-    }
-  else
-    {
-      memcpy (data, cr_data, cr_height * cr_stride);
     }
 
   cairo_surface_destroy (image);
@@ -1298,7 +1294,7 @@ meta_window_actor_has_damage (MetaScreenCastWindow *screen_cast_window)
 static void
 screen_cast_window_iface_init (MetaScreenCastWindowInterface *iface)
 {
-  iface->get_frame_bounds = meta_window_actor_get_frame_bounds;
+  iface->get_buffer_bounds = meta_window_actor_get_buffer_bounds;
   iface->transform_relative_position = meta_window_actor_transform_relative_position;
   iface->transform_cursor_position = meta_window_actor_transform_cursor_position;
   iface->capture_into = meta_window_actor_capture_into;
