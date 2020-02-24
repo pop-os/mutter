@@ -19,7 +19,7 @@ mutter (3.35.91-1) UNRELEASED; urgency=medium
   * debian/control:
     - build-depend on graphene (1.9.3)
     - Add libgraphene-1.0-dev as libmutter-6-dev dependency
-    - bump build dependency on mutter 0.50
+    - bump build dependency on meson 0.50
     - bump build dependency on libinput 1.7
     - bump package name to mutter-6
   * d/libmutter-6-0.symbols: update symbols
