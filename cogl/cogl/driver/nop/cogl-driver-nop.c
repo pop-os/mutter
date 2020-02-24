@@ -28,9 +28,7 @@
  *
  */
 
-#ifdef HAVE_CONFIG_H
 #include "cogl-config.h"
-#endif
 
 #include <string.h>
 
@@ -38,15 +36,14 @@
 #include "cogl-context-private.h"
 #include "cogl-feature-private.h"
 #include "cogl-renderer-private.h"
-#include "cogl-error-private.h"
 #include "cogl-framebuffer-nop-private.h"
 #include "cogl-texture-2d-nop-private.h"
 #include "cogl-attribute-nop-private.h"
 #include "cogl-clip-stack-nop-private.h"
 
-static CoglBool
+static gboolean
 _cogl_driver_update_features (CoglContext *ctx,
-                              CoglError **error)
+                              GError **error)
 {
   /* _cogl_gpu_info_init (ctx, &ctx->gpu); */
 
@@ -61,7 +58,6 @@ _cogl_driver_nop =
   {
     NULL, /* pixel_format_from_gl_internal */
     NULL, /* pixel_format_to_gl */
-    NULL, /* pixel_format_to_gl_with_target */
     _cogl_driver_update_features,
     _cogl_offscreen_nop_allocate,
     _cogl_offscreen_nop_free,
@@ -81,6 +77,7 @@ _cogl_driver_nop =
     _cogl_texture_2d_nop_get_gl_handle,
     _cogl_texture_2d_nop_generate_mipmap,
     _cogl_texture_2d_nop_copy_from_bitmap,
+    NULL, /* texture_2d_is_get_data_supported */
     NULL, /* texture_2d_get_data */
     _cogl_nop_flush_attributes_state,
     _cogl_clip_stack_nop_flush,

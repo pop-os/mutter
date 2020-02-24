@@ -22,18 +22,20 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <config.h>
+#include "config.h"
 
-#include "boxes-private.h"
-#include "place.h"
-#include "backends/meta-backend-private.h"
-#include "backends/meta-logical-monitor.h"
-#include <meta/meta-backend.h>
-#include <meta/workspace.h>
-#include <meta/prefs.h>
+#include "core/place.h"
+
 #include <gdk/gdk.h>
 #include <math.h>
 #include <stdlib.h>
+
+#include "backends/meta-backend-private.h"
+#include "backends/meta-logical-monitor.h"
+#include "core/boxes-private.h"
+#include "meta/meta-backend.h"
+#include "meta/prefs.h"
+#include "meta/workspace.h"
 
 typedef enum
 {
@@ -620,12 +622,9 @@ meta_window_process_placement (MetaWindow        *window,
   window_height = placement_rule->height;
   meta_window_get_frame_rect (parent, &parent_rect);
 
-  anchor_rect = (MetaRectangle) {
-    .x = parent_rect.x + placement_rule->anchor_rect.x,
-    .y = parent_rect.y + placement_rule->anchor_rect.y,
-    .width = placement_rule->anchor_rect.width,
-    .height = placement_rule->anchor_rect.height,
-  };
+  anchor_rect = placement_rule->anchor_rect;
+  anchor_rect.x += parent_rect.x;
+  anchor_rect.y += parent_rect.y;
 
   /* Place at anchor point. */
   if (placement_rule->anchor & META_PLACEMENT_ANCHOR_LEFT)

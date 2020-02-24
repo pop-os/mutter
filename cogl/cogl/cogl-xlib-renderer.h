@@ -55,7 +55,7 @@
 
 #include <cogl/cogl-renderer.h>
 
-COGL_BEGIN_DECLS
+G_BEGIN_DECLS
 
 /**
  * cogl_xlib_renderer_handle_event: (skip)
@@ -165,37 +165,7 @@ cogl_xlib_renderer_set_foreign_display (CoglRenderer *renderer,
  */
 void
 cogl_xlib_renderer_set_event_retrieval_enabled (CoglRenderer *renderer,
-                                                CoglBool enable);
-
-/**
- * cogl_xlib_renderer_set_threaded_swap_wait_enabled: (skip)
- * @renderer: a #CoglRenderer
- * @enable: The new value
- *
- * Sets whether Cogl is allowed to use a separate threaded to wait for the
- * completion of glXSwapBuffers() and call the frame callback for the
- * corresponding #CoglOnscreen. This is a way of emulating the
- * INTEL_swap_event extension, and will only ever be used if
- * INTEL_swap_event is not present; it will also only be used for
- * specific white-listed drivers that are known to work correctly with
- * multiple contexts sharing state between threads.
- *
- * The advantage of enabling this is that it will allow your main loop
- * to do other work while waiting for the system to be ready to draw
- * the next frame, instead of blocking in glXSwapBuffers(). A disadvantage
- * is that the driver will be prevented from buffering up multiple frames
- * even if it thinks that it would be advantageous. In general, this
- * will work best for something like a system compositor that is doing
- * simple drawing but handling lots of other complex tasks.
- * 
- * If you enable this, you must call XInitThreads() before any other
- * X11 calls in your program. (See the documentation for XInitThreads())
- *
- * Stability: unstable
- */
-void
-cogl_xlib_renderer_set_threaded_swap_wait_enabled (CoglRenderer *renderer,
-						   CoglBool enable);
+                                                gboolean enable);
 
 /**
  * cogl_xlib_renderer_get_display: (skip)
@@ -249,8 +219,8 @@ cogl_xlib_renderer_get_visual_info (CoglRenderer *renderer);
  */
 void
 cogl_xlib_renderer_request_reset_on_video_memory_purge (CoglRenderer *renderer,
-                                                        CoglBool enable);
-COGL_END_DECLS
+                                                        gboolean enable);
+G_END_DECLS
 
 /* The gobject introspection scanner seems to parse public headers in
  * isolation which means we need to be extra careful about how we

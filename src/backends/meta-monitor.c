@@ -31,14 +31,15 @@
 #include "backends/meta-output.h"
 
 #define SCALE_FACTORS_PER_INTEGER 4
+#define SCALE_FACTORS_STEPS (1.0 / (float) SCALE_FACTORS_PER_INTEGER)
 #define MINIMUM_SCALE_FACTOR 1.0f
 #define MAXIMUM_SCALE_FACTOR 4.0f
-#define MINIMUM_LOGICAL_WIDTH 800
-#define MINIMUM_LOGICAL_HEIGHT 480
+#define MINIMUM_LOGICAL_AREA (800 * 480)
 #define MAXIMUM_REFRESH_RATE_DIFF 0.001
 
 typedef struct _MetaMonitorMode
 {
+  MetaMonitor *monitor;
   char *id;
   MetaMonitorModeSpec spec;
   MetaMonitorCrtcMode *crtc_modes;
@@ -73,7 +74,9 @@ typedef struct _MetaMonitorPrivate
    * (it's an attempt to keep windows on the same monitor, and preferably on
    * the primary one).
    */
-  long winsys_id;
+  uint64_t winsys_id;
+
+  char *display_name;
 } MetaMonitorPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE (MetaMonitor, meta_monitor, G_TYPE_OBJECT)
@@ -88,6 +91,8 @@ G_DEFINE_TYPE (MetaMonitorNormal, meta_monitor_normal, META_TYPE_MONITOR)
 struct _MetaMonitorTiled
 {
   MetaMonitor parent;
+
+  MetaMonitorManager *monitor_manager;
 
   uint32_t tile_group_id;
 
@@ -176,6 +181,99 @@ meta_monitor_generate_spec (MetaMonitor *monitor)
   };
 
   priv->spec = monitor_spec;
+}
+
+static const double known_diagonals[] = {
+    12.1,
+    13.3,
+    15.6
+};
+
+static char *
+diagonal_to_str (double d)
+{
+  unsigned int i;
+
+  for (i = 0; i < G_N_ELEMENTS (known_diagonals); i++)
+    {
+      double delta;
+
+      delta = fabs(known_diagonals[i] - d);
+      if (delta < 0.1)
+        return g_strdup_printf ("%0.1lf\"", known_diagonals[i]);
+    }
+
+  return g_strdup_printf ("%d\"", (int) (d + 0.5));
+}
+
+static char *
+meta_monitor_make_display_name (MetaMonitor        *monitor,
+                                MetaMonitorManager *monitor_manager)
+{
+  g_autofree char *inches = NULL;
+  g_autofree char *vendor_name = NULL;
+  const char *vendor = NULL;
+  const char *product_name = NULL;
+  int width_mm;
+  int height_mm;
+
+  meta_monitor_get_physical_dimensions (monitor, &width_mm, &height_mm);
+
+  if (meta_monitor_is_laptop_panel (monitor))
+      return g_strdup (_("Built-in display"));
+
+  if (width_mm > 0 && height_mm > 0)
+    {
+      if (!meta_monitor_has_aspect_as_size (monitor))
+        {
+          double d = sqrt (width_mm * width_mm +
+                           height_mm * height_mm);
+          inches = diagonal_to_str (d / 25.4);
+        }
+      else
+        {
+          product_name = meta_monitor_get_product (monitor);
+        }
+    }
+
+  vendor = meta_monitor_get_vendor (monitor);
+
+  if (g_strcmp0 (vendor, "unknown") != 0)
+    {
+      vendor_name = meta_monitor_manager_get_vendor_name (monitor_manager,
+                                                          vendor);
+
+      if (!vendor_name)
+        vendor_name = g_strdup (vendor);
+    }
+  else
+    {
+      if (inches != NULL)
+        vendor_name = g_strdup (_("Unknown"));
+      else
+        vendor_name = g_strdup (_("Unknown Display"));
+    }
+
+  if (inches != NULL)
+    {
+       /**/
+      return g_strdup_printf (C_("This is a monitor vendor name, followed by a "
+                                 "size in inches, like 'Dell 15\"'",
+                                 "%s %s"),
+                              vendor_name, inches);
+    }
+  else if (product_name != NULL)
+    {
+      return g_strdup_printf (C_("This is a monitor vendor name followed by "
+                                 "product/model name where size in inches "
+                                 "could not be calculated, e.g. Dell U2414H",
+                                 "%s %s"),
+                              vendor_name, product_name);
+    }
+  else
+    {
+      return g_strdup (vendor_name);
+    }
 }
 
 MetaGpu *
@@ -407,6 +505,7 @@ meta_monitor_finalize (GObject *object)
   g_hash_table_destroy (priv->mode_ids);
   g_list_free_full (priv->modes, (GDestroyNotify) meta_monitor_mode_free);
   meta_monitor_spec_free (priv->spec);
+  g_free (priv->display_name);
 
   G_OBJECT_CLASS (meta_monitor_parent_class)->finalize (object);
 }
@@ -511,6 +610,7 @@ meta_monitor_normal_generate_modes (MetaMonitorNormal *monitor_normal)
       gboolean replace;
 
       mode = g_new0 (MetaMonitorMode, 1);
+      mode->monitor = monitor;
       mode->spec = meta_monitor_create_spec (monitor,
                                              crtc_mode->width,
                                              crtc_mode->height,
@@ -548,8 +648,9 @@ meta_monitor_normal_generate_modes (MetaMonitorNormal *monitor_normal)
 }
 
 MetaMonitorNormal *
-meta_monitor_normal_new (MetaGpu    *gpu,
-                         MetaOutput *output)
+meta_monitor_normal_new (MetaGpu            *gpu,
+                         MetaMonitorManager *monitor_manager,
+                         MetaOutput         *output)
 {
   MetaMonitorNormal *monitor_normal;
   MetaMonitor *monitor;
@@ -566,6 +667,9 @@ meta_monitor_normal_new (MetaGpu    *gpu,
   meta_monitor_generate_spec (monitor);
 
   meta_monitor_normal_generate_modes (monitor_normal);
+
+  monitor_priv->display_name = meta_monitor_make_display_name (monitor,
+                                                               monitor_manager);
 
   return monitor_normal;
 }
@@ -588,12 +692,7 @@ meta_monitor_normal_derive_layout (MetaMonitor   *monitor,
 
   output = meta_monitor_get_main_output (monitor);
   crtc = meta_output_get_assigned_crtc (output);
-  *layout = (MetaRectangle) {
-    .x = crtc->rect.x,
-    .y = crtc->rect.y,
-    .width = crtc->rect.width,
-    .height = crtc->rect.height
-  };
+  *layout = crtc->rect;
 }
 
 static gboolean
@@ -614,12 +713,12 @@ meta_monitor_normal_get_suggested_position (MetaMonitor *monitor,
 }
 
 static void
-meta_monitor_normal_calculate_crtc_pos (MetaMonitor         *monitor,
-                                        MetaMonitorMode     *monitor_mode,
-                                        MetaOutput          *output,
-                                        MetaMonitorTransform crtc_transform,
-                                        int                 *out_x,
-                                        int                 *out_y)
+meta_monitor_normal_calculate_crtc_pos (MetaMonitor          *monitor,
+                                        MetaMonitorMode      *monitor_mode,
+                                        MetaOutput           *output,
+                                        MetaMonitorTransform  crtc_transform,
+                                        int                  *out_x,
+                                        int                  *out_y)
 {
   *out_x = 0;
   *out_y = 0;
@@ -851,7 +950,7 @@ create_tiled_monitor_mode (MetaMonitorTiled *monitor_tiled,
   mode = g_new0 (MetaMonitorModeTiled, 1);
   mode->is_tiled = TRUE;
   meta_monitor_tiled_calculate_tiled_size (monitor, &width, &height);
-
+  mode->parent.monitor = monitor;
   mode->parent.spec =
     meta_monitor_create_spec (monitor, width, height, reference_crtc_mode);
   mode->parent.id = generate_mode_id (&mode->parent.spec);
@@ -961,8 +1060,8 @@ create_untiled_monitor_mode (MetaMonitorTiled *monitor_tiled,
     return NULL;
 
   mode = g_new0 (MetaMonitorModeTiled, 1);
-
   mode->is_tiled = FALSE;
+  mode->parent.monitor = monitor;
   mode->parent.spec = meta_monitor_create_spec (monitor,
                                                 crtc_mode->width,
                                                 crtc_mode->height,
@@ -1180,10 +1279,10 @@ meta_monitor_tiled_generate_modes (MetaMonitorTiled *monitor_tiled)
 }
 
 MetaMonitorTiled *
-meta_monitor_tiled_new (MetaGpu    *gpu,
-                        MetaOutput *output)
+meta_monitor_tiled_new (MetaGpu            *gpu,
+                        MetaMonitorManager *monitor_manager,
+                        MetaOutput         *output)
 {
-  MetaMonitorManager *monitor_manager;
   MetaMonitorTiled *monitor_tiled;
   MetaMonitor *monitor;
   MetaMonitorPrivate *monitor_priv;
@@ -1204,11 +1303,14 @@ meta_monitor_tiled_new (MetaGpu    *gpu,
 
   meta_monitor_generate_spec (monitor);
 
-  monitor_manager = meta_gpu_get_monitor_manager (gpu);
+  monitor_tiled->monitor_manager = monitor_manager;
   meta_monitor_manager_tiled_monitor_added (monitor_manager,
                                             META_MONITOR (monitor_tiled));
 
   meta_monitor_tiled_generate_modes (monitor_tiled);
+
+  monitor_priv->display_name = meta_monitor_make_display_name (monitor,
+                                                               monitor_manager);
 
   return monitor_tiled;
 }
@@ -1266,12 +1368,12 @@ meta_monitor_tiled_get_suggested_position (MetaMonitor *monitor,
 }
 
 static void
-meta_monitor_tiled_calculate_crtc_pos (MetaMonitor         *monitor,
-                                       MetaMonitorMode     *monitor_mode,
-                                       MetaOutput          *output,
-                                       MetaMonitorTransform crtc_transform,
-                                       int                 *out_x,
-                                       int                 *out_y)
+meta_monitor_tiled_calculate_crtc_pos (MetaMonitor          *monitor,
+                                       MetaMonitorMode      *monitor_mode,
+                                       MetaOutput           *output,
+                                       MetaMonitorTransform  crtc_transform,
+                                       int                  *out_x,
+                                       int                  *out_y)
 {
   MetaMonitorModeTiled *mode_tiled = (MetaMonitorModeTiled *) monitor_mode;
 
@@ -1290,14 +1392,10 @@ meta_monitor_tiled_calculate_crtc_pos (MetaMonitor         *monitor,
 static void
 meta_monitor_tiled_finalize (GObject *object)
 {
-  MetaMonitor *monitor = META_MONITOR (object);
-  MetaMonitorPrivate *monitor_priv =
-    meta_monitor_get_instance_private (monitor);
-  MetaMonitorManager *monitor_manager;
+  MetaMonitorTiled *monitor_tiled = META_MONITOR_TILED (object);
 
-  monitor_manager = meta_gpu_get_monitor_manager (monitor_priv->gpu);
-  meta_monitor_manager_tiled_monitor_removed (monitor_manager,
-                                              monitor);
+  meta_monitor_manager_tiled_monitor_removed (monitor_tiled->monitor_manager,
+                                              META_MONITOR (monitor_tiled));
 
   G_OBJECT_CLASS (meta_monitor_tiled_parent_class)->finalize (object);
 }
@@ -1460,12 +1558,12 @@ meta_monitor_get_modes (MetaMonitor *monitor)
 }
 
 void
-meta_monitor_calculate_crtc_pos (MetaMonitor         *monitor,
-                                 MetaMonitorMode     *monitor_mode,
-                                 MetaOutput          *output,
-                                 MetaMonitorTransform crtc_transform,
-                                 int                 *out_x,
-                                 int                 *out_y)
+meta_monitor_calculate_crtc_pos (MetaMonitor          *monitor,
+                                 MetaMonitorMode      *monitor_mode,
+                                 MetaOutput           *output,
+                                 MetaMonitorTransform  crtc_transform,
+                                 int                  *out_x,
+                                 int                  *out_y)
 {
   META_MONITOR_GET_CLASS (monitor)->calculate_crtc_pos (monitor,
                                                         monitor_mode,
@@ -1523,10 +1621,7 @@ calculate_scale (MetaMonitor     *monitor,
    * Somebody encoded the aspect ratio (16/9 or 16/10) instead of the physical
    * size.
    */
-  if ((width_mm == 160 && height_mm == 90) ||
-      (width_mm == 160 && height_mm == 100) ||
-      (width_mm == 16 && height_mm == 9) ||
-      (width_mm == 16 && height_mm == 10))
+  if (meta_monitor_has_aspect_as_size (monitor))
     goto out;
 
   if (width_mm > 0 && height_mm > 0)
@@ -1564,16 +1659,23 @@ meta_monitor_calculate_mode_scale (MetaMonitor     *monitor,
 }
 
 static gboolean
-is_logical_size_large_enough (gint width, gint height)
+is_logical_size_large_enough (int width,
+                              int height)
 {
-  return width >= MINIMUM_LOGICAL_WIDTH &&
-         height >= MINIMUM_LOGICAL_HEIGHT;
+  return width * height >= MINIMUM_LOGICAL_AREA;
 }
 
 gboolean
 meta_monitor_mode_should_be_advertised (MetaMonitorMode *monitor_mode)
 {
+  MetaMonitorMode *preferred_mode;
+
   g_return_val_if_fail (monitor_mode != NULL, FALSE);
+
+  preferred_mode = meta_monitor_get_preferred_mode (monitor_mode->monitor);
+  if (monitor_mode->spec.width == preferred_mode->spec.width &&
+      monitor_mode->spec.height == preferred_mode->spec.height)
+    return TRUE;
 
   return is_logical_size_large_enough (monitor_mode->spec.width,
                                        monitor_mode->spec.height);
@@ -1582,15 +1684,13 @@ meta_monitor_mode_should_be_advertised (MetaMonitorMode *monitor_mode)
 static float
 get_closest_scale_factor_for_resolution (float width,
                                          float height,
-                                         float scale,
-                                         float scale_step)
+                                         float scale)
 {
   unsigned int i, j;
   float scaled_h;
   float scaled_w;
   float best_scale;
   int base_scaled_w;
-  gboolean limit_exceeded;
   gboolean found_one;
 
   best_scale = 0;
@@ -1607,12 +1707,10 @@ get_closest_scale_factor_for_resolution (float width,
 
   i = 0;
   found_one = FALSE;
-  limit_exceeded = FALSE;
   base_scaled_w = floorf (scaled_w);
 
   do
     {
-
       for (j = 0; j < 2; j++)
         {
           float current_scale;
@@ -1622,13 +1720,12 @@ get_closest_scale_factor_for_resolution (float width,
           current_scale = width / scaled_w;
           scaled_h = height / current_scale;
 
-          if (current_scale >= scale + scale_step ||
-              current_scale <= scale - scale_step ||
+          if (current_scale >= scale + SCALE_FACTORS_STEPS ||
+              current_scale <= scale - SCALE_FACTORS_STEPS ||
               current_scale < MINIMUM_SCALE_FACTOR ||
               current_scale > MAXIMUM_SCALE_FACTOR)
             {
-              limit_exceeded = TRUE;
-              continue;
+              goto out;
             }
 
           if (floorf (scaled_h) == scaled_h)
@@ -1642,24 +1739,22 @@ get_closest_scale_factor_for_resolution (float width,
 
       i++;
     }
-  while (!found_one && !limit_exceeded);
+  while (!found_one);
 
 out:
   return best_scale;
 }
 
 float *
-meta_monitor_calculate_supported_scales (MetaMonitor                *monitor,
-                                         MetaMonitorMode            *monitor_mode,
-                                         MetaMonitorScalesConstraint constraints,
-                                         int                        *n_supported_scales)
+meta_monitor_calculate_supported_scales (MetaMonitor                 *monitor,
+                                         MetaMonitorMode             *monitor_mode,
+                                         MetaMonitorScalesConstraint  constraints,
+                                         int                         *n_supported_scales)
 {
   unsigned int i, j;
   int width, height;
-  float scale_steps;
   GArray *supported_scales;
 
-  scale_steps = 1.0 / (float) SCALE_FACTORS_PER_INTEGER;
   supported_scales = g_array_new (FALSE, FALSE, sizeof (float));
 
   meta_monitor_mode_get_resolution (monitor_mode, &width, &height);
@@ -1671,7 +1766,7 @@ meta_monitor_calculate_supported_scales (MetaMonitor                *monitor,
       for (j = 0; j < SCALE_FACTORS_PER_INTEGER; j++)
         {
           float scale;
-          float scale_value = i + j * scale_steps;
+          float scale_value = i + j * SCALE_FACTORS_STEPS;
 
           if ((constraints & META_MONITOR_SCALES_CONSTRAINT_NO_FRAC) &&
               fmodf (scale_value, 1.0) != 0.0)
@@ -1681,8 +1776,7 @@ meta_monitor_calculate_supported_scales (MetaMonitor                *monitor,
 
           scale = get_closest_scale_factor_for_resolution (width,
                                                            height,
-                                                           scale_value,
-                                                           scale_steps);
+                                                           scale_value);
 
           if (scale > 0.0f)
             g_array_append_val (supported_scales, scale);
@@ -1735,11 +1829,11 @@ meta_monitor_mode_get_flags (MetaMonitorMode *monitor_mode)
 }
 
 gboolean
-meta_monitor_mode_foreach_crtc (MetaMonitor        *monitor,
-                                MetaMonitorMode    *mode,
-                                MetaMonitorModeFunc func,
-                                gpointer            user_data,
-                                GError            **error)
+meta_monitor_mode_foreach_crtc (MetaMonitor          *monitor,
+                                MetaMonitorMode      *mode,
+                                MetaMonitorModeFunc   func,
+                                gpointer              user_data,
+                                GError              **error)
 {
   MetaMonitorPrivate *monitor_priv =
     meta_monitor_get_instance_private (monitor);
@@ -1761,11 +1855,11 @@ meta_monitor_mode_foreach_crtc (MetaMonitor        *monitor,
 }
 
 gboolean
-meta_monitor_mode_foreach_output (MetaMonitor        *monitor,
-                                  MetaMonitorMode    *mode,
-                                  MetaMonitorModeFunc func,
-                                  gpointer            user_data,
-                                  GError            **error)
+meta_monitor_mode_foreach_output (MetaMonitor          *monitor,
+                                  MetaMonitorMode      *mode,
+                                  MetaMonitorModeFunc   func,
+                                  gpointer              user_data,
+                                  GError              **error)
 {
   MetaMonitorPrivate *monitor_priv =
     meta_monitor_get_instance_private (monitor);
@@ -1781,4 +1875,13 @@ meta_monitor_mode_foreach_output (MetaMonitor        *monitor,
     }
 
   return TRUE;
+}
+
+const char *
+meta_monitor_get_display_name (MetaMonitor *monitor)
+{
+  MetaMonitorPrivate *monitor_priv =
+    meta_monitor_get_instance_private (monitor);
+
+  return monitor_priv->display_name;
 }

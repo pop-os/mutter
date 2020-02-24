@@ -26,9 +26,7 @@
  * Author: Emmanuele Bassi <ebassi@openedhand.com>
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #include <stdarg.h>
 #include <glib-object.h>
@@ -199,8 +197,7 @@ clutter_container_default_init (ClutterContainerInterface *iface)
                   iface_type,
                   G_SIGNAL_RUN_FIRST,
                   G_STRUCT_OFFSET (ClutterContainerIface, actor_added),
-                  NULL, NULL,
-                  _clutter_marshal_VOID__OBJECT,
+                  NULL, NULL, NULL,
                   G_TYPE_NONE, 1,
                   CLUTTER_TYPE_ACTOR);
   /**
@@ -218,8 +215,7 @@ clutter_container_default_init (ClutterContainerInterface *iface)
                   iface_type,
                   G_SIGNAL_RUN_FIRST,
                   G_STRUCT_OFFSET (ClutterContainerIface, actor_removed),
-                  NULL, NULL,
-                  _clutter_marshal_VOID__OBJECT,
+                  NULL, NULL, NULL,
                   G_TYPE_NONE, 1,
                   CLUTTER_TYPE_ACTOR);
 

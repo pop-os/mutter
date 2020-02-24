@@ -22,13 +22,15 @@
  * @short_description: objects holding images loaded from files, used for backgrounds
  */
 
-#include <config.h>
+#include "config.h"
 
-#include <gio/gio.h>
+#include "meta/meta-background-image.h"
+
 #include <gdk-pixbuf/gdk-pixbuf.h>
-#include <clutter/clutter.h>
-#include <meta/meta-background-image.h>
-#include "cogl-utils.h"
+#include <gio/gio.h>
+
+#include "clutter/clutter.h"
+#include "compositor/cogl-utils.h"
 
 enum
 {
@@ -38,6 +40,13 @@ enum
 
 static guint signals[LAST_SIGNAL] = { 0 };
 
+/**
+ * MetaBackgroundImageCache:
+ *
+ * #MetaBackgroundImageCache caches loading of textures for backgrounds; there's actually
+ * nothing background specific about it, other than it is tuned to work well for
+ * large images as typically are used for backgrounds.
+ */
 struct _MetaBackgroundImageCache
 {
   GObject parent_instance;
@@ -45,11 +54,11 @@ struct _MetaBackgroundImageCache
   GHashTable *images;
 };
 
-struct _MetaBackgroundImageCacheClass
-{
-  GObjectClass parent_class;
-};
-
+/**
+ * MetaBackgroundImage:
+ *
+ * #MetaBackgroundImage is an object that represents a loaded or loading background image.
+ */
 struct _MetaBackgroundImage
 {
   GObject parent_instance;
@@ -58,11 +67,6 @@ struct _MetaBackgroundImage
   gboolean in_cache;
   gboolean loaded;
   CoglTexture *texture;
-};
-
-struct _MetaBackgroundImageClass
-{
-  GObjectClass parent_class;
 };
 
 G_DEFINE_TYPE (MetaBackgroundImageCache, meta_background_image_cache, G_TYPE_OBJECT);
@@ -152,7 +156,7 @@ file_loaded (GObject      *source_object,
 {
   MetaBackgroundImage *image = META_BACKGROUND_IMAGE (source_object);
   GError *error = NULL;
-  CoglError *catch_error = NULL;
+  GError *catch_error = NULL;
   GTask *task;
   CoglTexture *texture;
   GdkPixbuf *pixbuf, *rotated;
@@ -197,7 +201,7 @@ file_loaded (GObject      *source_object,
                               &catch_error))
     {
       g_warning ("Failed to create texture for background");
-      cogl_error_free (catch_error);
+      g_error_free (catch_error);
       cogl_object_unref (texture);
     }
 

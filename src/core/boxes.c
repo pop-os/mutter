@@ -28,9 +28,15 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "boxes-private.h"
-#include <meta/util.h>
-#include <X11/Xutil.h>  /* Just for the definition of the various gravities */
+#include "config.h"
+
+#include "backends/meta-monitor-transform.h"
+#include "core/boxes-private.h"
+
+#include <math.h>
+#include <X11/Xutil.h>
+
+#include "meta/util.h"
 
 /* It would make sense to use GSlice here, but until we clean up the
  * rest of this file and the internal API to use these functions, we
@@ -49,17 +55,8 @@ meta_rectangle_free (MetaRectangle *rect)
   g_free (rect);
 }
 
-GType
-meta_rectangle_get_type (void)
-{
-  static GType type_id = 0;
-
-  if (!type_id)
-    type_id = g_boxed_type_register_static (g_intern_static_string ("MetaRectangle"),
-					    (GBoxedCopyFunc) meta_rectangle_copy,
-					    (GBoxedFreeFunc) meta_rectangle_free);
-  return type_id;
-}
+G_DEFINE_BOXED_TYPE (MetaRectangle, meta_rectangle,
+                     meta_rectangle_copy, meta_rectangle_free);
 
 char*
 meta_rectangle_to_string (const MetaRectangle *rect,
@@ -437,8 +434,8 @@ merge_spanning_rects_in_region (GList *region)
 
   if (region == NULL)
     {
-      meta_warning ("Region to merge was empty!  Either you have a some "
-                    "pathological STRUT list or there's a bug somewhere!\n");
+      g_warning ("Region to merge was empty!  Either you have a some "
+                 "pathological STRUT list or there's a bug somewhere!\n");
       return NULL;
     }
 
@@ -462,7 +459,7 @@ merge_spanning_rects_in_region (GList *region)
               delete_me = other;
             }
           /* If b contains a, just remove a */
-          else if (meta_rectangle_contains_rect (a, b))
+          else if (meta_rectangle_contains_rect (b, a))
             {
               delete_me = compare;
             }
@@ -845,10 +842,7 @@ meta_rectangle_expand_to_avoiding_struts (MetaRectangle       *rect,
 void
 meta_rectangle_free_list_and_elements (GList *filled_list)
 {
-  g_list_foreach (filled_list,
-                  (void (*)(gpointer,gpointer))&g_free, /* ew, for ugly */
-                  NULL);
-  g_list_free (filled_list);
+  g_list_free_full (filled_list, g_free);
 }
 
 gboolean
@@ -961,7 +955,7 @@ meta_rectangle_clamp_to_fit_into_region (const GList         *spanning_rects,
   /* Clamp rect appropriately */
   if (best_rect == NULL)
     {
-      meta_warning ("No rect whose size to clamp to found!\n");
+      g_warning ("No rect whose size to clamp to found!\n");
 
       /* If it doesn't fit, at least make it no bigger than it has to be */
       if (!(fixed_directions & FIXED_DIRECTION_X))
@@ -1024,7 +1018,9 @@ meta_rectangle_clip_to_region (const GList         *spanning_rects,
 
   /* Clip rect appropriately */
   if (best_rect == NULL)
-    meta_warning ("No rect to clip to found!\n");
+    {
+      g_warning ("No rect to clip to found!\n");
+    }
   else
     {
       /* Extra precaution with checking fixed direction shouldn't be needed
@@ -1120,7 +1116,9 @@ meta_rectangle_shove_into_region (const GList         *spanning_rects,
 
   /* Shove rect appropriately */
   if (best_rect == NULL)
-    meta_warning ("No rect to shove into found!\n");
+    {
+      g_warning ("No rect to shove into found!\n");
+    }
   else
     {
       /* Extra precaution with checking fixed direction shouldn't be needed
@@ -1237,6 +1235,7 @@ meta_rectangle_edge_aligns (const MetaRectangle *rect, const MetaEdge *edge)
              BOX_LEFT (edge->rect) <= BOX_RIGHT (*rect);
     default:
       g_assert_not_reached ();
+      return FALSE;
     }
 }
 
@@ -2015,7 +2014,7 @@ meta_rectangle_find_nonintersected_monitor_edges (
 }
 
 gboolean
-meta_rectangle_is_adjecent_to (MetaRectangle *rect,
+meta_rectangle_is_adjacent_to (MetaRectangle *rect,
                                MetaRectangle *other)
 {
   int rect_x1 = rect->x;
@@ -2035,4 +2034,139 @@ meta_rectangle_is_adjecent_to (MetaRectangle *rect,
     return TRUE;
   else
     return FALSE;
+}
+
+void
+meta_rectangle_scale_double (const MetaRectangle  *rect,
+                             double                scale,
+                             MetaRoundingStrategy  rounding_strategy,
+                             MetaRectangle        *dest)
+{
+  ClutterRect tmp = CLUTTER_RECT_INIT (rect->x, rect->y,
+                                       rect->width, rect->height);
+
+  clutter_rect_scale (&tmp, scale, scale);
+  meta_rectangle_from_clutter_rect (&tmp, rounding_strategy, dest);
+}
+
+void
+meta_rectangle_transform (const MetaRectangle  *rect,
+                          MetaMonitorTransform  transform,
+                          int                   width,
+                          int                   height,
+                          MetaRectangle        *dest)
+{
+  switch (transform)
+    {
+    case META_MONITOR_TRANSFORM_NORMAL:
+      *dest = *rect;
+      break;
+    case META_MONITOR_TRANSFORM_90:
+      *dest = (MetaRectangle) {
+        .x = width - (rect->y + rect->height),
+        .y = rect->x,
+        .width = rect->height,
+        .height = rect->width,
+      };
+      break;
+    case META_MONITOR_TRANSFORM_180:
+      *dest = (MetaRectangle) {
+        .x = width - (rect->x + rect->width),
+        .y = height - (rect->y + rect->height),
+        .width = rect->width,
+        .height = rect->height,
+      };
+      break;
+    case META_MONITOR_TRANSFORM_270:
+      *dest = (MetaRectangle) {
+        .x = rect->y,
+        .y = height - (rect->x + rect->width),
+        .width = rect->height,
+        .height = rect->width,
+      };
+      break;
+    case META_MONITOR_TRANSFORM_FLIPPED:
+      *dest = (MetaRectangle) {
+        .x = width - (rect->x + rect->width),
+        .y = rect->y,
+        .width = rect->width,
+        .height = rect->height,
+      };
+      break;
+    case META_MONITOR_TRANSFORM_FLIPPED_90:
+      *dest = (MetaRectangle) {
+        .x = width - (rect->y + rect->height),
+        .y = height - (rect->x + rect->width),
+        .width = rect->height,
+        .height = rect->width,
+      };
+      break;
+    case META_MONITOR_TRANSFORM_FLIPPED_180:
+      *dest = (MetaRectangle) {
+        .x = rect->x,
+        .y = height - (rect->y + rect->height),
+        .width = rect->width,
+        .height = rect->height,
+      };
+      break;
+    case META_MONITOR_TRANSFORM_FLIPPED_270:
+      *dest = (MetaRectangle) {
+        .x = rect->y,
+        .y = rect->x,
+        .width = rect->height,
+        .height = rect->width,
+      };
+      break;
+    }
+}
+
+void
+meta_rectangle_from_clutter_rect (ClutterRect          *rect,
+                                  MetaRoundingStrategy  rounding_strategy,
+                                  MetaRectangle        *dest)
+{
+  switch (rounding_strategy)
+    {
+    case META_ROUNDING_STRATEGY_SHRINK:
+      {
+        *dest = (MetaRectangle) {
+          .x = ceilf (rect->origin.x),
+          .y = ceilf (rect->origin.y),
+          .width = floorf (rect->size.width),
+          .height = floorf (rect->size.height),
+        };
+      }
+      break;
+    case META_ROUNDING_STRATEGY_GROW:
+      {
+        ClutterRect clamped = *rect;
+        clutter_rect_clamp_to_pixel (&clamped);
+
+        *dest = (MetaRectangle) {
+          .x = clamped.origin.x,
+          .y = clamped.origin.y,
+          .width = clamped.size.width,
+          .height = clamped.size.height,
+        };
+      }
+      break;
+    }
+}
+
+void
+meta_rectangle_crop_and_scale (const MetaRectangle *rect,
+                               ClutterRect         *src_rect,
+                               int                  dst_width,
+                               int                  dst_height,
+                               MetaRectangle       *dest)
+{
+  ClutterRect tmp = CLUTTER_RECT_INIT (rect->x, rect->y,
+                                       rect->width, rect->height);
+
+  clutter_rect_scale (&tmp,
+                      src_rect->size.width / dst_width,
+                      src_rect->size.height / dst_height);
+  clutter_rect_offset (&tmp, src_rect->origin.x, src_rect->origin.y);
+
+  meta_rectangle_from_clutter_rect (&tmp, META_ROUNDING_STRATEGY_GROW, dest);
 }

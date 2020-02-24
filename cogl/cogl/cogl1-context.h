@@ -42,7 +42,7 @@
 #include <cogl/cogl-framebuffer.h>
 #include <cogl/cogl-macros.h>
 
-COGL_BEGIN_DECLS
+G_BEGIN_DECLS
 
 /**
  * cogl_get_option_group:
@@ -56,7 +56,7 @@ COGL_BEGIN_DECLS
  * Since: 1.0
  * Deprecated: 1.16: Not replaced
  */
-COGL_DEPRECATED_IN_1_16
+COGL_DEPRECATED
 GOptionGroup *
 cogl_get_option_group (void);
 
@@ -71,7 +71,7 @@ cogl_get_option_group (void);
  * Since: 0.8
  * Deprecated: 1.10: Use cogl_foreach_feature() instead
  */
-COGL_DEPRECATED_IN_1_10_FOR (cogl_foreach_feature)
+COGL_DEPRECATED_FOR (cogl_foreach_feature)
 CoglFeatureFlags
 cogl_get_features (void);
 
@@ -87,8 +87,8 @@ cogl_get_features (void);
  * Return value: %TRUE if the features are available, %FALSE otherwise.
  * Deprecated: 1.10: Use cogl_has_feature() instead
  */
-COGL_DEPRECATED_IN_1_10_FOR (cogl_has_feature)
-CoglBool
+COGL_DEPRECATED_FOR (cogl_has_feature)
+gboolean
 cogl_features_available (CoglFeatureFlags features);
 
 /**
@@ -106,7 +106,7 @@ cogl_features_available (CoglFeatureFlags features);
  * Return value: a pointer to the requested function or %NULL if the
  *   function is not available.
  */
-CoglFuncPtr
+GCallback
 cogl_get_proc_address (const char *name);
 
 /**
@@ -122,11 +122,11 @@ cogl_get_proc_address (const char *name);
  *   not appropriate to expose OpenGL extensions through the Cogl API. This
  *   function can be replaced by the following equivalent code:
  * |[
- *   CoglBool retval = (strstr (ext, name) != NULL) ? TRUE : FALSE;
+ *   gboolean retval = (strstr (ext, name) != NULL) ? TRUE : FALSE;
  * ]|
  */
 COGL_DEPRECATED
-CoglBool
+gboolean
 cogl_check_extension (const char *name,
                       const char *ext);
 
@@ -144,7 +144,7 @@ cogl_check_extension (const char *name,
  * Deprecated: 1.8: Use cogl_framebuffer_get_red/green/blue/alpha_bits()
  *                  instead
  */
-COGL_DEPRECATED_IN_1_8_FOR (cogl_framebuffer_get_red_OR_green_OR_blue_OR_alpha_bits)
+COGL_DEPRECATED_FOR (cogl_framebuffer_get_red_OR_green_OR_blue_OR_alpha_bits)
 void
 cogl_get_bitmasks (int *red,
                    int *green,
@@ -168,7 +168,7 @@ cogl_get_bitmasks (int *red,
  *
  * Deprecated: 1.10: Use cogl_framebuffer_perspective() instead
  */
-COGL_DEPRECATED_IN_1_10_FOR (cogl_framebuffer_perspective)
+COGL_DEPRECATED_FOR (cogl_framebuffer_perspective)
 void
 cogl_perspective (float fovy,
                   float aspect,
@@ -195,7 +195,7 @@ cogl_perspective (float fovy,
  * Since: 0.8.2
  * Deprecated: 1.10: Use cogl_framebuffer_frustum() instead
  */
-COGL_DEPRECATED_IN_1_10_FOR (cogl_framebuffer_frustum)
+COGL_DEPRECATED_FOR (cogl_framebuffer_frustum)
 void
 cogl_frustum (float left,
               float right,
@@ -234,7 +234,7 @@ cogl_frustum (float left,
  * Since: 1.0
  * Deprecated: 1.10: Use cogl_framebuffer_orthographic() instead
  */
-COGL_DEPRECATED_IN_1_10_FOR (cogl_framebuffer_orthographic)
+COGL_DEPRECATED_FOR (cogl_framebuffer_orthographic)
 void
 cogl_ortho (float left,
             float right,
@@ -253,7 +253,7 @@ cogl_ortho (float left,
  * Since: 0.8.2
  * Deprecated: 1.8: Use cogl_framebuffer_set_viewport instead
  */
-COGL_DEPRECATED_IN_1_8_FOR (cogl_framebuffer_set_viewport)
+COGL_DEPRECATED_FOR (cogl_framebuffer_set_viewport)
 void
 cogl_viewport (unsigned int width,
 	       unsigned int height);
@@ -270,7 +270,7 @@ cogl_viewport (unsigned int width,
  * Since: 1.2
  * Deprecated: 1.8: Use cogl_framebuffer_set_viewport() instead
  */
-COGL_DEPRECATED_IN_1_8_FOR (cogl_framebuffer_set_viewport)
+COGL_DEPRECATED_FOR (cogl_framebuffer_set_viewport)
 void
 cogl_set_viewport (int x,
                    int y,
@@ -285,7 +285,7 @@ cogl_set_viewport (int x,
  *
  * Deprecated: 1.10: Use cogl_framebuffer_push_matrix() instead
  */
-COGL_DEPRECATED_IN_1_10_FOR (cogl_framebuffer_push_matrix)
+COGL_DEPRECATED_FOR (cogl_framebuffer_push_matrix)
 void
 cogl_push_matrix (void);
 
@@ -296,7 +296,7 @@ cogl_push_matrix (void);
  *
  * Deprecated: 1.10: Use cogl_framebuffer_pop_matrix() instead
  */
-COGL_DEPRECATED_IN_1_10_FOR (cogl_framebuffer_push_matrix)
+COGL_DEPRECATED_FOR (cogl_framebuffer_push_matrix)
 void
 cogl_pop_matrix (void);
 
@@ -311,7 +311,7 @@ cogl_pop_matrix (void);
  *
  * Deprecated: 1.10: Use cogl_framebuffer_pop_matrix() instead
  */
-COGL_DEPRECATED_IN_1_10_FOR (cogl_framebuffer_scale)
+COGL_DEPRECATED_FOR (cogl_framebuffer_scale)
 void
 cogl_scale (float x,
             float y,
@@ -328,7 +328,7 @@ cogl_scale (float x,
  *
  * Deprecated: 1.10: Use cogl_framebuffer_translate() instead
  */
-COGL_DEPRECATED_IN_1_10_FOR (cogl_framebuffer_translate)
+COGL_DEPRECATED_FOR (cogl_framebuffer_translate)
 void
 cogl_translate (float x,
                 float y,
@@ -349,7 +349,7 @@ cogl_translate (float x,
  *
  * Deprecated: 1.10: Use cogl_framebuffer_rotate() instead
  */
-COGL_DEPRECATED_IN_1_10_FOR (cogl_framebuffer_rotate)
+COGL_DEPRECATED_FOR (cogl_framebuffer_rotate)
 void
 cogl_rotate (float angle,
              float x,
@@ -365,7 +365,7 @@ cogl_rotate (float angle,
  * Since: 1.4
  * Deprecated: 1.10: Use cogl_framebuffer_transform() instead
  */
-COGL_DEPRECATED_IN_1_10_FOR (cogl_framebuffer_transform)
+COGL_DEPRECATED_FOR (cogl_framebuffer_transform)
 void
 cogl_transform (const CoglMatrix *matrix);
 
@@ -378,7 +378,7 @@ cogl_transform (const CoglMatrix *matrix);
  * Deprecated: 1.10: Use cogl_framebuffer_get_modelview_matrix()
  *                   instead
  */
-COGL_DEPRECATED_IN_1_10_FOR (cogl_framebuffer_get_modelview_matrix)
+COGL_DEPRECATED_FOR (cogl_framebuffer_get_modelview_matrix)
 void
 cogl_get_modelview_matrix (CoglMatrix *matrix);
 
@@ -391,7 +391,7 @@ cogl_get_modelview_matrix (CoglMatrix *matrix);
  * Deprecated: 1.10: Use cogl_framebuffer_set_modelview_matrix()
  *                   instead
  */
-COGL_DEPRECATED_IN_1_10_FOR (cogl_framebuffer_set_modelview_matrix)
+COGL_DEPRECATED_FOR (cogl_framebuffer_set_modelview_matrix)
 void
 cogl_set_modelview_matrix (CoglMatrix *matrix);
 
@@ -404,7 +404,7 @@ cogl_set_modelview_matrix (CoglMatrix *matrix);
  * Deprecated: 1.10: Use cogl_framebuffer_get_projection_matrix()
  *                   instead
  */
-COGL_DEPRECATED_IN_1_10_FOR (cogl_framebuffer_get_projection_matrix)
+COGL_DEPRECATED_FOR (cogl_framebuffer_get_projection_matrix)
 void
 cogl_get_projection_matrix (CoglMatrix *matrix);
 
@@ -417,7 +417,7 @@ cogl_get_projection_matrix (CoglMatrix *matrix);
  * Deprecated: 1.10: Use cogl_framebuffer_set_projection_matrix()
  *                   instead
  */
-COGL_DEPRECATED_IN_1_10_FOR (cogl_framebuffer_set_projection_matrix)
+COGL_DEPRECATED_FOR (cogl_framebuffer_set_projection_matrix)
 void
 cogl_set_projection_matrix (CoglMatrix *matrix);
 
@@ -433,7 +433,7 @@ cogl_set_projection_matrix (CoglMatrix *matrix);
  * Deprecated: 1.10: Use cogl_framebuffer_get_viewport4fv()
  *                   instead
  */
-COGL_DEPRECATED_IN_1_10_FOR (cogl_framebuffer_get_viewport4fv)
+COGL_DEPRECATED_FOR (cogl_framebuffer_get_viewport4fv)
 void
 cogl_get_viewport (float v[4]);
 
@@ -449,9 +449,9 @@ cogl_get_viewport (float v[4]);
  *
  * Deprecated: 1.16: Use cogl_pipeline_set_depth_state() instead
  */
-COGL_DEPRECATED_IN_1_16_FOR (cogl_pipeline_set_depth_state)
+COGL_DEPRECATED_FOR (cogl_pipeline_set_depth_state)
 void
-cogl_set_depth_test_enabled (CoglBool setting);
+cogl_set_depth_test_enabled (gboolean setting);
 
 /**
  * cogl_get_depth_test_enabled:
@@ -462,8 +462,8 @@ cogl_set_depth_test_enabled (CoglBool setting);
  *
  * Deprecated: 1.16: Use cogl_pipeline_set_depth_state() instead
  */
-COGL_DEPRECATED_IN_1_16_FOR (cogl_pipeline_set_depth_state)
-CoglBool
+COGL_DEPRECATED_FOR (cogl_pipeline_set_depth_state)
+gboolean
 cogl_get_depth_test_enabled (void);
 
 /**
@@ -478,9 +478,9 @@ cogl_get_depth_test_enabled (void);
  *
  * Deprecated: 1.16: Use cogl_pipeline_set_cull_face_mode() instead
  */
-COGL_DEPRECATED_IN_1_16_FOR (cogl_pipeline_set_cull_face_mode)
+COGL_DEPRECATED_FOR (cogl_pipeline_set_cull_face_mode)
 void
-cogl_set_backface_culling_enabled (CoglBool setting);
+cogl_set_backface_culling_enabled (gboolean setting);
 
 /**
  * cogl_get_backface_culling_enabled:
@@ -492,8 +492,8 @@ cogl_set_backface_culling_enabled (CoglBool setting);
  *
  * Deprecated: 1.16: Use cogl_pipeline_get_cull_face_mode() instead
  */
-COGL_DEPRECATED_IN_1_16_FOR (cogl_pipeline_get_cull_face_mode)
-CoglBool
+COGL_DEPRECATED_FOR (cogl_pipeline_get_cull_face_mode)
+gboolean
 cogl_get_backface_culling_enabled (void);
 
 /**
@@ -523,7 +523,7 @@ cogl_get_backface_culling_enabled (void);
  *
  * Deprecated: 1.16: Use #CoglSnippet shader api for fog
  */
-COGL_DEPRECATED_IN_1_16_FOR (cogl_snippet_API)
+COGL_DEPRECATED_FOR (cogl_snippet_API)
 void
 cogl_set_fog (const CoglColor *fog_color,
               CoglFogMode mode,
@@ -539,7 +539,7 @@ cogl_set_fog (const CoglColor *fog_color,
  *
  * Deprecated: 1.16: Use #CoglSnippet shader api for fog
  */
-COGL_DEPRECATED_IN_1_16_FOR (cogl_snippet_API)
+COGL_DEPRECATED_FOR (cogl_snippet_API)
 void
 cogl_disable_fog (void);
 
@@ -554,7 +554,7 @@ cogl_disable_fog (void);
  *
  * Deprecated: 1.16: Use cogl_framebuffer_clear() api instead
  */
-COGL_DEPRECATED_IN_1_16_FOR (cogl_framebuffer_clear)
+COGL_DEPRECATED_FOR (cogl_framebuffer_clear)
 void
 cogl_clear (const CoglColor *color,
             unsigned long buffers);
@@ -573,7 +573,7 @@ cogl_clear (const CoglColor *color,
  *                   #CoglPipeline argument so this stack of
  *                   #CoglMaterial<!-- -->s shouldn't be used.
  */
-COGL_DEPRECATED_IN_1_16
+COGL_DEPRECATED
 void
 cogl_set_source (void *material);
 
@@ -596,7 +596,7 @@ cogl_set_source (void *material);
  *                   #CoglPipeline argument so this stack of
  *                   #CoglMaterial<!-- -->s shouldn't be used.
  */
-COGL_DEPRECATED_IN_1_16
+COGL_DEPRECATED
 void *
 cogl_get_source (void);
 
@@ -613,7 +613,7 @@ cogl_get_source (void);
  *                   #CoglPipeline argument so this stack of
  *                   #CoglMaterial<!-- -->s shouldn't be used.
  */
-COGL_DEPRECATED_IN_1_16
+COGL_DEPRECATED
 void
 cogl_push_source (void *material);
 
@@ -629,7 +629,7 @@ cogl_push_source (void *material);
  *                   #CoglPipeline argument so this stack of
  *                   #CoglMaterial<!-- -->s shouldn't be used.
  */
-COGL_DEPRECATED_IN_1_16
+COGL_DEPRECATED
 void
 cogl_pop_source (void);
 
@@ -653,7 +653,7 @@ cogl_pop_source (void);
  *                   #CoglPipeline argument so this stack of
  *                   #CoglMaterial<!-- -->s shouldn't be used.
  */
-COGL_DEPRECATED_IN_1_16
+COGL_DEPRECATED
 void
 cogl_set_source_color (const CoglColor *color);
 
@@ -676,7 +676,7 @@ cogl_set_source_color (const CoglColor *color);
  *                   #CoglPipeline argument so this stack of
  *                   #CoglMaterial<!-- -->s shouldn't be used.
  */
-COGL_DEPRECATED_IN_1_16
+COGL_DEPRECATED
 void
 cogl_set_source_color4ub (uint8_t red,
                           uint8_t green,
@@ -703,7 +703,7 @@ cogl_set_source_color4ub (uint8_t red,
  *                   #CoglPipeline argument so this stack of
  *                   #CoglMaterial<!-- -->s shouldn't be used.
  */
-COGL_DEPRECATED_IN_1_16
+COGL_DEPRECATED
 void
 cogl_set_source_color4f (float red,
                          float green,
@@ -733,7 +733,7 @@ cogl_set_source_color4f (float red,
  *                   #CoglPipeline argument so this stack of
  *                   #CoglMaterial<!-- -->s shouldn't be used.
  */
-COGL_DEPRECATED_IN_1_16
+COGL_DEPRECATED
 void
 cogl_set_source_texture (CoglTexture *texture);
 
@@ -766,97 +766,6 @@ cogl_set_source_texture (CoglTexture *texture);
 void
 cogl_flush (void);
 
-/**
- * cogl_begin_gl:
- *
- * We do not advise nor reliably support the interleaving of raw GL drawing and
- * Cogl drawing functions, but if you insist, cogl_begin_gl() and cogl_end_gl()
- * provide a simple mechanism that may at least give you a fighting chance of
- * succeeding.
- *
- * Note: this doesn't help you modify the behaviour of Cogl drawing functions
- * through the modification of GL state; that will never be reliably supported,
- * but if you are trying to do something like:
- *
- * |[
- * {
- *    - setup some OpenGL state.
- *    - draw using OpenGL (e.g. glDrawArrays() )
- *    - reset modified OpenGL state.
- *    - continue using Cogl to draw
- * }
- * ]|
- *
- * You should surround blocks of drawing using raw GL with cogl_begin_gl()
- * and cogl_end_gl():
- *
- * |[
- * {
- *    cogl_begin_gl ();
- *    - setup some OpenGL state.
- *    - draw using OpenGL (e.g. glDrawArrays() )
- *    - reset modified OpenGL state.
- *    cogl_end_gl ();
- *    - continue using Cogl to draw
- * }
- * ]|
- *
- * Don't ever try and do:
- *
- * |[
- * {
- *    - setup some OpenGL state.
- *    - use Cogl to draw
- *    - reset modified OpenGL state.
- * }
- * ]|
- *
- * When the internals of Cogl evolves, this is very liable to break.
- *
- * This function will flush all batched primitives, and subsequently flush
- * all internal Cogl state to OpenGL as if it were going to draw something
- * itself.
- *
- * The result is that the OpenGL modelview matrix will be setup; the state
- * corresponding to the current source material will be set up and other world
- * state such as backface culling, depth and fogging enabledness will be sent
- * to OpenGL.
- *
- * <note>No special material state is flushed, so if you want Cogl to setup a
- * simplified material state it is your responsibility to set a simple source
- * material before calling cogl_begin_gl(). E.g. by calling
- * cogl_set_source_color4ub().</note>
- *
- * <note>It is your responsibility to restore any OpenGL state that you modify
- * to how it was after calling cogl_begin_gl() if you don't do this then the
- * result of further Cogl calls is undefined.</note>
- *
- * <note>You can not nest begin/end blocks.</note>
- *
- * Again we would like to stress, we do not advise the use of this API and if
- * possible we would prefer to improve Cogl than have developers require raw
- * OpenGL.
- *
- * Since: 1.0
- * Deprecated: 1.16: Use the #CoglGLES2Context api instead
- */
-COGL_DEPRECATED_IN_1_16_FOR (CoglGLES2Context_API)
-void
-cogl_begin_gl (void);
-
-/**
- * cogl_end_gl:
- *
- * This is the counterpart to cogl_begin_gl() used to delimit blocks of drawing
- * code using raw OpenGL. Please refer to cogl_begin_gl() for full details.
- *
- * Since: 1.0
- * Deprecated: 1.16: Use the #CoglGLES2Context api instead
- */
-COGL_DEPRECATED_IN_1_16_FOR (CoglGLES2Context_API)
-void
-cogl_end_gl (void);
-
-COGL_END_DECLS
+G_END_DECLS
 
 #endif /* __COGL_1_CONTEXT_H__ */

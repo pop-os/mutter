@@ -37,9 +37,7 @@
  * See also cogl_get_features() and #CoglFeatureFlags
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #include <stdlib.h>
 #include <string.h>
@@ -66,17 +64,13 @@ clutter_features_from_cogl (guint cogl_flags)
 {
   ClutterFeatureFlags clutter_flags = 0;
   
-  if (cogl_flags & COGL_FEATURE_TEXTURE_NPOT)
-    clutter_flags |= CLUTTER_FEATURE_TEXTURE_NPOT;
-
   if (cogl_flags & COGL_FEATURE_TEXTURE_YUV)
     clutter_flags |= CLUTTER_FEATURE_TEXTURE_YUV;
   
   if (cogl_flags & COGL_FEATURE_TEXTURE_READ_PIXELS)
     clutter_flags |= CLUTTER_FEATURE_TEXTURE_READ_PIXELS;
   
-  if (cogl_flags & COGL_FEATURE_SHADERS_GLSL)
-    clutter_flags |= CLUTTER_FEATURE_SHADERS_GLSL;
+  clutter_flags |= CLUTTER_FEATURE_SHADERS_GLSL;
   
   if (cogl_flags & COGL_FEATURE_OFFSCREEN)
     clutter_flags |= CLUTTER_FEATURE_OFFSCREEN;

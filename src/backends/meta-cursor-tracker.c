@@ -28,27 +28,30 @@
  */
 
 #include "config.h"
-#include "meta-cursor-tracker-private.h"
 
-#include <string.h>
-#include <meta/main.h>
-#include <meta/util.h>
-#include <meta/meta-x11-errors.h>
-
-#include <cogl/cogl.h>
-#include <clutter/clutter.h>
+#include "backends/meta-cursor-tracker-private.h"
 
 #include <gdk/gdk.h>
 #include <gdk/gdkx.h>
+#include <string.h>
 
-#include "meta-backend-private.h"
+#include "backends/meta-backend-private.h"
 #include "backends/x11/cm/meta-cursor-sprite-xfixes.h"
+#include "cogl/cogl.h"
+#include "clutter/clutter.h"
+#include "meta-marshal.h"
+#include "meta/main.h"
+#include "meta/meta-x11-errors.h"
+#include "meta/util.h"
 #include "x11/meta-x11-display-private.h"
 
 G_DEFINE_TYPE (MetaCursorTracker, meta_cursor_tracker, G_TYPE_OBJECT);
 
-enum {
+enum
+{
   CURSOR_CHANGED,
+  CURSOR_MOVED,
+  VISIBILITY_CHANGED,
   LAST_SIGNAL
 };
 
@@ -118,17 +121,22 @@ change_cursor_renderer (MetaCursorTracker *tracker)
 static void
 sync_cursor (MetaCursorTracker *tracker)
 {
-  if (update_displayed_cursor (tracker))
-    g_signal_emit (tracker, signals[CURSOR_CHANGED], 0);
+  gboolean cursor_changed = FALSE;
+
+  cursor_changed = update_displayed_cursor (tracker);
 
   if (update_effective_cursor (tracker))
     change_cursor_renderer (tracker);
+
+  if (cursor_changed)
+    g_signal_emit (tracker, signals[CURSOR_CHANGED], 0);
 }
 
 static void
 meta_cursor_tracker_init (MetaCursorTracker *self)
 {
   self->is_showing = TRUE;
+  self->keep_focus_while_hidden = FALSE;
 }
 
 static void
@@ -159,6 +167,33 @@ meta_cursor_tracker_class_init (MetaCursorTrackerClass *klass)
                                           0,
                                           NULL, NULL, NULL,
                                           G_TYPE_NONE, 0);
+
+  /**
+   * MetaCursorTracker::cursor-moved:
+   * @cursor: The #MetaCursorTracker
+   * @x: The new X coordinate of the cursor
+   * @y: The new Y coordinate of the cursor
+   *
+   * Notifies when the cursor has moved to a new location.
+   */
+  signals[CURSOR_MOVED] = g_signal_new ("cursor-moved",
+                                        G_TYPE_FROM_CLASS (klass),
+                                        G_SIGNAL_RUN_LAST,
+                                        0,
+                                        NULL, NULL,
+                                        meta_marshal_VOID__FLOAT_FLOAT,
+                                        G_TYPE_NONE, 2,
+                                        G_TYPE_FLOAT,
+                                        G_TYPE_FLOAT);
+  g_signal_set_va_marshaller (signals[CURSOR_MOVED],
+                              G_TYPE_FROM_CLASS (klass),
+                              meta_marshal_VOID__FLOAT_FLOATv);
+
+  signals[VISIBILITY_CHANGED] = g_signal_new ("visibility-changed",
+                                              G_TYPE_FROM_CLASS (klass),
+                                              G_SIGNAL_RUN_LAST,
+                                              0, NULL, NULL, NULL,
+                                              G_TYPE_NONE, 0);
 }
 
 /**
@@ -312,6 +347,14 @@ meta_cursor_tracker_unset_window_cursor (MetaCursorTracker *tracker)
   set_window_cursor (tracker, FALSE, NULL);
 }
 
+/**
+ * meta_cursor_tracker_set_root_cursor:
+ * @tracker: a #MetaCursorTracker object.
+ * @cursor_sprite: (transfer none): the new root cursor
+ *
+ * Sets the root cursor (the cursor that is shown if not modified by a window).
+ * The #MetaCursorTracker will take a strong reference to the sprite.
+ */
 void
 meta_cursor_tracker_set_root_cursor (MetaCursorTracker *tracker,
                                      MetaCursorSprite  *cursor_sprite)
@@ -335,6 +378,8 @@ meta_cursor_tracker_update_position (MetaCursorTracker *tracker,
   g_assert (meta_is_wayland_compositor ());
 
   meta_cursor_renderer_set_position (cursor_renderer, new_x, new_y);
+
+  g_signal_emit (tracker, signals[CURSOR_MOVED], 0, new_x, new_y);
 }
 
 static void
@@ -394,6 +439,12 @@ meta_cursor_tracker_get_pointer (MetaCursorTracker   *tracker,
     get_pointer_position_gdk (x, y, (int*)mods);
 }
 
+gboolean
+meta_cursor_tracker_get_pointer_visible (MetaCursorTracker *tracker)
+{
+  return tracker->is_showing;
+}
+
 void
 meta_cursor_tracker_set_pointer_visible (MetaCursorTracker *tracker,
                                          gboolean           visible)
@@ -403,6 +454,46 @@ meta_cursor_tracker_set_pointer_visible (MetaCursorTracker *tracker,
   tracker->is_showing = visible;
 
   sync_cursor (tracker);
+
+  g_signal_emit (tracker, signals[VISIBILITY_CHANGED], 0);
+}
+
+/**
+ * meta_cursor_tracker_get_keep_focus_while_hidden:
+ * @tracker: a #MetaCursorTracker object.
+ *
+ * Returns: %FALSE if the Wayland focus surface of the pointer will
+ * be forced to NULL while the pointer is hidden, %TRUE otherwise.
+ * This function is only meant to be used by the magnifier of the shell
+ * and will be removed in a future release.
+ */
+gboolean
+meta_cursor_tracker_get_keep_focus_while_hidden (MetaCursorTracker *tracker)
+{
+  return tracker->keep_focus_while_hidden;
+}
+
+/**
+ * meta_cursor_tracker_set_keep_focus_while_hidden:
+ * @tracker: a #MetaCursorTracker object.
+ * @keep_focus: whether to keep the cursor focus while hidden
+ *
+ * If this is set to %TRUE, the Wayland focus surface of the pointer will
+ * not be forced to NULL while the pointer is hidden.
+ * This function is only meant to be used by the magnifier of the shell
+ * and will be removed in a future release.
+ */
+void
+meta_cursor_tracker_set_keep_focus_while_hidden (MetaCursorTracker *tracker,
+                                                 gboolean           keep_focus)
+{
+  if (keep_focus == tracker->keep_focus_while_hidden)
+    return;
+  tracker->keep_focus_while_hidden = keep_focus;
+
+  sync_cursor (tracker);
+
+  g_signal_emit (tracker, signals[VISIBILITY_CHANGED], 0);
 }
 
 MetaCursorSprite *

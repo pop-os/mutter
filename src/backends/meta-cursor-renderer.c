@@ -24,16 +24,19 @@
 
 #include "config.h"
 
-#include "meta-cursor-renderer.h"
+#include "backends/meta-cursor-renderer.h"
 
-#include <meta/meta-backend.h>
-#include <meta/util.h>
 #include <math.h>
 
-#include <cogl/cogl.h>
-#include <clutter/clutter.h>
+#include "backends/meta-stage-private.h"
+#include "clutter/clutter.h"
+#include "clutter/clutter-mutter.h"
+#include "cogl/cogl.h"
+#include "meta/meta-backend.h"
+#include "meta/util.h"
 
-#include "meta-stage-private.h"
+G_DEFINE_INTERFACE (MetaHwCursorInhibitor, meta_hw_cursor_inhibitor,
+                    G_TYPE_OBJECT)
 
 struct _MetaCursorRendererPrivate
 {
@@ -44,10 +47,13 @@ struct _MetaCursorRendererPrivate
   MetaOverlay *stage_overlay;
   gboolean handled_by_backend;
   guint post_paint_func_id;
+
+  GList *hw_cursor_inhibitors;
 };
 typedef struct _MetaCursorRendererPrivate MetaCursorRendererPrivate;
 
-enum {
+enum
+{
   CURSOR_PAINTED,
   LAST_SIGNAL
 };
@@ -55,11 +61,53 @@ static guint signals[LAST_SIGNAL];
 
 G_DEFINE_TYPE_WITH_PRIVATE (MetaCursorRenderer, meta_cursor_renderer, G_TYPE_OBJECT);
 
+static gboolean
+meta_hw_cursor_inhibitor_is_cursor_sprite_inhibited (MetaHwCursorInhibitor *inhibitor,
+                                                     MetaCursorSprite      *cursor_sprite)
+{
+  MetaHwCursorInhibitorInterface *iface =
+    META_HW_CURSOR_INHIBITOR_GET_IFACE (inhibitor);
+
+  return iface->is_cursor_sprite_inhibited (inhibitor, cursor_sprite);
+}
+
+static void
+meta_hw_cursor_inhibitor_default_init (MetaHwCursorInhibitorInterface *iface)
+{
+}
+
 void
 meta_cursor_renderer_emit_painted (MetaCursorRenderer *renderer,
                                    MetaCursorSprite   *cursor_sprite)
 {
   g_signal_emit (renderer, signals[CURSOR_PAINTED], 0, cursor_sprite);
+}
+
+static void
+align_cursor_position (MetaCursorRenderer *renderer,
+                       ClutterRect        *rect)
+{
+  MetaCursorRendererPrivate *priv =
+    meta_cursor_renderer_get_instance_private (renderer);
+  MetaBackend *backend = meta_get_backend ();
+  ClutterActor *stage = meta_backend_get_stage (backend);
+  ClutterStageView *view;
+  cairo_rectangle_int_t view_layout;
+  float view_scale;
+
+  view = clutter_stage_get_view_at (CLUTTER_STAGE (stage),
+                                    priv->current_x,
+                                    priv->current_y);
+  if (!view)
+    return;
+
+  clutter_stage_view_get_layout (view, &view_layout);
+  view_scale = clutter_stage_view_get_scale (view);
+
+  clutter_rect_offset (rect, -view_layout.x, -view_layout.y);
+  rect->origin.x = floorf (rect->origin.x * view_scale) / view_scale;
+  rect->origin.y = floorf (rect->origin.y * view_scale) / view_scale;
+  clutter_rect_offset (rect, view_layout.x, view_layout.y);
 }
 
 static void
@@ -72,12 +120,15 @@ queue_redraw (MetaCursorRenderer *renderer,
   CoglTexture *texture;
   ClutterRect rect = CLUTTER_RECT_INIT_ZERO;
 
-  if (cursor_sprite)
-    rect = meta_cursor_renderer_calculate_rect (renderer, cursor_sprite);
-
   /* During early initialization, we can have no stage */
   if (!stage)
     return;
+
+  if (cursor_sprite)
+    {
+      rect = meta_cursor_renderer_calculate_rect (renderer, cursor_sprite);
+      align_cursor_position (renderer, &rect);
+    }
 
   if (!priv->stage_overlay)
     priv->stage_overlay = meta_stage_create_cursor_overlay (META_STAGE (stage));
@@ -282,4 +333,46 @@ meta_cursor_renderer_get_cursor (MetaCursorRenderer *renderer)
   MetaCursorRendererPrivate *priv = meta_cursor_renderer_get_instance_private (renderer);
 
   return priv->displayed_cursor;
+}
+
+void
+meta_cursor_renderer_add_hw_cursor_inhibitor (MetaCursorRenderer    *renderer,
+                                              MetaHwCursorInhibitor *inhibitor)
+{
+  MetaCursorRendererPrivate *priv =
+    meta_cursor_renderer_get_instance_private (renderer);
+
+  priv->hw_cursor_inhibitors = g_list_prepend (priv->hw_cursor_inhibitors,
+                                               inhibitor);
+}
+
+void
+meta_cursor_renderer_remove_hw_cursor_inhibitor (MetaCursorRenderer    *renderer,
+                                                 MetaHwCursorInhibitor *inhibitor)
+{
+  MetaCursorRendererPrivate *priv =
+    meta_cursor_renderer_get_instance_private (renderer);
+
+  priv->hw_cursor_inhibitors = g_list_remove (priv->hw_cursor_inhibitors,
+                                              inhibitor);
+}
+
+gboolean
+meta_cursor_renderer_is_hw_cursors_inhibited (MetaCursorRenderer *renderer,
+                                              MetaCursorSprite   *cursor_sprite)
+{
+  MetaCursorRendererPrivate *priv =
+    meta_cursor_renderer_get_instance_private (renderer);
+  GList *l;
+
+  for (l = priv->hw_cursor_inhibitors; l; l = l->next)
+    {
+      MetaHwCursorInhibitor *inhibitor = l->data;
+
+      if (meta_hw_cursor_inhibitor_is_cursor_sprite_inhibited (inhibitor,
+                                                               cursor_sprite))
+        return TRUE;
+    }
+
+  return FALSE;
 }

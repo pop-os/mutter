@@ -29,8 +29,10 @@
  */
 
 #include "config.h"
-#include "meta-gesture-tracker-private.h"
-#include "meta-surface-actor.h"
+
+#include "core/meta-gesture-tracker-private.h"
+
+#include "compositor/meta-surface-actor.h"
 
 #define DISTANCE_THRESHOLD 30
 
@@ -67,7 +69,8 @@ struct _MetaGestureTrackerPrivate
   guint autodeny_timeout;
 };
 
-enum {
+enum
+{
   PROP_0,
   PROP_AUTODENY_TIMEOUT,
   PROP_LAST,
@@ -75,7 +78,8 @@ enum {
 
 static GParamSpec *obj_props[PROP_LAST];
 
-enum {
+enum
+{
   STATE_CHANGED,
   N_SIGNALS
 };

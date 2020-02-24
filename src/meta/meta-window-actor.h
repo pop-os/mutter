@@ -23,47 +23,36 @@
 #ifndef META_WINDOW_ACTOR_H_
 #define META_WINDOW_ACTOR_H_
 
-#include <clutter/clutter.h>
-#include <X11/Xlib.h>
+#include "clutter/clutter.h"
+#include "meta/compositor.h"
+#include "meta/meta-shaped-texture.h"
 
-#include <meta/compositor.h>
+#define META_TYPE_WINDOW_ACTOR (meta_window_actor_get_type ())
 
-/*
- * MetaWindowActor object (ClutterGroup sub-class)
- */
-#define META_TYPE_WINDOW_ACTOR            (meta_window_actor_get_type ())
-#define META_WINDOW_ACTOR(obj)            (G_TYPE_CHECK_INSTANCE_CAST ((obj), META_TYPE_WINDOW_ACTOR, MetaWindowActor))
-#define META_WINDOW_ACTOR_CLASS(klass)    (G_TYPE_CHECK_CLASS_CAST ((klass), META_TYPE_WINDOW_ACTOR, MetaWindowActorClass))
-#define META_IS_WINDOW_ACTOR(obj)         (G_TYPE_CHECK_INSTANCE_TYPE ((obj), META_TYPE_WINDOW_ACTOR))
-#define META_IS_WINDOW_ACTOR_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE ((klass), META_TYPE_WINDOW_ACTOR))
-#define META_WINDOW_ACTOR_GET_CLASS(obj)  (G_TYPE_INSTANCE_GET_CLASS ((obj), META_TYPE_WINDOW_ACTOR, MetaWindowActorClass))
+META_EXPORT
+G_DECLARE_DERIVABLE_TYPE (MetaWindowActor,
+                          meta_window_actor,
+                          META, WINDOW_ACTOR,
+                          ClutterActor)
 
-typedef struct _MetaWindowActor        MetaWindowActor;
-typedef struct _MetaWindowActorClass   MetaWindowActorClass;
-typedef struct _MetaWindowActorPrivate MetaWindowActorPrivate;
-
-struct _MetaWindowActorClass
-{
-  /*< private >*/
-  ClutterActorClass parent_class;
-};
-
-struct _MetaWindowActor
-{
-  ClutterActor           parent;
-
-  MetaWindowActorPrivate *priv;
-};
-
-GType meta_window_actor_get_type (void);
-
-Window             meta_window_actor_get_x_window         (MetaWindowActor *self);
+META_EXPORT
 MetaWindow *       meta_window_actor_get_meta_window      (MetaWindowActor *self);
-ClutterActor *     meta_window_actor_get_texture          (MetaWindowActor *self);
+
+META_EXPORT
+MetaShapedTexture *meta_window_actor_get_texture          (MetaWindowActor *self);
+
+META_EXPORT
 void               meta_window_actor_sync_visibility      (MetaWindowActor *self);
+
+META_EXPORT
 gboolean       meta_window_actor_is_destroyed (MetaWindowActor *self);
 
-typedef enum {
+META_EXPORT
+cairo_surface_t * meta_window_actor_get_image (MetaWindowActor       *self,
+                                               cairo_rectangle_int_t *clip);
+
+typedef enum
+{
   META_SHADOW_MODE_AUTO,
   META_SHADOW_MODE_FORCED_OFF,
   META_SHADOW_MODE_FORCED_ON,

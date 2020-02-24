@@ -28,10 +28,12 @@
 #include "backends/meta-monitor-config-migration.h"
 #include "backends/meta-monitor-config-store.h"
 #include "backends/meta-output.h"
+#include "core/window-private.h"
 #include "meta-backend-test.h"
 #include "tests/meta-monitor-manager-test.h"
 #include "tests/monitor-test-utils.h"
 #include "tests/test-utils.h"
+#include "x11/meta-x11-display-private.h"
 
 #define ALL_TRANSFORMS ((1 << (META_MONITOR_TRANSFORM_FLIPPED_270 + 1)) - 1)
 
@@ -135,7 +137,7 @@ typedef struct _MonitorTestCaseSetup
 
 typedef struct _MonitorTestCaseMonitorCrtcMode
 {
-  int output;
+  uint64_t output;
   int crtc_mode;
 } MetaTestCaseMonitorCrtcMode;
 
@@ -150,7 +152,7 @@ typedef struct _MonitorTestCaseMonitorMode
 
 typedef struct _MonitorTestCaseMonitor
 {
-  long outputs[MAX_N_OUTPUTS];
+  uint64_t outputs[MAX_N_OUTPUTS];
   int n_outputs;
   MetaMonitorTestCaseMonitorMode modes[MAX_N_MODES];
   int n_modes;
@@ -319,60 +321,105 @@ static MonitorTestCase initial_test_case = {
   }
 };
 
-static TestClient *monitor_test_client = NULL;
+static TestClient *wayland_monitor_test_client = NULL;
+static TestClient *x11_monitor_test_client = NULL;
 
-#define TEST_CLIENT_NAME "client1"
-#define TEST_CLIENT_WINDOW "window1"
+#define WAYLAND_TEST_CLIENT_NAME "wayland_monitor_test_client"
+#define WAYLAND_TEST_CLIENT_WINDOW "window1"
+#define X11_TEST_CLIENT_NAME "x11_monitor_test_client"
+#define X11_TEST_CLIENT_WINDOW "window1"
+
+static gboolean
+monitor_tests_alarm_filter (MetaX11Display        *x11_display,
+                            XSyncAlarmNotifyEvent *event,
+                            gpointer               data)
+{
+  return test_client_alarm_filter (x11_display, event, x11_monitor_test_client);
+}
 
 static void
-create_monitor_test_client (void)
+create_monitor_test_clients (void)
 {
   GError *error = NULL;
 
-  monitor_test_client = test_client_new (TEST_CLIENT_NAME,
-                                         META_WINDOW_CLIENT_TYPE_WAYLAND,
-                                         &error);
-  if (!monitor_test_client)
-    g_error ("Failed to launch test client: %s", error->message);
+  meta_x11_display_set_alarm_filter (meta_get_display ()->x11_display,
+                                     monitor_tests_alarm_filter, NULL);
 
-  if (!test_client_do (monitor_test_client, &error,
-                       "create", TEST_CLIENT_WINDOW,
+  wayland_monitor_test_client = test_client_new (WAYLAND_TEST_CLIENT_NAME,
+                                                 META_WINDOW_CLIENT_TYPE_WAYLAND,
+                                                 &error);
+  if (!wayland_monitor_test_client)
+    g_error ("Failed to launch Wayland test client: %s", error->message);
+
+  x11_monitor_test_client = test_client_new (X11_TEST_CLIENT_NAME,
+                                             META_WINDOW_CLIENT_TYPE_X11,
+                                             &error);
+  if (!x11_monitor_test_client)
+    g_error ("Failed to launch X11 test client: %s", error->message);
+
+  if (!test_client_do (wayland_monitor_test_client, &error,
+                       "create", WAYLAND_TEST_CLIENT_WINDOW,
                        NULL))
-    g_error ("Failed to create window: %s", error->message);
+    g_error ("Failed to create Wayland window: %s", error->message);
 
-  if (!test_client_do (monitor_test_client, &error,
-                       "show", TEST_CLIENT_WINDOW,
+  if (!test_client_do (x11_monitor_test_client, &error,
+                       "create", X11_TEST_CLIENT_WINDOW,
+                       NULL))
+    g_error ("Failed to create X11 window: %s", error->message);
+
+  if (!test_client_do (wayland_monitor_test_client, &error,
+                       "show", WAYLAND_TEST_CLIENT_WINDOW,
+                       NULL))
+    g_error ("Failed to show the window: %s", error->message);
+
+  if (!test_client_do (x11_monitor_test_client, &error,
+                       "show", X11_TEST_CLIENT_WINDOW,
                        NULL))
     g_error ("Failed to show the window: %s", error->message);
 }
 
 static void
-check_monitor_test_client_state (void)
+check_test_client_state (TestClient *test_client)
 {
   GError *error = NULL;
 
-  if (!test_client_wait (monitor_test_client, &error))
-    g_error ("Failed to sync test client: %s", error->message);
+  if (!test_client_wait (test_client, &error))
+    {
+      g_error ("Failed to sync test client '%s': %s",
+               test_client_get_id (test_client), error->message);
+    }
 }
 
 static void
-destroy_monitor_test_client (void)
+check_monitor_test_clients_state (void)
+{
+  check_test_client_state (wayland_monitor_test_client);
+  check_test_client_state (x11_monitor_test_client);
+}
+
+static void
+destroy_monitor_test_clients (void)
 {
   GError *error = NULL;
 
-  if (!test_client_quit (monitor_test_client, &error))
-    g_error ("Failed to quit test client: %s", error->message);
+  if (!test_client_quit (wayland_monitor_test_client, &error))
+    g_error ("Failed to quit Wayland test client: %s", error->message);
 
-  test_client_destroy (monitor_test_client);
+  if (!test_client_quit (x11_monitor_test_client, &error))
+    g_error ("Failed to quit X11 test client: %s", error->message);
+
+  test_client_destroy (wayland_monitor_test_client);
+  test_client_destroy (x11_monitor_test_client);
+
+  meta_x11_display_set_alarm_filter (meta_get_display ()->x11_display,
+                                     NULL, NULL);
 }
 
 static MetaOutput *
-output_from_winsys_id (MetaMonitorManager *monitor_manager,
-                       long                winsys_id)
+output_from_winsys_id (MetaBackend *backend,
+                       uint64_t     winsys_id)
 {
-  MetaMonitorManagerTest *monitor_manager_test =
-    META_MONITOR_MANAGER_TEST (monitor_manager);
-  MetaGpu *gpu = meta_monitor_manager_test_get_gpu (monitor_manager_test);
+  MetaGpu *gpu = meta_backend_test_get_gpu (META_BACKEND_TEST (backend));
   GList *l;
 
   for (l = meta_gpu_get_outputs (gpu); l; l = l->next)
@@ -388,7 +435,7 @@ output_from_winsys_id (MetaMonitorManager *monitor_manager,
 
 typedef struct _CheckMonitorModeData
 {
-  MetaMonitorManager *monitor_manager;
+  MetaBackend *backend;
   MetaTestCaseMonitorCrtcMode *expect_crtc_mode_iter;
 } CheckMonitorModeData;
 
@@ -400,12 +447,12 @@ check_monitor_mode (MetaMonitor         *monitor,
                     GError             **error)
 {
   CheckMonitorModeData *data = user_data;
-  MetaMonitorManager *monitor_manager = data->monitor_manager;
+  MetaBackend *backend = data->backend;
   MetaOutput *output;
   MetaCrtcMode *crtc_mode;
   int expect_crtc_mode_index;
 
-  output = output_from_winsys_id (monitor_manager,
+  output = output_from_winsys_id (backend,
                                   data->expect_crtc_mode_iter->output);
   g_assert (monitor_crtc_mode->output == output);
 
@@ -448,11 +495,11 @@ check_current_monitor_mode (MetaMonitor         *monitor,
                             GError             **error)
 {
   CheckMonitorModeData *data = user_data;
-  MetaMonitorManager *monitor_manager = data->monitor_manager;
+  MetaBackend *backend = data->backend;
   MetaOutput *output;
   MetaCrtc *crtc;
 
-  output = output_from_winsys_id (monitor_manager,
+  output = output_from_winsys_id (backend,
                                   data->expect_crtc_mode_iter->output);
   crtc = meta_output_get_assigned_crtc (output);
 
@@ -620,7 +667,7 @@ check_monitor_configuration (MonitorTestCase *test_case)
     meta_backend_get_monitor_manager (backend);
   MetaMonitorManagerTest *monitor_manager_test =
     META_MONITOR_MANAGER_TEST (monitor_manager);
-  MetaGpu *gpu = meta_monitor_manager_test_get_gpu (monitor_manager_test);
+  MetaGpu *gpu = meta_backend_test_get_gpu (META_BACKEND_TEST (backend));
   int tiled_monitor_count;
   GList *monitors;
   GList *crtcs;
@@ -673,10 +720,9 @@ check_monitor_configuration (MonitorTestCase *test_case)
       for (l_output = outputs, j = 0; l_output; l_output = l_output->next, j++)
         {
           MetaOutput *output = l_output->data;
-          long winsys_id = test_case->expect.monitors[i].outputs[j];
+          uint64_t winsys_id = test_case->expect.monitors[i].outputs[j];
 
-          g_assert (output == output_from_winsys_id (monitor_manager,
-                                                     winsys_id));
+          g_assert (output == output_from_winsys_id (backend, winsys_id));
           g_assert_cmpint (test_case->expect.monitors[i].is_underscanning,
                            ==,
                            output->is_underscanning);
@@ -722,7 +768,7 @@ check_monitor_configuration (MonitorTestCase *test_case)
                            test_case->expect.monitors[i].modes[j].flags);
 
           data = (CheckMonitorModeData) {
-            .monitor_manager = monitor_manager,
+            .backend = backend,
             .expect_crtc_mode_iter =
               test_case->expect.monitors[i].modes[j].crtc_modes
           };
@@ -751,7 +797,7 @@ check_monitor_configuration (MonitorTestCase *test_case)
           CheckMonitorModeData data;
 
           data = (CheckMonitorModeData) {
-            .monitor_manager = monitor_manager,
+            .backend = backend,
             .expect_crtc_mode_iter =
               test_case->expect.monitors[i].modes[expected_current_mode_index].crtc_modes
           };
@@ -854,7 +900,7 @@ check_monitor_configuration (MonitorTestCase *test_case)
         }
     }
 
-  check_monitor_test_client_state ();
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -2886,12 +2932,27 @@ meta_test_monitor_no_outputs (void)
     }
   };
   MetaMonitorTestSetup *test_setup;
+  GError *error = NULL;
 
   test_setup = create_monitor_test_setup (&test_case,
                                           MONITOR_TEST_FLAG_NO_STORED);
 
   emulate_hotplug (test_setup);
   check_monitor_configuration (&test_case);
+
+  if (!test_client_do (x11_monitor_test_client, &error,
+                       "resize", X11_TEST_CLIENT_WINDOW,
+                       "123", "210",
+                       NULL))
+    g_error ("Failed to resize X11 window: %s", error->message);
+
+  if (!test_client_do (wayland_monitor_test_client, &error,
+                       "resize", WAYLAND_TEST_CLIENT_WINDOW,
+                       "123", "210",
+                       NULL))
+    g_error ("Failed to resize Wayland window: %s", error->message);
+
+  check_monitor_test_clients_state ();
 
   /* Also check that we handle going headless -> headless */
   test_setup = create_monitor_test_setup (&test_case,
@@ -5235,6 +5296,7 @@ meta_test_monitor_custom_lid_switch_config (void)
       .n_modes = 1,
       .outputs = {
         {
+          .crtc = -1,
           .modes = { 0 },
           .n_modes = 1,
           .preferred_mode = 0,
@@ -5245,6 +5307,7 @@ meta_test_monitor_custom_lid_switch_config (void)
           .is_laptop_panel = TRUE
         },
         {
+          .crtc = -1,
           .modes = { 0 },
           .n_modes = 1,
           .preferred_mode = 0,
@@ -5698,6 +5761,128 @@ meta_test_monitor_migrated_wiggle_discard (void)
     g_error ("Failed to remove test data output file: %s", error->message);
 }
 
+static gboolean
+quit_main_loop (gpointer data)
+{
+  GMainLoop *loop = data;
+
+  g_main_loop_quit (loop);
+
+  return G_SOURCE_REMOVE;
+}
+
+static void
+dispatch (void)
+{
+  GMainLoop *loop;
+
+  loop = g_main_loop_new (NULL, FALSE);
+  meta_later_add (META_LATER_BEFORE_REDRAW,
+                  quit_main_loop,
+                  loop,
+                  NULL);
+  g_main_loop_run (loop);
+}
+
+static TestClient *
+create_test_window (const char *window_name)
+{
+  TestClient *test_client;
+  static int client_count = 0;
+  g_autofree char *client_name = NULL;
+  g_autoptr (GError) error = NULL;
+
+  client_name = g_strdup_printf ("test_client_%d", client_count++);
+  test_client = test_client_new (client_name, META_WINDOW_CLIENT_TYPE_WAYLAND,
+                                 &error);
+  if (!test_client)
+    g_error ("Failed to launch test client: %s", error->message);
+
+  if (!test_client_do (test_client, &error,
+                       "create", window_name,
+                       NULL))
+    g_error ("Failed to create window: %s", error->message);
+
+  return test_client;
+}
+
+static void
+meta_test_monitor_wm_tiling (void)
+{
+  MonitorTestCase test_case = initial_test_case;
+  MetaMonitorTestSetup *test_setup;
+  g_autoptr (GError) error = NULL;
+
+  test_setup = create_monitor_test_setup (&test_case,
+                                          MONITOR_TEST_FLAG_NO_STORED);
+  emulate_hotplug (test_setup);
+
+  /*
+   * 1) Start with two monitors connected.
+   * 2) Tile it on the second monitor.
+   * 3) Unplug both monitors.
+   * 4) Replug in first monitor.
+   */
+
+  const char *test_window_name= "window1";
+  TestClient *test_client = create_test_window (test_window_name);
+
+  if (!test_client_do (test_client, &error,
+                       "show", test_window_name,
+                       NULL))
+    g_error ("Failed to show the window: %s", error->message);
+
+  MetaWindow *test_window =
+    test_client_find_window (test_client,
+                             test_window_name,
+                             &error);
+  if (!test_window)
+    g_error ("Failed to find the window: %s", error->message);
+  test_client_wait_for_window_shown (test_client, test_window);
+
+  meta_window_tile (test_window, META_TILE_MAXIMIZED);
+  meta_window_move_to_monitor (test_window, 1);
+  check_test_client_state (test_client);
+
+  fprintf(stderr, ":::: %s:%d %s() - UNPLUGGING\n", __FILE__, __LINE__, __func__);
+
+  test_case.setup.n_outputs = 0;
+  test_setup = create_monitor_test_setup (&test_case,
+                                          MONITOR_TEST_FLAG_NO_STORED);
+  emulate_hotplug (test_setup);
+  test_case.setup.n_outputs = 1;
+  test_setup = create_monitor_test_setup (&test_case,
+                                          MONITOR_TEST_FLAG_NO_STORED);
+  emulate_hotplug (test_setup);
+
+  dispatch ();
+
+  /*
+   * 1) Start with two monitors connected.
+   * 2) Tile a window on the second monitor.
+   * 3) Untile window.
+   * 4) Unplug monitor.
+   * 5) Tile window again.
+   */
+
+  test_case.setup.n_outputs = 2;
+  test_setup = create_monitor_test_setup (&test_case,
+                                          MONITOR_TEST_FLAG_NO_STORED);
+  emulate_hotplug (test_setup);
+
+  meta_window_move_to_monitor (test_window, 1);
+  meta_window_tile (test_window, META_TILE_NONE);
+
+  test_case.setup.n_outputs = 1;
+  test_setup = create_monitor_test_setup (&test_case,
+                                          MONITOR_TEST_FLAG_NO_STORED);
+  emulate_hotplug (test_setup);
+
+  meta_window_tile (test_window, META_TILE_MAXIMIZED);
+
+  test_client_destroy (test_client);
+}
+
 static void
 meta_test_monitor_migrated_wiggle (void)
 {
@@ -5953,16 +6138,19 @@ init_monitor_tests (void)
                     meta_test_monitor_migrated_wiggle);
   add_monitor_test ("/backends/monitor/migrated/wiggle-discard",
                     meta_test_monitor_migrated_wiggle_discard);
+
+  add_monitor_test ("/backends/monitor/wm/tiling",
+                    meta_test_monitor_wm_tiling);
 }
 
 void
 pre_run_monitor_tests (void)
 {
-  create_monitor_test_client ();
+  create_monitor_test_clients ();
 }
 
 void
 finish_monitor_tests (void)
 {
-  destroy_monitor_test_client ();
+  destroy_monitor_test_clients ();
 }

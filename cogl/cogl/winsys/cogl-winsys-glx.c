@@ -30,13 +30,10 @@
  *   Robert Bragg <robert@linux.intel.com>
  */
 
-#ifdef HAVE_CONFIG_H
 #include "cogl-config.h"
-#endif
 
 #include "cogl-i18n-private.h"
 #include "cogl-util.h"
-#include "cogl-winsys-private.h"
 #include "cogl-feature-private.h"
 #include "cogl-context-private.h"
 #include "cogl-framebuffer.h"
@@ -47,19 +44,18 @@
 #include "cogl-glx-display-private.h"
 #include "cogl-private.h"
 #include "cogl-texture-2d-private.h"
-#include "cogl-texture-rectangle-private.h"
-#include "cogl-pipeline-opengl-private.h"
 #include "cogl-frame-info-private.h"
 #include "cogl-framebuffer-private.h"
 #include "cogl-onscreen-private.h"
 #include "cogl-swap-chain-private.h"
 #include "cogl-xlib-renderer.h"
 #include "cogl-util.h"
-#include "cogl-winsys-glx-private.h"
-#include "cogl-error-private.h"
 #include "cogl-poll-private.h"
 #include "cogl-version.h"
 #include "cogl-glx.h"
+#include "driver/gl/cogl-pipeline-opengl-private.h"
+#include "winsys/cogl-winsys-private.h"
+#include "winsys/cogl-winsys-glx-private.h"
 
 #include <stdlib.h>
 #include <sys/types.h>
@@ -92,7 +88,7 @@ typedef struct _CoglOnscreenXlib
 {
   Window xwin;
   int x, y;
-  CoglBool is_foreign_xwin;
+  gboolean is_foreign_xwin;
   CoglOutput *output;
 } CoglOnscreenXlib;
 
@@ -101,31 +97,23 @@ typedef struct _CoglOnscreenGLX
   CoglOnscreenXlib _parent;
   GLXDrawable glxwin;
   uint32_t last_swap_vsync_counter;
-  CoglBool pending_sync_notify;
-  CoglBool pending_complete_notify;
-  CoglBool pending_resize_notify;
-
-  GThread *swap_wait_thread;
-  GQueue *swap_wait_queue;
-  GCond swap_wait_cond;
-  GMutex swap_wait_mutex;
-  int swap_wait_pipe[2];
-  GLXContext swap_wait_context;
-  CoglBool closing_down;
+  uint32_t pending_sync_notify;
+  uint32_t pending_complete_notify;
+  uint32_t pending_resize_notify;
 } CoglOnscreenGLX;
 
 typedef struct _CoglPixmapTextureEyeGLX
 {
   CoglTexture *glx_tex;
-  CoglBool bind_tex_image_queued;
-  CoglBool pixmap_bound;
+  gboolean bind_tex_image_queued;
+  gboolean pixmap_bound;
 } CoglPixmapTextureEyeGLX;
 
 typedef struct _CoglTexturePixmapGLX
 {
   GLXPixmap glx_pixmap;
-  CoglBool has_mipmap_space;
-  CoglBool can_mipmap;
+  gboolean has_mipmap_space;
+  gboolean can_mipmap;
 
   CoglPixmapTextureEyeGLX left;
   CoglPixmapTextureEyeGLX right;
@@ -144,7 +132,7 @@ typedef struct _CoglTexturePixmapGLX
 #define COGL_WINSYS_FEATURE_END()               \
   { NULL, 0 },                                  \
     };
-#include "cogl-winsys-glx-feature-functions.h"
+#include "winsys/cogl-winsys-glx-feature-functions.h"
 
 /* Define an array of features */
 #undef COGL_WINSYS_FEATURE_BEGIN
@@ -165,13 +153,13 @@ typedef struct _CoglTexturePixmapGLX
 
 static const CoglFeatureData winsys_feature_data[] =
   {
-#include "cogl-winsys-glx-feature-functions.h"
+#include "winsys/cogl-winsys-glx-feature-functions.h"
   };
 
-static CoglFuncPtr
+static GCallback
 _cogl_winsys_renderer_get_proc_address (CoglRenderer *renderer,
                                         const char *name,
-                                        CoglBool in_core)
+                                        gboolean in_core)
 {
   CoglGLXRenderer *glx_renderer = renderer->winsys;
 
@@ -349,35 +337,35 @@ flush_pending_notifications_cb (void *data,
     {
       CoglOnscreen *onscreen = COGL_ONSCREEN (framebuffer);
       CoglOnscreenGLX *glx_onscreen = onscreen->winsys;
-      CoglBool pending_sync_notify = glx_onscreen->pending_sync_notify;
-      CoglBool pending_complete_notify = glx_onscreen->pending_complete_notify;
 
-      /* If swap_region is called then notifying the sync event could
-       * potentially immediately queue a subsequent pending notify so
-       * we need to clear the flag before invoking the callback */
-      glx_onscreen->pending_sync_notify = FALSE;
-      glx_onscreen->pending_complete_notify = FALSE;
-
-      if (pending_sync_notify)
+      while (glx_onscreen->pending_sync_notify > 0 ||
+             glx_onscreen->pending_complete_notify > 0 ||
+             glx_onscreen->pending_resize_notify > 0)
         {
-          CoglFrameInfo *info = g_queue_peek_head (&onscreen->pending_frame_infos);
+          if (glx_onscreen->pending_sync_notify > 0)
+            {
+              CoglFrameInfo *info =
+                g_queue_peek_head (&onscreen->pending_frame_infos);
 
-          _cogl_onscreen_notify_frame_sync (onscreen, info);
-        }
+              _cogl_onscreen_notify_frame_sync (onscreen, info);
+              glx_onscreen->pending_sync_notify--;
+            }
 
-      if (pending_complete_notify)
-        {
-          CoglFrameInfo *info = g_queue_pop_head (&onscreen->pending_frame_infos);
+          if (glx_onscreen->pending_complete_notify > 0)
+            {
+              CoglFrameInfo *info =
+                g_queue_pop_head (&onscreen->pending_frame_infos);
 
-          _cogl_onscreen_notify_complete (onscreen, info);
+              _cogl_onscreen_notify_complete (onscreen, info);
+              cogl_object_unref (info);
+              glx_onscreen->pending_complete_notify--;
+            }
 
-          cogl_object_unref (info);
-        }
-
-      if (glx_onscreen->pending_resize_notify)
-        {
-          _cogl_onscreen_notify_resize (onscreen);
-          glx_onscreen->pending_resize_notify = FALSE;
+          if (glx_onscreen->pending_resize_notify > 0)
+            {
+              _cogl_onscreen_notify_resize (onscreen);
+              glx_onscreen->pending_resize_notify--;
+            }
         }
     }
 }
@@ -419,7 +407,7 @@ set_sync_pending (CoglOnscreen *onscreen)
                                       NULL);
     }
 
-  glx_onscreen->pending_sync_notify = TRUE;
+  glx_onscreen->pending_sync_notify++;
 }
 
 static void
@@ -442,7 +430,7 @@ set_complete_pending (CoglOnscreen *onscreen)
                                       NULL);
     }
 
-  glx_onscreen->pending_complete_notify = TRUE;
+  glx_onscreen->pending_complete_notify++;
 }
 
 static void
@@ -535,7 +523,7 @@ notify_resize (CoglContext *context,
                                       NULL);
     }
 
-  glx_onscreen->pending_resize_notify = TRUE;
+  glx_onscreen->pending_resize_notify++;
 
   if (!xlib_onscreen->is_foreign_xwin)
     {
@@ -629,7 +617,7 @@ _cogl_winsys_renderer_disconnect (CoglRenderer *renderer)
   g_slice_free (CoglGLXRenderer, renderer->winsys);
 }
 
-static CoglBool
+static gboolean
 update_all_outputs (CoglRenderer *renderer)
 {
   GList *l;
@@ -661,9 +649,9 @@ _cogl_winsys_renderer_outputs_changed (CoglRenderer *renderer)
   update_all_outputs (renderer);
 }
 
-static CoglBool
+static gboolean
 resolve_core_glx_functions (CoglRenderer *renderer,
-                            CoglError **error)
+                            GError **error)
 {
   CoglGLXRenderer *glx_renderer;
 
@@ -682,9 +670,9 @@ resolve_core_glx_functions (CoglRenderer *renderer,
        !g_module_symbol (glx_renderer->libgl_module, "glXQueryDrawable",
                          (void **) &glx_renderer->glXQueryDrawable))
     {
-      _cogl_set_error (error, COGL_WINSYS_ERROR,
-                   COGL_WINSYS_ERROR_INIT,
-                   "Failed to resolve required GLX symbol");
+      g_set_error_literal (error, COGL_WINSYS_ERROR,
+                           COGL_WINSYS_ERROR_INIT,
+                           "Failed to resolve required GLX symbol");
       return FALSE;
     }
 
@@ -754,9 +742,9 @@ update_base_winsys_features (CoglRenderer *renderer)
                     TRUE);
 }
 
-static CoglBool
+static gboolean
 _cogl_winsys_renderer_connect (CoglRenderer *renderer,
-                               CoglError **error)
+                               GError **error)
 {
   CoglGLXRenderer *glx_renderer;
   CoglXlibRenderer *xlib_renderer;
@@ -772,9 +760,9 @@ _cogl_winsys_renderer_connect (CoglRenderer *renderer,
   if (renderer->driver != COGL_DRIVER_GL &&
       renderer->driver != COGL_DRIVER_GL3)
     {
-      _cogl_set_error (error, COGL_WINSYS_ERROR,
-                   COGL_WINSYS_ERROR_INIT,
-                   "GLX Backend can only be used in conjunction with OpenGL");
+      g_set_error_literal (error, COGL_WINSYS_ERROR,
+                           COGL_WINSYS_ERROR_INIT,
+                           "GLX Backend can only be used in conjunction with OpenGL");
       goto error;
     }
 
@@ -783,9 +771,9 @@ _cogl_winsys_renderer_connect (CoglRenderer *renderer,
 
   if (glx_renderer->libgl_module == NULL)
     {
-      _cogl_set_error (error, COGL_WINSYS_ERROR,
-                   COGL_WINSYS_ERROR_INIT,
-                   "Failed to dynamically open the OpenGL library");
+      g_set_error_literal (error, COGL_WINSYS_ERROR,
+                           COGL_WINSYS_ERROR_INIT,
+                           "Failed to dynamically open the OpenGL library");
       goto error;
     }
 
@@ -796,9 +784,9 @@ _cogl_winsys_renderer_connect (CoglRenderer *renderer,
                                         &glx_renderer->glx_error_base,
                                         &glx_renderer->glx_event_base))
     {
-      _cogl_set_error (error, COGL_WINSYS_ERROR,
-                   COGL_WINSYS_ERROR_INIT,
-                   "XServer appears to lack required GLX support");
+      g_set_error_literal (error, COGL_WINSYS_ERROR,
+                           COGL_WINSYS_ERROR_INIT,
+                           "XServer appears to lack required GLX support");
       goto error;
     }
 
@@ -810,9 +798,9 @@ _cogl_winsys_renderer_connect (CoglRenderer *renderer,
                                       &glx_renderer->glx_minor)
       || !(glx_renderer->glx_major == 1 && glx_renderer->glx_minor >= 2))
     {
-      _cogl_set_error (error, COGL_WINSYS_ERROR,
-                   COGL_WINSYS_ERROR_INIT,
-                   "XServer appears to lack required GLX 1.2 support");
+      g_set_error_literal (error, COGL_WINSYS_ERROR,
+                           COGL_WINSYS_ERROR_INIT,
+                           "XServer appears to lack required GLX 1.2 support");
       goto error;
     }
 
@@ -827,13 +815,13 @@ error:
   return FALSE;
 }
 
-static CoglBool
-update_winsys_features (CoglContext *context, CoglError **error)
+static gboolean
+update_winsys_features (CoglContext *context, GError **error)
 {
   CoglGLXDisplay *glx_display = context->display->winsys;
   CoglGLXRenderer *glx_renderer = context->display->renderer->winsys;
 
-  _COGL_RETURN_VAL_IF_FAIL (glx_display->glx_context, FALSE);
+  g_return_val_if_fail (glx_display->glx_context, FALSE);
 
   if (!_cogl_context_update_features (context, error))
     return FALSE;
@@ -896,29 +884,6 @@ update_winsys_features (CoglContext *context, CoglError **error)
       COGL_FLAGS_SET (context->features,
                       COGL_FEATURE_ID_PRESENTATION_TIME,
                       TRUE);
-    }
-  else
-    {
-      CoglGpuInfo *info = &context->gpu;
-      if (glx_display->have_vblank_counter &&
-	  context->display->renderer->xlib_enable_threaded_swap_wait &&
-	  info->vendor == COGL_GPU_INFO_VENDOR_NVIDIA)
-        {
-          COGL_FLAGS_SET (context->winsys_features,
-                          COGL_WINSYS_FEATURE_SYNC_AND_COMPLETE_EVENT, TRUE);
-          COGL_FLAGS_SET (context->winsys_features,
-                          COGL_WINSYS_FEATURE_SWAP_BUFFERS_EVENT, TRUE);
-          /* TODO: remove this deprecated feature */
-          COGL_FLAGS_SET (context->features,
-                          COGL_FEATURE_ID_SWAP_BUFFERS_EVENT,
-                          TRUE);
-          COGL_FLAGS_SET (context->features,
-                          COGL_FEATURE_ID_PRESENTATION_TIME,
-                          TRUE);
-          COGL_FLAGS_SET (context->private_features,
-                          COGL_PRIVATE_FEATURE_THREADED_SWAP_WAIT,
-                          TRUE);
-        }
     }
 
   /* We'll manually handle queueing dirty events in response to
@@ -985,11 +950,11 @@ glx_attributes_from_framebuffer_config (CoglDisplay *display,
 /* It seems the GLX spec never defined an invalid GLXFBConfig that
  * we could overload as an indication of error, so we have to return
  * an explicit boolean status. */
-static CoglBool
+static gboolean
 find_fbconfig (CoglDisplay *display,
                CoglFramebufferConfig *config,
                GLXFBConfig *config_ret,
-               CoglError **error)
+               GError **error)
 {
   CoglXlibRenderer *xlib_renderer =
     _cogl_xlib_renderer_get_data (display->renderer);
@@ -997,7 +962,7 @@ find_fbconfig (CoglDisplay *display,
   GLXFBConfig *configs = NULL;
   int n_configs;
   static int attributes[MAX_GLX_CONFIG_ATTRIBS];
-  CoglBool ret = TRUE;
+  gboolean ret = TRUE;
   int xscreen_num = DefaultScreen (xlib_renderer->xdpy);
 
   glx_attributes_from_framebuffer_config (display, config, attributes);
@@ -1009,9 +974,9 @@ find_fbconfig (CoglDisplay *display,
 
   if (!configs || n_configs == 0)
     {
-      _cogl_set_error (error, COGL_WINSYS_ERROR,
-                   COGL_WINSYS_ERROR_CREATE_CONTEXT,
-                   "Failed to find any compatible fbconfigs");
+      g_set_error_literal (error, COGL_WINSYS_ERROR,
+                           COGL_WINSYS_ERROR_CREATE_CONTEXT,
+                           "Failed to find any compatible fbconfigs");
       ret = FALSE;
       goto done;
     }
@@ -1039,9 +1004,9 @@ find_fbconfig (CoglDisplay *display,
             }
         }
 
-      _cogl_set_error (error, COGL_WINSYS_ERROR,
-                   COGL_WINSYS_ERROR_CREATE_CONTEXT,
-                   "Unable to find fbconfig with rgba visual");
+      g_set_error_literal (error, COGL_WINSYS_ERROR,
+                           COGL_WINSYS_ERROR_CREATE_CONTEXT,
+                           "Unable to find fbconfig with rgba visual");
       ret = FALSE;
       goto done;
     }
@@ -1124,34 +1089,34 @@ create_gl3_context (CoglDisplay *display,
                                                 attrib_list);
 }
 
-static CoglBool
-create_context (CoglDisplay *display, CoglError **error)
+static gboolean
+create_context (CoglDisplay *display, GError **error)
 {
   CoglGLXDisplay *glx_display = display->winsys;
   CoglXlibRenderer *xlib_renderer =
     _cogl_xlib_renderer_get_data (display->renderer);
   CoglGLXRenderer *glx_renderer = display->renderer->winsys;
-  CoglBool support_transparent_windows =
+  gboolean support_transparent_windows =
     display->onscreen_template->config.swap_chain->has_alpha;
   GLXFBConfig config;
-  CoglError *fbconfig_error = NULL;
+  GError *fbconfig_error = NULL;
   XSetWindowAttributes attrs;
   XVisualInfo *xvisinfo;
   GLXDrawable dummy_drawable;
   CoglXlibTrapState old_state;
 
-  _COGL_RETURN_VAL_IF_FAIL (glx_display->glx_context == NULL, TRUE);
+  g_return_val_if_fail (glx_display->glx_context == NULL, TRUE);
 
   glx_display->found_fbconfig =
     find_fbconfig (display, &display->onscreen_template->config, &config,
                    &fbconfig_error);
   if (!glx_display->found_fbconfig)
     {
-      _cogl_set_error (error, COGL_WINSYS_ERROR,
+      g_set_error (error, COGL_WINSYS_ERROR,
                    COGL_WINSYS_ERROR_CREATE_CONTEXT,
                    "Unable to find suitable fbconfig for the GLX context: %s",
                    fbconfig_error->message);
-      cogl_error_free (fbconfig_error);
+      g_error_free (fbconfig_error);
       return FALSE;
     }
 
@@ -1176,9 +1141,9 @@ create_context (CoglDisplay *display, CoglError **error)
   if (_cogl_xlib_renderer_untrap_errors (display->renderer, &old_state) ||
       glx_display->glx_context == NULL)
     {
-      _cogl_set_error (error, COGL_WINSYS_ERROR,
-                   COGL_WINSYS_ERROR_CREATE_CONTEXT,
-                   "Unable to create suitable GL context");
+      g_set_error_literal (error, COGL_WINSYS_ERROR,
+                           COGL_WINSYS_ERROR_CREATE_CONTEXT,
+                           "Unable to create suitable GL context");
       return FALSE;
     }
 
@@ -1199,9 +1164,9 @@ create_context (CoglDisplay *display, CoglError **error)
                                                      config);
   if (xvisinfo == NULL)
     {
-      _cogl_set_error (error, COGL_WINSYS_ERROR,
-                   COGL_WINSYS_ERROR_CREATE_CONTEXT,
-                   "Unable to retrieve the X11 visual");
+      g_set_error_literal (error, COGL_WINSYS_ERROR,
+                           COGL_WINSYS_ERROR_CREATE_CONTEXT,
+                           "Unable to retrieve the X11 visual");
       return FALSE;
     }
 
@@ -1254,9 +1219,9 @@ create_context (CoglDisplay *display, CoglError **error)
 
   if (_cogl_xlib_renderer_untrap_errors (display->renderer, &old_state))
     {
-      _cogl_set_error (error, COGL_WINSYS_ERROR,
-                   COGL_WINSYS_ERROR_CREATE_CONTEXT,
-                   "Unable to select the newly created GLX context");
+      g_set_error_literal (error, COGL_WINSYS_ERROR,
+                           COGL_WINSYS_ERROR_CREATE_CONTEXT,
+                           "Unable to select the newly created GLX context");
       return FALSE;
     }
 
@@ -1271,7 +1236,7 @@ _cogl_winsys_display_destroy (CoglDisplay *display)
     _cogl_xlib_renderer_get_data (display->renderer);
   CoglGLXRenderer *glx_renderer = display->renderer->winsys;
 
-  _COGL_RETURN_IF_FAIL (glx_display != NULL);
+  g_return_if_fail (glx_display != NULL);
 
   if (glx_display->glx_context)
     {
@@ -1299,14 +1264,14 @@ _cogl_winsys_display_destroy (CoglDisplay *display)
   display->winsys = NULL;
 }
 
-static CoglBool
+static gboolean
 _cogl_winsys_display_setup (CoglDisplay *display,
-                            CoglError **error)
+                            GError **error)
 {
   CoglGLXDisplay *glx_display;
   int i;
 
-  _COGL_RETURN_VAL_IF_FAIL (display->winsys == NULL, FALSE);
+  g_return_val_if_fail (display->winsys == NULL, FALSE);
 
   glx_display = g_slice_new0 (CoglGLXDisplay);
   display->winsys = glx_display;
@@ -1324,8 +1289,8 @@ error:
   return FALSE;
 }
 
-static CoglBool
-_cogl_winsys_context_init (CoglContext *context, CoglError **error)
+static gboolean
+_cogl_winsys_context_init (CoglContext *context, GError **error)
 {
   context->winsys = g_new0 (CoglContextGLX, 1);
 
@@ -1344,9 +1309,9 @@ _cogl_winsys_context_deinit (CoglContext *context)
   g_free (context->winsys);
 }
 
-static CoglBool
+static gboolean
 _cogl_winsys_onscreen_init (CoglOnscreen *onscreen,
-                            CoglError **error)
+                            GError **error)
 {
   CoglFramebuffer *framebuffer = COGL_FRAMEBUFFER (onscreen);
   CoglContext *context = framebuffer->context;
@@ -1359,19 +1324,19 @@ _cogl_winsys_onscreen_init (CoglOnscreen *onscreen,
   CoglOnscreenXlib *xlib_onscreen;
   CoglOnscreenGLX *glx_onscreen;
   GLXFBConfig fbconfig;
-  CoglError *fbconfig_error = NULL;
+  GError *fbconfig_error = NULL;
 
-  _COGL_RETURN_VAL_IF_FAIL (glx_display->glx_context, FALSE);
+  g_return_val_if_fail (glx_display->glx_context, FALSE);
 
   if (!find_fbconfig (display, &framebuffer->config,
                       &fbconfig,
                       &fbconfig_error))
     {
-      _cogl_set_error (error, COGL_WINSYS_ERROR,
+      g_set_error (error, COGL_WINSYS_ERROR,
                    COGL_WINSYS_ERROR_CREATE_CONTEXT,
                    "Unable to find suitable fbconfig for the GLX context: %s",
                    fbconfig_error->message);
-      cogl_error_free (fbconfig_error);
+      g_error_free (fbconfig_error);
       return FALSE;
     }
 
@@ -1415,7 +1380,7 @@ _cogl_winsys_onscreen_init (CoglOnscreen *onscreen,
         {
           char message[1000];
           XGetErrorText (xlib_renderer->xdpy, xerror, message, sizeof(message));
-          _cogl_set_error (error, COGL_WINSYS_ERROR,
+          g_set_error (error, COGL_WINSYS_ERROR,
                        COGL_WINSYS_ERROR_CREATE_ONSCREEN,
                        "Unable to query geometry of foreign xid 0x%08lX: %s",
                        xwin, message);
@@ -1449,10 +1414,10 @@ _cogl_winsys_onscreen_init (CoglOnscreen *onscreen,
                                                          fbconfig);
       if (xvisinfo == NULL)
         {
-          _cogl_set_error (error, COGL_WINSYS_ERROR,
-                       COGL_WINSYS_ERROR_CREATE_ONSCREEN,
-                       "Unable to retrieve the X11 visual of context's "
-                       "fbconfig");
+          g_set_error_literal (error, COGL_WINSYS_ERROR,
+                               COGL_WINSYS_ERROR_CREATE_ONSCREEN,
+                               "Unable to retrieve the X11 visual of context's "
+                               "fbconfig");
           return FALSE;
         }
 
@@ -1488,7 +1453,7 @@ _cogl_winsys_onscreen_init (CoglOnscreen *onscreen,
           char message[1000];
           XGetErrorText (xlib_renderer->xdpy, xerror,
                          message, sizeof (message));
-          _cogl_set_error (error, COGL_WINSYS_ERROR,
+          g_set_error (error, COGL_WINSYS_ERROR,
                        COGL_WINSYS_ERROR_CREATE_ONSCREEN,
                        "X error while creating Window for CoglOnscreen: %s",
                        message);
@@ -1516,8 +1481,7 @@ _cogl_winsys_onscreen_init (CoglOnscreen *onscreen,
     }
 
 #ifdef GLX_INTEL_swap_event
-  if (_cogl_winsys_has_feature (COGL_WINSYS_FEATURE_SYNC_AND_COMPLETE_EVENT) &&
-      !_cogl_has_private_feature (context, COGL_PRIVATE_FEATURE_THREADED_SWAP_WAIT))
+  if (_cogl_winsys_has_feature (COGL_WINSYS_FEATURE_SYNC_AND_COMPLETE_EVENT))
     {
       GLXDrawable drawable =
         glx_onscreen->glxwin ? glx_onscreen->glxwin : xlib_onscreen->xwin;
@@ -1558,31 +1522,6 @@ _cogl_winsys_onscreen_deinit (CoglOnscreen *onscreen)
     {
       cogl_object_unref (xlib_onscreen->output);
       xlib_onscreen->output = NULL;
-    }
-
-  if (glx_onscreen->swap_wait_thread)
-    {
-      g_mutex_lock (&glx_onscreen->swap_wait_mutex);
-      glx_onscreen->closing_down = TRUE;
-      g_cond_signal (&glx_onscreen->swap_wait_cond);
-      g_mutex_unlock (&glx_onscreen->swap_wait_mutex);
-      g_thread_join (glx_onscreen->swap_wait_thread);
-      glx_onscreen->swap_wait_thread = NULL;
-
-      g_cond_clear (&glx_onscreen->swap_wait_cond);
-      g_mutex_clear (&glx_onscreen->swap_wait_mutex);
-
-      g_queue_free (glx_onscreen->swap_wait_queue);
-      glx_onscreen->swap_wait_queue = NULL;
-
-      _cogl_poll_renderer_remove_fd (context->display->renderer,
-                                     glx_onscreen->swap_wait_pipe[0]);
-      
-      close (glx_onscreen->swap_wait_pipe[0]);
-      close (glx_onscreen->swap_wait_pipe[1]);
-
-      glx_renderer->glXDestroyContext (xlib_renderer->xdpy,
-                                       glx_onscreen->swap_wait_context);
     }
 
   _cogl_xlib_renderer_trap_errors (context->display->renderer, &old_state);
@@ -1687,18 +1626,11 @@ _cogl_winsys_onscreen_bind (CoglOnscreen *onscreen)
    * exclusive.
    */
   if (glx_renderer->glXSwapInterval)
-    {
-      CoglFramebuffer *fb = COGL_FRAMEBUFFER (onscreen);
-      if (fb->config.swap_throttled)
-        glx_renderer->glXSwapInterval (1);
-      else
-        glx_renderer->glXSwapInterval (0);
-    }
+    glx_renderer->glXSwapInterval (1);
 
   XSync (xlib_renderer->xdpy, False);
 
-  /* FIXME: We should be reporting a CoglError here
-   */
+  /* FIXME: We should be reporting a GError here */
   if (_cogl_xlib_renderer_untrap_errors (context->display->renderer,
                                          &old_state))
     {
@@ -1818,199 +1750,6 @@ set_frame_info_output (CoglOnscreen *onscreen,
     }
 }
 
-static gpointer
-threaded_swap_wait (gpointer data)
-{
-  CoglOnscreen *onscreen = data;
-
-  CoglOnscreenGLX *glx_onscreen = onscreen->winsys;
-
-  CoglFramebuffer *framebuffer = COGL_FRAMEBUFFER (onscreen);
-  CoglContext *context = framebuffer->context;
-  CoglDisplay *display = context->display;
-  CoglXlibRenderer *xlib_renderer = _cogl_xlib_renderer_get_data (display->renderer);
-  CoglGLXDisplay *glx_display = display->winsys;
-  CoglGLXRenderer *glx_renderer = display->renderer->winsys;
-  GLXDrawable dummy_drawable;
-
-  if (glx_display->dummy_glxwin)
-    dummy_drawable = glx_display->dummy_glxwin;
-  else
-    dummy_drawable = glx_display->dummy_xwin;
-
-  glx_renderer->glXMakeContextCurrent (xlib_renderer->xdpy,
-                                       dummy_drawable,
-                                       dummy_drawable,
-                                       glx_onscreen->swap_wait_context);
-
-  g_mutex_lock (&glx_onscreen->swap_wait_mutex);
-
-  while (TRUE)
-    {
-      gpointer queue_element;
-      uint32_t vblank_counter;
-
-      while (!glx_onscreen->closing_down && glx_onscreen->swap_wait_queue->length == 0)
-         g_cond_wait (&glx_onscreen->swap_wait_cond, &glx_onscreen->swap_wait_mutex);
-
-      if (glx_onscreen->closing_down)
-         break;
-
-      queue_element = g_queue_pop_tail (glx_onscreen->swap_wait_queue);
-      vblank_counter = GPOINTER_TO_UINT(queue_element);
-
-      g_mutex_unlock (&glx_onscreen->swap_wait_mutex);
-      glx_renderer->glXWaitVideoSync (2,
-                                      (vblank_counter + 1) % 2,
-                                      &vblank_counter);
-      g_mutex_lock (&glx_onscreen->swap_wait_mutex);
-
-      if (!glx_onscreen->closing_down)
-         {
-           int bytes_written = 0;
-
-           union {
-             char bytes[8];
-             int64_t presentation_time;
-           } u;
-
-           u.presentation_time = get_monotonic_time_ns ();
-
-           while (bytes_written < 8)
-             {
-               int res = write (glx_onscreen->swap_wait_pipe[1], u.bytes + bytes_written, 8 - bytes_written);
-               if (res == -1)
-                 {
-                   if (errno != EINTR)
-                     g_error ("Error writing to swap notification pipe: %s\n",
-                              g_strerror (errno));
-                 }
-               else
-                 {
-                   bytes_written += res;
-                 }
-             }
-         }
-    }
-
-  g_mutex_unlock (&glx_onscreen->swap_wait_mutex);
-
-  glx_renderer->glXMakeContextCurrent (xlib_renderer->xdpy,
-                                       None,
-                                       None,
-                                       NULL);
-
-  return NULL;
-}
-
-static int64_t
-threaded_swap_wait_pipe_prepare (void *user_data)
-{
-  return -1;
-}
-
-static void
-threaded_swap_wait_pipe_dispatch (void *user_data, int revents)
-{
-  CoglOnscreen *onscreen = user_data;
-  CoglOnscreenGLX *glx_onscreen = onscreen->winsys;
-
-  CoglFrameInfo *info;
-
-  if ((revents & COGL_POLL_FD_EVENT_IN))
-    {
-      int bytes_read = 0;
-
-      union {
-         char bytes[8];
-         int64_t presentation_time;
-      } u;
-
-      while (bytes_read < 8)
-         {
-           int res = read (glx_onscreen->swap_wait_pipe[0], u.bytes + bytes_read, 8 - bytes_read);
-           if (res == -1)
-             {
-               if (errno != EINTR)
-                 g_error ("Error reading from swap notification pipe: %s\n",
-                          g_strerror (errno));
-             }
-           else
-             {
-               bytes_read += res;
-             }
-         }
-
-      set_sync_pending (onscreen);
-      set_complete_pending (onscreen);
-
-      info = g_queue_peek_head (&onscreen->pending_frame_infos);
-      info->presentation_time = u.presentation_time;
-    }
-}
-
-static void
-start_threaded_swap_wait (CoglOnscreen *onscreen,
-                           uint32_t      vblank_counter)
-{
-  CoglOnscreenGLX *glx_onscreen = onscreen->winsys;
-  CoglFramebuffer *framebuffer = COGL_FRAMEBUFFER (onscreen);
-  CoglContext *context = framebuffer->context;
-
-  if (glx_onscreen->swap_wait_thread == NULL)
-    {
-      CoglDisplay *display = context->display;
-      CoglGLXRenderer *glx_renderer = display->renderer->winsys;
-      CoglGLXDisplay *glx_display = display->winsys;
-      CoglOnscreenXlib *xlib_onscreen = onscreen->winsys;
-      CoglXlibRenderer *xlib_renderer =
-        _cogl_xlib_renderer_get_data (display->renderer);
-
-      GLXDrawable drawable =
-        glx_onscreen->glxwin ? glx_onscreen->glxwin : xlib_onscreen->xwin;
-      int i;
-
-      ensure_ust_type (display->renderer, drawable);
-      
-      if ((pipe (glx_onscreen->swap_wait_pipe) == -1))
-        g_error ("Couldn't create pipe for swap notification: %s\n",
-                 g_strerror (errno));
-
-      for (i = 0; i < 2; i++)
-	{
-	  if (fcntl(glx_onscreen->swap_wait_pipe[i], F_SETFD,
-		    fcntl(glx_onscreen->swap_wait_pipe[i], F_GETFD, 0) | FD_CLOEXEC) == -1)
-	    g_error ("Couldn't set swap notification pipe CLOEXEC: %s\n",
-		     g_strerror (errno));
-	}
-
-      _cogl_poll_renderer_add_fd (display->renderer,
-                                  glx_onscreen->swap_wait_pipe[0],
-                                  COGL_POLL_FD_EVENT_IN,
-                                  threaded_swap_wait_pipe_prepare,
-                                  threaded_swap_wait_pipe_dispatch,
-                                  onscreen);
-
-      glx_onscreen->swap_wait_queue = g_queue_new ();
-      g_mutex_init (&glx_onscreen->swap_wait_mutex);
-      g_cond_init (&glx_onscreen->swap_wait_cond);
-      glx_onscreen->swap_wait_context =
-         glx_renderer->glXCreateNewContext (xlib_renderer->xdpy,
-                                            glx_display->fbconfig,
-                                            GLX_RGBA_TYPE,
-                                            glx_display->glx_context,
-                                            True);
-      glx_onscreen->swap_wait_thread = g_thread_new ("cogl_glx_swap_wait",
-                                                     threaded_swap_wait,
-                                                     onscreen);
-    }
-
-  g_mutex_lock (&glx_onscreen->swap_wait_mutex);
-  g_queue_push_head (glx_onscreen->swap_wait_queue, GUINT_TO_POINTER(vblank_counter));
-  g_cond_signal (&glx_onscreen->swap_wait_cond);
-  g_mutex_unlock (&glx_onscreen->swap_wait_mutex);
-}
-
 static void
 _cogl_winsys_onscreen_swap_region (CoglOnscreen *onscreen,
                                    const int *user_rectangles,
@@ -2027,8 +1766,8 @@ _cogl_winsys_onscreen_swap_region (CoglOnscreen *onscreen,
   GLXDrawable drawable =
     glx_onscreen->glxwin ? glx_onscreen->glxwin : xlib_onscreen->xwin;
   uint32_t end_frame_vsync_counter = 0;
-  CoglBool have_counter;
-  CoglBool can_wait;
+  gboolean have_counter;
+  gboolean can_wait;
   int x_min = 0, x_max = 0, y_min = 0, y_max = 0;
 
   /*
@@ -2037,7 +1776,7 @@ _cogl_winsys_onscreen_swap_region (CoglOnscreen *onscreen,
    * case then we still want to use the vblank sync menchanism but
    * we only need it to throttle redraws.
    */
-  CoglBool blit_sub_buffer_is_synchronized =
+  gboolean blit_sub_buffer_is_synchronized =
      _cogl_winsys_has_feature (COGL_WINSYS_FEATURE_SWAP_REGION_SYNCHRONIZED);
 
   int framebuffer_width =  cogl_framebuffer_get_width (framebuffer);
@@ -2076,16 +1815,8 @@ _cogl_winsys_onscreen_swap_region (CoglOnscreen *onscreen,
                                  framebuffer,
                                  COGL_FRAMEBUFFER_STATE_BIND);
 
-  if (framebuffer->config.swap_throttled)
-    {
-      have_counter = glx_display->have_vblank_counter;
-      can_wait = glx_display->can_vblank_wait;
-    }
-  else
-    {
-      have_counter = FALSE;
-      can_wait = FALSE;
-    }
+  have_counter = glx_display->have_vblank_counter;
+  can_wait = glx_display->can_vblank_wait;
 
   /* We need to ensure that all the rendering is done, otherwise
    * redraw operations that are slower than the framerate can
@@ -2239,7 +1970,7 @@ _cogl_winsys_onscreen_swap_buffers_with_damage (CoglOnscreen *onscreen,
   CoglGLXDisplay *glx_display = context->display->winsys;
   CoglOnscreenXlib *xlib_onscreen = onscreen->winsys;
   CoglOnscreenGLX *glx_onscreen = onscreen->winsys;
-  CoglBool have_counter;
+  gboolean have_counter;
   GLXDrawable drawable;
 
   /* XXX: theoretically this shouldn't be necessary but at least with
@@ -2252,71 +1983,47 @@ _cogl_winsys_onscreen_swap_buffers_with_damage (CoglOnscreen *onscreen,
 
   drawable = glx_onscreen->glxwin ? glx_onscreen->glxwin : xlib_onscreen->xwin;
 
-  if (framebuffer->config.swap_throttled)
+  have_counter = glx_display->have_vblank_counter;
+
+  if (!glx_renderer->glXSwapInterval)
     {
-      have_counter = glx_display->have_vblank_counter;
+      gboolean can_wait = have_counter || glx_display->can_vblank_wait;
 
-      if (glx_renderer->glXSwapInterval)
+      uint32_t end_frame_vsync_counter = 0;
+
+      /* If the swap_region API is also being used then we need to track
+       * the vsync counter for each swap request so we can manually
+       * throttle swap_region requests. */
+      if (have_counter)
+        end_frame_vsync_counter = _cogl_winsys_get_vsync_counter (context);
+
+      /* If we are going to wait for VBLANK manually, we not only
+       * need to flush out pending drawing to the GPU before we
+       * sleep, we need to wait for it to finish. Otherwise, we
+       * may end up with the situation:
+       *
+       *        - We finish drawing      - GPU drawing continues
+       *        - We go to sleep         - GPU drawing continues
+       * VBLANK - We call glXSwapBuffers - GPU drawing continues
+       *                                 - GPU drawing continues
+       *                                 - Swap buffers happens
+       *
+       * Producing a tear. Calling glFinish() first will cause us
+       * to properly wait for the next VBLANK before we swap. This
+       * obviously does not happen when we use _GLX_SWAP and let
+       * the driver do the right thing
+       */
+      _cogl_winsys_wait_for_gpu (onscreen);
+
+      if (have_counter && can_wait)
         {
-          if (_cogl_has_private_feature (context, COGL_PRIVATE_FEATURE_THREADED_SWAP_WAIT))
-            {
-	      /* If we didn't wait for the GPU here, then it's easy to get the case
-	       * where there is a VBlank between the point where we get the vsync counter
-	       * and the point where the GPU is ready to actually perform the glXSwapBuffers(),
-	       * and the swap wait terminates at the first VBlank rather than the one
-	       * where the swap buffers happens. Calling glFinish() here makes this a
-	       * rare race since the GPU is already ready to swap when we call glXSwapBuffers().
-	       * The glFinish() also prevents any serious damage if the rare race happens,
-	       * since it will wait for the preceding glXSwapBuffers() and prevent us from
-	       * getting premanently ahead. (For NVIDIA drivers, glFinish() after glXSwapBuffers()
-	       * waits for the buffer swap to happen.)
-	       */
-              _cogl_winsys_wait_for_gpu (onscreen);
-              start_threaded_swap_wait (onscreen, _cogl_winsys_get_vsync_counter (context));
-            }
-        }
-      else
-        {
-          CoglBool can_wait = have_counter || glx_display->can_vblank_wait;
-
-          uint32_t end_frame_vsync_counter = 0;
-
-          /* If the swap_region API is also being used then we need to track
-           * the vsync counter for each swap request so we can manually
-           * throttle swap_region requests. */
-          if (have_counter)
-            end_frame_vsync_counter = _cogl_winsys_get_vsync_counter (context);
-
-          /* If we are going to wait for VBLANK manually, we not only
-           * need to flush out pending drawing to the GPU before we
-           * sleep, we need to wait for it to finish. Otherwise, we
-           * may end up with the situation:
-           *
-           *        - We finish drawing      - GPU drawing continues
-           *        - We go to sleep         - GPU drawing continues
-           * VBLANK - We call glXSwapBuffers - GPU drawing continues
-           *                                 - GPU drawing continues
-           *                                 - Swap buffers happens
-           *
-           * Producing a tear. Calling glFinish() first will cause us
-           * to properly wait for the next VBLANK before we swap. This
-           * obviously does not happen when we use _GLX_SWAP and let
-           * the driver do the right thing
-           */
-          _cogl_winsys_wait_for_gpu (onscreen);
-
-          if (have_counter && can_wait)
-            {
-              if (glx_onscreen->last_swap_vsync_counter ==
-                  end_frame_vsync_counter)
-                _cogl_winsys_wait_for_vblank (onscreen);
-            }
-          else if (can_wait)
+          if (glx_onscreen->last_swap_vsync_counter ==
+              end_frame_vsync_counter)
             _cogl_winsys_wait_for_vblank (onscreen);
         }
+      else if (can_wait)
+        _cogl_winsys_wait_for_vblank (onscreen);
     }
-  else
-    have_counter = FALSE;
 
   glx_renderer->glXSwapBuffers (xlib_renderer->xdpy, drawable);
 
@@ -2335,25 +2042,8 @@ _cogl_winsys_onscreen_x11_get_window_xid (CoglOnscreen *onscreen)
 }
 
 static void
-_cogl_winsys_onscreen_update_swap_throttled (CoglOnscreen *onscreen)
-{
-  CoglContext *context = COGL_FRAMEBUFFER (onscreen)->context;
-  CoglContextGLX *glx_context = context->winsys;
-  CoglOnscreenGLX *glx_onscreen = onscreen->winsys;
-  CoglOnscreenXlib *xlib_onscreen = onscreen->winsys;
-  GLXDrawable drawable =
-    glx_onscreen->glxwin ? glx_onscreen->glxwin : xlib_onscreen->xwin;
-
-  if (glx_context->current_drawable != drawable)
-    return;
-
-  glx_context->current_drawable = 0;
-  _cogl_winsys_onscreen_bind (onscreen);
-}
-
-static void
 _cogl_winsys_onscreen_set_visibility (CoglOnscreen *onscreen,
-                                      CoglBool visibility)
+                                      gboolean visibility)
 {
   CoglContext *context = COGL_FRAMEBUFFER (onscreen)->context;
   CoglXlibRenderer *xlib_renderer =
@@ -2368,7 +2058,7 @@ _cogl_winsys_onscreen_set_visibility (CoglOnscreen *onscreen,
 
 static void
 _cogl_winsys_onscreen_set_resizable (CoglOnscreen *onscreen,
-                                     CoglBool resizable)
+                                     gboolean resizable)
 {
   CoglFramebuffer *framebuffer = COGL_FRAMEBUFFER (onscreen);
   CoglContext *context = framebuffer->context;
@@ -2404,12 +2094,12 @@ _cogl_winsys_onscreen_set_resizable (CoglOnscreen *onscreen,
   XFree (size_hints);
 }
 
-static CoglBool
+static gboolean
 get_fbconfig_for_depth (CoglContext *context,
                         unsigned int depth,
-                        CoglBool stereo,
+                        gboolean stereo,
                         GLXFBConfig *fbconfig_ret,
-                        CoglBool *can_mipmap_ret)
+                        gboolean *can_mipmap_ret)
 {
   CoglXlibRenderer *xlib_renderer;
   CoglGLXRenderer *glx_renderer;
@@ -2419,7 +2109,7 @@ get_fbconfig_for_depth (CoglContext *context,
   int n_elements, i;
   int db, stencil, alpha, mipmap, rgba, value;
   int spare_cache_slot = 0;
-  CoglBool found = FALSE;
+  gboolean found = FALSE;
 
   xlib_renderer = _cogl_xlib_renderer_get_data (context->display->renderer);
   glx_renderer = context->display->renderer->winsys;
@@ -2563,58 +2253,10 @@ get_fbconfig_for_depth (CoglContext *context,
   return found;
 }
 
-static CoglBool
-should_use_rectangle (CoglContext *context)
-{
-
-  if (context->rectangle_state == COGL_WINSYS_RECTANGLE_STATE_UNKNOWN)
-    {
-      if (cogl_has_feature (context, COGL_FEATURE_ID_TEXTURE_RECTANGLE))
-        {
-          const char *rect_env;
-
-          /* Use the rectangle only if it is available and either:
-
-             the COGL_PIXMAP_TEXTURE_RECTANGLE environment variable is
-             set to 'force'
-
-             *or*
-
-             the env var is set to 'allow' or not set and NPOTs textures
-             are not available */
-
-          context->rectangle_state =
-            cogl_has_feature (context, COGL_FEATURE_ID_TEXTURE_NPOT) ?
-            COGL_WINSYS_RECTANGLE_STATE_DISABLE :
-            COGL_WINSYS_RECTANGLE_STATE_ENABLE;
-
-          if ((rect_env = g_getenv ("COGL_PIXMAP_TEXTURE_RECTANGLE")) ||
-              /* For compatibility, we'll also look at the old Clutter
-                 environment variable */
-              (rect_env = g_getenv ("CLUTTER_PIXMAP_TEXTURE_RECTANGLE")))
-            {
-              if (g_ascii_strcasecmp (rect_env, "force") == 0)
-                context->rectangle_state =
-                  COGL_WINSYS_RECTANGLE_STATE_ENABLE;
-              else if (g_ascii_strcasecmp (rect_env, "disable") == 0)
-                context->rectangle_state =
-                  COGL_WINSYS_RECTANGLE_STATE_DISABLE;
-              else if (g_ascii_strcasecmp (rect_env, "allow"))
-                g_warning ("Unknown value for COGL_PIXMAP_TEXTURE_RECTANGLE, "
-                           "should be 'force' or 'disable'");
-            }
-        }
-      else
-        context->rectangle_state = COGL_WINSYS_RECTANGLE_STATE_DISABLE;
-    }
-
-  return context->rectangle_state == COGL_WINSYS_RECTANGLE_STATE_ENABLE;
-}
-
-static CoglBool
+static gboolean
 try_create_glx_pixmap (CoglContext *context,
                        CoglTexturePixmapX11 *tex_pixmap,
-                       CoglBool mipmap)
+                       gboolean mipmap)
 {
   CoglTexturePixmapGLX *glx_tex_pixmap = tex_pixmap->winsys;
   CoglRenderer *renderer;
@@ -2627,7 +2269,6 @@ try_create_glx_pixmap (CoglContext *context,
   GLXFBConfig fb_config = (GLXFBConfig)0;
   int attribs[7];
   int i = 0;
-  GLenum target;
   CoglXlibTrapState trap_state;
 
   unsigned int depth = tex_pixmap->depth;
@@ -2647,14 +2288,6 @@ try_create_glx_pixmap (CoglContext *context,
                  depth);
       return FALSE;
     }
-
-  if (should_use_rectangle (context))
-    {
-      target = GLX_TEXTURE_RECTANGLE_EXT;
-      glx_tex_pixmap->can_mipmap = FALSE;
-    }
-  else
-    target = GLX_TEXTURE_2D_EXT;
 
   if (!glx_tex_pixmap->can_mipmap)
     mipmap = FALSE;
@@ -2676,7 +2309,7 @@ try_create_glx_pixmap (CoglContext *context,
   attribs[i++] = mipmap;
 
   attribs[i++] = GLX_TEXTURE_TARGET_EXT;
-  attribs[i++] = target;
+  attribs[i++] = GLX_TEXTURE_2D_EXT;
 
   attribs[i++] = None;
 
@@ -2711,7 +2344,7 @@ try_create_glx_pixmap (CoglContext *context,
   return TRUE;
 }
 
-static CoglBool
+static gboolean
 _cogl_winsys_texture_pixmap_x11_create (CoglTexturePixmapX11 *tex_pixmap)
 {
   CoglTexturePixmapGLX *glx_tex_pixmap;
@@ -2820,10 +2453,10 @@ _cogl_winsys_texture_pixmap_x11_free (CoglTexturePixmapX11 *tex_pixmap)
   g_free (glx_tex_pixmap);
 }
 
-static CoglBool
+static gboolean
 _cogl_winsys_texture_pixmap_x11_update (CoglTexturePixmapX11 *tex_pixmap,
                                         CoglTexturePixmapStereoMode stereo_mode,
-                                        CoglBool needs_mipmap)
+                                        gboolean needs_mipmap)
 {
   CoglTexture *tex = COGL_TEXTURE (tex_pixmap);
   CoglContext *ctx = COGL_TEXTURE (tex_pixmap)->context;
@@ -2853,55 +2486,27 @@ _cogl_winsys_texture_pixmap_x11_update (CoglTexturePixmapX11 *tex_pixmap,
   if (texture_info->glx_tex == NULL)
     {
       CoglPixelFormat texture_format;
-      CoglError *error = NULL;
+      GError *error = NULL;
 
       texture_format = (tex_pixmap->depth >= 32 ?
                         COGL_PIXEL_FORMAT_RGBA_8888_PRE :
                         COGL_PIXEL_FORMAT_RGB_888);
 
-      if (should_use_rectangle (ctx))
-        {
-          texture_info->glx_tex = COGL_TEXTURE (
-            cogl_texture_rectangle_new_with_size (ctx,
-                                                  tex->width,
-                                                  tex->height));
+      texture_info->glx_tex = COGL_TEXTURE (
+        cogl_texture_2d_new_with_size (ctx, tex->width, tex->height));
 
-          _cogl_texture_set_internal_format (tex, texture_format);
+      _cogl_texture_set_internal_format (tex, texture_format);
 
-          if (cogl_texture_allocate (texture_info->glx_tex, &error))
-            COGL_NOTE (TEXTURE_PIXMAP, "Created a texture rectangle for %p",
-                       tex_pixmap);
-          else
-            {
-              COGL_NOTE (TEXTURE_PIXMAP, "Falling back for %p because a "
-                         "texture rectangle could not be created: %s",
-                         tex_pixmap, error->message);
-              cogl_error_free (error);
-              free_glx_pixmap (ctx, glx_tex_pixmap);
-              return FALSE;
-            }
-        }
+      if (cogl_texture_allocate (texture_info->glx_tex, &error))
+        COGL_NOTE (TEXTURE_PIXMAP, "Created a texture 2d for %p", tex_pixmap);
       else
         {
-          texture_info->glx_tex = COGL_TEXTURE (
-            cogl_texture_2d_new_with_size (ctx,
-                                           tex->width,
-                                           tex->height));
-
-          _cogl_texture_set_internal_format (tex, texture_format);
-
-          if (cogl_texture_allocate (texture_info->glx_tex, &error))
-            COGL_NOTE (TEXTURE_PIXMAP, "Created a texture 2d for %p",
-                       tex_pixmap);
-          else
-            {
-              COGL_NOTE (TEXTURE_PIXMAP, "Falling back for %p because a "
-                         "texture 2d could not be created: %s",
-                         tex_pixmap, error->message);
-              cogl_error_free (error);
-              free_glx_pixmap (ctx, glx_tex_pixmap);
-              return FALSE;
-            }
+          COGL_NOTE (TEXTURE_PIXMAP, "Falling back for %p because a "
+                     "texture 2d could not be created: %s",
+                     tex_pixmap, error->message);
+          g_error_free (error);
+          free_glx_pixmap (ctx, glx_tex_pixmap);
+          return FALSE;
         }
     }
 
@@ -3024,8 +2629,6 @@ static CoglWinsysVtable _cogl_winsys_vtable =
       _cogl_winsys_onscreen_swap_buffers_with_damage,
     .onscreen_swap_region = _cogl_winsys_onscreen_swap_region,
     .onscreen_get_buffer_age = _cogl_winsys_onscreen_get_buffer_age,
-    .onscreen_update_swap_throttled =
-      _cogl_winsys_onscreen_update_swap_throttled,
     .onscreen_x11_get_window_xid =
       _cogl_winsys_onscreen_x11_get_window_xid,
     .onscreen_set_visibility = _cogl_winsys_onscreen_set_visibility,

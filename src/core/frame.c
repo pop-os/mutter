@@ -21,12 +21,14 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <config.h>
-#include "frame.h"
-#include "bell.h"
-#include <meta/meta-x11-errors.h>
-#include "keybindings-private.h"
+#include "config.h"
+
+#include "core/frame.h"
+
 #include "backends/x11/meta-backend-x11.h"
+#include "core/bell.h"
+#include "core/keybindings-private.h"
+#include "meta/meta-x11-errors.h"
 #include "x11/meta-x11-display-private.h"
 
 #define EVENT_MASK (SubstructureRedirectMask |                     \
@@ -58,7 +60,6 @@ meta_window_ensure_frame (MetaWindow *window)
   frame->right_width = 0;
   frame->current_cursor = 0;
 
-  frame->is_flashing = FALSE;
   frame->borders_cached = FALSE;
 
   meta_verbose ("Frame geometry %d,%d  %dx%d\n",
@@ -106,6 +107,7 @@ meta_window_ensure_frame (MetaWindow *window)
                    frame->xwindow,
                    frame->child_x,
                    frame->child_y);
+  window->reparents_pending += 1;
   /* FIXME handle this error */
   meta_x11_error_trap_pop (x11_display);
 
@@ -175,8 +177,6 @@ meta_window_destroy_frame (MetaWindow *window)
 
   meta_frame_calc_borders (frame, &borders);
 
-  meta_bell_notify_frame_destroy (frame);
-
   /* Unparent the client window; it may be destroyed,
    * thus the error trap.
    */
@@ -191,18 +191,25 @@ meta_window_destroy_frame (MetaWindow *window)
                   "Incrementing unmaps_pending on %s for reparent back to root\n", window->desc);
       window->unmaps_pending += 1;
     }
-  meta_stack_tracker_record_add (window->display->stack_tracker,
-                                 window->xwindow,
-                                 XNextRequest (x11_display->xdisplay));
-  XReparentWindow (x11_display->xdisplay,
-                   window->xwindow,
-                   x11_display->xroot,
-                   /* Using anything other than client root window coordinates
-                    * coordinates here means we'll need to ensure a configure
-                    * notify event is sent; see bug 399552.
-                    */
-                   window->frame->rect.x + borders.invisible.left,
-                   window->frame->rect.y + borders.invisible.top);
+
+  if (!x11_display->closing)
+    {
+      meta_stack_tracker_record_add (window->display->stack_tracker,
+                                     window->xwindow,
+                                     XNextRequest (x11_display->xdisplay));
+
+      XReparentWindow (x11_display->xdisplay,
+                       window->xwindow,
+                       x11_display->xroot,
+                       /* Using anything other than client root window coordinates
+                        * coordinates here means we'll need to ensure a configure
+                        * notify event is sent; see bug 399552.
+                        */
+                       window->frame->rect.x + borders.invisible.left,
+                       window->frame->rect.y + borders.invisible.top);
+      window->reparents_pending += 1;
+    }
+
   meta_x11_error_trap_pop (x11_display);
 
   meta_ui_frame_unmanage (frame->ui_frame);
@@ -250,10 +257,6 @@ meta_frame_get_flags (MetaFrame *frame)
     {
       flags |= META_FRAME_ALLOWS_MENU;
 
-      if (meta_prefs_get_show_fallback_app_menu () &&
-          frame->window->gtk_app_menu_object_path)
-        flags |= META_FRAME_ALLOWS_APPMENU;
-
       if (frame->window->has_close_func)
         flags |= META_FRAME_ALLOWS_DELETE;
 
@@ -299,9 +302,6 @@ meta_frame_get_flags (MetaFrame *frame)
 
   if (frame->window->fullscreen)
     flags |= META_FRAME_FULLSCREEN;
-
-  if (frame->is_flashing)
-    flags |= META_FRAME_IS_FLASHING;
 
   if (frame->window->wm_state_above)
     flags |= META_FRAME_ABOVE;

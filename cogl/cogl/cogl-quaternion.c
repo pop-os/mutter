@@ -39,9 +39,7 @@
  * 3D Maths Primer for Graphics and Game Development ISBN-10: 1556229119
  */
 
-#ifdef HAVE_CONFIG_H
 #include "cogl-config.h"
-#endif
 
 #include <cogl-util.h>
 #include <cogl-quaternion.h>
@@ -326,14 +324,14 @@ cogl_quaternion_init_from_matrix (CoglQuaternion *quaternion,
     }
 }
 
-CoglBool
+gboolean
 cogl_quaternion_equal (const void *v1, const void *v2)
 {
   const CoglQuaternion *a = v1;
   const CoglQuaternion *b = v2;
 
-  _COGL_RETURN_VAL_IF_FAIL (v1 != NULL, FALSE);
-  _COGL_RETURN_VAL_IF_FAIL (v2 != NULL, FALSE);
+  g_return_val_if_fail (v1 != NULL, FALSE);
+  g_return_val_if_fail (v2 != NULL, FALSE);
 
   if (v1 == v2)
     return TRUE;
@@ -449,7 +447,7 @@ cogl_quaternion_multiply (CoglQuaternion *result,
   float y = a->y;
   float z = a->z;
 
-  _COGL_RETURN_IF_FAIL (b != result);
+  g_return_if_fail (b != result);
 
   result->w = w * b->w - x * b->x - y * b->y - z * b->z;
 
@@ -506,7 +504,7 @@ cogl_quaternion_slerp (CoglQuaternion *result,
   float fa;
   float fb;
 
-  _COGL_RETURN_IF_FAIL (t >=0 && t <= 1.0f);
+  g_return_if_fail (t >=0 && t <= 1.0f);
 
   if (t == 0)
     {
@@ -593,7 +591,7 @@ cogl_quaternion_nlerp (CoglQuaternion *result,
   float fa;
   float fb;
 
-  _COGL_RETURN_IF_FAIL (t >=0 && t <= 1.0f);
+  g_return_if_fail (t >=0 && t <= 1.0f);
 
   if (t == 0)
     {

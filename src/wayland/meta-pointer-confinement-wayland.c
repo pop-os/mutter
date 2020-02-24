@@ -22,6 +22,16 @@
  *     Jonas Ådahl <jadahl@gmail.com>
  */
 
+/**
+ * SECTION:meta-pointer-confinement-wayland
+ * @title: MetaPointerConfinementWayland
+ * @short_description: A #MetaPointerConstraint implementing pointer confinement
+ *
+ * A MetaPointerConfinementConstraint implements the client pointer constraint
+ * "pointer confinement": the cursor should not be able to "break out" of a
+ * certain area defined by the client requesting it.
+ */
+
 #include "config.h"
 
 #include "wayland/meta-pointer-confinement-wayland.h"
@@ -30,13 +40,13 @@
 #include <cairo.h>
 
 #include "backends/meta-backend-private.h"
-#include "core/meta-border.h"
-#include "wayland/meta-wayland-seat.h"
-#include "wayland/meta-wayland-pointer.h"
-#include "wayland/meta-wayland-pointer-constraints.h"
-#include "wayland/meta-wayland-surface.h"
 #include "backends/meta-pointer-constraint.h"
 #include "compositor/meta-surface-actor-wayland.h"
+#include "core/meta-border.h"
+#include "wayland/meta-wayland-pointer-constraints.h"
+#include "wayland/meta-wayland-pointer.h"
+#include "wayland/meta-wayland-seat.h"
+#include "wayland/meta-wayland-surface.h"
 
 struct _MetaPointerConfinementWayland
 {
@@ -664,8 +674,8 @@ meta_pointer_confinement_wayland_maybe_warp (MetaPointerConfinementWayland *self
 }
 
 static void
-surface_actor_geometry_changed (MetaSurfaceActorWayland       *surface_actor,
-                                MetaPointerConfinementWayland *self)
+surface_geometry_changed (MetaWaylandSurface            *surface,
+                          MetaPointerConfinementWayland *self)
 {
   meta_pointer_confinement_wayland_maybe_warp (self);
 }
@@ -690,9 +700,9 @@ meta_pointer_confinement_wayland_new (MetaWaylandPointerConstraint *constraint)
   confinement->constraint = constraint;
 
   surface = meta_wayland_pointer_constraint_get_surface (constraint);
-  g_signal_connect_object (meta_wayland_surface_get_actor (surface),
+  g_signal_connect_object (surface,
                            "geometry-changed",
-                           G_CALLBACK (surface_actor_geometry_changed),
+                           G_CALLBACK (surface_geometry_changed),
                            confinement,
                            0);
   if (surface->window)

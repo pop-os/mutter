@@ -27,7 +27,6 @@
 
 #include "backends/meta-logical-monitor.h"
 #include "core/window-private.h"
-#include "wayland/meta-wayland.h"
 #include "wayland/meta-wayland-outputs.h"
 #include "wayland/meta-wayland-popup.h"
 #include "wayland/meta-wayland-private.h"
@@ -35,6 +34,7 @@
 #include "wayland/meta-wayland-shell-surface.h"
 #include "wayland/meta-wayland-surface.h"
 #include "wayland/meta-wayland-versions.h"
+#include "wayland/meta-wayland.h"
 #include "wayland/meta-window-wayland.h"
 
 #include "xdg-shell-unstable-v6-server-protocol.h"
@@ -165,9 +165,10 @@ zxdg_toplevel_v6_destructor (struct wl_resource *resource)
 {
   MetaWaylandZxdgToplevelV6 *xdg_toplevel =
     wl_resource_get_user_data (resource);
-  MetaWaylandSurface *surface = surface_from_xdg_toplevel_resource (resource);
+  MetaWaylandShellSurface *shell_surface =
+    META_WAYLAND_SHELL_SURFACE (xdg_toplevel);
 
-  meta_wayland_surface_destroy_window (surface);
+  meta_wayland_shell_surface_destroy_window (shell_surface);
   xdg_toplevel->resource = NULL;
 }
 
@@ -258,7 +259,7 @@ zxdg_toplevel_v6_show_window_menu (struct wl_client   *client,
   if (!meta_wayland_seat_get_grab_info (seat, surface, serial, FALSE, NULL, NULL))
     return;
 
-  monitor_scale = window->monitor->scale;
+  monitor_scale = meta_window_wayland_get_geometry_scale (window);
   meta_window_show_menu (window, META_WINDOW_MENU_WM,
                          window->buffer_rect.x + (x * monitor_scale),
                          window->buffer_rect.y + (y * monitor_scale));
@@ -395,6 +396,9 @@ zxdg_toplevel_v6_set_maximized (struct wl_client   *client,
 
   window = surface->window;
   if (!window)
+    return;
+
+  if (!window->has_maximize_func)
     return;
 
   meta_window_force_placement (window, TRUE);
@@ -546,45 +550,39 @@ handle_popup_parent_destroyed (struct wl_listener *listener,
     META_WAYLAND_ZXDG_SURFACE_V6 (xdg_popup);
   struct wl_resource *xdg_shell_resource =
     meta_wayland_zxdg_surface_v6_get_shell_resource (xdg_surface);
-  MetaWaylandSurfaceRole *surface_role =
-    META_WAYLAND_SURFACE_ROLE (xdg_popup);
-  MetaWaylandSurface *surface =
-    meta_wayland_surface_role_get_surface (surface_role);
+  MetaWaylandShellSurface *shell_surface =
+    META_WAYLAND_SHELL_SURFACE (xdg_popup);
 
   wl_resource_post_error (xdg_shell_resource,
                           ZXDG_SHELL_V6_ERROR_NOT_THE_TOPMOST_POPUP,
                           "destroyed popup not top most popup");
   xdg_popup->parent_surface = NULL;
 
-  meta_wayland_surface_destroy_window (surface);
+  meta_wayland_shell_surface_destroy_window (shell_surface);
+}
+
+static void
+add_state_value (struct wl_array             *states,
+                 enum zxdg_toplevel_v6_state  state)
+{
+  uint32_t *s;
+
+  s = wl_array_add (states, sizeof *s);
+  *s = state;
 }
 
 static void
 fill_states (struct wl_array *states,
              MetaWindow      *window)
 {
-  uint32_t *s;
-
   if (META_WINDOW_MAXIMIZED (window))
-    {
-      s = wl_array_add (states, sizeof *s);
-      *s = ZXDG_TOPLEVEL_V6_STATE_MAXIMIZED;
-    }
+    add_state_value (states, ZXDG_TOPLEVEL_V6_STATE_MAXIMIZED);
   if (meta_window_is_fullscreen (window))
-    {
-      s = wl_array_add (states, sizeof *s);
-      *s = ZXDG_TOPLEVEL_V6_STATE_FULLSCREEN;
-    }
+    add_state_value (states, ZXDG_TOPLEVEL_V6_STATE_FULLSCREEN);
   if (meta_grab_op_is_resizing (window->display->grab_op))
-    {
-      s = wl_array_add (states, sizeof *s);
-      *s = ZXDG_TOPLEVEL_V6_STATE_RESIZING;
-    }
+    add_state_value (states, ZXDG_TOPLEVEL_V6_STATE_RESIZING);
   if (meta_window_appears_focused (window))
-    {
-      s = wl_array_add (states, sizeof *s);
-      *s = ZXDG_TOPLEVEL_V6_STATE_ACTIVATED;
-    }
+    add_state_value (states, ZXDG_TOPLEVEL_V6_STATE_ACTIVATED);
 }
 
 static void
@@ -705,7 +703,7 @@ meta_wayland_zxdg_toplevel_v6_commit (MetaWaylandSurfaceRole  *surface_role,
                                        window_geometry,
                                        pending->dx, pending->dy);
     }
-  else if (pending->dx != 0 || pending->dx != 0)
+  else if (pending->dx != 0 || pending->dy != 0)
     {
       g_warning ("XXX: Attach-initiated move without a new geometry. "
                  "This is unimplemented right now.");
@@ -945,7 +943,7 @@ finish_popup_setup (MetaWaylandZxdgPopupV6 *xdg_popup)
       if (popup == NULL)
         {
           zxdg_popup_v6_send_popup_done (xdg_popup->resource);
-          meta_wayland_surface_destroy_window (surface);
+          meta_wayland_shell_surface_destroy_window (shell_surface);
           return;
         }
 
@@ -1100,6 +1098,8 @@ meta_wayland_zxdg_popup_v6_dismiss (MetaWaylandPopupSurface *popup_surface)
     META_WAYLAND_ZXDG_SURFACE_V6 (xdg_popup);
   struct wl_resource *xdg_shell_resource =
     meta_wayland_zxdg_surface_v6_get_shell_resource (xdg_surface);
+  MetaWaylandShellSurface *shell_surface =
+    META_WAYLAND_SHELL_SURFACE (xdg_popup);
   MetaWaylandSurfaceRole *surface_role = META_WAYLAND_SURFACE_ROLE (xdg_popup);
   MetaWaylandSurface *surface =
     meta_wayland_surface_role_get_surface (surface_role);
@@ -1115,7 +1115,7 @@ meta_wayland_zxdg_popup_v6_dismiss (MetaWaylandPopupSurface *popup_surface)
 
   xdg_popup->popup = NULL;
 
-  meta_wayland_surface_destroy_window (surface);
+  meta_wayland_shell_surface_destroy_window (shell_surface);
 }
 
 static MetaWaylandSurface *

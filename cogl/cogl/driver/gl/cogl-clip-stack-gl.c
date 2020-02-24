@@ -32,16 +32,14 @@
  *  Robert Bragg   <robert@linux.intel.com>
  */
 
-#ifdef HAVE_CONFIG_H
 #include "cogl-config.h"
-#endif
 
 #include "cogl-context-private.h"
-#include "cogl-util-gl-private.h"
 #include "cogl-primitives-private.h"
-#include "cogl-pipeline-opengl-private.h"
-#include "cogl-clip-stack-gl-private.h"
 #include "cogl-primitive-private.h"
+#include "driver/gl/cogl-util-gl-private.h"
+#include "driver/gl/cogl-pipeline-opengl-private.h"
+#include "driver/gl/cogl-clip-stack-gl-private.h"
 
 #ifndef GL_CLIP_PLANE0
 #define GL_CLIP_PLANE0 0x3000
@@ -125,10 +123,6 @@ set_clip_plane (CoglFramebuffer *framebuffer,
       g_assert_not_reached ();
       break;
 
-    case COGL_DRIVER_GLES1:
-      GE( ctx, glClipPlanef (plane_num, planef) );
-      break;
-
     case COGL_DRIVER_GL:
     case COGL_DRIVER_GL3:
       planed[0] = planef[0];
@@ -208,7 +202,7 @@ add_stencil_clip_rectangle (CoglFramebuffer *framebuffer,
                             float y_1,
                             float x_2,
                             float y_2,
-                            CoglBool first)
+                            gboolean first)
 {
   CoglMatrixStack *projection_stack =
     _cogl_framebuffer_get_projection_stack (framebuffer);
@@ -278,8 +272,8 @@ add_stencil_clip_silhouette (CoglFramebuffer *framebuffer,
                              float bounds_y1,
                              float bounds_x2,
                              float bounds_y2,
-                             CoglBool merge,
-                             CoglBool need_clear,
+                             gboolean merge,
+                             gboolean need_clear,
                              void *user_data)
 {
   CoglMatrixStack *projection_stack =
@@ -389,8 +383,8 @@ add_stencil_clip_primitive (CoglFramebuffer *framebuffer,
                             float bounds_y1,
                             float bounds_x2,
                             float bounds_y2,
-                            CoglBool merge,
-                            CoglBool need_clear)
+                            gboolean merge,
+                            gboolean need_clear)
 {
   add_stencil_clip_silhouette (framebuffer,
                                paint_primitive_silhouette,
@@ -428,8 +422,8 @@ _cogl_clip_stack_gl_flush (CoglClipStack *stack,
 {
   CoglContext *ctx = framebuffer->context;
   int has_clip_planes;
-  CoglBool using_clip_planes = FALSE;
-  CoglBool using_stencil_buffer = FALSE;
+  gboolean using_clip_planes = FALSE;
+  gboolean using_stencil_buffer = FALSE;
   int scissor_x0;
   int scissor_y0;
   int scissor_x1;
@@ -441,12 +435,7 @@ _cogl_clip_stack_gl_flush (CoglClipStack *stack,
      anything */
   if (ctx->current_clip_stack_valid)
     {
-      if (ctx->current_clip_stack == stack &&
-          (ctx->needs_viewport_scissor_workaround == FALSE ||
-           (framebuffer->viewport_age ==
-            framebuffer->viewport_age_for_scissor_workaround &&
-            ctx->viewport_scissor_workaround_framebuffer ==
-            framebuffer)))
+      if (ctx->current_clip_stack == stack)
         return;
 
       _cogl_clip_stack_unref (ctx->current_clip_stack);
@@ -463,10 +452,8 @@ _cogl_clip_stack_gl_flush (CoglClipStack *stack,
   GE( ctx, glDisable (GL_STENCIL_TEST) );
 
   /* If the stack is empty then there's nothing else to do
-   *
-   * See comment below about ctx->needs_viewport_scissor_workaround
    */
-  if (stack == NULL && !ctx->needs_viewport_scissor_workaround)
+  if (stack == NULL)
     {
       COGL_NOTE (CLIPPING, "Flushed empty clip stack");
 
@@ -482,31 +469,6 @@ _cogl_clip_stack_gl_flush (CoglClipStack *stack,
   _cogl_clip_stack_get_bounds (stack,
                                &scissor_x0, &scissor_y0,
                                &scissor_x1, &scissor_y1);
-
-  /* XXX: ONGOING BUG: Intel viewport scissor
-   *
-   * Intel gen6 drivers don't correctly handle offset viewports, since
-   * primitives aren't clipped within the bounds of the viewport.  To
-   * workaround this we push our own clip for the viewport that will
-   * use scissoring to ensure we clip as expected.
-   *
-   * TODO: file a bug upstream!
-   */
-  if (ctx->needs_viewport_scissor_workaround)
-    {
-      _cogl_util_scissor_intersect (framebuffer->viewport_x,
-                                    framebuffer->viewport_y,
-                                    framebuffer->viewport_x +
-                                      framebuffer->viewport_width,
-                                    framebuffer->viewport_y +
-                                      framebuffer->viewport_height,
-                                    &scissor_x0, &scissor_y0,
-                                    &scissor_x1, &scissor_y1);
-      framebuffer->viewport_age_for_scissor_workaround =
-        framebuffer->viewport_age;
-      ctx->viewport_scissor_workaround_framebuffer =
-        framebuffer;
-    }
 
   /* Enable scissoring as soon as possible */
   if (scissor_x0 >= scissor_x1 || scissor_y0 >= scissor_y1)

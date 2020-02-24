@@ -43,56 +43,60 @@
 
 #define _XOPEN_SOURCE /* for putenv() and some signal-related functions */
 
-#include <config.h>
-#include <meta/main.h>
-#include "util-private.h"
-#include "display-private.h"
-#include <meta/meta-x11-errors.h>
-#include "ui.h"
-#include <meta/prefs.h>
-#include <meta/compositor.h>
-#include <meta/meta-backend.h>
-#include "core/main-private.h"
+#include "config.h"
 
-#include <glib-object.h>
-#include <glib-unix.h>
+#include "meta/main.h"
 
-#include <stdlib.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <stdio.h>
-#include <string.h>
-#include <signal.h>
-#include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <glib-object.h>
+#include <glib-unix.h>
 #include <locale.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-
-#include <clutter/clutter.h>
+#include <unistd.h>
 
 #ifdef HAVE_INTROSPECTION
 #include <girepository.h>
 #endif
 
+#if defined(HAVE_NATIVE_BACKEND) && defined(HAVE_WAYLAND)
+#include <systemd/sd-login.h>
+#endif /* HAVE_WAYLAND && HAVE_NATIVE_BACKEND */
+
+#ifdef HAVE_SYS_PRCTL
+#include <sys/prctl.h>
+#endif
+
+#include "backends/meta-backend-private.h"
+#include "backends/x11/cm/meta-backend-x11-cm.h"
+#include "backends/x11/meta-backend-x11.h"
+#include "clutter/clutter.h"
+#include "core/display-private.h"
+#include "core/main-private.h"
+#include "core/util-private.h"
+#include "meta/compositor.h"
+#include "meta/meta-backend.h"
+#include "meta/meta-x11-errors.h"
+#include "meta/prefs.h"
+#include "ui/ui.h"
 #include "x11/session.h"
 
 #ifdef HAVE_WAYLAND
-#include "wayland/meta-wayland.h"
 #include "backends/x11/nested/meta-backend-x11-nested.h"
-# endif
-
-#include "backends/meta-backend-private.h"
-#include "backends/x11/meta-backend-x11.h"
-#include "backends/x11/cm/meta-backend-x11-cm.h"
+#include "wayland/meta-wayland.h"
+#include "wayland/meta-xwayland.h"
+#endif
 
 #ifdef HAVE_NATIVE_BACKEND
 #include "backends/native/meta-backend-native.h"
-#ifdef HAVE_WAYLAND
-#include <systemd/sd-login.h>
-#endif /* HAVE_WAYLAND */
-#endif /* HAVE_NATIVE_BACKEND */
+#endif
 
 /*
  * The exit code we'll return to our parent process when we eventually die.
@@ -119,11 +123,6 @@ static void prefs_changed_callback (MetaPreference pref,
 static void
 meta_print_compilation_info (void)
 {
-#ifdef HAVE_RANDR
-  meta_verbose ("Compiled with randr extension\n");
-#else
-  meta_verbose ("Compiled without randr extension\n");
-#endif
 #ifdef HAVE_STARTUP_NOTIFICATION
   meta_verbose ("Compiled with startup notification\n");
 #else
@@ -537,6 +536,10 @@ meta_init (void)
   MetaCompositorType compositor_type;
   GType backend_gtype;
 
+#ifdef HAVE_SYS_PRCTL
+  prctl (PR_SET_DUMPABLE, 1);
+#endif
+
   sigemptyset (&empty_mask);
   act.sa_handler = SIG_IGN;
   act.sa_mask    = empty_mask;
@@ -612,22 +615,6 @@ meta_init (void)
     meta_fatal ("Can't specify both SM save file and SM client id\n");
 
   meta_main_loop = g_main_loop_new (NULL, FALSE);
-
-  /*
-   * We need to make sure the first client connecting to the X server
-   * (e.g. Xwayland started from meta_wayland_init() above) is a permanent one,
-   * so prepare the GDK X11 connection now already. Without doing this, if
-   * there are any functionality that relies on X11 after here before
-   * meta_display_open(), the X server will terminate itself when such a client
-   * disconnects before the permanent GDK client connects.
-   */
-  if (meta_should_autostart_x11_display ())
-    {
-      GError *error = NULL;
-
-      if (!meta_x11_init_gdk_display (&error))
-        g_error ("Failed to open X11 display: %s", error->message);
-    }
 }
 
 /**
@@ -739,15 +726,46 @@ prefs_changed_callback (MetaPreference pref,
     }
 }
 
-gboolean
-meta_should_autostart_x11_display (void)
+MetaDisplayPolicy
+meta_get_x11_display_policy (void)
 {
   MetaBackend *backend = meta_get_backend ();
-  gboolean wants_x11 = TRUE;
+
+  if (META_IS_BACKEND_X11_CM (backend))
+    return META_DISPLAY_POLICY_MANDATORY;
 
 #ifdef HAVE_WAYLAND
-  wants_x11 = !opt_no_x11;
+  if (meta_is_wayland_compositor ())
+    {
+      MetaSettings *settings = meta_backend_get_settings (backend);
+
+      if (opt_no_x11)
+        return META_DISPLAY_POLICY_DISABLED;
+
+      if (meta_settings_is_experimental_feature_enabled (settings,
+                                                         META_EXPERIMENTAL_FEATURE_AUTOSTART_XWAYLAND))
+        return META_DISPLAY_POLICY_ON_DEMAND;
+    }
 #endif
 
-  return META_IS_BACKEND_X11_CM (backend) || wants_x11;
+  return META_DISPLAY_POLICY_MANDATORY;
+}
+
+void
+meta_test_init (void)
+{
+#if defined(HAVE_WAYLAND)
+  g_autofree char *display_name = g_strdup ("mutter-test-display-XXXXXX");
+  int fd = g_mkstemp (display_name);
+
+  meta_override_compositor_configuration (META_COMPOSITOR_TYPE_WAYLAND,
+                                          META_TYPE_BACKEND_X11_NESTED);
+  meta_wayland_override_display_name (display_name);
+  meta_xwayland_override_display_number (512 + rand() % 512);
+  meta_init ();
+
+  close (fd);
+#else
+  g_warning ("Tests require wayland support");
+#endif
 }

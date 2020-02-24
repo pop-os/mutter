@@ -93,9 +93,7 @@
  * ]|
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #include "clutter-timeline.h"
 
@@ -426,6 +424,11 @@ clutter_timeline_set_custom_property (ClutterScriptable *scriptable,
     g_object_set_property (G_OBJECT (scriptable), name, value);
 }
 
+void
+clutter_timeline_cancel_delay (ClutterTimeline *timeline)
+{
+  g_clear_handle_id (&timeline->priv->delay_id, g_source_remove);
+}
 
 static void
 clutter_scriptable_iface_init (ClutterScriptableIface *iface)
@@ -552,11 +555,7 @@ clutter_timeline_dispose (GObject *object)
 
   priv = self->priv;
 
-  if (priv->delay_id)
-    {
-      g_source_remove (priv->delay_id);
-      priv->delay_id = 0;
-    }
+  clutter_timeline_cancel_delay (self);
 
   if (priv->progress_notify != NULL)
     {
@@ -711,8 +710,7 @@ clutter_timeline_class_init (ClutterTimelineClass *klass)
 		  G_TYPE_FROM_CLASS (object_class),
 		  G_SIGNAL_RUN_LAST,
 		  G_STRUCT_OFFSET (ClutterTimelineClass, new_frame),
-		  NULL, NULL,
-		  _clutter_marshal_VOID__INT,
+		  NULL, NULL, NULL,
 		  G_TYPE_NONE,
 		  1, G_TYPE_INT);
   /**
@@ -735,8 +733,7 @@ clutter_timeline_class_init (ClutterTimelineClass *klass)
 		  G_TYPE_FROM_CLASS (object_class),
 		  G_SIGNAL_RUN_LAST,
 		  G_STRUCT_OFFSET (ClutterTimelineClass, completed),
-		  NULL, NULL,
-		  _clutter_marshal_VOID__VOID,
+		  NULL, NULL, NULL,
 		  G_TYPE_NONE, 0);
   /**
    * ClutterTimeline::started:
@@ -752,8 +749,7 @@ clutter_timeline_class_init (ClutterTimelineClass *klass)
 		  G_TYPE_FROM_CLASS (object_class),
 		  G_SIGNAL_RUN_LAST,
 		  G_STRUCT_OFFSET (ClutterTimelineClass, started),
-		  NULL, NULL,
-		  _clutter_marshal_VOID__VOID,
+		  NULL, NULL, NULL,
 		  G_TYPE_NONE, 0);
   /**
    * ClutterTimeline::paused:
@@ -766,8 +762,7 @@ clutter_timeline_class_init (ClutterTimelineClass *klass)
 		  G_TYPE_FROM_CLASS (object_class),
 		  G_SIGNAL_RUN_LAST,
 		  G_STRUCT_OFFSET (ClutterTimelineClass, paused),
-		  NULL, NULL,
-		  _clutter_marshal_VOID__VOID,
+		  NULL, NULL, NULL,
 		  G_TYPE_NONE, 0);
   /**
    * ClutterTimeline::marker-reached:
@@ -834,8 +829,7 @@ clutter_timeline_class_init (ClutterTimelineClass *klass)
 		  G_TYPE_FROM_CLASS (object_class),
 		  G_SIGNAL_RUN_LAST,
 		  G_STRUCT_OFFSET (ClutterTimelineClass, stopped),
-		  NULL, NULL,
-		  _clutter_marshal_VOID__BOOLEAN,
+		  NULL, NULL, NULL,
 		  G_TYPE_NONE, 1,
                   G_TYPE_BOOLEAN);
 }
@@ -1220,14 +1214,10 @@ clutter_timeline_pause (ClutterTimeline *timeline)
 
   priv = timeline->priv;
 
-  if (priv->delay_id == 0 && !priv->is_playing)
-    return;
+  clutter_timeline_cancel_delay (timeline);
 
-  if (priv->delay_id)
-    {
-      g_source_remove (priv->delay_id);
-      priv->delay_id = 0;
-    }
+  if (!priv->is_playing)
+    return;
 
   priv->msecs_delta = 0;
   set_is_playing (timeline, FALSE);

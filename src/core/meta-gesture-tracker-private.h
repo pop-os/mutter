@@ -25,8 +25,10 @@
 #define META_GESTURE_TRACKER_PRIVATE_H
 
 #include <glib-object.h>
-#include <clutter/clutter.h>
-#include <meta/window.h>
+
+#include "backends/meta-backend-private.h"
+#include "clutter/clutter.h"
+#include "meta/window.h"
 
 #define META_TYPE_GESTURE_TRACKER            (meta_gesture_tracker_get_type ())
 #define META_GESTURE_TRACKER(obj)            (G_TYPE_CHECK_INSTANCE_CAST ((obj), META_TYPE_GESTURE_TRACKER, MetaGestureTracker))
@@ -37,13 +39,6 @@
 
 typedef struct _MetaGestureTracker MetaGestureTracker;
 typedef struct _MetaGestureTrackerClass MetaGestureTrackerClass;
-
-typedef enum {
-  META_SEQUENCE_NONE,
-  META_SEQUENCE_ACCEPTED,
-  META_SEQUENCE_REJECTED,
-  META_SEQUENCE_PENDING_END
-} MetaSequenceState;
 
 struct _MetaGestureTracker
 {

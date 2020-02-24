@@ -29,17 +29,17 @@
 #include "config.h"
 
 #include <string.h>
-#include <clutter/clutter.h>
 #include <X11/Xlib.h>
 #include <X11/extensions/sync.h>
 
-#include <meta/util.h>
-#include <meta/main.h>
-#include <meta/meta-idle-monitor.h>
-#include "gsm-inhibitor-flag.h"
-#include "meta-idle-monitor-private.h"
-#include "meta-idle-monitor-dbus.h"
-#include "meta-backend-private.h"
+#include "backends/gsm-inhibitor-flag.h"
+#include "backends/meta-backend-private.h"
+#include "backends/meta-idle-monitor-private.h"
+#include "backends/meta-idle-monitor-dbus.h"
+#include "clutter/clutter.h"
+#include "meta/main.h"
+#include "meta/meta-idle-monitor.h"
+#include "meta/util.h"
 
 G_STATIC_ASSERT(sizeof(unsigned long) == sizeof(gpointer));
 
@@ -54,8 +54,8 @@ static GParamSpec *obj_props[PROP_LAST];
 
 G_DEFINE_TYPE (MetaIdleMonitor, meta_idle_monitor, G_TYPE_OBJECT)
 
-void
-_meta_idle_monitor_watch_fire (MetaIdleMonitorWatch *watch)
+static void
+meta_idle_monitor_watch_fire (MetaIdleMonitorWatch *watch)
 {
   MetaIdleMonitor *monitor;
   guint id;
@@ -207,6 +207,8 @@ update_inhibited (MetaIdleMonitor *monitor,
   if (inhibited == monitor->inhibited)
     return;
 
+  monitor->inhibited = inhibited;
+
   g_hash_table_foreach (monitor->watches,
                         update_inhibited_watch,
                         monitor);
@@ -316,11 +318,19 @@ idle_monitor_dispatch_timeout (GSource     *source,
                                gpointer     user_data)
 {
   MetaIdleMonitorWatch *watch = (MetaIdleMonitorWatch *) user_data;
+  int64_t now;
+  int64_t ready_time;
 
-  _meta_idle_monitor_watch_fire (watch);
+  now = g_source_get_time (source);
+  ready_time = g_source_get_ready_time (source);
+  if (ready_time > now)
+    return G_SOURCE_CONTINUE;
+
   g_source_set_ready_time (watch->timeout_source, -1);
 
-  return TRUE;
+  meta_idle_monitor_watch_fire (watch);
+
+  return G_SOURCE_CONTINUE;
 }
 
 static GSourceFuncs idle_monitor_source_funcs = {
@@ -504,13 +514,20 @@ meta_idle_monitor_reset_idletime (MetaIdleMonitor *monitor)
 
       if (watch->timeout_msec == 0)
         {
-          _meta_idle_monitor_watch_fire ((MetaIdleMonitorWatch *) watch);
+          meta_idle_monitor_watch_fire (watch);
         }
       else
         {
-          g_source_set_ready_time (watch->timeout_source,
-                                   monitor->last_event_time +
-                                   watch->timeout_msec * 1000);
+          if (monitor->inhibited)
+            {
+              g_source_set_ready_time (watch->timeout_source, -1);
+            }
+          else
+            {
+              g_source_set_ready_time (watch->timeout_source,
+                                       monitor->last_event_time +
+                                       watch->timeout_msec * 1000);
+            }
         }
     }
 

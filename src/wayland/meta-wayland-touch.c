@@ -25,13 +25,15 @@
 
 #include <glib.h>
 #include <string.h>
-#include <clutter/evdev/clutter-evdev.h>
 
-#include "meta-surface-actor-wayland.h"
-#include "meta-wayland-private.h"
+#include "compositor/meta-surface-actor-wayland.h"
+#include "wayland/meta-wayland-private.h"
 
 #ifdef HAVE_NATIVE_BACKEND
+#include <libinput.h>
 #include "backends/native/meta-backend-native.h"
+#include "backends/native/meta-device-manager-native.h"
+#include "backends/native/meta-event-native.h"
 #endif
 
 G_DEFINE_TYPE (MetaWaylandTouch, meta_wayland_touch,
@@ -59,6 +61,7 @@ struct _MetaWaylandTouchInfo
   guint begin_delivered : 1;
 };
 
+#ifdef HAVE_NATIVE_BACKEND
 static void
 move_resources (struct wl_list *destination, struct wl_list *source)
 {
@@ -185,7 +188,7 @@ touch_get_info (MetaWaylandTouch     *touch,
   if (!touch_info && create)
     {
       touch_info = g_new0 (MetaWaylandTouchInfo, 1);
-      touch_info->slot = clutter_evdev_event_sequence_get_slot (sequence);
+      touch_info->slot = meta_event_native_sequence_get_slot (sequence);
       g_hash_table_insert (touch->touches, sequence, touch_info);
     }
 
@@ -207,11 +210,13 @@ touch_get_relative_coordinates (MetaWaylandTouch   *touch,
                                                         event_x, event_y,
                                                         x, y);
 }
+#endif /* HAVE_NATIVE_BACKEND */
 
 void
 meta_wayland_touch_update (MetaWaylandTouch   *touch,
                            const ClutterEvent *event)
 {
+#ifdef HAVE_NATIVE_BACKEND
   MetaWaylandTouchInfo *touch_info;
   ClutterEventSequence *sequence;
 
@@ -240,6 +245,13 @@ meta_wayland_touch_update (MetaWaylandTouch   *touch,
   if (!touch_info)
     return;
 
+  if (event->type != CLUTTER_TOUCH_BEGIN &&
+      !touch_info->begin_delivered)
+    {
+      g_hash_table_remove (touch->touches, sequence);
+      return;
+    }
+
   if (event->type == CLUTTER_TOUCH_BEGIN ||
       event->type == CLUTTER_TOUCH_END)
     {
@@ -252,12 +264,14 @@ meta_wayland_touch_update (MetaWaylandTouch   *touch,
   touch_get_relative_coordinates (touch, touch_info->touch_surface->surface,
                                   event, &touch_info->x, &touch_info->y);
   touch_info->updated = TRUE;
+#endif /* HAVE_NATIVE_BACKEND */
 }
 
 static void
 handle_touch_begin (MetaWaylandTouch   *touch,
                     const ClutterEvent *event)
 {
+#ifdef HAVE_NATIVE_BACKEND
   MetaWaylandTouchInfo *touch_info;
   ClutterEventSequence *sequence;
   struct wl_resource *resource;
@@ -281,38 +295,14 @@ handle_touch_begin (MetaWaylandTouch   *touch,
     }
 
   touch_info->begin_delivered = TRUE;
+#endif /* HAVE_NATIVE_BACKEND */
 }
 
 static void
 handle_touch_update (MetaWaylandTouch   *touch,
                      const ClutterEvent *event)
 {
-  MetaWaylandTouchInfo *touch_info;
-  ClutterEventSequence *sequence;
-  struct wl_resource *resource;
-  struct wl_list *l;
-
-  sequence = clutter_event_get_event_sequence (event);
-  touch_info = touch_get_info (touch, sequence, FALSE);
-
-  if (!touch_info || !touch_info->begin_delivered)
-    return;
-
-  l = &touch_info->touch_surface->resource_list;
-  wl_resource_for_each(resource, l)
-    {
-      wl_touch_send_motion (resource,
-                            clutter_event_get_time (event),
-                            touch_info->slot,
-                            wl_fixed_from_double (touch_info->x),
-                            wl_fixed_from_double (touch_info->y));
-    }
-}
-
-static void
-handle_touch_end (MetaWaylandTouch   *touch,
-                  const ClutterEvent *event)
-{
+#ifdef HAVE_NATIVE_BACKEND
   MetaWaylandTouchInfo *touch_info;
   ClutterEventSequence *sequence;
   struct wl_resource *resource;
@@ -324,18 +314,44 @@ handle_touch_end (MetaWaylandTouch   *touch,
   if (!touch_info)
     return;
 
-  if (touch_info->begin_delivered)
+  l = &touch_info->touch_surface->resource_list;
+  wl_resource_for_each(resource, l)
     {
-      l = &touch_info->touch_surface->resource_list;
-      wl_resource_for_each(resource, l)
-        {
-          wl_touch_send_up (resource, touch_info->slot_serial,
+      wl_touch_send_motion (resource,
                             clutter_event_get_time (event),
-                            touch_info->slot);
-        }
+                            touch_info->slot,
+                            wl_fixed_from_double (touch_info->x),
+                            wl_fixed_from_double (touch_info->y));
+    }
+#endif /* HAVE_NATIVE_BACKEND */
+}
+
+static void
+handle_touch_end (MetaWaylandTouch   *touch,
+                  const ClutterEvent *event)
+{
+#ifdef HAVE_NATIVE_BACKEND
+  MetaWaylandTouchInfo *touch_info;
+  ClutterEventSequence *sequence;
+  struct wl_resource *resource;
+  struct wl_list *l;
+
+  sequence = clutter_event_get_event_sequence (event);
+  touch_info = touch_get_info (touch, sequence, FALSE);
+
+  if (!touch_info)
+    return;
+
+  l = &touch_info->touch_surface->resource_list;
+  wl_resource_for_each (resource, l)
+    {
+      wl_touch_send_up (resource, touch_info->slot_serial,
+                        clutter_event_get_time (event),
+                        touch_info->slot);
     }
 
   g_hash_table_remove (touch->touches, sequence);
+#endif /* HAVE_NATIVE_BACKEND */
 }
 
 static GList *
@@ -389,14 +405,30 @@ static void
 check_send_frame_event (MetaWaylandTouch   *touch,
                         const ClutterEvent *event)
 {
+  gboolean send_frame_event;
+#ifdef HAVE_NATIVE_BACKEND
+  MetaBackend *backend = meta_get_backend ();
   ClutterEventSequence *sequence;
   gint32 slot;
 
-  sequence = clutter_event_get_event_sequence (event);
-  slot = clutter_evdev_event_sequence_get_slot (sequence);
-  touch->frame_slots &= ~(1 << slot);
+  if (META_IS_BACKEND_NATIVE (backend))
+    {
+      sequence = clutter_event_get_event_sequence (event);
+      slot = meta_event_native_sequence_get_slot (sequence);
+      touch->frame_slots &= ~(1 << slot);
 
-  if (touch->frame_slots == 0)
+      if (touch->frame_slots == 0)
+        send_frame_event = TRUE;
+      else
+        send_frame_event = FALSE;
+    }
+  else
+#endif /* HAVE_NATIVE_BACKEND */
+    {
+      send_frame_event = TRUE;
+    }
+
+  if (send_frame_event)
     touch_send_frame_event (touch);
 }
 
@@ -443,12 +475,14 @@ static const struct wl_touch_interface touch_interface = {
   touch_release,
 };
 
+#ifdef HAVE_NATIVE_BACKEND
 static void
 touch_info_free (MetaWaylandTouchInfo *touch_info)
 {
   touch_surface_decrement_touch (touch_info->touch_surface);
   g_free (touch_info);
 }
+#endif /* HAVE_NATIVE_BACKEND */
 
 void
 meta_wayland_touch_cancel (MetaWaylandTouch *touch)
@@ -521,10 +555,12 @@ meta_wayland_touch_enable (MetaWaylandTouch *touch)
 {
   ClutterDeviceManager *manager;
 
+#ifdef HAVE_NATIVE_BACKEND
   touch->touch_surfaces = g_hash_table_new_full (NULL, NULL, NULL,
                                                  (GDestroyNotify) touch_surface_free);
   touch->touches = g_hash_table_new_full (NULL, NULL, NULL,
                                           (GDestroyNotify) touch_info_free);
+#endif /* HAVE_NATIVE_BACKEND */
 
   wl_list_init (&touch->resource_list);
 
@@ -534,7 +570,7 @@ meta_wayland_touch_enable (MetaWaylandTouch *touch)
 #ifdef HAVE_NATIVE_BACKEND
   MetaBackend *backend = meta_get_backend ();
   if (META_IS_BACKEND_NATIVE (backend))
-    clutter_evdev_add_filter (evdev_filter_func, touch, NULL);
+    meta_device_manager_native_add_filter (evdev_filter_func, touch, NULL);
 #endif
 }
 
@@ -544,7 +580,7 @@ meta_wayland_touch_disable (MetaWaylandTouch *touch)
 #ifdef HAVE_NATIVE_BACKEND
   MetaBackend *backend = meta_get_backend ();
   if (META_IS_BACKEND_NATIVE (backend))
-    clutter_evdev_remove_filter (evdev_filter_func, touch);
+    meta_device_manager_native_remove_filter (evdev_filter_func, touch);
 #endif
 
   meta_wayland_touch_cancel (touch);

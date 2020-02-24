@@ -31,31 +31,29 @@
  *   Neil Roberts <neil@linux.intel.com>
  */
 
-#ifdef HAVE_CONFIG_H
 #include "cogl-config.h"
-#endif
 
 #include <string.h>
 
 #include "cogl-util.h"
 #include "cogl-context-private.h"
-#include "cogl-util-gl-private.h"
 #include "cogl-pipeline-private.h"
-#include "cogl-pipeline-opengl-private.h"
 #include "cogl-offscreen.h"
+#include "driver/gl/cogl-util-gl-private.h"
+#include "driver/gl/cogl-pipeline-opengl-private.h"
 
 #ifdef COGL_PIPELINE_PROGEND_GLSL
 
 #include "cogl-context-private.h"
 #include "cogl-object-private.h"
-#include "cogl-program-private.h"
-#include "cogl-pipeline-fragend-glsl-private.h"
-#include "cogl-pipeline-vertend-glsl-private.h"
 #include "cogl-pipeline-cache.h"
 #include "cogl-pipeline-state-private.h"
 #include "cogl-attribute-private.h"
 #include "cogl-framebuffer-private.h"
-#include "cogl-pipeline-progend-glsl-private.h"
+#include "driver/gl/cogl-pipeline-fragend-glsl-private.h"
+#include "driver/gl/cogl-pipeline-vertend-glsl-private.h"
+#include "driver/gl/cogl-pipeline-progend-glsl-private.h"
+#include "deprecated/cogl-program-private.h"
 
 /* These are used to generalise updating some uniforms that are
    required when building for drivers missing some fixed function
@@ -182,8 +180,8 @@ _cogl_pipeline_progend_glsl_get_attrib_location (CoglPipeline *pipeline,
 
   _COGL_GET_CONTEXT (ctx, -1);
 
-  _COGL_RETURN_VAL_IF_FAIL (program_state != NULL, -1);
-  _COGL_RETURN_VAL_IF_FAIL (program_state->program != 0, -1);
+  g_return_val_if_fail (program_state != NULL, -1);
+  g_return_val_if_fail (program_state->program != 0, -1);
 
   if (G_UNLIKELY (program_state->attribute_locations == NULL))
     program_state->attribute_locations =
@@ -206,7 +204,7 @@ _cogl_pipeline_progend_glsl_get_attrib_location (CoglPipeline *pipeline,
         g_array_index (ctx->attribute_name_index_map,
                        CoglAttributeNameState *, name_index);
 
-      _COGL_RETURN_VAL_IF_FAIL (name_state != NULL, 0);
+      g_return_val_if_fail (name_state != NULL, 0);
 
       GE_RET( locations[name_index],
               ctx, glGetAttribLocation (program_state->program,
@@ -357,11 +355,11 @@ typedef struct
 {
   int unit;
   GLuint gl_program;
-  CoglBool update_all;
+  gboolean update_all;
   CoglPipelineProgramState *program_state;
 } UpdateUniformsState;
 
-static CoglBool
+static gboolean
 get_uniform_cb (CoglPipeline *pipeline,
                 int layer_index,
                 void *user_data)
@@ -415,7 +413,7 @@ get_uniform_cb (CoglPipeline *pipeline,
   return TRUE;
 }
 
-static CoglBool
+static gboolean
 update_constants_cb (CoglPipeline *pipeline,
                      int layer_index,
                      void *user_data)
@@ -488,7 +486,7 @@ typedef struct
   int value_index;
 } FlushUniformsClosure;
 
-static CoglBool
+static gboolean
 flush_uniform_cb (int uniform_num, void *user_data)
 {
   FlushUniformsClosure *data = user_data;
@@ -551,7 +549,7 @@ _cogl_pipeline_progend_glsl_flush_uniforms (CoglPipeline *pipeline,
                                             CoglPipelineProgramState *
                                                                   program_state,
                                             GLuint gl_program,
-                                            CoglBool program_changed)
+                                            gboolean program_changed)
 {
   CoglPipelineUniformsState *uniforms_state;
   FlushUniformsClosure data;
@@ -639,15 +637,12 @@ _cogl_pipeline_progend_glsl_flush_uniforms (CoglPipeline *pipeline,
     _cogl_bitmask_clear_all (&uniforms_state->changed_mask);
 }
 
-static CoglBool
+static gboolean
 _cogl_pipeline_progend_glsl_start (CoglPipeline *pipeline)
 {
   CoglHandle user_program;
 
   _COGL_GET_CONTEXT (ctx, FALSE);
-
-  if (!cogl_has_feature (ctx, COGL_FEATURE_ID_GLSL))
-    return FALSE;
 
   user_program = cogl_pipeline_get_user_program (pipeline);
   if (user_program &&
@@ -663,7 +658,7 @@ _cogl_pipeline_progend_glsl_end (CoglPipeline *pipeline,
 {
   CoglPipelineProgramState *program_state;
   GLuint gl_program;
-  CoglBool program_changed = FALSE;
+  gboolean program_changed = FALSE;
   UpdateUniformsState state;
   CoglProgram *user_program;
   CoglPipelineCacheEntry *cache_entry = NULL;
@@ -927,14 +922,14 @@ static void
 _cogl_pipeline_progend_glsl_pre_paint (CoglPipeline *pipeline,
                                        CoglFramebuffer *framebuffer)
 {
-  CoglBool needs_flip;
+  gboolean needs_flip;
   CoglMatrixEntry *projection_entry;
   CoglMatrixEntry *modelview_entry;
   CoglPipelineProgramState *program_state;
-  CoglBool modelview_changed;
-  CoglBool projection_changed;
-  CoglBool need_modelview;
-  CoglBool need_projection;
+  gboolean modelview_changed;
+  gboolean projection_changed;
+  gboolean need_modelview;
+  gboolean need_projection;
   CoglMatrix modelview, projection;
 
   _COGL_GET_CONTEXT (ctx, NO_RETVAL);

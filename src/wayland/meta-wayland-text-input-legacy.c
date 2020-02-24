@@ -23,11 +23,12 @@
 
 #include <wayland-server.h>
 
-#include "gtk-text-input-server-protocol.h"
 #include "wayland/meta-wayland-private.h"
 #include "wayland/meta-wayland-seat.h"
 #include "wayland/meta-wayland-text-input-legacy.h"
 #include "wayland/meta-wayland-versions.h"
+
+#include "gtk-text-input-server-protocol.h"
 
 #define META_TYPE_WAYLAND_GTK_TEXT_INPUT_FOCUS (meta_wayland_gtk_text_input_focus_get_type ())
 
@@ -308,7 +309,7 @@ text_input_enable (struct wl_client   *client,
   clutter_input_focus_set_can_show_preedit (focus, show_preedit);
 
   if (flags & GTK_TEXT_INPUT_ENABLE_FLAGS_TOGGLE_INPUT_PANEL)
-    clutter_input_focus_request_toggle_input_panel (focus);
+    clutter_input_focus_set_input_panel_state (focus, CLUTTER_INPUT_PANEL_STATE_TOGGLE);
 }
 
 static void

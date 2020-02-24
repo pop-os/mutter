@@ -24,26 +24,29 @@
 
 #include "config.h"
 
-#include "meta-wayland-pointer-constraints.h"
+#include "wayland/meta-wayland-pointer-constraints.h"
 
 #include <glib.h>
 
-#include "meta/meta-backend.h"
-#include "meta-wayland-private.h"
-#include "meta-wayland-seat.h"
-#include "meta-wayland-pointer.h"
-#include "meta-wayland-surface.h"
-#include "meta-wayland-region.h"
-#include "meta-xwayland.h"
-#include "meta-pointer-lock-wayland.h"
-#include "meta-pointer-confinement-wayland.h"
-#include "window-private.h"
 #include "backends/meta-backend-private.h"
-#include "backends/native/meta-backend-native.h"
 #include "backends/meta-pointer-constraint.h"
 #include "core/frame.h"
+#include "core/window-private.h"
+#include "meta/meta-backend.h"
+#include "wayland/meta-pointer-confinement-wayland.h"
+#include "wayland/meta-pointer-lock-wayland.h"
+#include "wayland/meta-wayland-pointer.h"
+#include "wayland/meta-wayland-private.h"
+#include "wayland/meta-wayland-region.h"
+#include "wayland/meta-wayland-seat.h"
+#include "wayland/meta-wayland-surface.h"
+#include "wayland/meta-xwayland.h"
 
 #include "pointer-constraints-unstable-v1-server-protocol.h"
+
+#ifdef HAVE_NATIVE_BACKEND
+#include "backends/native/meta-backend-native.h"
+#endif
 
 static GQuark quark_pending_constraint_state = 0;
 static GQuark quark_surface_pointer_constraints_data = 0;
@@ -416,8 +419,8 @@ meta_wayland_pointer_constraint_disable (MetaWaylandPointerConstraint *constrain
 {
   constraint->is_enabled = FALSE;
   meta_wayland_pointer_constraint_notify_deactivated (constraint);
-  meta_wayland_pointer_end_grab (constraint->grab.pointer);
   meta_backend_set_client_pointer_constraint (meta_get_backend (), NULL);
+  meta_wayland_pointer_end_grab (constraint->grab.pointer);
 }
 
 void
@@ -859,6 +862,19 @@ init_pointer_constraint (struct wl_resource                      *resource,
   if (cr == NULL)
     {
       wl_client_post_no_memory (client);
+      return;
+    }
+
+  switch (lifetime)
+    {
+    case ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_ONESHOT:
+    case ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT:
+      break;
+
+    default:
+      wl_resource_post_error (resource,
+                              WL_DISPLAY_ERROR_INVALID_OBJECT,
+                              "Invalid constraint lifetime");
       return;
     }
 

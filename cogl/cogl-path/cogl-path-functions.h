@@ -43,7 +43,7 @@
 #endif
 #include <glib-object.h>
 
-COGL_BEGIN_DECLS
+G_BEGIN_DECLS
 
 /**
  * cogl_path_get_gtype:
@@ -96,7 +96,7 @@ cogl_path_copy (CoglPath *path);
  *
  * Since: 2.0
  */
-CoglBool
+gboolean
 cogl_is_path (void *object);
 
 #define cogl_path_move_to cogl2_path_move_to
@@ -460,9 +460,7 @@ cogl_path_fill (CoglPath *path);
  * use while filling a path.</note>
  *
  * Stability: unstable
- * Deprecated: 1.16: Use cogl_path_fill() instead
  */
-COGL_DEPRECATED_IN_1_16_FOR (cogl_path_fill)
 void
 cogl_framebuffer_fill_path (CoglFramebuffer *framebuffer,
                             CoglPipeline *pipeline,
@@ -492,9 +490,7 @@ cogl_path_stroke (CoglPath *path);
  * regardless of the current transformation matrix.
  *
  * Stability: unstable
- * Deprecated: 1.16: Use cogl_path_stroke() instead
  */
-COGL_DEPRECATED_IN_1_16_FOR (cogl_path_stroke)
 void
 cogl_framebuffer_stroke_path (CoglFramebuffer *framebuffer,
                               CoglPipeline *pipeline,
@@ -529,13 +525,11 @@ cogl_framebuffer_push_path_clip (CoglFramebuffer *framebuffer,
  *
  * Since: 1.8
  * Stability: Unstable
- * Deprecated: 1.16: Use cogl_framebuffer_push_path_clip() instead
  */
-COGL_DEPRECATED_IN_1_16_FOR (cogl_framebuffer_push_path_clip)
 void
 cogl_clip_push_from_path (CoglPath *path);
 
-COGL_END_DECLS
+G_END_DECLS
 
 #endif /* __COGL_PATH_FUNCTIONS_H__ */
 

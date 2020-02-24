@@ -69,9 +69,7 @@
  *   the inverse of the identity matrix)
  */
 
-#ifdef HAVE_CONFIG_H
 #include "cogl-config.h"
-#endif
 
 #include <cogl-util.h>
 #include <cogl-debug.h>
@@ -378,7 +376,7 @@ _cogl_matrix_prefix_print (const char *prefix, const CoglMatrix *matrix)
 {
   if (!(matrix->flags & MAT_DIRTY_TYPE))
     {
-      _COGL_RETURN_IF_FAIL (matrix->type < COGL_MATRIX_N_TYPES);
+      g_return_if_fail (matrix->type < COGL_MATRIX_N_TYPES);
       g_print ("%sMatrix type: %s, flags: %x\n",
                prefix, types[matrix->type], (int)matrix->flags);
     }
@@ -444,7 +442,7 @@ cogl_debug_matrix_print (const CoglMatrix *matrix)
  * with partial pivoting followed by back/substitution with the loops manually
  * unrolled.
  */
-static CoglBool
+static gboolean
 invert_matrix_general (CoglMatrix *matrix)
 {
   const float *m = (float *)matrix;
@@ -583,7 +581,7 @@ invert_matrix_general (CoglMatrix *matrix)
  * element. Finally deals with the translation part by transforming the
  * original translation vector using by the calculated submatrix inverse.
  */
-static CoglBool
+static gboolean
 invert_matrix_3d_general (CoglMatrix *matrix)
 {
   const float *in = (float *)matrix;
@@ -665,7 +663,7 @@ invert_matrix_3d_general (CoglMatrix *matrix)
  * the inverse matrix analyzing and inverting each of the scaling, rotation and
  * translation parts.
  */
-static CoglBool
+static gboolean
 invert_matrix_3d (CoglMatrix *matrix)
 {
   const float *in = (float *)matrix;
@@ -750,7 +748,7 @@ invert_matrix_3d (CoglMatrix *matrix)
  *
  * Simply copies identity into CoglMatrix::inv.
  */
-static CoglBool
+static gboolean
 invert_matrix_identity (CoglMatrix *matrix)
 {
   memcpy (matrix->inv, identity, 16 * sizeof (float));
@@ -767,7 +765,7 @@ invert_matrix_identity (CoglMatrix *matrix)
  *
  * Calculates the
  */
-static CoglBool
+static gboolean
 invert_matrix_3d_no_rotation (CoglMatrix *matrix)
 {
   const float *in = (float *)matrix;
@@ -802,7 +800,7 @@ invert_matrix_3d_no_rotation (CoglMatrix *matrix)
  * Calculates the inverse matrix by applying the inverse scaling and
  * translation to the identity matrix.
  */
-static CoglBool
+static gboolean
 invert_matrix_2d_no_rotation (CoglMatrix *matrix)
 {
   const float *in = (float *)matrix;
@@ -826,7 +824,7 @@ invert_matrix_2d_no_rotation (CoglMatrix *matrix)
 
 #if 0
 /* broken */
-static CoglBool
+static gboolean
 invert_matrix_perspective (CoglMatrix *matrix)
 {
   const float *in = matrix;
@@ -856,7 +854,7 @@ invert_matrix_perspective (CoglMatrix *matrix)
 /*
  * Matrix inversion function pointer type.
  */
-typedef CoglBool (*inv_mat_func)(CoglMatrix *matrix);
+typedef gboolean (*inv_mat_func)(CoglMatrix *matrix);
 
 /*
  * Table of the matrix inversion functions according to the matrix type.
@@ -1114,7 +1112,7 @@ _cogl_matrix_update_type_and_flags (CoglMatrix *matrix)
  * given matrix type.  In case of failure, updates the MAT_FLAG_SINGULAR flag,
  * and copies the identity matrix into CoglMatrix::inv.
  */
-static CoglBool
+static gboolean
 _cogl_matrix_update_inverse (CoglMatrix *matrix)
 {
   if (matrix->flags & MAT_DIRTY_FLAGS ||
@@ -1139,7 +1137,7 @@ _cogl_matrix_update_inverse (CoglMatrix *matrix)
     return TRUE;
 }
 
-CoglBool
+gboolean
 cogl_matrix_get_inverse (const CoglMatrix *matrix, CoglMatrix *inverse)
 {
   if (_cogl_matrix_update_inverse ((CoglMatrix *)matrix))
@@ -1171,7 +1169,7 @@ _cogl_matrix_rotate (CoglMatrix *matrix,
 {
   float xx, yy, zz, xy, yz, zx, xs, ys, zs, one_c, s, c;
   float m[16];
-  CoglBool optimized;
+  gboolean optimized;
 
   s = sinf (angle * DEG2RAD);
   c = cosf (angle * DEG2RAD);
@@ -1669,7 +1667,7 @@ cogl_matrix_init_translation (CoglMatrix *matrix,
 /*
  * Test if the given matrix preserves vector lengths.
  */
-static CoglBool
+static gboolean
 _cogl_matrix_is_length_preserving (const CoglMatrix *m)
 {
   return TEST_MAT_FLAGS (m, MAT_FLAGS_LENGTH_PRESERVING);
@@ -1679,7 +1677,7 @@ _cogl_matrix_is_length_preserving (const CoglMatrix *m)
  * Test if the given matrix does any rotation.
  * (or perhaps if the upper-left 3x3 is non-identity)
  */
-static CoglBool
+static gboolean
 _cogl_matrix_has_rotation (const CoglMatrix *matrix)
 {
   if (matrix->flags & (MAT_FLAG_GENERAL |
@@ -1691,13 +1689,13 @@ _cogl_matrix_has_rotation (const CoglMatrix *matrix)
     return FALSE;
 }
 
-static CoglBool
+static gboolean
 _cogl_matrix_is_general_scale (const CoglMatrix *matrix)
 {
   return (matrix->flags & MAT_FLAG_GENERAL_SCALE) ? TRUE : FALSE;
 }
 
-static CoglBool
+static gboolean
 _cogl_matrix_is_dirty (const CoglMatrix *matrix)
 {
   return (matrix->flags & MAT_DIRTY_ALL) ? TRUE : FALSE;
@@ -1938,14 +1936,14 @@ cogl_matrix_view_2d_in_perspective (CoglMatrix *matrix,
                                   height_2d);
 }
 
-CoglBool
+gboolean
 cogl_matrix_equal (const void *v1, const void *v2)
 {
   const CoglMatrix *a = v1;
   const CoglMatrix *b = v2;
 
-  _COGL_RETURN_VAL_IF_FAIL (v1 != NULL, FALSE);
-  _COGL_RETURN_VAL_IF_FAIL (v2 != NULL, FALSE);
+  g_return_val_if_fail (v1 != NULL, FALSE);
+  g_return_val_if_fail (v2 != NULL, FALSE);
 
   /* We want to avoid having a fuzzy _equal() function (e.g. that uses
    * an arbitrary epsilon value) since this function noteably conforms
@@ -2169,7 +2167,7 @@ cogl_matrix_transform_points (const CoglMatrix *matrix,
                               int n_points)
 {
   /* The results of transforming always have three components... */
-  _COGL_RETURN_IF_FAIL (stride_out >= sizeof (Point3f));
+  g_return_if_fail (stride_out >= sizeof (Point3f));
 
   if (n_components == 2)
     _cogl_matrix_transform_points_f2 (matrix,
@@ -2178,7 +2176,7 @@ cogl_matrix_transform_points (const CoglMatrix *matrix,
                                       n_points);
   else
     {
-      _COGL_RETURN_IF_FAIL (n_components == 3);
+      g_return_if_fail (n_components == 3);
 
       _cogl_matrix_transform_points_f3 (matrix,
                                         stride_in, points_in,
@@ -2208,7 +2206,7 @@ cogl_matrix_project_points (const CoglMatrix *matrix,
                                     n_points);
   else
     {
-      _COGL_RETURN_IF_FAIL (n_components == 4);
+      g_return_if_fail (n_components == 4);
 
       _cogl_matrix_project_points_f4 (matrix,
                                       stride_in, points_in,
@@ -2217,7 +2215,7 @@ cogl_matrix_project_points (const CoglMatrix *matrix,
     }
 }
 
-CoglBool
+gboolean
 cogl_matrix_is_identity (const CoglMatrix *matrix)
 {
   if (!(matrix->flags & MAT_DIRTY_TYPE) &&

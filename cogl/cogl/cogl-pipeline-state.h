@@ -39,7 +39,7 @@
 #include <cogl/cogl-color.h>
 #include <cogl/cogl-depth-state.h>
 
-COGL_BEGIN_DECLS
+G_BEGIN_DECLS
 
 /**
  * cogl_pipeline_set_color:
@@ -325,7 +325,8 @@ cogl_pipeline_get_emission (CoglPipeline *pipeline,
  * incoming alpha value and a reference alpha value. The #CoglPipelineAlphaFunc
  * determines how the comparison is done.
  */
-typedef enum {
+typedef enum
+{
   COGL_PIPELINE_ALPHA_FUNC_NEVER    = 0x0200,
   COGL_PIPELINE_ALPHA_FUNC_LESS	    = 0x0201,
   COGL_PIPELINE_ALPHA_FUNC_EQUAL    = 0x0202,
@@ -389,7 +390,7 @@ cogl_pipeline_get_alpha_test_reference (CoglPipeline *pipeline);
  * @pipeline: A #CoglPipeline object
  * @blend_string: A <link linkend="cogl-Blend-Strings">Cogl blend string</link>
  *   describing the desired blend function.
- * @error: return location for a #CoglError that may report lack of driver
+ * @error: return location for a #GError that may report lack of driver
  *   support if you give separate blend string statements for the alpha
  *   channel and RGB channels since some drivers, or backends such as
  *   GLES 1.1, don't support this feature. May be %NULL, in which case a
@@ -466,10 +467,10 @@ cogl_pipeline_get_alpha_test_reference (CoglPipeline *pipeline);
  * Since: 2.0
  * Stability: Unstable
  */
-CoglBool
+gboolean
 cogl_pipeline_set_blend (CoglPipeline *pipeline,
                          const char   *blend_string,
-                         CoglError      **error);
+                         GError **error);
 
 /**
  * cogl_pipeline_set_blend_constant:
@@ -530,7 +531,7 @@ cogl_pipeline_get_point_size (CoglPipeline *pipeline);
  * cogl_pipeline_set_per_vertex_point_size:
  * @pipeline: a #CoglPipeline pointer
  * @enable: whether to enable per-vertex point size
- * @error: a location to store a #CoglError if the change failed
+ * @error: a location to store a #GError if the change failed
  *
  * Sets whether to use a per-vertex point size or to use the value set
  * by cogl_pipeline_set_point_size(). If per-vertex point size is
@@ -546,16 +547,16 @@ cogl_pipeline_get_point_size (CoglPipeline *pipeline);
  * Note that enabling this will only work if the
  * %COGL_FEATURE_ID_PER_VERTEX_POINT_SIZE feature is available. If
  * this is not available then the function will return %FALSE and set
- * a #CoglError.
+ * a #GError.
  *
  * Since: 2.0
  * Stability: Unstable
  * Return value: %TRUE if the change suceeded or %FALSE otherwise
  */
-CoglBool
+gboolean
 cogl_pipeline_set_per_vertex_point_size (CoglPipeline *pipeline,
-                                         CoglBool enable,
-                                         CoglError **error);
+                                         gboolean enable,
+                                         GError **error);
 
 /**
  * cogl_pipeline_get_per_vertex_point_size:
@@ -567,40 +568,8 @@ cogl_pipeline_set_per_vertex_point_size (CoglPipeline *pipeline,
  *   enabled or %FALSE otherwise. The per-vertex point size can be
  *   enabled with cogl_pipeline_set_per_vertex_point_size().
  */
-CoglBool
+gboolean
 cogl_pipeline_get_per_vertex_point_size (CoglPipeline *pipeline);
-
-/**
- * cogl_pipeline_get_color_mask:
- * @pipeline: a #CoglPipeline object.
- *
- * Gets the current #CoglColorMask of which channels would be written to the
- * current framebuffer. Each bit set in the mask means that the
- * corresponding color would be written.
- *
- * Returns: A #CoglColorMask
- * Since: 1.8
- * Stability: unstable
- */
-CoglColorMask
-cogl_pipeline_get_color_mask (CoglPipeline *pipeline);
-
-/**
- * cogl_pipeline_set_color_mask:
- * @pipeline: a #CoglPipeline object.
- * @color_mask: A #CoglColorMask of which color channels to write to
- *              the current framebuffer.
- *
- * Defines a bit mask of which color channels should be written to the
- * current framebuffer. If a bit is set in @color_mask that means that
- * color will be written.
- *
- * Since: 1.8
- * Stability: unstable
- */
-void
-cogl_pipeline_set_color_mask (CoglPipeline *pipeline,
-                              CoglColorMask color_mask);
 
 /**
  * cogl_pipeline_get_user_program:
@@ -657,10 +626,6 @@ cogl_pipeline_get_user_program (CoglPipeline *pipeline);
  * meantime we hope this will handle most practical GLSL and ARBfp
  * requirements.
  *
- * Also remember you need to check for either the
- * %COGL_FEATURE_SHADERS_GLSL or %COGL_FEATURE_SHADERS_ARBFP before
- * using the cogl_program or cogl_shader API.
- *
  * Since: 2.0
  * Stability: Unstable
  */
@@ -669,10 +634,10 @@ cogl_pipeline_set_user_program (CoglPipeline *pipeline,
                                 CoglHandle program);
 
 /**
- * cogl_pipeline_set_depth_state:
+ * cogl_pipeline_set_depth_state: (skip)
  * @pipeline: A #CoglPipeline object
  * @state: A #CoglDepthState struct
- * @error: A #CoglError to report failures to setup the given @state.
+ * @error: A #GError to report failures to setup the given @state.
  *
  * This commits all the depth state configured in @state struct to the
  * given @pipeline. The configuration values are copied into the
@@ -688,13 +653,13 @@ cogl_pipeline_set_user_program (CoglPipeline *pipeline,
  * Since: 2.0
  * Stability: Unstable
  */
-CoglBool
+gboolean
 cogl_pipeline_set_depth_state (CoglPipeline *pipeline,
                                const CoglDepthState *state,
-                               CoglError **error);
+                               GError **error);
 
 /**
- * cogl_pipeline_get_depth_state:
+ * cogl_pipeline_get_depth_state: (skip)
  * @pipeline: A #CoglPipeline object
  * @state_out: (out): A destination #CoglDepthState struct
  *
@@ -951,11 +916,11 @@ cogl_pipeline_set_uniform_matrix (CoglPipeline *pipeline,
                                   int uniform_location,
                                   int dimensions,
                                   int count,
-                                  CoglBool transpose,
+                                  gboolean transpose,
                                   const float *value);
 
 /**
- * cogl_pipeline_add_snippet:
+ * cogl_pipeline_add_snippet: (skip)
  * @pipeline: A #CoglPipeline
  * @snippet: The #CoglSnippet to add to the vertex processing hook
  *
@@ -971,6 +936,6 @@ void
 cogl_pipeline_add_snippet (CoglPipeline *pipeline,
                            CoglSnippet *snippet);
 
-COGL_END_DECLS
+G_END_DECLS
 
 #endif /* __COGL_PIPELINE_STATE_H__ */

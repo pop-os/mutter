@@ -28,9 +28,7 @@
  *
  */
 
-#ifdef HAVE_CONFIG_H
 #include "cogl-config.h"
-#endif
 
 #include <string.h>
 #include <math.h>
@@ -46,14 +44,12 @@
 #include "cogl-matrix-private.h"
 #include "cogl-primitives-private.h"
 #include "cogl-private.h"
-#include "cogl-pipeline-opengl-private.h"
 #include "cogl-attribute-private.h"
 #include "cogl-primitive-private.h"
 #include "cogl1-context.h"
 #include "cogl-offscreen.h"
 #include "cogl-matrix-stack.h"
-
-
+#include "driver/gl/cogl-pipeline-opengl-private.h"
 
 static void *
 _cogl_clip_stack_push_entry (CoglClipStack *clip_stack,
@@ -354,7 +350,7 @@ _cogl_clip_stack_pop (CoglClipStack *stack)
 {
   CoglClipStack *new_top;
 
-  _COGL_RETURN_VAL_IF_FAIL (stack != NULL, NULL);
+  g_return_val_if_fail (stack != NULL, NULL);
 
   /* To pop we are moving the top of the stack to the old top's parent
      node. The stack always needs to have a reference to the top entry

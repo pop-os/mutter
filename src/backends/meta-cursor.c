@@ -21,7 +21,7 @@
 
 #include "config.h"
 
-#include "meta-cursor.h"
+#include "backends/meta-cursor.h"
 
 #include "backends/meta-backend-private.h"
 #include "cogl/cogl.h"
@@ -90,11 +90,6 @@ meta_cursor_sprite_set_texture (MetaCursorSprite *sprite,
 {
   MetaCursorSpritePrivate *priv =
     meta_cursor_sprite_get_instance_private (sprite);
-
-  if (priv->texture == COGL_TEXTURE_2D (texture) &&
-      priv->hot_x == hot_x &&
-      priv->hot_y == hot_y)
-    return;
 
   g_clear_pointer (&priv->texture, cogl_object_unref);
   if (texture)

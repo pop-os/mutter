@@ -19,20 +19,22 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <config.h>
+#include "config.h"
 
-#include <meta/display.h>
-#include <meta/meta-plugin.h>
-#include <meta/window.h>
-#include <meta/meta-background-group.h>
-#include <meta/meta-background-actor.h>
-#include <meta/meta-monitor-manager.h>
-#include <meta/util.h>
+#include "meta/display.h"
+
 #include <glib/gi18n-lib.h>
-
-#include <clutter/clutter.h>
 #include <gmodule.h>
 #include <string.h>
+
+#include "clutter/clutter.h"
+#include "meta/meta-backend.h"
+#include "meta/meta-background-actor.h"
+#include "meta/meta-background-group.h"
+#include "meta/meta-monitor-manager.h"
+#include "meta/meta-plugin.h"
+#include "meta/util.h"
+#include "meta/window.h"
 
 #define DESTROY_TIMEOUT   100
 #define MINIMIZE_TIMEOUT  250
@@ -48,9 +50,6 @@
 #define META_IS_DEFAULT_PLUGIN(obj)         (G_TYPE_CHECK_INSTANCE_TYPE ((obj), META_DEFAULT_PLUGIN_TYPE))
 #define META_IS_DEFAULT_PLUGIN_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE ((klass),  META_TYPE_DEFAULT_PLUGIN))
 #define META_DEFAULT_PLUGIN_GET_CLASS(obj)  (G_TYPE_INSTANCE_GET_CLASS ((obj),  META_TYPE_DEFAULT_PLUGIN, MetaDefaultPluginClass))
-
-#define META_DEFAULT_PLUGIN_GET_PRIVATE(obj) \
-(G_TYPE_INSTANCE_GET_PRIVATE ((obj), META_TYPE_DEFAULT_PLUGIN, MetaDefaultPluginPrivate))
 
 typedef struct _MetaDefaultPlugin        MetaDefaultPlugin;
 typedef struct _MetaDefaultPluginClass   MetaDefaultPluginClass;
@@ -217,7 +216,7 @@ meta_default_plugin_init (MetaDefaultPlugin *self)
 {
   MetaDefaultPluginPrivate *priv;
 
-  self->priv = priv = META_DEFAULT_PLUGIN_GET_PRIVATE (self);
+  self->priv = priv = meta_default_plugin_get_instance_private (self);
 
   priv->info.name        = "Default Effects";
   priv->info.version     = "0.1";
@@ -372,6 +371,67 @@ on_monitors_changed (MetaMonitorManager *monitor_manager,
 }
 
 static void
+init_keymap (MetaDefaultPlugin *self)
+{
+  g_autoptr (GError) error = NULL;
+  g_autoptr (GDBusProxy) proxy = NULL;
+  g_autoptr (GVariant) result = NULL;
+  g_autoptr (GVariant) props = NULL;
+  g_autofree char *x11_layout = NULL;
+  g_autofree char *x11_options = NULL;
+  g_autofree char *x11_variant = NULL;
+
+  proxy = g_dbus_proxy_new_for_bus_sync (G_BUS_TYPE_SYSTEM,
+                                         G_DBUS_PROXY_FLAGS_NONE,
+                                         NULL,
+                                         "org.freedesktop.locale1",
+                                         "/org/freedesktop/locale1",
+                                         "org.freedesktop.DBus.Properties",
+                                         NULL,
+                                         &error);
+  if (!proxy)
+    {
+      g_message ("Failed to acquire org.freedesktop.locale1 proxy: %s, "
+                 "probably running in CI",
+                 error->message);
+      return;
+    }
+
+  result = g_dbus_proxy_call_sync (proxy,
+                                   "GetAll",
+                                   g_variant_new ("(s)",
+                                                  "org.freedesktop.locale1"),
+                                   G_DBUS_CALL_FLAGS_NONE,
+                                   100,
+                                   NULL,
+                                   &error);
+  if (!result)
+    {
+      g_warning ("Failed to retrieve locale properties: %s", error->message);
+      return;
+    }
+
+  props = g_variant_get_child_value (result, 0);
+  if (!props)
+    {
+      g_warning ("No locale properties found");
+      return;
+    }
+
+  if (!g_variant_lookup (props, "X11Layout", "s", &x11_layout))
+    x11_layout = g_strdup ("us");
+
+  if (!g_variant_lookup (props, "X11Options", "s", &x11_options))
+    x11_options = g_strdup ("");
+
+  if (!g_variant_lookup (props, "X11Variant", "s", &x11_variant))
+    x11_variant = g_strdup ("");
+
+  meta_backend_set_keymap (meta_get_backend (),
+                           x11_layout, x11_variant, x11_options);
+}
+
+static void
 start (MetaPlugin *plugin)
 {
   MetaDefaultPlugin *self = META_DEFAULT_PLUGIN (plugin);
@@ -386,6 +446,9 @@ start (MetaPlugin *plugin)
                     G_CALLBACK (on_monitors_changed), plugin);
 
   on_monitors_changed (monitor_manager, plugin);
+
+  if (meta_is_wayland_compositor ())
+    init_keymap (self);
 
   clutter_actor_show (meta_get_stage_for_display (display));
 }
@@ -527,6 +590,7 @@ minimize (MetaPlugin *plugin, MetaWindowActor *window_actor)
   MetaWindowType type;
   MetaRectangle icon_geometry;
   MetaWindow *meta_window = meta_window_actor_get_meta_window (window_actor);
+  ClutterTimeline *timeline = NULL;
   ClutterActor *actor  = CLUTTER_ACTOR (window_actor);
 
 
@@ -540,23 +604,27 @@ minimize (MetaPlugin *plugin, MetaWindowActor *window_actor)
 
   if (type == META_WINDOW_NORMAL)
     {
+      timeline = actor_animate (actor,
+                                CLUTTER_EASE_IN_SINE,
+                                MINIMIZE_TIMEOUT,
+                                "scale-x", 0.0,
+                                "scale-y", 0.0,
+                                "x", (double)icon_geometry.x,
+                                "y", (double)icon_geometry.y,
+                                NULL);
+    }
+
+  if (timeline)
+    {
       EffectCompleteData *data = g_new0 (EffectCompleteData, 1);
       ActorPrivate *apriv = get_actor_private (window_actor);
 
-      apriv->tml_minimize = actor_animate (actor,
-                                           CLUTTER_EASE_IN_SINE,
-                                           MINIMIZE_TIMEOUT,
-                                           "scale-x", 0.0,
-                                           "scale-y", 0.0,
-                                           "x", (double)icon_geometry.x,
-                                           "y", (double)icon_geometry.y,
-                                           NULL);
+      apriv->tml_minimize = timeline;
       data->plugin = plugin;
       data->actor = actor;
       g_signal_connect (apriv->tml_minimize, "completed",
                         G_CALLBACK (on_minimize_effect_complete),
                         data);
-
     }
   else
     meta_plugin_minimize_completed (plugin, window_actor);
@@ -645,21 +713,27 @@ destroy (MetaPlugin *plugin, MetaWindowActor *window_actor)
   MetaWindowType type;
   ClutterActor *actor = CLUTTER_ACTOR (window_actor);
   MetaWindow *meta_window = meta_window_actor_get_meta_window (window_actor);
+  ClutterTimeline *timeline = NULL;
 
   type = meta_window_get_window_type (meta_window);
 
   if (type == META_WINDOW_NORMAL)
     {
+      timeline = actor_animate (actor,
+                                CLUTTER_EASE_OUT_QUAD,
+                                DESTROY_TIMEOUT,
+                                "opacity", 0,
+                                "scale-x", 0.8,
+                                "scale-y", 0.8,
+                                NULL);
+    }
+
+  if (timeline)
+    {
       EffectCompleteData *data = g_new0 (EffectCompleteData, 1);
       ActorPrivate *apriv = get_actor_private (window_actor);
 
-      apriv->tml_destroy = actor_animate (actor,
-                                          CLUTTER_EASE_OUT_QUAD,
-                                          DESTROY_TIMEOUT,
-                                          "opacity", 0,
-                                          "scale-x", 0.8,
-                                          "scale-y", 0.8,
-                                          NULL);
+      apriv->tml_destroy = timeline;
       data->plugin = plugin;
       data->actor = actor;
       g_signal_connect (apriv->tml_destroy, "completed",
@@ -674,9 +748,8 @@ destroy (MetaPlugin *plugin, MetaWindowActor *window_actor)
  * Tile preview private data accessor
  */
 static void
-free_display_tile_preview (gpointer data)
+free_display_tile_preview (DisplayTilePreview *preview)
 {
-  DisplayTilePreview *preview = data;
 
   if (G_LIKELY (preview != NULL)) {
     clutter_actor_destroy (preview->actor);
@@ -684,15 +757,27 @@ free_display_tile_preview (gpointer data)
   }
 }
 
+static void
+on_display_closing (MetaDisplay        *display,
+                    DisplayTilePreview *preview)
+{
+  free_display_tile_preview (preview);
+}
+
 static DisplayTilePreview *
 get_display_tile_preview (MetaDisplay *display)
 {
-  DisplayTilePreview *preview = g_object_get_qdata (G_OBJECT (display), display_tile_preview_data_quark);
+  DisplayTilePreview *preview;
 
-  if (G_UNLIKELY (display_tile_preview_data_quark == 0))
-    display_tile_preview_data_quark = g_quark_from_static_string (DISPLAY_TILE_PREVIEW_DATA_KEY);
+  if (!display_tile_preview_data_quark)
+    {
+      display_tile_preview_data_quark =
+        g_quark_from_static_string (DISPLAY_TILE_PREVIEW_DATA_KEY);
+    }
 
-  if (G_UNLIKELY (!preview))
+  preview = g_object_get_qdata (G_OBJECT (display),
+                                display_tile_preview_data_quark);
+  if (!preview)
     {
       preview = g_slice_new0 (DisplayTilePreview);
 
@@ -701,9 +786,13 @@ get_display_tile_preview (MetaDisplay *display)
       clutter_actor_set_opacity (preview->actor, 100);
 
       clutter_actor_add_child (meta_get_window_group_for_display (display), preview->actor);
-      g_object_set_qdata_full (G_OBJECT (display),
-                               display_tile_preview_data_quark, preview,
-                               free_display_tile_preview);
+      g_signal_connect (display,
+                        "closing",
+                        G_CALLBACK (on_display_closing),
+                        preview);
+      g_object_set_qdata (G_OBJECT (display),
+                          display_tile_preview_data_quark,
+                          preview);
     }
 
   return preview;
@@ -749,15 +838,26 @@ hide_tile_preview (MetaPlugin *plugin)
 }
 
 static void
+finish_timeline (ClutterTimeline *timeline)
+{
+  g_object_ref (timeline);
+  clutter_timeline_stop (timeline);
+  g_signal_emit_by_name (timeline, "completed", NULL);
+  g_object_unref (timeline);
+}
+
+static void
 kill_switch_workspace (MetaPlugin     *plugin)
 {
   MetaDefaultPluginPrivate *priv = META_DEFAULT_PLUGIN (plugin)->priv;
 
   if (priv->tml_switch_workspace1)
     {
+      g_object_ref (priv->tml_switch_workspace1);
       clutter_timeline_stop (priv->tml_switch_workspace1);
       clutter_timeline_stop (priv->tml_switch_workspace2);
       g_signal_emit_by_name (priv->tml_switch_workspace1, "completed", NULL);
+      g_object_unref (priv->tml_switch_workspace1);
     }
 }
 
@@ -770,22 +870,13 @@ kill_window_effects (MetaPlugin      *plugin,
   apriv = get_actor_private (window_actor);
 
   if (apriv->tml_minimize)
-    {
-      clutter_timeline_stop (apriv->tml_minimize);
-      g_signal_emit_by_name (apriv->tml_minimize, "completed", NULL);
-    }
+    finish_timeline (apriv->tml_minimize);
 
   if (apriv->tml_map)
-    {
-      clutter_timeline_stop (apriv->tml_map);
-      g_signal_emit_by_name (apriv->tml_map, "completed", NULL);
-    }
+    finish_timeline (apriv->tml_map);
 
   if (apriv->tml_destroy)
-    {
-      clutter_timeline_stop (apriv->tml_destroy);
-      g_signal_emit_by_name (apriv->tml_destroy, "completed", NULL);
-    }
+    finish_timeline (apriv->tml_destroy);
 }
 
 static const MetaPluginInfo *

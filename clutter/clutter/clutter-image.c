@@ -36,9 +36,7 @@
  * #ClutterImage is available since Clutter 1.10.
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #define CLUTTER_ENABLE_EXPERIMENTAL_API
 
@@ -55,9 +53,11 @@
 struct _ClutterImagePrivate
 {
   CoglTexture *texture;
+  gint width;
+  gint height;
 };
 
-static void clutter_content_iface_init (ClutterContentIface *iface);
+static void clutter_content_iface_init (ClutterContentInterface *iface);
 
 G_DEFINE_TYPE_WITH_CODE (ClutterImage, clutter_image, G_TYPE_OBJECT,
                          G_ADD_PRIVATE (ClutterImage)
@@ -68,6 +68,27 @@ GQuark
 clutter_image_error_quark (void)
 {
   return g_quark_from_static_string ("clutter-image-error-quark");
+}
+
+static void
+update_image_size (ClutterImage *self)
+{
+  gint width, height;
+
+  if (self->priv->texture == NULL)
+    return;
+
+  width = cogl_texture_get_width (self->priv->texture);
+  height = cogl_texture_get_height (self->priv->texture);
+
+  if (self->priv->width == width &&
+      self->priv->height == height)
+    return;
+
+  self->priv->width = width;
+  self->priv->height = height;
+
+  clutter_content_invalidate_size (CLUTTER_CONTENT (self));
 }
 
 static void
@@ -133,7 +154,7 @@ clutter_image_get_preferred_size (ClutterContent *content,
 }
 
 static void
-clutter_content_iface_init (ClutterContentIface *iface)
+clutter_content_iface_init (ClutterContentInterface *iface)
 {
   iface->get_preferred_size = clutter_image_get_preferred_size;
   iface->paint_content = clutter_image_paint_content;
@@ -235,11 +256,12 @@ clutter_image_set_data (ClutterImage     *image,
     {
       g_set_error_literal (error, CLUTTER_IMAGE_ERROR,
                            CLUTTER_IMAGE_ERROR_INVALID_DATA,
-                           _("Unable to load image data"));
+                           "Unable to load image data");
       return FALSE;
     }
 
   clutter_content_invalidate (CLUTTER_CONTENT (image));
+  update_image_size (image);
 
   return TRUE;
 }
@@ -303,11 +325,12 @@ clutter_image_set_bytes (ClutterImage     *image,
     {
       g_set_error_literal (error, CLUTTER_IMAGE_ERROR,
                            CLUTTER_IMAGE_ERROR_INVALID_DATA,
-                           _("Unable to load image data"));
+                           "Unable to load image data");
       return FALSE;
     }
 
   clutter_content_invalidate (CLUTTER_CONTENT (image));
+  update_image_size (image);
 
   return TRUE;
 }
@@ -396,11 +419,12 @@ clutter_image_set_area (ClutterImage                 *image,
     {
       g_set_error_literal (error, CLUTTER_IMAGE_ERROR,
                            CLUTTER_IMAGE_ERROR_INVALID_DATA,
-                           _("Unable to load image data"));
+                           "Unable to load image data");
       return FALSE;
     }
 
   clutter_content_invalidate (CLUTTER_CONTENT (image));
+  update_image_size (image);
 
   return TRUE;
 }

@@ -78,7 +78,7 @@ typedef struct _CoglTexture2DSliced CoglTexture2DSliced;
 GType cogl_texture_2d_sliced_get_gtype (void);
 
 /**
- * cogl_texture_2d_sliced_new_with_size:
+ * cogl_texture_2d_sliced_new_with_size: (skip)
  * @ctx: A #CoglContext
  * @width: The virtual width of your sliced texture.
  * @height: The virtual height of your sliced texture.
@@ -125,14 +125,14 @@ cogl_texture_2d_sliced_new_with_size (CoglContext *ctx,
                                       int max_waste);
 
 /**
- * cogl_texture_2d_sliced_new_from_file:
+ * cogl_texture_2d_sliced_new_from_file: (skip)
  * @ctx: A #CoglContext
  * @filename: the file to load
  * @max_waste: The threshold of how wide a strip of wasted texels
  *             are allowed along the right and bottom textures before
  *             they must be sliced to reduce the amount of waste. A
  *             negative can be passed to disable slicing.
- * @error: A #CoglError to catch exceptional errors or %NULL
+ * @error: A #GError to catch exceptional errors or %NULL
  *
  * Creates a #CoglTexture2DSliced from an image file.
  *
@@ -170,10 +170,10 @@ CoglTexture2DSliced *
 cogl_texture_2d_sliced_new_from_file (CoglContext *ctx,
                                       const char *filename,
                                       int max_waste,
-                                      CoglError **error);
+                                      GError **error);
 
 /**
- * cogl_texture_2d_sliced_new_from_data:
+ * cogl_texture_2d_sliced_new_from_data: (skip)
  * @ctx: A #CoglContext
  * @width: width of texture in pixels
  * @height: height of texture in pixels
@@ -186,7 +186,7 @@ cogl_texture_2d_sliced_new_from_file (CoglContext *ctx,
  *    row in @data. A value of 0 will make Cogl automatically
  *    calculate @rowstride from @width and @format.
  * @data: pointer the memory region where the source buffer resides
- * @error: A #CoglError to catch exceptional errors or %NULL
+ * @error: A #GError to catch exceptional errors or %NULL
  *
  * Creates a new #CoglTexture2DSliced texture based on data residing
  * in memory.
@@ -235,7 +235,7 @@ cogl_texture_2d_sliced_new_from_data (CoglContext *ctx,
                                       CoglPixelFormat format,
                                       int rowstride,
                                       const uint8_t *data,
-                                      CoglError **error);
+                                      GError **error);
 
 /**
  * cogl_texture_2d_sliced_new_from_bitmap:
@@ -293,7 +293,7 @@ cogl_texture_2d_sliced_new_from_bitmap (CoglBitmap *bmp,
  * Since: 1.10
  * Stability: unstable
  */
-CoglBool
+gboolean
 cogl_is_texture_2d_sliced (void *object);
 
 #endif /* __COGL_TEXURE_2D_SLICED_H */

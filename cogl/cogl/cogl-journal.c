@@ -28,23 +28,21 @@
  *
  */
 
-#ifdef HAVE_CONFIG_H
 #include "cogl-config.h"
-#endif
 
 #include "cogl-debug.h"
 #include "cogl-context-private.h"
 #include "cogl-journal-private.h"
 #include "cogl-texture-private.h"
 #include "cogl-pipeline-private.h"
-#include "cogl-pipeline-opengl-private.h"
-#include "cogl-vertex-buffer-private.h"
 #include "cogl-framebuffer-private.h"
 #include "cogl-profile.h"
 #include "cogl-attribute-private.h"
 #include "cogl-point-in-poly-private.h"
 #include "cogl-private.h"
 #include "cogl1-context.h"
+#include "driver/gl/cogl-pipeline-opengl-private.h"
+#include "deprecated/cogl-vertex-buffer-private.h"
 
 #include <string.h>
 #include <gmodule.h>
@@ -121,7 +119,7 @@ typedef struct _CoglJournalFlushState
 typedef void (*CoglJournalBatchCallback) (CoglJournalEntry *start,
                                           int n_entries,
                                           void *data);
-typedef CoglBool (*CoglJournalBatchTest) (CoglJournalEntry *entry0,
+typedef gboolean (*CoglJournalBatchTest) (CoglJournalEntry *entry0,
                                           CoglJournalEntry *entry1);
 
 static void _cogl_journal_free (CoglJournal *journal);
@@ -405,7 +403,7 @@ _cogl_journal_flush_modelview_and_entries (CoglJournalEntry *batch_start,
   COGL_TIMER_STOP (_cogl_uprof_context, time_flush_modelview_and_entries);
 }
 
-static CoglBool
+static gboolean
 compare_entry_modelviews (CoglJournalEntry *entry0,
                           CoglJournalEntry *entry1)
 {
@@ -450,7 +448,7 @@ _cogl_journal_flush_pipeline_and_entries (CoglJournalEntry *batch_start,
   COGL_TIMER_STOP (_cogl_uprof_context, time_flush_pipeline_entries);
 }
 
-static CoglBool
+static gboolean
 compare_entry_pipelines (CoglJournalEntry *entry0, CoglJournalEntry *entry1)
 {
   /* batch rectangles using compatible pipelines */
@@ -472,7 +470,7 @@ typedef struct _CreateAttributeState
   CoglJournalFlushState *flush_state;
 } CreateAttributeState;
 
-static CoglBool
+static gboolean
 create_attribute_cb (CoglPipeline *pipeline,
                      int layer_number,
                      void *user_data)
@@ -570,7 +568,7 @@ _cogl_journal_flush_texcoord_vbo_offsets_and_entries (
   COGL_TIMER_STOP (_cogl_uprof_context, time_flush_texcoord_pipeline_entries);
 }
 
-static CoglBool
+static gboolean
 compare_entry_layer_numbers (CoglJournalEntry *entry0, CoglJournalEntry *entry1)
 {
   if (_cogl_pipeline_layer_numbers_equal (entry0->pipeline, entry1->pipeline))
@@ -685,7 +683,7 @@ _cogl_journal_flush_vbo_offsets_and_entries (CoglJournalEntry *batch_start,
                    time_flush_vbo_texcoord_pipeline_entries);
 }
 
-static CoglBool
+static gboolean
 compare_entry_strides (CoglJournalEntry *entry0, CoglJournalEntry *entry1)
 {
   /* Currently the only thing that affects the stride for our vertex arrays
@@ -765,7 +763,7 @@ typedef struct
   float x_2, y_2;
 } ClipBounds;
 
-static CoglBool
+static gboolean
 can_software_clip_entry (CoglJournalEntry *journal_entry,
                          CoglJournalEntry *prev_journal_entry,
                          CoglClipStack *clip_stack,
@@ -1040,7 +1038,7 @@ _cogl_journal_maybe_software_clip_entries (CoglJournalEntry *batch_start,
                    time_check_software_clip);
 }
 
-static CoglBool
+static gboolean
 compare_entry_clip_stacks (CoglJournalEntry *entry0, CoglJournalEntry *entry1)
 {
   return entry0->clip_stack == entry1->clip_stack;
@@ -1211,7 +1209,7 @@ _cogl_journal_discard (CoglJournal *journal)
 
 /* Note: A return value of FALSE doesn't mean 'no' it means
  * 'unknown' */
-CoglBool
+gboolean
 _cogl_journal_all_entries_within_bounds (CoglJournal *journal,
                                          float clip_x0,
                                          float clip_y0,
@@ -1256,7 +1254,7 @@ _cogl_journal_all_entries_within_bounds (CoglJournal *journal,
    */
   for (i = 1; i < journal->entries->len; i++)
     {
-      CoglBool found_reference = FALSE;
+      gboolean found_reference = FALSE;
       entry = &g_array_index (journal->entries, CoglJournalEntry, i);
 
       for (clip_entry = entry->clip_stack;
@@ -1418,7 +1416,7 @@ _cogl_journal_flush (CoglJournal *journal)
   COGL_TIMER_STOP (_cogl_uprof_context, flush_timer);
 }
 
-static CoglBool
+static gboolean
 add_framebuffer_deps_cb (CoglPipelineLayer *layer, void *user_data)
 {
   CoglFramebuffer *framebuffer = user_data;
@@ -1666,16 +1664,16 @@ entry_to_screen_polygon (CoglFramebuffer *framebuffer,
 #undef VIEWPORT_TRANSFORM_Y
 }
 
-static CoglBool
+static gboolean
 try_checking_point_hits_entry_after_clipping (CoglFramebuffer *framebuffer,
                                               CoglJournalEntry *entry,
                                               float *vertices,
                                               float x,
                                               float y,
-                                              CoglBool *hit)
+                                              gboolean *hit)
 {
-  CoglBool can_software_clip = TRUE;
-  CoglBool needs_software_clip = FALSE;
+  gboolean can_software_clip = TRUE;
+  gboolean needs_software_clip = FALSE;
   CoglClipStack *clip_entry;
 
   *hit = TRUE;
@@ -1739,12 +1737,12 @@ try_checking_point_hits_entry_after_clipping (CoglFramebuffer *framebuffer,
   return TRUE;
 }
 
-CoglBool
+gboolean
 _cogl_journal_try_read_pixel (CoglJournal *journal,
                               int x,
                               int y,
                               CoglBitmap *bitmap,
-                              CoglBool *found_intersection)
+                              gboolean *found_intersection)
 {
   CoglContext *ctx;
   CoglPixelFormat format;
@@ -1788,7 +1786,7 @@ _cogl_journal_try_read_pixel (CoglJournal *journal,
       float poly[16];
       CoglFramebuffer *framebuffer = journal->framebuffer;
       uint8_t *pixel;
-      CoglError *ignore_error;
+      GError *ignore_error;
 
       entry_to_screen_polygon (framebuffer, entry, vertices, poly);
 
@@ -1797,7 +1795,7 @@ _cogl_journal_try_read_pixel (CoglJournal *journal,
 
       if (entry->clip_stack)
         {
-          CoglBool hit;
+          gboolean hit;
 
           if (!try_checking_point_hits_entry_after_clipping (framebuffer,
                                                              entry,
@@ -1833,7 +1831,7 @@ _cogl_journal_try_read_pixel (CoglJournal *journal,
                                 &ignore_error);
       if (pixel == NULL)
         {
-          cogl_error_free (ignore_error);
+          g_error_free (ignore_error);
           return FALSE;
         }
 

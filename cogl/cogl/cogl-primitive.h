@@ -49,7 +49,7 @@ typedef struct _CoglPrimitive CoglPrimitive;
 
 #include <glib-object.h>
 
-COGL_BEGIN_DECLS
+G_BEGIN_DECLS
 
 /**
  * SECTION:cogl-primitive
@@ -874,7 +874,7 @@ cogl_primitive_copy (CoglPrimitive *primitive);
  * Since: 1.6
  * Stability: Unstable
  */
-CoglBool
+gboolean
 cogl_is_primitive (void *object);
 
 /**
@@ -892,7 +892,7 @@ cogl_is_primitive (void *object);
  * Since: 1.10
  * Stability: Unstable
  */
-typedef CoglBool (* CoglPrimitiveAttributeCallback) (CoglPrimitive *primitive,
+typedef gboolean (* CoglPrimitiveAttributeCallback) (CoglPrimitive *primitive,
                                                      CoglAttribute *attribute,
                                                      void *user_data);
 
@@ -926,8 +926,8 @@ cogl_primitive_foreach_attribute (CoglPrimitive *primitive,
  * This drawing api doesn't support high-level meta texture types such
  * as #CoglTexture2DSliced so it is the user's responsibility to
  * ensure that only low-level textures that can be directly sampled by
- * a GPU such as #CoglTexture2D, #CoglTextureRectangle or #CoglTexture3D
- * are associated with layers of the given @pipeline.
+ * a GPU such as #CoglTexture2D are associated with layers of the given
+ * @pipeline.
  *
  * Stability: unstable
  * Since: 1.16
@@ -938,7 +938,7 @@ cogl_primitive_draw (CoglPrimitive *primitive,
                      CoglPipeline *pipeline);
 
 
-COGL_END_DECLS
+G_END_DECLS
 
 #endif /* __COGL_PRIMITIVE_H__ */
 

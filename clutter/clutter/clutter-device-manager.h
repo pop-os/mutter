@@ -33,16 +33,12 @@
 
 G_BEGIN_DECLS
 
-#define CLUTTER_TYPE_DEVICE_MANAGER             (clutter_device_manager_get_type ())
-#define CLUTTER_DEVICE_MANAGER(obj)             (G_TYPE_CHECK_INSTANCE_CAST ((obj), CLUTTER_TYPE_DEVICE_MANAGER, ClutterDeviceManager))
-#define CLUTTER_IS_DEVICE_MANAGER(obj)          (G_TYPE_CHECK_INSTANCE_TYPE ((obj), CLUTTER_TYPE_DEVICE_MANAGER))
-#define CLUTTER_DEVICE_MANAGER_CLASS(klass)     (G_TYPE_CHECK_CLASS_CAST ((klass), CLUTTER_TYPE_DEVICE_MANAGER, ClutterDeviceManagerClass))
-#define CLUTTER_IS_DEVICE_MANAGER_CLASS(klass)  (G_TYPE_CHECK_CLASS_TYPE ((klass), CLUTTER_TYPE_DEVICE_MANAGER))
-#define CLUTTER_DEVICE_MANAGER_GET_CLASS(obj)   (G_TYPE_INSTANCE_GET_CLASS ((obj), CLUTTER_TYPE_DEVICE_MANAGER, ClutterDeviceManagerClass))
+#define CLUTTER_TYPE_DEVICE_MANAGER (clutter_device_manager_get_type ())
+CLUTTER_EXPORT
+G_DECLARE_DERIVABLE_TYPE (ClutterDeviceManager, clutter_device_manager,
+                          CLUTTER, DEVICE_MANAGER, GObject)
 
-typedef struct _ClutterDeviceManager            ClutterDeviceManager;
 typedef struct _ClutterDeviceManagerPrivate     ClutterDeviceManagerPrivate;
-typedef struct _ClutterDeviceManagerClass       ClutterDeviceManagerClass;
 
 /**
  * ClutterVirtualDeviceType:
@@ -74,19 +70,25 @@ typedef struct _ClutterKbdA11ySettings
 } ClutterKbdA11ySettings;
 
 /**
- * ClutterDeviceManager:
+ * ClutterPointerA11ySettings:
  *
- * The #ClutterDeviceManager structure contains only private data
+ * The #ClutterPointerA11ySettings structure contains pointer accessibility
+ * settings
  *
- * Since: 1.2
  */
-struct _ClutterDeviceManager
+typedef struct _ClutterPointerA11ySettings
 {
-  /*< private >*/
-  GObject parent_instance;
-
-  ClutterDeviceManagerPrivate *priv;
-};
+  ClutterPointerA11yFlags controls;
+  ClutterPointerA11yDwellClickType dwell_click_type;
+  ClutterPointerA11yDwellMode dwell_mode;
+  ClutterPointerA11yDwellDirection dwell_gesture_single;
+  ClutterPointerA11yDwellDirection dwell_gesture_double;
+  ClutterPointerA11yDwellDirection dwell_gesture_drag;
+  ClutterPointerA11yDwellDirection dwell_gesture_secondary;
+  gint secondary_click_delay;
+  gint dwell_delay;
+  gint dwell_threshold;
+} ClutterPointerA11ySettings;
 
 /**
  * ClutterDeviceManagerClass:
@@ -121,40 +123,58 @@ struct _ClutterDeviceManagerClass
   /* Keyboard accessbility */
   void                (* apply_kbd_a11y_settings) (ClutterDeviceManager   *device_manger,
                                                    ClutterKbdA11ySettings *settings);
+
+  /* Event platform data */
+  void (* copy_event_data) (ClutterDeviceManager *device_manager,
+                            const ClutterEvent   *src,
+                            ClutterEvent         *dest);
+  void (* free_event_data) (ClutterDeviceManager *device_manager,
+                            ClutterEvent         *event);
+
   /* padding */
-  gpointer _padding[6];
+  gpointer _padding[4];
 };
 
-CLUTTER_AVAILABLE_IN_1_2
-GType clutter_device_manager_get_type (void) G_GNUC_CONST;
-
-CLUTTER_AVAILABLE_IN_1_2
+CLUTTER_EXPORT
 ClutterDeviceManager *clutter_device_manager_get_default     (void);
-CLUTTER_AVAILABLE_IN_1_2
+CLUTTER_EXPORT
 GSList *              clutter_device_manager_list_devices    (ClutterDeviceManager   *device_manager);
-CLUTTER_AVAILABLE_IN_1_2
+CLUTTER_EXPORT
 const GSList *        clutter_device_manager_peek_devices    (ClutterDeviceManager   *device_manager);
 
-CLUTTER_AVAILABLE_IN_1_2
+CLUTTER_EXPORT
 ClutterInputDevice *  clutter_device_manager_get_device      (ClutterDeviceManager   *device_manager,
                                                               gint                    device_id);
-CLUTTER_AVAILABLE_IN_1_2
+CLUTTER_EXPORT
 ClutterInputDevice *  clutter_device_manager_get_core_device (ClutterDeviceManager   *device_manager,
                                                               ClutterInputDeviceType  device_type);
 
-CLUTTER_AVAILABLE_IN_ALL
+CLUTTER_EXPORT
 ClutterVirtualInputDevice *clutter_device_manager_create_virtual_device (ClutterDeviceManager  *device_manager,
                                                                          ClutterInputDeviceType device_type);
 
-CLUTTER_AVAILABLE_IN_ALL
+CLUTTER_EXPORT
 ClutterVirtualDeviceType clutter_device_manager_get_supported_virtual_device_types (ClutterDeviceManager *device_manager);
 
-CLUTTER_AVAILABLE_IN_ALL
+CLUTTER_EXPORT
 void clutter_device_manager_set_kbd_a11y_settings (ClutterDeviceManager   *device_manager,
                                                    ClutterKbdA11ySettings *settings);
-CLUTTER_AVAILABLE_IN_ALL
+
+CLUTTER_EXPORT
 void clutter_device_manager_get_kbd_a11y_settings (ClutterDeviceManager   *device_manager,
                                                    ClutterKbdA11ySettings *settings);
+
+CLUTTER_EXPORT
+void clutter_device_manager_set_pointer_a11y_settings (ClutterDeviceManager       *device_manager,
+                                                       ClutterPointerA11ySettings *settings);
+
+CLUTTER_EXPORT
+void clutter_device_manager_get_pointer_a11y_settings (ClutterDeviceManager       *device_manager,
+                                                       ClutterPointerA11ySettings *settings);
+
+CLUTTER_EXPORT
+void clutter_device_manager_set_pointer_a11y_dwell_click_type (ClutterDeviceManager             *device_manager,
+                                                               ClutterPointerA11yDwellClickType  click_type);
 
 G_END_DECLS
 

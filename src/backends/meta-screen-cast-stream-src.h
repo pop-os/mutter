@@ -24,8 +24,16 @@
 #define META_SCREEN_CAST_STREAM_SRC_H
 
 #include <glib-object.h>
+#include <spa/param/video/format-utils.h>
+#include <spa/buffer/meta.h>
 
+#include "backends/meta-backend-private.h"
+#include "backends/meta-cursor-renderer.h"
+#include "backends/meta-cursor.h"
+#include "backends/meta-renderer.h"
 #include "clutter/clutter.h"
+#include "cogl/cogl.h"
+#include "meta/boxes.h"
 
 typedef struct _MetaScreenCastStream MetaScreenCastStream;
 
@@ -45,12 +53,42 @@ struct _MetaScreenCastStreamSrcClass
                       float                   *frame_rate);
   void (* enable) (MetaScreenCastStreamSrc *src);
   void (* disable) (MetaScreenCastStreamSrc *src);
-  void (* record_frame) (MetaScreenCastStreamSrc *src,
-                         uint8_t                 *data);
+  gboolean (* record_frame) (MetaScreenCastStreamSrc *src,
+                             uint8_t                 *data);
+  gboolean (* get_videocrop) (MetaScreenCastStreamSrc *src,
+                              MetaRectangle           *crop_rect);
+  void (* set_cursor_metadata) (MetaScreenCastStreamSrc *src,
+                                struct spa_meta_cursor  *spa_meta_cursor);
 };
 
 void meta_screen_cast_stream_src_maybe_record_frame (MetaScreenCastStreamSrc *src);
 
 MetaScreenCastStream * meta_screen_cast_stream_src_get_stream (MetaScreenCastStreamSrc *src);
+
+gboolean meta_screen_cast_stream_src_draw_cursor_into (MetaScreenCastStreamSrc  *src,
+                                                       CoglTexture              *cursor_texture,
+                                                       float                     scale,
+                                                       uint8_t                  *data,
+                                                       GError                  **error);
+
+void meta_screen_cast_stream_src_unset_cursor_metadata (MetaScreenCastStreamSrc *src,
+                                                        struct spa_meta_cursor  *spa_meta_cursor);
+
+void meta_screen_cast_stream_src_set_cursor_position_metadata (MetaScreenCastStreamSrc *src,
+                                                               struct spa_meta_cursor  *spa_meta_cursor,
+                                                               int                      x,
+                                                               int                      y);
+
+void meta_screen_cast_stream_src_set_empty_cursor_sprite_metadata (MetaScreenCastStreamSrc *src,
+                                                                   struct spa_meta_cursor  *spa_meta_cursor,
+                                                                   int                      x,
+                                                                   int                      y);
+
+void meta_screen_cast_stream_src_set_cursor_sprite_metadata (MetaScreenCastStreamSrc *src,
+                                                             struct spa_meta_cursor  *spa_meta_cursor,
+                                                             MetaCursorSprite        *cursor_sprite,
+                                                             int                      x,
+                                                             int                      y,
+                                                             float                    scale);
 
 #endif /* META_SCREEN_CAST_STREAM_SRC_H */

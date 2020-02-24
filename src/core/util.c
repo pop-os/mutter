@@ -26,12 +26,9 @@
 
 #define _POSIX_C_SOURCE 200112L /* for fdopen() */
 
-#include <config.h>
-#include <meta/common.h>
-#include "util-private.h"
-#include <meta/main.h>
+#include "config.h"
 
-#include <clutter/clutter.h> /* For clutter_threads_add_repaint_func() */
+#include "core/util-private.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,6 +37,11 @@
 #include <string.h>
 #include <X11/Xlib.h>   /* must explicitly be included for Solaris; #326746 */
 #include <X11/Xutil.h>  /* Just for the definition of the various gravities */
+
+#include "clutter/clutter.h"
+#include "cogl/cogl-trace.h"
+#include "meta/common.h"
+#include "meta/main.h"
 
 #ifdef WITH_VERBOSE_MODE
 static void
@@ -238,20 +240,6 @@ utf8_fputs (const char *str,
   g_free (l);
 
   return retval;
-}
-
-/**
- * meta_free_gslist_and_elements: (skip)
- * @list_to_deep_free: list to deep free
- *
- */
-void
-meta_free_gslist_and_elements (GSList *list_to_deep_free)
-{
-  g_slist_foreach (list_to_deep_free,
-                   (void (*)(gpointer,gpointer))&g_free, /* ew, for ugly */
-                   NULL);
-  g_slist_free (list_to_deep_free);
 }
 
 #ifdef WITH_VERBOSE_MODE
@@ -783,6 +771,37 @@ destroy_later (MetaLater *later)
   unref_later (later);
 }
 
+#ifdef HAVE_TRACING
+static const char *
+later_type_to_string (MetaLaterType when)
+{
+  switch (when)
+    {
+    case META_LATER_RESIZE:
+      return "Later (resize)";
+    case META_LATER_CALC_SHOWING:
+      return "Later (calc-showing)";
+    case META_LATER_CHECK_FULLSCREEN:
+      return "Later (check-fullscreen)";
+    case META_LATER_SYNC_STACK:
+      return "Later (sync-stack)";
+    case META_LATER_BEFORE_REDRAW:
+      return "Later (before-redraw)";
+    case META_LATER_IDLE:
+      return "Later (idle)";
+    }
+
+  return "unknown";
+}
+#endif
+
+static gboolean
+call_later_func (MetaLater *later)
+{
+  COGL_TRACE_BEGIN_SCOPED (later, later_type_to_string (later->when));
+  return later->func (later->data);
+}
+
 static void
 run_repaint_laters (GSList **laters_list)
 {
@@ -806,7 +825,7 @@ run_repaint_laters (GSList **laters_list)
     {
       MetaLater *later = l->data;
 
-      if (!later->func || !later->func (later->data))
+      if (!later->func || !call_later_func (later))
         meta_later_remove_from_list (later->id, laters_list);
       unref_later (later);
     }
@@ -991,6 +1010,7 @@ meta_get_locale_direction (void)
       return META_LOCALE_DIRECTION_RTL;
     default:
       g_assert_not_reached ();
+      return 0;
     }
 }
 

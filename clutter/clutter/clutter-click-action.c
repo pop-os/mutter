@@ -92,9 +92,7 @@
  * #ClutterClickAction is available since Clutter 1.4
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #include "clutter-click-action.h"
 
@@ -357,6 +355,10 @@ on_captured_event (ClutterActor       *stage,
 
   switch (clutter_event_type (event))
     {
+    case CLUTTER_TOUCH_CANCEL:
+      clutter_click_action_release (action);
+      break;
+
     case CLUTTER_TOUCH_END:
       has_button = FALSE;
     case CLUTTER_BUTTON_RELEASE:
@@ -664,8 +666,7 @@ clutter_click_action_class_init (ClutterClickActionClass *klass)
                   G_TYPE_FROM_CLASS (klass),
                   G_SIGNAL_RUN_LAST,
                   G_STRUCT_OFFSET (ClutterClickActionClass, clicked),
-                  NULL, NULL,
-                  _clutter_marshal_VOID__OBJECT,
+                  NULL, NULL, NULL,
                   G_TYPE_NONE, 1,
                   CLUTTER_TYPE_ACTOR);
 

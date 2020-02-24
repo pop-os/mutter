@@ -31,16 +31,14 @@
  *
  */
 
-#ifdef HAVE_CONFIG_H
 #include "cogl-config.h"
-#endif
 
 #include "cogl-renderer-private.h"
 #include "cogl-display-private.h"
 #include "cogl-context-private.h"
 #include "cogl-framebuffer-private.h"
 #include "cogl-private.h"
-#include "cogl-winsys-stub-private.h"
+#include "winsys/cogl-winsys-stub-private.h"
 
 #include <string.h>
 
@@ -51,10 +49,10 @@ static int _cogl_winsys_stub_dummy_ptr;
  * integration code.
  */
 
-static CoglFuncPtr
+static GCallback
 _cogl_winsys_renderer_get_proc_address (CoglRenderer *renderer,
                                         const char *name,
-                                        CoglBool in_core)
+                                        gboolean in_core)
 {
   static GModule *module = NULL;
 
@@ -80,9 +78,9 @@ _cogl_winsys_renderer_disconnect (CoglRenderer *renderer)
   renderer->winsys = NULL;
 }
 
-static CoglBool
+static gboolean
 _cogl_winsys_renderer_connect (CoglRenderer *renderer,
-                               CoglError **error)
+                               GError **error)
 {
   renderer->winsys = &_cogl_winsys_stub_dummy_ptr;
   return TRUE;
@@ -94,16 +92,16 @@ _cogl_winsys_display_destroy (CoglDisplay *display)
   display->winsys = NULL;
 }
 
-static CoglBool
+static gboolean
 _cogl_winsys_display_setup (CoglDisplay *display,
-                            CoglError **error)
+                            GError **error)
 {
   display->winsys = &_cogl_winsys_stub_dummy_ptr;
   return TRUE;
 }
 
-static CoglBool
-_cogl_winsys_context_init (CoglContext *context, CoglError **error)
+static gboolean
+_cogl_winsys_context_init (CoglContext *context, GError **error)
 {
   context->winsys = &_cogl_winsys_stub_dummy_ptr;
 
@@ -121,9 +119,9 @@ _cogl_winsys_context_deinit (CoglContext *context)
   context->winsys = NULL;
 }
 
-static CoglBool
+static gboolean
 _cogl_winsys_onscreen_init (CoglOnscreen *onscreen,
-                            CoglError **error)
+                            GError **error)
 {
   return TRUE;
 }
@@ -146,20 +144,15 @@ _cogl_winsys_onscreen_swap_buffers_with_damage (CoglOnscreen *onscreen,
 }
 
 static void
-_cogl_winsys_onscreen_update_swap_throttled (CoglOnscreen *onscreen)
-{
-}
-
-static void
 _cogl_winsys_onscreen_set_visibility (CoglOnscreen *onscreen,
-                                      CoglBool visibility)
+                                      gboolean visibility)
 {
 }
 
 const CoglWinsysVtable *
 _cogl_winsys_stub_get_vtable (void)
 {
-  static CoglBool vtable_inited = FALSE;
+  static gboolean vtable_inited = FALSE;
   static CoglWinsysVtable vtable;
 
   /* It would be nice if we could use C99 struct initializers here
@@ -186,8 +179,6 @@ _cogl_winsys_stub_get_vtable (void)
       vtable.onscreen_bind = _cogl_winsys_onscreen_bind;
       vtable.onscreen_swap_buffers_with_damage =
         _cogl_winsys_onscreen_swap_buffers_with_damage;
-      vtable.onscreen_update_swap_throttled =
-        _cogl_winsys_onscreen_update_swap_throttled;
       vtable.onscreen_set_visibility = _cogl_winsys_onscreen_set_visibility;
 
       vtable_inited = TRUE;

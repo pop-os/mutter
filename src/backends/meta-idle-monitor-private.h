@@ -23,8 +23,8 @@
 #ifndef META_IDLE_MONITOR_PRIVATE_H
 #define META_IDLE_MONITOR_PRIVATE_H
 
-#include <meta/meta-idle-monitor.h>
-#include "display-private.h"
+#include "core/display-private.h"
+#include "meta/meta-idle-monitor.h"
 
 typedef struct
 {
@@ -54,7 +54,6 @@ struct _MetaIdleMonitorClass
   GObjectClass parent_class;
 };
 
-void _meta_idle_monitor_watch_fire (MetaIdleMonitorWatch *watch);
 void meta_idle_monitor_reset_idletime (MetaIdleMonitor *monitor);
 
 #endif /* META_IDLE_MONITOR_PRIVATE_H */

@@ -43,19 +43,24 @@ meta_wayland_shell_surface_calculate_geometry (MetaWaylandShellSurface *shell_su
   MetaWaylandSurface *surface =
     meta_wayland_surface_role_get_surface (surface_role);
   MetaRectangle geometry;
-  GList *l;
+  GNode *n;
 
   geometry = (MetaRectangle) {
     .width = meta_wayland_surface_get_width (surface),
     .height = meta_wayland_surface_get_height (surface),
   };
 
-  for (l = surface->subsurfaces; l; l = l->next)
+  for (n = g_node_first_child (surface->subsurface_branch_node);
+       n;
+       n = g_node_next_sibling (n))
     {
-      MetaWaylandSurface *subsurface_surface = l->data;
-      MetaWaylandSubsurface *subsurface =
-        META_WAYLAND_SUBSURFACE (subsurface_surface->role);
+      MetaWaylandSurface *subsurface_surface = n->data;
+      MetaWaylandSubsurface *subsurface;
 
+      if (G_NODE_IS_LEAF (n))
+        continue;
+
+      subsurface = META_WAYLAND_SUBSURFACE (subsurface_surface->role);
       meta_wayland_subsurface_union_geometry (subsurface,
                                               0, 0,
                                               &geometry);
@@ -153,8 +158,7 @@ meta_wayland_shell_surface_surface_commit (MetaWaylandSurfaceRole  *surface_role
   MetaWaylandSurfaceRoleClass *surface_role_class;
   MetaWindow *window;
   MetaWaylandBuffer *buffer;
-  CoglTexture *texture;
-  double scale;
+  double geometry_scale;
 
   surface_role_class =
     META_WAYLAND_SURFACE_ROLE_CLASS (meta_wayland_shell_surface_parent_class);
@@ -168,11 +172,75 @@ meta_wayland_shell_surface_surface_commit (MetaWaylandSurfaceRole  *surface_role
   if (!window)
     return;
 
-  scale = meta_wayland_actor_surface_calculate_scale (actor_surface);
-  texture = meta_wayland_buffer_get_texture (buffer);
+  geometry_scale = meta_wayland_actor_surface_get_geometry_scale (actor_surface);
 
-  window->buffer_rect.width = cogl_texture_get_width (texture) * scale;
-  window->buffer_rect.height = cogl_texture_get_height (texture) * scale;
+  window->buffer_rect.width =
+    meta_wayland_surface_get_width (surface) * geometry_scale;
+  window->buffer_rect.height =
+    meta_wayland_surface_get_height (surface) * geometry_scale;
+}
+
+static double
+meta_wayland_shell_surface_get_geometry_scale (MetaWaylandActorSurface *actor_surface)
+{
+  MetaWaylandSurfaceRole *surface_role =
+    META_WAYLAND_SURFACE_ROLE (actor_surface);
+  MetaWaylandSurface *surface =
+    meta_wayland_surface_role_get_surface (surface_role);
+  MetaWindow *toplevel_window;
+
+  toplevel_window = meta_wayland_surface_get_toplevel_window (surface);
+  if (meta_is_stage_views_scaled () || !toplevel_window)
+    return 1;
+  else
+    return meta_window_wayland_get_geometry_scale (toplevel_window);
+}
+
+static void
+meta_wayland_shell_surface_sync_actor_state (MetaWaylandActorSurface *actor_surface)
+{
+  MetaWaylandSurfaceRole *surface_role =
+    META_WAYLAND_SURFACE_ROLE (actor_surface);
+  MetaWaylandSurface *surface =
+    meta_wayland_surface_role_get_surface (surface_role);
+  MetaWaylandActorSurfaceClass *actor_surface_class =
+    META_WAYLAND_ACTOR_SURFACE_CLASS (meta_wayland_shell_surface_parent_class);
+  MetaWaylandSurface *toplevel_surface;
+
+  toplevel_surface = meta_wayland_surface_get_toplevel (surface);
+  if (toplevel_surface && toplevel_surface->window)
+    actor_surface_class->sync_actor_state (actor_surface);
+}
+
+void
+meta_wayland_shell_surface_destroy_window (MetaWaylandShellSurface *shell_surface)
+{
+  MetaWaylandSurfaceRole *surface_role =
+    META_WAYLAND_SURFACE_ROLE (shell_surface);
+  MetaWaylandSurface *surface =
+    meta_wayland_surface_role_get_surface (surface_role);
+  MetaWindow *window;
+  MetaDisplay *display;
+  uint32_t timestamp;
+
+  window = surface->window;
+  if (!window)
+    return;
+
+  display = meta_window_get_display (window);
+  timestamp = meta_display_get_current_time_roundtrip (display);
+  meta_window_unmanage (surface->window, timestamp);
+  g_assert (!surface->window);
+}
+
+static void
+meta_wayland_shell_surface_finalize (GObject *object)
+{
+  MetaWaylandShellSurface *shell_surface = META_WAYLAND_SHELL_SURFACE (object);
+
+  meta_wayland_shell_surface_destroy_window (shell_surface);
+
+  G_OBJECT_CLASS (meta_wayland_shell_surface_parent_class)->finalize (object);
 }
 
 static void
@@ -183,8 +251,18 @@ meta_wayland_shell_surface_init (MetaWaylandShellSurface *role)
 static void
 meta_wayland_shell_surface_class_init (MetaWaylandShellSurfaceClass *klass)
 {
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
   MetaWaylandSurfaceRoleClass *surface_role_class =
     META_WAYLAND_SURFACE_ROLE_CLASS (klass);
+  MetaWaylandActorSurfaceClass *actor_surface_class =
+    META_WAYLAND_ACTOR_SURFACE_CLASS (klass);
+
+  object_class->finalize = meta_wayland_shell_surface_finalize;
 
   surface_role_class->commit = meta_wayland_shell_surface_surface_commit;
+
+  actor_surface_class->get_geometry_scale =
+    meta_wayland_shell_surface_get_geometry_scale;
+  actor_surface_class->sync_actor_state =
+    meta_wayland_shell_surface_sync_actor_state;
 }

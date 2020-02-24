@@ -26,12 +26,15 @@
 
 #include "meta/meta-settings.h"
 #include "meta/types.h"
+#include "core/util-private.h"
 
 typedef enum _MetaExperimentalFeature
 {
   META_EXPERIMENTAL_FEATURE_NONE = 0,
   META_EXPERIMENTAL_FEATURE_SCALE_MONITOR_FRAMEBUFFER = (1 << 0),
   META_EXPERIMENTAL_FEATURE_KMS_MODIFIERS  = (1 << 1),
+  META_EXPERIMENTAL_FEATURE_RT_SCHEDULER = (1 << 2),
+  META_EXPERIMENTAL_FEATURE_AUTOSTART_XWAYLAND  = (1 << 3),
 } MetaExperimentalFeature;
 
 #define META_TYPE_SETTINGS (meta_settings_get_type ())
@@ -47,13 +50,16 @@ void meta_settings_update_ui_scaling_factor (MetaSettings *settings);
 gboolean meta_settings_get_global_scaling_factor (MetaSettings *settings,
                                                   int          *scaing_factor);
 
+META_EXPORT_TEST
 gboolean meta_settings_is_experimental_feature_enabled (MetaSettings           *settings,
                                                         MetaExperimentalFeature feature);
 
 MetaExperimentalFeature meta_settings_get_experimental_features (MetaSettings *settings);
 
+META_EXPORT_TEST
 void meta_settings_override_experimental_features (MetaSettings *settings);
 
+META_EXPORT_TEST
 void meta_settings_enable_experimental_feature (MetaSettings           *settings,
                                                 MetaExperimentalFeature feature);
 
@@ -61,6 +67,6 @@ void meta_settings_get_xwayland_grab_patterns (MetaSettings  *settings,
                                                GPtrArray    **whitelist_patterns,
                                                GPtrArray    **blacklist_patterns);
 
-gboolean  meta_settings_are_xwayland_grabs_allowed (MetaSettings *settings);
+gboolean meta_settings_are_xwayland_grabs_allowed (MetaSettings *settings);
 
 #endif /* META_SETTINGS_PRIVATE_H */

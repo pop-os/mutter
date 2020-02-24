@@ -28,22 +28,20 @@
  *
  */
 
-#ifdef HAVE_CONFIG_H
 #include "cogl-config.h"
-#endif
 
 #include <string.h>
 
 #include "cogl-context-private.h"
-#include "cogl-util-gl-private.h"
 #include "cogl-feature-private.h"
 #include "cogl-renderer-private.h"
 #include "cogl-private.h"
-#include "cogl-framebuffer-gl-private.h"
-#include "cogl-texture-2d-gl-private.h"
-#include "cogl-attribute-gl-private.h"
-#include "cogl-clip-stack-gl-private.h"
-#include "cogl-buffer-gl-private.h"
+#include "driver/gl/cogl-util-gl-private.h"
+#include "driver/gl/cogl-framebuffer-gl-private.h"
+#include "driver/gl/cogl-texture-2d-gl-private.h"
+#include "driver/gl/cogl-attribute-gl-private.h"
+#include "driver/gl/cogl-clip-stack-gl-private.h"
+#include "driver/gl/cogl-buffer-gl-private.h"
 
 #ifndef GL_UNSIGNED_INT_24_8
 #define GL_UNSIGNED_INT_24_8 0x84FA
@@ -58,7 +56,7 @@
 #define GL_RG8 0x822B
 #endif
 
-static CoglBool
+static gboolean
 _cogl_driver_pixel_format_from_gl_internal (CoglContext *context,
                                             GLenum gl_int_format,
                                             CoglPixelFormat *out_format)
@@ -67,12 +65,11 @@ _cogl_driver_pixel_format_from_gl_internal (CoglContext *context,
 }
 
 static CoglPixelFormat
-_cogl_driver_pixel_format_to_gl_with_target (CoglContext *context,
-                                             CoglPixelFormat format,
-                                             CoglPixelFormat target_format,
-                                             GLenum *out_glintformat,
-                                             GLenum *out_glformat,
-                                             GLenum *out_gltype)
+_cogl_driver_pixel_format_to_gl (CoglContext     *context,
+                                 CoglPixelFormat  format,
+                                 GLenum          *out_glintformat,
+                                 GLenum          *out_glformat,
+                                 GLenum          *out_gltype)
 {
   CoglPixelFormat required_format;
   GLenum glintformat;
@@ -220,21 +217,7 @@ _cogl_driver_pixel_format_to_gl_with_target (CoglContext *context,
   return required_format;
 }
 
-static CoglPixelFormat
-_cogl_driver_pixel_format_to_gl (CoglContext *context,
-                                 CoglPixelFormat  format,
-                                 GLenum *out_glintformat,
-                                 GLenum *out_glformat,
-                                 GLenum *out_gltype)
-{
-  return _cogl_driver_pixel_format_to_gl_with_target (context,
-                                                      format, format,
-                                                      out_glintformat,
-                                                      out_glformat,
-                                                      out_gltype);
-}
-
-static CoglBool
+static gboolean
 _cogl_get_gl_version (CoglContext *ctx,
                       int *major_out,
                       int *minor_out)
@@ -253,9 +236,9 @@ _cogl_get_gl_version (CoglContext *ctx,
                                          minor_out);
 }
 
-static CoglBool
+static gboolean
 _cogl_driver_update_features (CoglContext *context,
-                              CoglError **error)
+                              GError **error)
 {
   unsigned long private_features
     [COGL_FLAGS_N_LONGS_FOR_SIZE (COGL_N_PRIVATE_FEATURES)] = { 0 };
@@ -304,55 +287,38 @@ _cogl_driver_update_features (CoglContext *context,
       gl_minor = 1;
     }
 
+  if (!COGL_CHECK_GL_VERSION (gl_major, gl_minor, 2, 0))
+    {
+      g_set_error (error,
+                       COGL_DRIVER_ERROR,
+                       COGL_DRIVER_ERROR_INVALID_VERSION,
+                       "OpenGL ES 2.0 or better is required");
+      return FALSE;
+    }
+
   _cogl_feature_check_ext_functions (context,
                                      gl_major,
                                      gl_minor,
                                      gl_extensions);
 
-#ifdef HAVE_COGL_GLES
-  if (context->driver == COGL_DRIVER_GLES1)
-    {
-      int max_clip_planes;
-      GE( context, glGetIntegerv (GL_MAX_CLIP_PLANES, &max_clip_planes) );
-      if (max_clip_planes >= 4)
-        COGL_FLAGS_SET (private_features,
-                        COGL_PRIVATE_FEATURE_FOUR_CLIP_PLANES, TRUE);
-    }
-#endif
+  flags |= COGL_FEATURE_OFFSCREEN;
+  /* Note GLES 2 core doesn't support mipmaps for npot textures or
+   * repeat modes other than CLAMP_TO_EDGE. */
+  flags |= COGL_FEATURE_DEPTH_RANGE;
+  COGL_FLAGS_SET (context->features, COGL_FEATURE_ID_OFFSCREEN, TRUE);
+  COGL_FLAGS_SET (context->features, COGL_FEATURE_ID_DEPTH_RANGE, TRUE);
+  COGL_FLAGS_SET (context->features,
+                  COGL_FEATURE_ID_MIRRORED_REPEAT, TRUE);
+  COGL_FLAGS_SET (context->features,
+                  COGL_FEATURE_ID_PER_VERTEX_POINT_SIZE, TRUE);
 
-  if (context->driver == COGL_DRIVER_GLES2)
-    {
-      flags |= COGL_FEATURE_SHADERS_GLSL | COGL_FEATURE_OFFSCREEN;
-      /* Note GLES 2 core doesn't support mipmaps for npot textures or
-       * repeat modes other than CLAMP_TO_EDGE. */
-      flags |= COGL_FEATURE_TEXTURE_NPOT_BASIC;
-      flags |= COGL_FEATURE_DEPTH_RANGE;
-      COGL_FLAGS_SET (context->features, COGL_FEATURE_ID_GLSL, TRUE);
-      COGL_FLAGS_SET (context->features, COGL_FEATURE_ID_OFFSCREEN, TRUE);
-      COGL_FLAGS_SET (context->features,
-                      COGL_FEATURE_ID_TEXTURE_NPOT_BASIC, TRUE);
-      COGL_FLAGS_SET (context->features, COGL_FEATURE_ID_DEPTH_RANGE, TRUE);
-      COGL_FLAGS_SET (context->features,
-                      COGL_FEATURE_ID_MIRRORED_REPEAT, TRUE);
-      COGL_FLAGS_SET (context->features,
-                      COGL_FEATURE_ID_PER_VERTEX_POINT_SIZE, TRUE);
-
-      COGL_FLAGS_SET (private_features,
-                      COGL_PRIVATE_FEATURE_BLEND_CONSTANT, TRUE);
-    }
-  else if (context->driver == COGL_DRIVER_GLES1)
-    {
-      COGL_FLAGS_SET (private_features, COGL_PRIVATE_FEATURE_GL_FIXED, TRUE);
-      COGL_FLAGS_SET (private_features, COGL_PRIVATE_FEATURE_ALPHA_TEST, TRUE);
-      COGL_FLAGS_SET (private_features,
-                      COGL_PRIVATE_FEATURE_BUILTIN_POINT_SIZE_UNIFORM, TRUE);
-    }
+  COGL_FLAGS_SET (private_features,
+                  COGL_PRIVATE_FEATURE_BLEND_CONSTANT, TRUE);
 
   COGL_FLAGS_SET (private_features, COGL_PRIVATE_FEATURE_VBOS, TRUE);
   COGL_FLAGS_SET (private_features, COGL_PRIVATE_FEATURE_ANY_GL, TRUE);
   COGL_FLAGS_SET (private_features, COGL_PRIVATE_FEATURE_ALPHA_TEXTURES, TRUE);
 
-  /* Both GLES 1.1 and GLES 2.0 support point sprites in core */
   flags |= COGL_FEATURE_POINT_SPRITE;
   COGL_FLAGS_SET (context->features, COGL_FEATURE_ID_POINT_SPRITE, TRUE);
 
@@ -364,7 +330,7 @@ _cogl_driver_update_features (CoglContext *context,
 
   if (context->glBlitFramebuffer)
     COGL_FLAGS_SET (private_features,
-                    COGL_PRIVATE_FEATURE_OFFSCREEN_BLIT, TRUE);
+                    COGL_PRIVATE_FEATURE_BLIT_FRAMEBUFFER, TRUE);
 
   if (_cogl_check_extension ("GL_OES_element_index_uint", gl_extensions))
     {
@@ -377,37 +343,6 @@ _cogl_driver_update_features (CoglContext *context,
     {
       flags |= COGL_FEATURE_DEPTH_TEXTURE;
       COGL_FLAGS_SET (context->features, COGL_FEATURE_ID_DEPTH_TEXTURE, TRUE);
-    }
-
-  if (_cogl_check_extension ("GL_OES_texture_npot", gl_extensions))
-    {
-      flags |= (COGL_FEATURE_TEXTURE_NPOT |
-                COGL_FEATURE_TEXTURE_NPOT_BASIC |
-                COGL_FEATURE_TEXTURE_NPOT_MIPMAP |
-                COGL_FEATURE_TEXTURE_NPOT_REPEAT);
-      COGL_FLAGS_SET (context->features,
-                      COGL_FEATURE_ID_TEXTURE_NPOT, TRUE);
-      COGL_FLAGS_SET (context->features,
-                      COGL_FEATURE_ID_TEXTURE_NPOT_BASIC, TRUE);
-      COGL_FLAGS_SET (context->features,
-                      COGL_FEATURE_ID_TEXTURE_NPOT_MIPMAP, TRUE);
-      COGL_FLAGS_SET (context->features,
-                      COGL_FEATURE_ID_TEXTURE_NPOT_REPEAT, TRUE);
-    }
-  else if (_cogl_check_extension ("GL_IMG_texture_npot", gl_extensions))
-    {
-      flags |= (COGL_FEATURE_TEXTURE_NPOT_BASIC |
-                COGL_FEATURE_TEXTURE_NPOT_MIPMAP);
-      COGL_FLAGS_SET (context->features,
-                      COGL_FEATURE_ID_TEXTURE_NPOT_BASIC, TRUE);
-      COGL_FLAGS_SET (context->features,
-                      COGL_FEATURE_ID_TEXTURE_NPOT_MIPMAP, TRUE);
-    }
-
-  if (context->glTexImage3D)
-    {
-      flags |= COGL_FEATURE_TEXTURE_3D;
-      COGL_FLAGS_SET (context->features, COGL_FEATURE_ID_TEXTURE_3D, TRUE);
     }
 
   if (context->glMapBuffer)
@@ -467,12 +402,17 @@ _cogl_driver_update_features (CoglContext *context,
   return TRUE;
 }
 
+static gboolean
+_cogl_driver_texture_2d_is_get_data_supported (CoglTexture2D *tex_2d)
+{
+  return FALSE;
+}
+
 const CoglDriverVtable
 _cogl_driver_gles =
   {
     _cogl_driver_pixel_format_from_gl_internal,
     _cogl_driver_pixel_format_to_gl,
-    _cogl_driver_pixel_format_to_gl_with_target,
     _cogl_driver_update_features,
     _cogl_offscreen_gl_allocate,
     _cogl_offscreen_gl_free,
@@ -492,6 +432,7 @@ _cogl_driver_gles =
     _cogl_texture_2d_gl_get_gl_handle,
     _cogl_texture_2d_gl_generate_mipmap,
     _cogl_texture_2d_gl_copy_from_bitmap,
+    _cogl_driver_texture_2d_is_get_data_supported,
     NULL, /* texture_2d_get_data */
     _cogl_gl_flush_attributes_state,
     _cogl_clip_stack_gl_flush,

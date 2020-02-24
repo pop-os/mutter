@@ -25,16 +25,16 @@
 
 #include "config.h"
 
-#include "meta-monitor-manager-dummy.h"
+#include "backends/meta-monitor-manager-dummy.h"
 
 #include <stdlib.h>
 
-#include <meta/util.h>
 #include "backends/meta-backend-private.h"
 #include "backends/meta-crtc.h"
 #include "backends/meta-monitor.h"
 #include "backends/meta-monitor-config-manager.h"
 #include "backends/meta-output.h"
+#include "meta/util.h"
 
 #define ALL_TRANSFORMS ((1 << (META_MONITOR_TRANSFORM_FLIPPED_270 + 1)) - 1)
 
@@ -46,8 +46,6 @@
 struct _MetaMonitorManagerDummy
 {
   MetaMonitorManager parent_instance;
-
-  MetaGpu *gpu;
 
   gboolean is_transform_handled;
 };
@@ -80,6 +78,7 @@ typedef struct _CrtcModeSpec
   int height;
   float refresh_rate;
 } CrtcModeSpec;
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(CrtcModeSpec, g_free);
 
 static MetaCrtcMode *
 create_mode (CrtcModeSpec *spec,
@@ -97,6 +96,14 @@ create_mode (CrtcModeSpec *spec,
   return mode;
 }
 
+static MetaGpu *
+get_gpu (MetaMonitorManager *manager)
+{
+  MetaBackend *backend = meta_monitor_manager_get_backend (manager);
+
+  return META_GPU (meta_backend_get_gpus (backend)->data);
+}
+
 static void
 append_monitor (MetaMonitorManager *manager,
                 GList             **modes,
@@ -104,9 +111,8 @@ append_monitor (MetaMonitorManager *manager,
                 GList             **outputs,
                 float               scale)
 {
-  MetaMonitorManagerDummy *manager_dummy = META_MONITOR_MANAGER_DUMMY (manager);
-  MetaGpu *gpu = manager_dummy->gpu;
-  CrtcModeSpec mode_specs[] = {
+  MetaGpu *gpu = get_gpu (manager);
+  CrtcModeSpec default_specs[] = {
     {
       .width = 800,
       .height = 600,
@@ -116,25 +122,79 @@ append_monitor (MetaMonitorManager *manager,
       .width = 1024,
       .height = 768,
       .refresh_rate = 60.0
-    }
+    },
+    {
+      .width = 1440,
+      .height = 900,
+      .refresh_rate = 60.0
+    },
+    {
+      .width = 1600,
+      .height = 920,
+      .refresh_rate = 60.0
+    },
   };
+  g_autolist (CrtcModeSpec) mode_specs = NULL;
+  unsigned int n_mode_specs = 0;
   GList *new_modes = NULL;
   MetaCrtc *crtc;
   MetaOutputDummy *output_dummy;
   MetaOutput *output;
   unsigned int i;
   unsigned int number;
+  const char *mode_specs_str;
   GList *l;
 
-  for (i = 0; i < G_N_ELEMENTS (mode_specs); i++)
+  mode_specs_str = getenv ("MUTTER_DEBUG_DUMMY_MODE_SPECS");
+  if (mode_specs_str && *mode_specs_str != '\0')
     {
+      g_auto (GStrv) specs = g_strsplit (mode_specs_str, ":", -1);
+      for (i = 0; specs[i]; ++i)
+        {
+          int width, height;
+          float refresh_rate = 60.0;
+
+          if (sscanf (specs[i], "%dx%d@%f",
+                      &width, &height, &refresh_rate) == 3 ||
+              sscanf (specs[i], "%dx%d",
+                      &width, &height) == 2)
+            {
+              CrtcModeSpec *spec;
+
+              if (width < META_MONITOR_MANAGER_MIN_SCREEN_WIDTH ||
+                  height < META_MONITOR_MANAGER_MIN_SCREEN_HEIGHT)
+                continue;
+
+              spec = g_new0 (CrtcModeSpec, 1);
+              spec->width = width;
+              spec->height = height;
+              spec->refresh_rate = refresh_rate;
+              mode_specs = g_list_prepend (mode_specs, spec);
+            }
+        }
+    }
+  else
+    {
+      for (i = 0; i < G_N_ELEMENTS (default_specs); i++)
+        {
+          CrtcModeSpec *spec;
+
+          spec = g_memdup (&default_specs[i], sizeof (CrtcModeSpec));
+          mode_specs = g_list_prepend (mode_specs, spec);
+        }
+    }
+
+  for (l = mode_specs; l; l = l->next)
+    {
+      CrtcModeSpec *spec = l->data;
       long mode_id;
       MetaCrtcMode *mode;
 
-      mode_id = g_list_length (*modes) + i + 1;
-      mode = create_mode (&mode_specs[i], mode_id);
+      mode_id = g_list_length (*modes) + n_mode_specs + 1;
+      mode = create_mode (spec, mode_id);
 
       new_modes = g_list_append (new_modes, mode);
+      n_mode_specs++;
     }
   *modes = g_list_concat (*modes, new_modes);
 
@@ -171,14 +231,14 @@ append_monitor (MetaMonitorManager *manager,
   output->driver_notify =
     (GDestroyNotify) meta_output_dummy_notify_destroy;
 
-  output->modes = g_new0 (MetaCrtcMode *, G_N_ELEMENTS (mode_specs));
+  output->modes = g_new0 (MetaCrtcMode *, n_mode_specs);
   for (l = new_modes, i = 0; l; l = l->next, i++)
     {
       MetaCrtcMode *mode = l->data;
 
       output->modes[i] = mode;
     }
-  output->n_modes = G_N_ELEMENTS (mode_specs);
+  output->n_modes = n_mode_specs;
   output->possible_crtcs = g_new0 (MetaCrtc *, 1);
   output->possible_crtcs[0] = g_list_last (*crtcs)->data;
   output->n_possible_crtcs = 1;
@@ -193,8 +253,7 @@ append_tiled_monitor (MetaMonitorManager *manager,
                       GList             **outputs,
                       int                 scale)
 {
-  MetaMonitorManagerDummy *manager_dummy = META_MONITOR_MANAGER_DUMMY (manager);
-  MetaGpu *gpu = manager_dummy->gpu;
+  MetaGpu *gpu = get_gpu (manager);
   CrtcModeSpec mode_specs[] = {
     {
       .width = 800,
@@ -318,8 +377,7 @@ meta_output_dummy_notify_destroy (MetaOutput *output)
 static void
 meta_monitor_manager_dummy_read_current (MetaMonitorManager *manager)
 {
-  MetaMonitorManagerDummy *manager_dummy = META_MONITOR_MANAGER_DUMMY (manager);
-  MetaGpu *gpu = manager_dummy->gpu;
+  MetaGpu *gpu = get_gpu (manager);
   unsigned int num_monitors = 1;
   float *monitor_scales = NULL;
   const char *num_monitors_str;
@@ -338,6 +396,13 @@ meta_monitor_manager_dummy_read_current (MetaMonitorManager *manager)
    *
    * Specifies the number of dummy monitors to include in the stage. Every
    * monitor is 1024x786 pixels and they are placed on a horizontal row.
+   *
+   * MUTTER_DEBUG_DUMMY_MODE_SPECS
+   *
+   * A colon separated list of mode specifications that can be used to
+   * configure the monitor via dbus API. Setting this environment variable
+   * overrides the default set of modes available.
+   * Format should be WWxHH:WWxHH@RR
    *
    * MUTTER_DEBUG_DUMMY_MONITOR_SCALES
    *
@@ -436,7 +501,6 @@ apply_crtc_assignments (MetaMonitorManager *manager,
                         MetaOutputInfo    **outputs,
                         unsigned int        n_outputs)
 {
-  MetaMonitorManagerDummy *manager_dummy = META_MONITOR_MANAGER_DUMMY (manager);
   GList *l;
   unsigned i;
 
@@ -501,7 +565,7 @@ apply_crtc_assignments (MetaMonitorManager *manager,
     }
 
   /* Disable CRTCs not mentioned in the list */
-  for (l = meta_gpu_get_crtcs (manager_dummy->gpu); l; l = l->next)
+  for (l = meta_gpu_get_crtcs (get_gpu (manager)); l; l = l->next)
     {
       MetaCrtc *crtc = l->data;
 
@@ -521,7 +585,7 @@ apply_crtc_assignments (MetaMonitorManager *manager,
     }
 
   /* Disable outputs not mentioned in the list */
-  for (l = meta_gpu_get_outputs (manager_dummy->gpu); l; l = l->next)
+  for (l = meta_gpu_get_outputs (get_gpu (manager)); l; l = l->next)
     {
       MetaOutput *output = l->data;
 
@@ -635,11 +699,11 @@ meta_monitor_manager_dummy_calculate_monitor_mode_scale (MetaMonitorManager *man
 }
 
 static float *
-meta_monitor_manager_dummy_calculate_supported_scales (MetaMonitorManager          *manager,
-                                                       MetaLogicalMonitorLayoutMode layout_mode,
-                                                       MetaMonitor                 *monitor,
-                                                       MetaMonitorMode             *monitor_mode,
-                                                       int                         *n_supported_scales)
+meta_monitor_manager_dummy_calculate_supported_scales (MetaMonitorManager           *manager,
+                                                       MetaLogicalMonitorLayoutMode  layout_mode,
+                                                       MetaMonitor                  *monitor,
+                                                       MetaMonitorMode              *monitor_mode,
+                                                       int                          *n_supported_scales)
 {
   MetaMonitorScalesConstraint constraints =
     META_MONITOR_SCALES_CONSTRAINT_NONE;
@@ -714,9 +778,30 @@ meta_monitor_manager_dummy_get_default_layout_mode (MetaMonitorManager *manager)
 }
 
 static void
+meta_monitor_manager_dummy_constructed (GObject *object)
+{
+  MetaMonitorManagerDummy *manager_dummy = META_MONITOR_MANAGER_DUMMY (object);
+  const char *nested_offscreen_transform;
+  GObjectClass *parent_object_class =
+    G_OBJECT_CLASS (meta_monitor_manager_dummy_parent_class);
+
+  parent_object_class->constructed (object);
+
+  nested_offscreen_transform =
+    g_getenv ("MUTTER_DEBUG_NESTED_OFFSCREEN_TRANSFORM");
+  if (g_strcmp0 (nested_offscreen_transform, "1") == 0)
+    manager_dummy->is_transform_handled = FALSE;
+  else
+    manager_dummy->is_transform_handled = TRUE;
+}
+
+static void
 meta_monitor_manager_dummy_class_init (MetaMonitorManagerDummyClass *klass)
 {
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
   MetaMonitorManagerClass *manager_class = META_MONITOR_MANAGER_CLASS (klass);
+
+  object_class->constructed = meta_monitor_manager_dummy_constructed;
 
   manager_class->ensure_initial_config = meta_monitor_manager_dummy_ensure_initial_config;
   manager_class->apply_monitors_config = meta_monitor_manager_dummy_apply_monitors_config;
@@ -731,27 +816,14 @@ meta_monitor_manager_dummy_class_init (MetaMonitorManagerDummyClass *klass)
 static void
 meta_monitor_manager_dummy_init (MetaMonitorManagerDummy *manager_dummy)
 {
-  MetaMonitorManager *manager = META_MONITOR_MANAGER (manager_dummy);
-  const char *nested_offscreen_transform;
-
-  nested_offscreen_transform =
-    g_getenv ("MUTTER_DEBUG_NESTED_OFFSCREEN_TRANSFORM");
-  if (g_strcmp0 (nested_offscreen_transform, "1") == 0)
-    manager_dummy->is_transform_handled = FALSE;
-  else
-    manager_dummy->is_transform_handled = TRUE;
-
-  manager_dummy->gpu = g_object_new (META_TYPE_GPU_DUMMY,
-                                     "monitor-manager", manager,
-                                     NULL);
-  meta_monitor_manager_add_gpu (manager, manager_dummy->gpu);
 }
 
 static gboolean
 meta_gpu_dummy_read_current (MetaGpu  *gpu,
                              GError  **error)
 {
-  MetaMonitorManager *manager = meta_gpu_get_monitor_manager (gpu);
+  MetaBackend *backend = meta_gpu_get_backend (gpu);
+  MetaMonitorManager *manager = meta_backend_get_monitor_manager (backend);
 
   meta_monitor_manager_dummy_read_current (manager);
 

@@ -20,24 +20,25 @@
 #ifndef META_XWAYLAND_PRIVATE_H
 #define META_XWAYLAND_PRIVATE_H
 
-#include "meta-wayland-private.h"
-
 #include <glib.h>
 
+#include "wayland/meta-wayland-private.h"
+
 gboolean
-meta_xwayland_start (MetaXWaylandManager *manager,
-                     struct wl_display   *display);
+meta_xwayland_init (MetaXWaylandManager *manager,
+		    struct wl_display   *display);
 
 void
-meta_xwayland_complete_init (MetaDisplay *display);
+meta_xwayland_complete_init (MetaDisplay *display,
+                             Display     *xdisplay);
 
 void
-meta_xwayland_stop (MetaXWaylandManager *manager);
+meta_xwayland_shutdown (MetaXWaylandManager *manager);
 
 /* wl_data_device/X11 selection interoperation */
-void     meta_xwayland_init_selection         (void);
-void     meta_xwayland_shutdown_selection     (void);
-gboolean meta_xwayland_selection_handle_event (XEvent *xevent);
+void     meta_xwayland_init_dnd         (Display *xdisplay);
+void     meta_xwayland_shutdown_dnd     (Display *xdisplay);
+gboolean meta_xwayland_dnd_handle_event (XEvent *xevent);
 
 const MetaWaylandDragDestFuncs * meta_xwayland_selection_get_drag_dest_funcs (void);
 

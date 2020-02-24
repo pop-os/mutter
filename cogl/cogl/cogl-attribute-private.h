@@ -52,10 +52,10 @@ typedef enum
 
 typedef struct _CoglAttributeNameState
 {
-  char *name;
+  const char *name;
   CoglAttributeNameID name_id;
   int name_index;
-  CoglBool normalized_default;
+  gboolean normalized_default;
   int layer_number;
 } CoglAttributeNameState;
 
@@ -64,9 +64,9 @@ struct _CoglAttribute
   CoglObject _parent;
 
   const CoglAttributeNameState *name_state;
-  CoglBool normalized;
+  gboolean normalized;
 
-  CoglBool is_buffered;
+  gboolean is_buffered;
 
   union {
     struct {

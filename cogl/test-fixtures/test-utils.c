@@ -8,36 +8,18 @@
 #define FB_WIDTH 512
 #define FB_HEIGHT 512
 
-static CoglBool cogl_test_is_verbose;
+static gboolean cogl_test_is_verbose;
 
 CoglContext *test_ctx;
 CoglFramebuffer *test_fb;
 
-static CoglBool
+static gboolean
 check_flags (TestFlags flags,
              CoglRenderer *renderer)
 {
   if (flags & TEST_REQUIREMENT_GL &&
       cogl_renderer_get_driver (renderer) != COGL_DRIVER_GL &&
       cogl_renderer_get_driver (renderer) != COGL_DRIVER_GL3)
-    {
-      return FALSE;
-    }
-
-  if (flags & TEST_REQUIREMENT_NPOT &&
-      !cogl_has_feature (test_ctx, COGL_FEATURE_ID_TEXTURE_NPOT))
-    {
-      return FALSE;
-    }
-
-  if (flags & TEST_REQUIREMENT_TEXTURE_3D &&
-      !cogl_has_feature (test_ctx, COGL_FEATURE_ID_TEXTURE_3D))
-    {
-      return FALSE;
-    }
-
-  if (flags & TEST_REQUIREMENT_TEXTURE_RECTANGLE &&
-      !cogl_has_feature (test_ctx, COGL_FEATURE_ID_TEXTURE_RECTANGLE))
     {
       return FALSE;
     }
@@ -60,20 +42,8 @@ check_flags (TestFlags flags,
       return FALSE;
     }
 
-  if (flags & TEST_REQUIREMENT_GLES2_CONTEXT &&
-      !cogl_has_feature (test_ctx, COGL_FEATURE_ID_GLES2_CONTEXT))
-    {
-      return FALSE;
-    }
-
   if (flags & TEST_REQUIREMENT_MAP_WRITE &&
       !cogl_has_feature (test_ctx, COGL_FEATURE_ID_MAP_BUFFER_FOR_WRITE))
-    {
-      return FALSE;
-    }
-
-  if (flags & TEST_REQUIREMENT_GLSL &&
-      !cogl_has_feature (test_ctx, COGL_FEATURE_ID_GLSL))
     {
       return FALSE;
     }
@@ -98,11 +68,11 @@ check_flags (TestFlags flags,
   return TRUE;
 }
 
-CoglBool
+static gboolean
 is_boolean_env_set (const char *variable)
 {
   char *val = getenv (variable);
-  CoglBool ret;
+  gboolean ret;
 
   if (!val)
     return FALSE;
@@ -130,12 +100,12 @@ test_utils_init (TestFlags requirement_flags,
                  TestFlags known_failure_flags)
 {
   static int counter = 0;
-  CoglError *error = NULL;
+  GError *error = NULL;
   CoglOnscreen *onscreen = NULL;
   CoglDisplay *display;
   CoglRenderer *renderer;
-  CoglBool missing_requirement;
-  CoglBool known_failure;
+  gboolean missing_requirement;
+  gboolean known_failure;
 
   if (counter != 0)
     g_critical ("We don't support running more than one test at a time\n"
@@ -216,7 +186,7 @@ test_utils_fini (void)
     cogl_object_unref (test_ctx);
 }
 
-static CoglBool
+static gboolean
 compare_component (int a, int b)
 {
   return ABS (a - b) <= 1;
@@ -347,7 +317,7 @@ test_utils_create_color_texture (CoglContext *context,
   return COGL_TEXTURE (tex_2d);
 }
 
-CoglBool
+gboolean
 cogl_test_verbose (void)
 {
   return cogl_test_is_verbose;
@@ -371,27 +341,19 @@ test_utils_texture_new_with_size (CoglContext *ctx,
                                   CoglTextureComponents components)
 {
   CoglTexture *tex;
-  CoglError *skip_error = NULL;
+  GError *skip_error = NULL;
 
-  if ((test_utils_is_pot (width) && test_utils_is_pot (height)) ||
-      (cogl_has_feature (ctx, COGL_FEATURE_ID_TEXTURE_NPOT_BASIC) &&
-       cogl_has_feature (ctx, COGL_FEATURE_ID_TEXTURE_NPOT_MIPMAP)))
+  /* First try creating a fast-path non-sliced texture */
+  tex = COGL_TEXTURE (cogl_texture_2d_new_with_size (ctx, width, height));
+
+  cogl_texture_set_components (tex, components);
+
+  if (!cogl_texture_allocate (tex, &skip_error))
     {
-      /* First try creating a fast-path non-sliced texture */
-      tex = COGL_TEXTURE (cogl_texture_2d_new_with_size (ctx,
-                                                         width, height));
-
-      cogl_texture_set_components (tex, components);
-
-      if (!cogl_texture_allocate (tex, &skip_error))
-        {
-          cogl_error_free (skip_error);
-          cogl_object_unref (tex);
-          tex = NULL;
-        }
+      g_error_free (skip_error);
+      cogl_object_unref (tex);
+      tex = NULL;
     }
-  else
-    tex = NULL;
 
   if (!tex)
     {
@@ -430,11 +392,11 @@ test_utils_texture_new_with_size (CoglContext *ctx,
 CoglTexture *
 test_utils_texture_new_from_bitmap (CoglBitmap *bitmap,
                                     TestUtilsTextureFlags flags,
-                                    CoglBool premultiplied)
+                                    gboolean premultiplied)
 {
   CoglAtlasTexture *atlas_tex;
   CoglTexture *tex;
-  CoglError *internal_error = NULL;
+  GError *internal_error = NULL;
 
   if (!flags)
     {
@@ -446,37 +408,25 @@ test_utils_texture_new_from_bitmap (CoglBitmap *bitmap,
       if (cogl_texture_allocate (COGL_TEXTURE (atlas_tex), &internal_error))
         return COGL_TEXTURE (atlas_tex);
 
-      cogl_error_free (internal_error);
       cogl_object_unref (atlas_tex);
-      internal_error = NULL;
     }
+
+  g_clear_error (&internal_error);
 
   /* If that doesn't work try a fast path 2D texture */
-  if ((test_utils_is_pot (cogl_bitmap_get_width (bitmap)) &&
-       test_utils_is_pot (cogl_bitmap_get_height (bitmap))) ||
-      (cogl_has_feature (test_ctx, COGL_FEATURE_ID_TEXTURE_NPOT_BASIC) &&
-       cogl_has_feature (test_ctx, COGL_FEATURE_ID_TEXTURE_NPOT_MIPMAP)))
+  tex = COGL_TEXTURE (cogl_texture_2d_new_from_bitmap (bitmap));
+
+  cogl_texture_set_premultiplied (tex, premultiplied);
+
+  if (g_error_matches (internal_error,
+                       COGL_SYSTEM_ERROR,
+                       COGL_SYSTEM_ERROR_NO_MEMORY))
     {
-      tex = COGL_TEXTURE (cogl_texture_2d_new_from_bitmap (bitmap));
-
-      cogl_texture_set_premultiplied (tex, premultiplied);
-
-      if (cogl_error_matches (internal_error,
-                              COGL_SYSTEM_ERROR,
-                              COGL_SYSTEM_ERROR_NO_MEMORY))
-        {
-          g_assert_not_reached ();
-          return NULL;
-        }
-
-      if (!tex)
-        {
-          cogl_error_free (internal_error);
-          internal_error = NULL;
-        }
+      g_assert_not_reached ();
+      return NULL;
     }
-  else
-    tex = NULL;
+
+  g_clear_error (&internal_error);
 
   if (!tex)
     {

@@ -69,6 +69,9 @@ typedef struct _ClutterVertex4          ClutterVertex4;
 #define CLUTTER_ACTOR_IN_REPARENT(a)            ((CLUTTER_PRIVATE_FLAGS (a) & CLUTTER_IN_REPARENT) != FALSE)
 #define CLUTTER_ACTOR_IN_PAINT(a)               ((CLUTTER_PRIVATE_FLAGS (a) & CLUTTER_IN_PAINT) != FALSE)
 #define CLUTTER_ACTOR_IN_RELAYOUT(a)            ((CLUTTER_PRIVATE_FLAGS (a) & CLUTTER_IN_RELAYOUT) != FALSE)
+#define CLUTTER_ACTOR_IN_PREF_WIDTH(a)          ((CLUTTER_PRIVATE_FLAGS (a) & CLUTTER_IN_PREF_WIDTH) != FALSE)
+#define CLUTTER_ACTOR_IN_PREF_HEIGHT(a)         ((CLUTTER_PRIVATE_FLAGS (a) & CLUTTER_IN_PREF_HEIGHT) != FALSE)
+#define CLUTTER_ACTOR_IN_PREF_SIZE(a)           ((CLUTTER_PRIVATE_FLAGS (a) & (CLUTTER_IN_PREF_HEIGHT|CLUTTER_IN_PREF_WIDTH)) != FALSE)
 
 #define CLUTTER_PARAM_READABLE  (G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)
 #define CLUTTER_PARAM_WRITABLE  (G_PARAM_WRITABLE | G_PARAM_STATIC_STRINGS)
@@ -82,7 +85,6 @@ typedef struct _ClutterVertex4          ClutterVertex4;
 /* keep this for source compatibility with clutter */
 #define P_(String) (String)
 #define N_(String) (String)
-#define _(String) (String)
 
 /* This is a replacement for the nearbyint function which always rounds to the
  * nearest integer. nearbyint is apparently a C99 function so it might not
@@ -91,21 +93,24 @@ typedef struct _ClutterVertex4          ClutterVertex4;
  * because it will break for negative numbers. */
 #define CLUTTER_NEARBYINT(x) ((int) ((x) < 0.0f ? (x) - 0.5f : (x) + 0.5f))
 
-typedef enum {
+typedef enum
+{
   CLUTTER_ACTOR_UNUSED_FLAG = 0,
 
   CLUTTER_IN_DESTRUCTION = 1 << 0,
   CLUTTER_IS_TOPLEVEL    = 1 << 1,
   CLUTTER_IN_REPARENT    = 1 << 2,
+  CLUTTER_IN_PREF_WIDTH  = 1 << 3,
+  CLUTTER_IN_PREF_HEIGHT = 1 << 4,
 
   /* Used to avoid recursion */
-  CLUTTER_IN_PAINT       = 1 << 3,
+  CLUTTER_IN_PAINT       = 1 << 5,
 
   /* Used to avoid recursion */
-  CLUTTER_IN_RELAYOUT    = 1 << 4,
+  CLUTTER_IN_RELAYOUT    = 1 << 6,
 
   /* a flag for internal children of Containers (DEPRECATED) */
-  CLUTTER_INTERNAL_CHILD = 1 << 5
+  CLUTTER_INTERNAL_CHILD = 1 << 7
 } ClutterPrivateFlags;
 
 /*
@@ -136,13 +141,6 @@ struct _ClutterMainContext
   /* default FPS; this is only used if we cannot sync to vblank */
   guint frame_rate;
 
-  /* actors with a grab on all devices */
-  ClutterActor *pointer_grab_actor;
-  ClutterActor *keyboard_grab_actor;
-
-  /* stack of actors with shaders during paint */
-  GSList *shaders;
-
   /* fb bit masks for col<->id mapping in picking */
   gint fb_r_mask;
   gint fb_g_mask;
@@ -167,7 +165,6 @@ struct _ClutterMainContext
 
   /* boolean flags */
   guint is_initialized          : 1;
-  guint motion_events_per_actor : 1;
   guint defer_display_setup     : 1;
   guint options_parsed          : 1;
   guint show_fps                : 1;
@@ -184,7 +181,9 @@ typedef struct
 gboolean _clutter_threads_dispatch      (gpointer data);
 void     _clutter_threads_dispatch_free (gpointer data);
 
+CLUTTER_EXPORT
 void                    _clutter_threads_acquire_lock                   (void);
+CLUTTER_EXPORT
 void                    _clutter_threads_release_lock                   (void);
 
 ClutterMainContext *    _clutter_context_get_default                    (void);
@@ -192,23 +191,15 @@ void                    _clutter_context_lock                           (void);
 void                    _clutter_context_unlock                         (void);
 gboolean                _clutter_context_is_initialized                 (void);
 ClutterPickMode         _clutter_context_get_pick_mode                  (void);
-void                    _clutter_context_push_shader_stack              (ClutterActor *actor);
-ClutterActor *          _clutter_context_pop_shader_stack               (ClutterActor *actor);
-ClutterActor *          _clutter_context_peek_shader_stack              (void);
-gboolean                _clutter_context_get_motion_events_enabled      (void);
 gboolean                _clutter_context_get_show_fps                   (void);
 
 gboolean      _clutter_feature_init (GError **error);
 
 /* Diagnostic mode */
 gboolean        _clutter_diagnostic_enabled     (void);
-void            _clutter_diagnostic_message     (const char *fmt, ...);
+void            _clutter_diagnostic_message     (const char *fmt, ...) G_GNUC_PRINTF (1, 2);
 
-/* Picking code */
-guint           _clutter_pixel_to_id            (guchar        pixel[4]);
-void            _clutter_id_to_color            (guint         id,
-                                                 ClutterColor *col);
-
+CLUTTER_EXPORT
 void            _clutter_set_sync_to_vblank     (gboolean      sync_to_vblank);
 
 /* use this function as the accumulator if you have a signal with
@@ -239,6 +230,17 @@ void  _clutter_util_fully_transform_vertices (const CoglMatrix    *modelview,
                                               const ClutterVertex *vertices_in,
                                               ClutterVertex       *vertices_out,
                                               int                  n_vertices);
+
+void _clutter_util_rect_from_rectangle (const cairo_rectangle_int_t *src,
+                                        ClutterRect                 *dest);
+
+void _clutter_util_rectangle_int_extents (const ClutterRect     *src,
+                                          cairo_rectangle_int_t *dest);
+
+void _clutter_util_rectangle_offset (const cairo_rectangle_int_t *src,
+                                     int                          x,
+                                     int                          y,
+                                     cairo_rectangle_int_t       *dest);
 
 void _clutter_util_rectangle_union (const cairo_rectangle_int_t *src1,
                                     const cairo_rectangle_int_t *src2,
@@ -286,6 +288,12 @@ gboolean        _clutter_util_matrix_decompose  (const ClutterMatrix *src,
                                                  ClutterVertex       *translate_p,
                                                  ClutterVertex4      *perspective_p);
 
+CLUTTER_EXPORT
+PangoDirection _clutter_pango_unichar_direction (gunichar ch);
+
+PangoDirection _clutter_pango_find_base_dir     (const gchar *text,
+                                                 gint         length);
+
 typedef struct _ClutterPlane
 {
   float v0[3];
@@ -306,6 +314,8 @@ gboolean        _clutter_run_progress_function  (GType gtype,
                                                  const GValue *final,
                                                  gdouble progress,
                                                  GValue *retval);
+
+void            clutter_timeline_cancel_delay (ClutterTimeline *timeline);
 
 G_END_DECLS
 

@@ -21,12 +21,12 @@
 
 #include "config.h"
 
-#include "meta-wayland-seat.h"
+#include "wayland/meta-wayland-seat.h"
 
-#include "meta-wayland-private.h"
-#include "meta-wayland-versions.h"
-#include "meta-wayland-data-device.h"
-#include "meta-wayland-tablet-seat.h"
+#include "wayland/meta-wayland-data-device.h"
+#include "wayland/meta-wayland-private.h"
+#include "wayland/meta-wayland-tablet-seat.h"
+#include "wayland/meta-wayland-versions.h"
 
 #define CAPABILITY_ENABLED(prev, cur, capability) ((cur & (capability)) && !(prev & (capability)))
 #define CAPABILITY_DISABLED(prev, cur, capability) ((prev & (capability)) && !(cur & (capability)))
@@ -266,7 +266,7 @@ meta_wayland_seat_free (MetaWaylandSeat *seat)
   meta_wayland_gtk_text_input_destroy (seat->gtk_text_input);
   meta_wayland_text_input_destroy (seat->text_input);
 
-  g_slice_free (MetaWaylandSeat, seat);
+  g_free (seat);
 }
 
 static gboolean
@@ -504,9 +504,17 @@ gboolean
 meta_wayland_seat_can_popup (MetaWaylandSeat *seat,
                              uint32_t         serial)
 {
+  MetaWaylandCompositor *compositor;
+  MetaWaylandTabletSeat *tablet_seat;
+
+  compositor = meta_wayland_compositor_get_default ();
+  tablet_seat =
+    meta_wayland_tablet_manager_ensure_seat (compositor->tablet_manager, seat);
+
   return (meta_wayland_pointer_can_popup (seat->pointer, serial) ||
           meta_wayland_keyboard_can_popup (seat->keyboard, serial) ||
-          meta_wayland_touch_can_popup (seat->touch, serial));
+          meta_wayland_touch_can_popup (seat->touch, serial) ||
+          meta_wayland_tablet_seat_can_popup (tablet_seat, serial));
 }
 
 gboolean

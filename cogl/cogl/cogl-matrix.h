@@ -44,7 +44,7 @@
 #include <cogl/cogl-quaternion.h>
 #include <glib-object.h>
 
-COGL_BEGIN_DECLS
+G_BEGIN_DECLS
 
 /**
  * SECTION:cogl-matrix
@@ -405,7 +405,7 @@ cogl_matrix_orthographic (CoglMatrix *matrix,
  *
  * Deprecated: 1.10: Use cogl_matrix_orthographic()
  */
-COGL_DEPRECATED_IN_1_10_FOR (cogl_matrix_orthographic)
+COGL_DEPRECATED_FOR (cogl_matrix_orthographic)
 void
 cogl_matrix_ortho (CoglMatrix *matrix,
                    float       left,
@@ -549,7 +549,7 @@ cogl_matrix_init_from_euler (CoglMatrix *matrix,
  *
  * Since: 1.4
  */
-CoglBool
+gboolean
 cogl_matrix_equal (const void *v1, const void *v2);
 
 /**
@@ -599,7 +599,7 @@ cogl_matrix_free (CoglMatrix *matrix);
  *
  * Since: 1.2
  */
-CoglBool
+gboolean
 cogl_matrix_get_inverse (const CoglMatrix *matrix,
                          CoglMatrix *inverse);
 
@@ -747,7 +747,7 @@ cogl_matrix_project_points (const CoglMatrix *matrix,
  * Returns: %TRUE if @matrix is an identity matrix else %FALSE
  * Since: 1.8
  */
-CoglBool
+gboolean
 cogl_matrix_is_identity (const CoglMatrix *matrix);
 
 /**
@@ -794,6 +794,6 @@ GType cogl_matrix_get_gtype (void);
 GType
 cogl_gtype_matrix_get_type (void);
 
-COGL_END_DECLS
+G_END_DECLS
 
 #endif /* __COGL_MATRIX_H */

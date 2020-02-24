@@ -43,9 +43,7 @@
  * recommended to use #ClutterImage instead.
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 /* sadly, we are still using ClutterShader internally */
 #define CLUTTER_DISABLE_DEPRECATION_WARNINGS
@@ -66,9 +64,7 @@
 #include "clutter-stage-private.h"
 #include "clutter-backend.h"
 
-#include "deprecated/clutter-shader.h"
 #include "deprecated/clutter-texture.h"
-#include "deprecated/clutter-util.h"
 
 typedef struct _ClutterTextureAsyncData ClutterTextureAsyncData;
 
@@ -482,21 +478,9 @@ update_fbo (ClutterActor *self)
 {
   ClutterTexture        *texture = CLUTTER_TEXTURE (self);
   ClutterTexturePrivate *priv = texture->priv;
-  ClutterActor          *head;
-  ClutterShader         *shader = NULL;
   ClutterActor          *stage = NULL;
   CoglMatrix             projection;
   CoglColor              transparent_col;
-
-  head = _clutter_context_peek_shader_stack ();
-  if (head != NULL)
-    shader = clutter_actor_get_shader (head);
-
-  /* Temporarily turn off the shader on the top of the context's
-   * shader stack, to restore the GL pipeline to it's natural state.
-   */
-  if (shader != NULL)
-    clutter_shader_set_is_enabled (shader, FALSE);
 
   /* Redirect drawing to the fbo */
   cogl_push_framebuffer (priv->fbo_handle);
@@ -556,14 +540,12 @@ update_fbo (ClutterActor *self)
 
   /* Restore drawing to the previous framebuffer */
   cogl_pop_framebuffer ();
-
-  /* If there is a shader on top of the shader stack, turn it back on. */
-  if (shader != NULL)
-    clutter_shader_set_is_enabled (shader, TRUE);
 }
 
 static void
-gen_texcoords_and_draw_cogl_rectangle (ClutterActor *self)
+gen_texcoords_and_draw_cogl_rectangle (ClutterActor    *self,
+                                       CoglPipeline    *pipeline,
+                                       CoglFramebuffer *framebuffer)
 {
   ClutterTexture *texture = CLUTTER_TEXTURE (self);
   ClutterTexturePrivate *priv = texture->priv;
@@ -582,87 +564,12 @@ gen_texcoords_and_draw_cogl_rectangle (ClutterActor *self)
   else
     t_h = 1.0;
 
-  cogl_rectangle_with_texture_coords (0, 0,
-			              box.x2 - box.x1,
-                                      box.y2 - box.y1,
-			              0, 0, t_w, t_h);
-}
-
-static CoglPipeline *
-create_pick_pipeline (ClutterActor *self)
-{
-  ClutterTexture *texture = CLUTTER_TEXTURE (self);
-  ClutterTexturePrivate *priv = texture->priv;
-  CoglPipeline *pick_pipeline = cogl_pipeline_copy (texture_template_pipeline);
-  GError *error = NULL;
-
-  if (!cogl_pipeline_set_layer_combine (pick_pipeline, 0,
-                                        "RGBA = "
-                                        "  MODULATE (CONSTANT, TEXTURE[A])",
-                                        &error))
-    {
-      if (!priv->seen_create_pick_pipeline_warning)
-        g_warning ("Error setting up texture combine for shaped "
-                   "texture picking: %s", error->message);
-      priv->seen_create_pick_pipeline_warning = TRUE;
-      g_error_free (error);
-      cogl_object_unref (pick_pipeline);
-      return NULL;
-    }
-
-  cogl_pipeline_set_blend (pick_pipeline,
-                           "RGBA = ADD (SRC_COLOR[RGBA], 0)",
-                           NULL);
-
-  cogl_pipeline_set_alpha_test_function (pick_pipeline,
-                                         COGL_PIPELINE_ALPHA_FUNC_EQUAL,
-                                         1.0);
-
-  return pick_pipeline;
-}
-
-static void
-clutter_texture_pick (ClutterActor       *self,
-                      const ClutterColor *color)
-{
-  ClutterTexture *texture = CLUTTER_TEXTURE (self);
-  ClutterTexturePrivate *priv = texture->priv;
-
-  if (!clutter_actor_should_pick_paint (self))
-    return;
-
-  if (G_LIKELY (priv->pick_with_alpha_supported) && priv->pick_with_alpha)
-    {
-      CoglColor pick_color;
-
-      if (priv->pick_pipeline == NULL)
-        priv->pick_pipeline = create_pick_pipeline (self);
-
-      if (priv->pick_pipeline == NULL)
-        {
-          priv->pick_with_alpha_supported = FALSE;
-          CLUTTER_ACTOR_CLASS (clutter_texture_parent_class)->pick (self,
-                                                                    color);
-          return;
-        }
-
-      if (priv->fbo_handle != NULL)
-        update_fbo (self);
-
-      cogl_color_init_from_4ub (&pick_color,
-                                color->red,
-                                color->green,
-                                color->blue,
-                                0xff);
-      cogl_pipeline_set_layer_combine_constant (priv->pick_pipeline,
-                                                0, &pick_color);
-      cogl_pipeline_set_layer_texture (priv->pick_pipeline, 0,
-                                       clutter_texture_get_cogl_texture (texture));
-      cogl_set_source (priv->pick_pipeline);
-      gen_texcoords_and_draw_cogl_rectangle (self);
-    }
-  else
-    CLUTTER_ACTOR_CLASS (clutter_texture_parent_class)->pick (self, color);
+  cogl_framebuffer_draw_textured_rectangle (framebuffer,
+                                            pipeline,
+                                            0, 0,
+                                            box.x2 - box.x1,
+                                            box.y2 - box.y1,
+                                            0, 0, t_w, t_h);
 }
 
 static void
@@ -671,6 +578,7 @@ clutter_texture_paint (ClutterActor *self)
   ClutterTexture *texture = CLUTTER_TEXTURE (self);
   ClutterTexturePrivate *priv = texture->priv;
   guint8 paint_opacity = clutter_actor_get_paint_opacity (self);
+  CoglFramebuffer *framebuffer = cogl_get_draw_framebuffer ();
 
   CLUTTER_NOTE (PAINT,
                 "painting texture '%s'",
@@ -685,9 +593,8 @@ clutter_texture_paint (ClutterActor *self)
                               paint_opacity,
                               paint_opacity,
                               paint_opacity);
-  cogl_set_source (priv->pipeline);
 
-  gen_texcoords_and_draw_cogl_rectangle (self);
+  gen_texcoords_and_draw_cogl_rectangle (self, priv->pipeline, framebuffer);
 }
 
 static gboolean
@@ -781,12 +688,6 @@ clutter_texture_dispose (GObject *object)
     {
       cogl_object_unref (priv->pipeline);
       priv->pipeline = NULL;
-    }
-
-  if (priv->pick_pipeline != NULL)
-    {
-      cogl_object_unref (priv->pick_pipeline);
-      priv->pick_pipeline = NULL;
     }
 
   G_OBJECT_CLASS (clutter_texture_parent_class)->dispose (object);
@@ -960,7 +861,6 @@ clutter_texture_class_init (ClutterTextureClass *klass)
   GParamSpec *pspec;
 
   actor_class->paint            = clutter_texture_paint;
-  actor_class->pick             = clutter_texture_pick;
   actor_class->get_paint_volume = clutter_texture_get_paint_volume;
   actor_class->realize          = clutter_texture_realize;
   actor_class->unrealize        = clutter_texture_unrealize;
@@ -1182,8 +1082,7 @@ clutter_texture_class_init (ClutterTextureClass *klass)
 		  G_TYPE_FROM_CLASS (gobject_class),
 		  G_SIGNAL_RUN_LAST,
 		  G_STRUCT_OFFSET (ClutterTextureClass, pixbuf_change),
-		  NULL, NULL,
-		  _clutter_marshal_VOID__VOID,
+		  NULL, NULL, NULL,
 		  G_TYPE_NONE,
 		  0);
   /**
@@ -1204,8 +1103,7 @@ clutter_texture_class_init (ClutterTextureClass *klass)
 		  G_TYPE_FROM_CLASS (gobject_class),
 		  G_SIGNAL_RUN_LAST,
 		  G_STRUCT_OFFSET (ClutterTextureClass, load_finished),
-		  NULL, NULL,
-		  _clutter_marshal_VOID__BOXED,
+		  NULL, NULL, NULL,
 		  G_TYPE_NONE,
 		  1,
                   G_TYPE_ERROR);
@@ -1279,11 +1177,9 @@ clutter_texture_init (ClutterTexture *self)
   priv->repeat_y          = FALSE;
   priv->sync_actor_size   = TRUE;
   priv->fbo_handle        = NULL;
-  priv->pick_pipeline     = NULL;
   priv->keep_aspect_ratio = FALSE;
   priv->pick_with_alpha   = FALSE;
   priv->pick_with_alpha_supported = TRUE;
-  priv->seen_create_pick_pipeline_warning = FALSE;
 
   if (G_UNLIKELY (texture_template_pipeline == NULL))
     {
@@ -1293,9 +1189,7 @@ clutter_texture_init (ClutterTexture *self)
 
       texture_template_pipeline = cogl_pipeline_new (ctx);
       pipeline = COGL_PIPELINE (texture_template_pipeline);
-      cogl_pipeline_set_layer_null_texture (pipeline,
-                                            0, /* layer_index */
-                                            COGL_TEXTURE_TYPE_2D);
+      cogl_pipeline_set_layer_null_texture (pipeline, 0);
     }
 
   g_assert (texture_template_pipeline != NULL);
@@ -1583,7 +1477,7 @@ clutter_texture_set_from_data (ClutterTexture     *texture,
 
       g_set_error (&inner_error, CLUTTER_TEXTURE_ERROR,
                    CLUTTER_TEXTURE_ERROR_BAD_FORMAT,
-                   _("Failed to load the image data"));
+                   "Failed to load the image data");
 
       g_signal_emit (texture, texture_signals[LOAD_FINISHED], 0, inner_error);
 
@@ -1742,7 +1636,7 @@ clutter_texture_set_from_yuv_data (ClutterTexture     *texture,
     {
       g_set_error (error, CLUTTER_TEXTURE_ERROR,
                    CLUTTER_TEXTURE_ERROR_NO_YUV,
-                   _("YUV textures are not supported"));
+                   "YUV textures are not supported");
       return FALSE;
     }
 
@@ -1751,7 +1645,7 @@ clutter_texture_set_from_yuv_data (ClutterTexture     *texture,
     {
       g_set_error (error, CLUTTER_TEXTURE_ERROR,
 		   CLUTTER_TEXTURE_ERROR_BAD_FORMAT,
-		   _("YUV2 textures are not supported"));
+		   "YUV2 textures are not supported");
       return FALSE;
     }
 
@@ -1978,7 +1872,7 @@ clutter_texture_async_load (ClutterTexture *self,
     {
       g_set_error (error, CLUTTER_TEXTURE_ERROR,
 		   CLUTTER_TEXTURE_ERROR_BAD_FORMAT,
-                   _("Failed to load the image data"));
+                   "Failed to load the image data");
       return FALSE;
     }
   else
@@ -2075,7 +1969,7 @@ clutter_texture_set_from_file (ClutterTexture *texture,
     {
       g_set_error (&internal_error, CLUTTER_TEXTURE_ERROR,
                    CLUTTER_TEXTURE_ERROR_BAD_FORMAT,
-		   _("Failed to load the image data"));
+		   "Failed to load the image data");
     }
 
   if (internal_error != NULL)
@@ -2377,7 +2271,7 @@ clutter_texture_set_area_from_rgb_data (ClutterTexture     *texture,
     {
       g_set_error (error, CLUTTER_TEXTURE_ERROR,
 		   CLUTTER_TEXTURE_ERROR_BAD_FORMAT,
-		   _("Failed to load the image data"));
+		   "Failed to load the image data");
       return FALSE;
     }
 
@@ -3068,13 +2962,8 @@ clutter_texture_set_pick_with_alpha (ClutterTexture *texture,
   if (priv->pick_with_alpha == pick_with_alpha)
     return;
 
-  if (!pick_with_alpha && priv->pick_pipeline != NULL)
-    {
-      cogl_object_unref (priv->pick_pipeline);
-      priv->pick_pipeline = NULL;
-    }
+  g_assert (!pick_with_alpha);  /* No longer supported */
 
-  /* NB: the pick pipeline is created lazily when we first pick */
   priv->pick_with_alpha = pick_with_alpha;
 
   /* NB: actors are expected to call clutter_actor_queue_redraw when

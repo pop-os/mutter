@@ -22,35 +22,64 @@
  *     Jasper St. Pierre <jstpierre@mecheye.net>
  */
 
+/**
+ * SECTION:meta-backend
+ * @title: MetaBackend
+ * @short_description: Handles monitor config, modesetting, cursor sprites, ...
+ *
+ * MetaBackend is the abstraction that deals with several things like:
+ * - Modesetting (depending on the backend, this can be done either by X or KMS)
+ * - Initializing the #MetaSettings
+ * - Setting up Monitor configuration
+ * - Input device configuration (using the #ClutterDeviceManager)
+ * - Creating the #MetaRenderer
+ * - Setting up the stage of the scene graph (using #MetaStage)
+ * - Creating the object that deals wih the cursor (using #MetaCursorTracker)
+ *     and its possible pointer constraint (using #MetaPointerConstraint)
+ * - Setting the cursor sprite (using #MetaCursorRenderer)
+ * - Interacting with logind (using the appropriate D-Bus interface)
+ * - Querying UPower (over D-Bus) to know when the lid is closed
+ * - Setup Remote Desktop / Screencasting (#MetaRemoteDesktop)
+ * - Setup the #MetaEgl object
+ *
+ * Note that the #MetaBackend is not a subclass of #ClutterBackend. It is
+ * responsible for creating the correct one, based on the backend that is
+ * used (#MetaBackendNative or #MetaBackendX11).
+ */
+
 #include "config.h"
+
+#include "backends/meta-backend-private.h"
 
 #include <stdlib.h>
 
-#include <clutter/clutter-mutter.h>
-#include <meta/meta-backend.h>
-#include <meta/main.h>
-#include <meta/util.h>
-#include "meta-backend-private.h"
-#include "meta-input-settings-private.h"
+#include "backends/meta-cursor-tracker-private.h"
+#include "backends/meta-idle-monitor-private.h"
+#include "backends/meta-input-settings-private.h"
+#include "backends/meta-logical-monitor.h"
+#include "backends/meta-monitor-manager-dummy.h"
+#include "backends/meta-settings-private.h"
+#include "backends/meta-stage-private.h"
 #include "backends/x11/meta-backend-x11.h"
-#include "meta-cursor-tracker-private.h"
-#include "meta-stage-private.h"
+#include "clutter/clutter-mutter.h"
+#include "meta/main.h"
+#include "meta/meta-backend.h"
+#include "meta/util.h"
+
+#ifdef HAVE_PROFILER
+#include "backends/meta-profiler.h"
+#endif
 
 #ifdef HAVE_REMOTE_DESKTOP
 #include "backends/meta-dbus-session-watcher.h"
-#include "backends/meta-screen-cast.h"
 #include "backends/meta-remote-access-controller-private.h"
 #include "backends/meta-remote-desktop.h"
+#include "backends/meta-screen-cast.h"
 #endif
 
 #ifdef HAVE_NATIVE_BACKEND
 #include "backends/native/meta-backend-native.h"
 #endif
-
-#include "backends/meta-idle-monitor-private.h"
-#include "backends/meta-logical-monitor.h"
-#include "backends/meta-monitor-manager-dummy.h"
-#include "backends/meta-settings-private.h"
 
 #define META_IDLE_MONITOR_CORE_DEVICE 0
 
@@ -60,6 +89,7 @@ enum
   KEYMAP_LAYOUT_GROUP_CHANGED,
   LAST_DEVICE_CHANGED,
   LID_IS_CLOSED_CHANGED,
+  GPU_ADDED,
 
   N_SIGNALS
 };
@@ -91,7 +121,9 @@ struct _MetaBackendPrivate
   MetaCursorRenderer *cursor_renderer;
   MetaInputSettings *input_settings;
   MetaRenderer *renderer;
+#ifdef HAVE_EGL
   MetaEgl *egl;
+#endif
   MetaSettings *settings;
 #ifdef HAVE_REMOTE_DESKTOP
   MetaRemoteAccessController *remote_access_controller;
@@ -100,12 +132,19 @@ struct _MetaBackendPrivate
   MetaRemoteDesktop *remote_desktop;
 #endif
 
+#ifdef HAVE_PROFILER
+  MetaProfiler *profiler;
+#endif
+
   ClutterBackend *clutter_backend;
   ClutterActor *stage;
+
+  GList *gpus;
 
   gboolean is_pointer_position_initialized;
 
   guint device_update_idle_id;
+  guint keymap_state_changed_id;
 
   GHashTable *device_monitors;
 
@@ -121,6 +160,8 @@ struct _MetaBackendPrivate
   guint sleep_signal_id;
   GCancellable *cancellable;
   GDBusConnection *system_bus;
+
+  gboolean was_headless;
 };
 typedef struct _MetaBackendPrivate MetaBackendPrivate;
 
@@ -137,6 +178,16 @@ meta_backend_finalize (GObject *object)
 {
   MetaBackend *backend = META_BACKEND (object);
   MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
+
+  if (priv->keymap_state_changed_id)
+    {
+      ClutterKeymap *keymap;
+
+      keymap = clutter_backend_get_keymap (priv->clutter_backend);
+      g_signal_handler_disconnect (keymap, priv->keymap_state_changed_id);
+    }
+
+  g_list_free_full (priv->gpus, g_object_unref);
 
   g_clear_object (&priv->monitor_manager);
   g_clear_object (&priv->orientation_manager);
@@ -163,6 +214,10 @@ meta_backend_finalize (GObject *object)
   g_hash_table_destroy (priv->device_monitors);
 
   g_clear_object (&priv->settings);
+
+#ifdef HAVE_PROFILER
+  g_clear_object (&priv->profiler);
+#endif
 
   G_OBJECT_CLASS (meta_backend_parent_class)->finalize (object);
 }
@@ -221,6 +276,19 @@ meta_backend_monitors_changed (MetaBackend *backend)
     }
 
   meta_cursor_renderer_force_update (priv->cursor_renderer);
+
+  if (meta_monitor_manager_is_headless (priv->monitor_manager) &&
+      !priv->was_headless)
+    {
+      clutter_stage_freeze_updates (CLUTTER_STAGE (priv->stage));
+      priv->was_headless = TRUE;
+    }
+  else if (!meta_monitor_manager_is_headless (priv->monitor_manager) &&
+           priv->was_headless)
+    {
+      clutter_stage_thaw_updates (CLUTTER_STAGE (priv->stage));
+      priv->was_headless = FALSE;
+    }
 }
 
 void
@@ -432,8 +500,9 @@ meta_backend_real_post_init (MetaBackend *backend)
 {
   MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
   ClutterDeviceManager *device_manager = clutter_device_manager_get_default ();
+  ClutterKeymap *keymap = clutter_backend_get_keymap (priv->clutter_backend);
 
-  priv->stage = meta_stage_new ();
+  priv->stage = meta_stage_new (backend);
   clutter_actor_realize (priv->stage);
   META_BACKEND_GET_CLASS (backend)->select_stage_events (backend);
 
@@ -458,11 +527,21 @@ meta_backend_real_post_init (MetaBackend *backend)
 
   priv->input_settings = meta_backend_create_input_settings (backend);
 
+  if (priv->input_settings)
+    {
+      priv->keymap_state_changed_id =
+        g_signal_connect_swapped (keymap, "state-changed",
+                                  G_CALLBACK (meta_input_settings_maybe_save_numlock_state),
+                                  priv->input_settings);
+      meta_input_settings_maybe_restore_numlock_state (priv->input_settings);
+    }
+
 #ifdef HAVE_REMOTE_DESKTOP
   priv->remote_access_controller =
     g_object_new (META_TYPE_REMOTE_ACCESS_CONTROLLER, NULL);
   priv->dbus_session_watcher = g_object_new (META_TYPE_DBUS_SESSION_WATCHER, NULL);
-  priv->screen_cast = meta_screen_cast_new (priv->dbus_session_watcher);
+  priv->screen_cast = meta_screen_cast_new (backend,
+                                            priv->dbus_session_watcher);
   priv->remote_desktop = meta_remote_desktop_new (priv->dbus_session_watcher);
 #endif /* HAVE_REMOTE_DESKTOP */
 
@@ -697,6 +776,18 @@ meta_backend_class_init (MetaBackendClass *klass)
                   0,
                   NULL, NULL, NULL,
                   G_TYPE_NONE, 1, G_TYPE_BOOLEAN);
+  /**
+   * MetaBackend::gpu-added: (skip)
+   * @backend: the #MetaBackend
+   * @gpu: the #MetaGpu
+   */
+  signals[GPU_ADDED] =
+    g_signal_new ("gpu-added",
+                  G_TYPE_FROM_CLASS (klass),
+                  G_SIGNAL_RUN_LAST,
+                  0,
+                  NULL, NULL, NULL,
+                  G_TYPE_NONE, 1, META_TYPE_GPU);
 
   mutter_stage_views = g_getenv ("MUTTER_STAGE_VIEWS");
   stage_views_disabled = g_strcmp0 (mutter_stage_views, "0") == 0;
@@ -774,7 +865,9 @@ meta_backend_initable_init (GInitable     *initable,
 
   priv->settings = meta_settings_new (backend);
 
+#ifdef HAVE_EGL
   priv->egl = g_object_new (META_TYPE_EGL, NULL);
+#endif
 
   priv->orientation_manager = g_object_new (META_TYPE_ORIENTATION_MANAGER, NULL);
 
@@ -795,6 +888,10 @@ meta_backend_initable_init (GInitable     *initable,
              priv->cancellable,
              system_bus_gotten_cb,
              backend);
+
+#ifdef HAVE_PROFILER
+  priv->profiler = meta_profiler_new ();
+#endif
 
   return TRUE;
 }
@@ -885,6 +982,7 @@ meta_backend_get_renderer (MetaBackend *backend)
   return priv->renderer;
 }
 
+#ifdef HAVE_EGL
 /**
  * meta_backend_get_egl: (skip)
  */
@@ -895,6 +993,7 @@ meta_backend_get_egl (MetaBackend *backend)
 
   return priv->egl;
 }
+#endif /* HAVE_EGL */
 
 /**
  * meta_backend_get_settings: (skip)
@@ -958,6 +1057,20 @@ meta_backend_ungrab_device (MetaBackend *backend,
                             uint32_t     timestamp)
 {
   return META_BACKEND_GET_CLASS (backend)->ungrab_device (backend, device_id, timestamp);
+}
+
+/**
+ * meta_backend_finish_touch_sequence: (skip)
+ */
+void
+meta_backend_finish_touch_sequence (MetaBackend          *backend,
+                                    ClutterEventSequence *sequence,
+                                    MetaSequenceState     state)
+{
+  if (META_BACKEND_GET_CLASS (backend)->finish_touch_sequence)
+    META_BACKEND_GET_CLASS (backend)->finish_touch_sequence (backend,
+                                                             sequence,
+                                                             state);
 }
 
 /**
@@ -1030,6 +1143,24 @@ meta_backend_get_stage (MetaBackend *backend)
 {
   MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
   return priv->stage;
+}
+
+void
+meta_backend_freeze_updates (MetaBackend *backend)
+{
+  ClutterStage *stage;
+
+  stage = CLUTTER_STAGE (meta_backend_get_stage (backend));
+  clutter_stage_freeze_updates (stage);
+}
+
+void
+meta_backend_thaw_updates (MetaBackend *backend)
+{
+  ClutterStage *stage;
+
+  stage = CLUTTER_STAGE (meta_backend_get_stage (backend));
+  clutter_stage_thaw_updates (stage);
 }
 
 static gboolean
@@ -1117,6 +1248,15 @@ meta_backend_get_client_pointer_constraint (MetaBackend *backend)
   return priv->client_pointer_constraint;
 }
 
+/**
+ * meta_backend_set_client_pointer_constraint:
+ * @backend: a #MetaBackend object.
+ * @constraint: (nullable): the client constraint to follow.
+ *
+ * Sets the current pointer constraint and removes (and unrefs) the previous
+ * one. If @constrant is %NULL, this means that there is no
+ * #MetaPointerConstraint active.
+ */
 void
 meta_backend_set_client_pointer_constraint (MetaBackend           *backend,
                                             MetaPointerConstraint *constraint)
@@ -1239,6 +1379,14 @@ meta_clutter_init (void)
   meta_backend_post_init (_backend);
 }
 
+/**
+ * meta_is_stage_views_enabled:
+ *
+ * Returns whether the #ClutterStage can be rendered using multiple stage views.
+ * In practice, this means we can define a separate framebuffer for each
+ * #MetaLogicalMonitor, rather than rendering everything into a single
+ * framebuffer. For example: in X11, onle one single framebuffer is allowed.
+ */
 gboolean
 meta_is_stage_views_enabled (void)
 {
@@ -1300,4 +1448,23 @@ meta_backend_notify_keymap_layout_group_changed (MetaBackend *backend,
 {
   g_signal_emit (backend, signals[KEYMAP_LAYOUT_GROUP_CHANGED], 0,
                  locked_group);
+}
+
+void
+meta_backend_add_gpu (MetaBackend *backend,
+                      MetaGpu     *gpu)
+{
+  MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
+
+  priv->gpus = g_list_append (priv->gpus, gpu);
+
+  g_signal_emit (backend, signals[GPU_ADDED], 0, gpu);
+}
+
+GList *
+meta_backend_get_gpus (MetaBackend *backend)
+{
+  MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
+
+  return priv->gpus;
 }

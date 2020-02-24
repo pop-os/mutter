@@ -29,9 +29,7 @@
  *   Robert Bragg <robert@linux.intel.com>
  */
 
-#ifdef HAVE_CONFIG_H
 #include "cogl-config.h"
-#endif
 
 #include <glib.h>
 #include <string.h>
@@ -40,17 +38,17 @@
 #include "cogl-types.h"
 #include "cogl-private.h"
 #include "cogl-context-private.h"
-#include "cogl-winsys-private.h"
-#include "cogl-winsys-stub-private.h"
 #include "cogl-framebuffer-private.h"
 #include "cogl-onscreen-private.h"
 #ifdef COGL_HAS_XLIB_SUPPORT
 #include "cogl-clutter-xlib.h"
 #include "cogl-xlib-renderer.h"
 #endif
-#include "cogl-clutter.h"
+#include "winsys/cogl-winsys-private.h"
+#include "winsys/cogl-winsys-stub-private.h"
+#include "deprecated/cogl-clutter.h"
 
-CoglBool
+gboolean
 cogl_clutter_check_extension (const char *name, const char *ext)
 {
   char *end;
@@ -75,7 +73,7 @@ cogl_clutter_check_extension (const char *name, const char *ext)
   return FALSE;
 }
 
-CoglBool
+gboolean
 cogl_clutter_winsys_has_feature (CoglWinsysFeature feature)
 {
   return _cogl_winsys_has_feature (feature);
@@ -104,10 +102,10 @@ cogl_clutter_winsys_xlib_get_visual_info (void)
 
   _COGL_GET_CONTEXT (ctx, NULL);
 
-  _COGL_RETURN_VAL_IF_FAIL (ctx->display != NULL, NULL);
+  g_return_val_if_fail (ctx->display != NULL, NULL);
 
   renderer = cogl_display_get_renderer (ctx->display);
-  _COGL_RETURN_VAL_IF_FAIL (renderer != NULL, NULL);
+  g_return_val_if_fail (renderer != NULL, NULL);
 
   return cogl_xlib_renderer_get_visual_info (renderer);
 }

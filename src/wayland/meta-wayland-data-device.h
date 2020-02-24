@@ -23,11 +23,12 @@
 #ifndef META_WAYLAND_DATA_DEVICE_H
 #define META_WAYLAND_DATA_DEVICE_H
 
-#include <wayland-server.h>
 #include <glib-object.h>
+#include <wayland-server.h>
 
-#include "meta-wayland-types.h"
 #include "clutter/clutter.h"
+#include "meta/meta-selection-source.h"
+#include "wayland/meta-wayland-types.h"
 
 typedef struct _MetaWaylandDragGrab MetaWaylandDragGrab;
 typedef struct _MetaWaylandDataSourceFuncs MetaWaylandDataSourceFuncs;
@@ -66,9 +67,9 @@ struct _MetaWaylandDataDevice
   MetaWaylandDragGrab *current_grab;
   struct wl_client *focus_client;
 
-  struct wl_signal selection_ownership_signal;
-  struct wl_signal dnd_ownership_signal;
-  struct wl_signal primary_ownership_signal;
+  guint selection_owner_signal_id;
+
+  MetaSelectionSource *owners[META_N_SELECTION_TYPES];
 };
 
 void meta_wayland_data_device_manager_init (MetaWaylandCompositor *compositor);
@@ -105,6 +106,8 @@ gboolean meta_wayland_data_source_has_target     (MetaWaylandDataSource *source)
 
 void     meta_wayland_data_source_set_has_target (MetaWaylandDataSource *source,
                                                   gboolean               has_target);
+
+void     meta_wayland_data_source_cancel         (MetaWaylandDataSource *source);
 
 void     meta_wayland_data_source_send           (MetaWaylandDataSource *source,
                                                   const gchar           *mime_type,

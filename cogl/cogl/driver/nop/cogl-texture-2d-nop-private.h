@@ -41,7 +41,7 @@
 void
 _cogl_texture_2d_nop_free (CoglTexture2D *tex_2d);
 
-CoglBool
+gboolean
 _cogl_texture_2d_nop_can_create (CoglContext *ctx,
                                  int width,
                                  int height,
@@ -50,9 +50,9 @@ _cogl_texture_2d_nop_can_create (CoglContext *ctx,
 void
 _cogl_texture_2d_nop_init (CoglTexture2D *tex_2d);
 
-CoglBool
+gboolean
 _cogl_texture_2d_nop_allocate (CoglTexture *tex,
-                               CoglError **error);
+                               GError **error);
 
 void
 _cogl_texture_2d_nop_flush_legacy_texobj_filters (CoglTexture *tex,
@@ -82,7 +82,7 @@ _cogl_texture_2d_nop_get_gl_handle (CoglTexture2D *tex_2d);
 void
 _cogl_texture_2d_nop_generate_mipmap (CoglTexture2D *tex_2d);
 
-CoglBool
+gboolean
 _cogl_texture_2d_nop_copy_from_bitmap (CoglTexture2D *tex_2d,
                                        int src_x,
                                        int src_y,
@@ -92,7 +92,7 @@ _cogl_texture_2d_nop_copy_from_bitmap (CoglTexture2D *tex_2d,
                                        int dst_x,
                                        int dst_y,
                                        int level,
-                                       CoglError **error);
+                                       GError **error);
 
 void
 _cogl_texture_2d_nop_get_data (CoglTexture2D *tex_2d,

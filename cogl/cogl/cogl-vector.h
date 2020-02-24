@@ -36,7 +36,7 @@
 #ifndef __COGL_VECTOR_H
 #define __COGL_VECTOR_H
 
-COGL_BEGIN_DECLS
+G_BEGIN_DECLS
 
 /**
  * SECTION:cogl-vector
@@ -96,7 +96,7 @@ cogl_vector3_init_zero (float *vector);
  * Since: 1.4
  * Stability: Unstable
  */
-CoglBool
+gboolean
 cogl_vector3_equal (const void *v1, const void *v2);
 
 /**
@@ -120,7 +120,7 @@ cogl_vector3_equal (const void *v1, const void *v2);
  * Since: 1.4
  * Stability: Unstable
  */
-CoglBool
+gboolean
 cogl_vector3_equal_with_epsilon (const float *vector0,
                                  const float *vector1,
                                  float epsilon);
@@ -350,7 +350,7 @@ cogl_vector3_dot_product (const float *a, const float *b);
 float
 cogl_vector3_distance (const float *a, const float *b);
 
-COGL_END_DECLS
+G_END_DECLS
 
 #endif /* __COGL_VECTOR_H */
 

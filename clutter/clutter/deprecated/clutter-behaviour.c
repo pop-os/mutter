@@ -70,9 +70,7 @@
  * if you still have code using #ClutterBehaviour.
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #define CLUTTER_DISABLE_DEPRECATION_WARNINGS
 #include "clutter-behaviour.h"
@@ -103,7 +101,8 @@ enum
 
 static GParamSpec *obj_props[PROP_LAST];
 
-enum {
+enum
+{
   APPLIED,
   REMOVED,
   LAST_SIGNAL
@@ -259,8 +258,7 @@ clutter_behaviour_class_init (ClutterBehaviourClass *klass)
 		  G_OBJECT_CLASS_TYPE (object_class),
 		  G_SIGNAL_RUN_FIRST,
 		  G_STRUCT_OFFSET (ClutterBehaviourClass, applied),
-		  NULL, NULL,
-		  _clutter_marshal_VOID__OBJECT,
+		  NULL, NULL, NULL,
 		  G_TYPE_NONE, 1,
 		  CLUTTER_TYPE_ACTOR);
   /**
@@ -280,8 +278,7 @@ clutter_behaviour_class_init (ClutterBehaviourClass *klass)
 		  G_OBJECT_CLASS_TYPE (object_class),
 		  G_SIGNAL_RUN_FIRST,
 		  G_STRUCT_OFFSET (ClutterBehaviourClass, removed),
-		  NULL, NULL,
-		  _clutter_marshal_VOID__OBJECT,
+		  NULL, NULL, NULL,
 		  G_TYPE_NONE, 1,
 		  CLUTTER_TYPE_ACTOR);
 }

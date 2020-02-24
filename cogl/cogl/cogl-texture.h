@@ -53,11 +53,12 @@ typedef struct _CoglTexture CoglTexture;
 #include <cogl/cogl-macros.h>
 #include <cogl/cogl-defines.h>
 #include <cogl/cogl-pixel-buffer.h>
+#include <cogl/cogl-pixel-format.h>
 #include <cogl/cogl-bitmap.h>
 
 #include <glib-object.h>
 
-COGL_BEGIN_DECLS
+G_BEGIN_DECLS
 
 /**
  * SECTION:cogl-texture
@@ -80,7 +81,7 @@ GType cogl_texture_get_gtype (void);
 /**
  * COGL_TEXTURE_ERROR:
  *
- * #CoglError domain for texture errors.
+ * #GError domain for texture errors.
  *
  * Since: 1.8
  * Stability: Unstable
@@ -99,30 +100,13 @@ GType cogl_texture_get_gtype (void);
  * Since: 1.8
  * Stability: Unstable
  */
-typedef enum {
+typedef enum
+{
   COGL_TEXTURE_ERROR_SIZE,
   COGL_TEXTURE_ERROR_FORMAT,
   COGL_TEXTURE_ERROR_BAD_PARAMETER,
   COGL_TEXTURE_ERROR_TYPE
 } CoglTextureError;
-
-/**
- * CoglTextureType:
- * @COGL_TEXTURE_TYPE_2D: A #CoglTexture2D
- * @COGL_TEXTURE_TYPE_3D: A #CoglTexture3D
- * @COGL_TEXTURE_TYPE_RECTANGLE: A #CoglTextureRectangle
- *
- * Constants representing the underlying hardware texture type of a
- * #CoglTexture.
- *
- * Stability: unstable
- * Since: 1.10
- */
-typedef enum {
-  COGL_TEXTURE_TYPE_2D,
-  COGL_TEXTURE_TYPE_3D,
-  COGL_TEXTURE_TYPE_RECTANGLE
-} CoglTextureType;
 
 uint32_t cogl_texture_error_quark (void);
 
@@ -135,7 +119,7 @@ uint32_t cogl_texture_error_quark (void);
  * Return value: %TRUE if the @object references a texture, and
  *   %FALSE otherwise
  */
-CoglBool
+gboolean
 cogl_is_texture (void *object);
 
 /**
@@ -241,7 +225,7 @@ cogl_texture_get_components (CoglTexture *texture);
  */
 void
 cogl_texture_set_premultiplied (CoglTexture *texture,
-                                CoglBool premultiplied);
+                                gboolean premultiplied);
 
 /**
  * cogl_texture_get_premultiplied:
@@ -258,7 +242,7 @@ cogl_texture_set_premultiplied (CoglTexture *texture,
  *               value or %FALSE if not.
  * Since: 1.18
  */
-CoglBool
+gboolean
 cogl_texture_get_premultiplied (CoglTexture *texture);
 
 /**
@@ -305,7 +289,7 @@ cogl_texture_get_max_waste (CoglTexture *texture);
  * Return value: %TRUE if the texture is sliced, %FALSE if the texture
  *   is stored as a single GPU texture
  */
-CoglBool
+gboolean
 cogl_texture_is_sliced (CoglTexture *texture);
 
 /**
@@ -324,7 +308,7 @@ cogl_texture_is_sliced (CoglTexture *texture);
  * Return value: %TRUE if the handle was successfully retrieved, %FALSE
  *   if the handle was invalid
  */
-CoglBool
+gboolean
 cogl_texture_get_gl_texture (CoglTexture *texture,
                              unsigned int *out_gl_handle,
                              unsigned int *out_gl_target);
@@ -380,7 +364,7 @@ cogl_texture_get_data (CoglTexture *texture,
  * Return value: %TRUE if the subregion upload was successful, and
  *   %FALSE otherwise
  */
-CoglBool
+gboolean
 cogl_texture_set_region (CoglTexture *texture,
                          int src_x,
                          int src_y,
@@ -403,7 +387,7 @@ cogl_texture_set_region (CoglTexture *texture,
  * @data: the source data, pointing to the first top-left pixel to set
  * @level: The mipmap level to update (Normally 0 for the largest,
  *         base texture)
- * @error: A #CoglError to return exceptional errors
+ * @error: A #GError to return exceptional errors
  *
  * Sets all the pixels for a given mipmap @level by copying the pixel
  * data pointed to by the @data argument into the given @texture.
@@ -446,13 +430,13 @@ cogl_texture_set_region (CoglTexture *texture,
  * Return value: %TRUE if the data upload was successful, and
  *               %FALSE otherwise
  */
-CoglBool
+gboolean
 cogl_texture_set_data (CoglTexture *texture,
                        CoglPixelFormat format,
                        int rowstride,
                        const uint8_t *data,
                        int level,
-                       CoglError **error);
+                       GError **error);
 
 /**
  * cogl_texture_set_region_from_bitmap:
@@ -479,7 +463,7 @@ cogl_texture_set_data (CoglTexture *texture,
  * Since: 1.8
  * Stability: unstable
  */
-CoglBool
+gboolean
 cogl_texture_set_region_from_bitmap (CoglTexture *texture,
                                      int src_x,
                                      int src_y,
@@ -492,7 +476,7 @@ cogl_texture_set_region_from_bitmap (CoglTexture *texture,
 /**
  * cogl_texture_allocate:
  * @texture: A #CoglTexture
- * @error: A #CoglError to return exceptional errors or %NULL
+ * @error: A #GError to return exceptional errors or %NULL
  *
  * Explicitly allocates the storage for the given @texture which
  * allows you to be sure that there is enough memory for the
@@ -507,10 +491,16 @@ cogl_texture_set_region_from_bitmap (CoglTexture *texture,
  *               otherwise %FALSE and @error will be updated if it
  *               wasn't %NULL.
  */
-CoglBool
+gboolean
 cogl_texture_allocate (CoglTexture *texture,
-                       CoglError **error);
+                       GError **error);
 
-COGL_END_DECLS
+/**
+ * cogl_texture_is_get_data_supported: (skip)
+ */
+gboolean
+cogl_texture_is_get_data_supported (CoglTexture *texture);
+
+G_END_DECLS
 
 #endif /* __COGL_TEXTURE_H__ */

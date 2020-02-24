@@ -22,14 +22,15 @@
 
 #include "config.h"
 
-#include "meta-idle-monitor-dbus.h"
-#include <meta/meta-idle-monitor.h>
-#include <backends/meta-idle-monitor-private.h>
-#include "meta-dbus-idle-monitor.h"
+#include "backends/meta-idle-monitor-dbus.h"
 
-#include <clutter/clutter.h>
-#include <meta/util.h>
-#include <meta/main.h> /* for meta_get_replace_current_wm () */
+#include "backends/meta-idle-monitor-private.h"
+#include "clutter/clutter.h"
+#include "meta/main.h"
+#include "meta/meta-idle-monitor.h"
+#include "meta/util.h"
+
+#include "meta-dbus-idle-monitor.h"
 
 static gboolean
 handle_get_idletime (MetaDBusIdleMonitor   *skeleton,
@@ -54,8 +55,8 @@ handle_reset_idletime (MetaDBusIdleMonitor   *skeleton,
       g_dbus_method_invocation_return_error_literal (invocation,
                                                      G_DBUS_ERROR,
                                                      G_DBUS_ERROR_UNKNOWN_METHOD,
-                                                     "No such method");
-      return FALSE;
+                                                     "This method is for testing purposes only. MUTTER_DEBUG_RESET_IDLETIME must be set to use it");
+      return TRUE;
     }
 
   meta_idle_monitor_reset_idletime (meta_idle_monitor_get_core ());

@@ -28,8 +28,13 @@
 
 #include "wayland/meta-wayland.h"
 
-G_DEFINE_TYPE (MetaBackendX11Nested, meta_backend_x11_nested,
-               META_TYPE_BACKEND_X11)
+typedef struct _MetaBackendX11NestedPrivate
+{
+  MetaGpu *gpu;
+} MetaBackendX11NestedPrivate;
+
+G_DEFINE_TYPE_WITH_PRIVATE (MetaBackendX11Nested, meta_backend_x11_nested,
+                            META_TYPE_BACKEND_X11)
 
 static MetaRenderer *
 meta_backend_x11_nested_create_renderer (MetaBackend *backend,
@@ -68,7 +73,10 @@ meta_backend_x11_nested_update_screen_size (MetaBackend *backend,
   MetaRenderer *renderer = meta_backend_get_renderer (backend);
 
   if (meta_is_stage_views_enabled ())
-    meta_renderer_rebuild_views (renderer);
+    {
+      meta_renderer_rebuild_views (renderer);
+      clutter_stage_update_resource_scales (CLUTTER_STAGE (stage));
+    }
   clutter_actor_set_size (stage, width, height);
 }
 
@@ -132,6 +140,12 @@ meta_backend_x11_nested_set_keymap (MetaBackend *backend,
 }
 
 static gboolean
+meta_backend_x11_nested_is_lid_closed (MetaBackend *backend)
+{
+  return FALSE;
+}
+
+static gboolean
 meta_backend_x11_nested_handle_host_xevent (MetaBackendX11 *x11,
                                             XEvent         *event)
 {
@@ -174,6 +188,32 @@ meta_backend_x11_nested_translate_device_event (MetaBackendX11 *x11,
 }
 
 static void
+meta_backend_x11_nested_real_init_gpus (MetaBackendX11Nested *backend_x11_nested)
+{
+  MetaBackendX11NestedPrivate *priv =
+    meta_backend_x11_nested_get_instance_private (backend_x11_nested);
+
+  priv->gpu = g_object_new (META_TYPE_GPU_DUMMY,
+                            "backend", backend_x11_nested,
+                            NULL);
+  meta_backend_add_gpu (META_BACKEND (backend_x11_nested), priv->gpu);
+}
+
+static void
+meta_backend_x11_nested_constructed (GObject *object)
+{
+  MetaBackendX11Nested *backend_x11_nested = META_BACKEND_X11_NESTED (object);
+  MetaBackendX11NestedClass *backend_x11_nested_class =
+    META_BACKEND_X11_NESTED_GET_CLASS (backend_x11_nested);
+  GObjectClass *parent_class =
+    G_OBJECT_CLASS (meta_backend_x11_nested_parent_class);
+
+  parent_class->constructed (object);
+
+  backend_x11_nested_class->init_gpus (backend_x11_nested);
+}
+
+static void
 meta_backend_x11_nested_init (MetaBackendX11Nested *backend_x11_nested)
 {
 }
@@ -181,8 +221,11 @@ meta_backend_x11_nested_init (MetaBackendX11Nested *backend_x11_nested)
 static void
 meta_backend_x11_nested_class_init (MetaBackendX11NestedClass *klass)
 {
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
   MetaBackendClass *backend_class = META_BACKEND_CLASS (klass);
   MetaBackendX11Class *backend_x11_class = META_BACKEND_X11_CLASS (klass);
+
+  object_class->constructed = meta_backend_x11_nested_constructed;
 
   backend_class->create_renderer = meta_backend_x11_nested_create_renderer;
   backend_class->create_monitor_manager = meta_backend_x11_nested_create_monitor_manager;
@@ -192,7 +235,10 @@ meta_backend_x11_nested_class_init (MetaBackendX11NestedClass *klass)
   backend_class->select_stage_events = meta_backend_x11_nested_select_stage_events;
   backend_class->lock_layout_group = meta_backend_x11_nested_lock_layout_group;
   backend_class->set_keymap = meta_backend_x11_nested_set_keymap;
+  backend_class->is_lid_closed = meta_backend_x11_nested_is_lid_closed;
 
   backend_x11_class->handle_host_xevent = meta_backend_x11_nested_handle_host_xevent;
   backend_x11_class->translate_device_event = meta_backend_x11_nested_translate_device_event;
+
+  klass->init_gpus = meta_backend_x11_nested_real_init_gpus;
 }

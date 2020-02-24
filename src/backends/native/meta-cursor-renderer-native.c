@@ -24,15 +24,12 @@
 
 #include "config.h"
 
-#include "meta-cursor-renderer-native.h"
+#include "backends/native/meta-cursor-renderer-native.h"
 
 #include <string.h>
 #include <gbm.h>
 #include <xf86drm.h>
 #include <errno.h>
-
-#include <meta/util.h>
-#include <meta/meta-backend.h>
 
 #include "backends/meta-backend-private.h"
 #include "backends/meta-cursor-sprite-xcursor.h"
@@ -43,6 +40,8 @@
 #include "backends/native/meta-renderer-native.h"
 #include "core/boxes-private.h"
 #include "meta/boxes.h"
+#include "meta/meta-backend.h"
+#include "meta/util.h"
 
 #ifdef HAVE_WAYLAND
 #include "wayland/meta-cursor-sprite-wayland.h"
@@ -78,7 +77,7 @@ struct _MetaCursorRendererNative
 
 struct _MetaCursorRendererNativePrivate
 {
-  MetaMonitorManager *monitor_manager;
+  MetaBackend *backend;
 
   gboolean hw_state_invalidated;
   gboolean has_hw_cursor;
@@ -105,6 +104,7 @@ typedef enum _MetaCursorGbmBoState
 
 typedef struct _MetaCursorNativeGpuState
 {
+  MetaGpu *gpu;
   guint active_bo;
   MetaCursorGbmBoState pending_bo_state;
   struct gbm_bo *bos[HW_CURSOR_BUFFER_COUNT];
@@ -322,6 +322,7 @@ update_monitor_crtc_cursor (MetaMonitor         *monitor,
                                    &crtc_x, &crtc_y);
 
   transform = meta_logical_monitor_get_transform (data->in_logical_monitor);
+  transform = meta_monitor_logical_to_crtc_transform (monitor, transform);
   if (meta_monitor_transform_is_rotated (transform))
     {
       crtc_width = monitor_crtc_mode->crtc_mode->height;
@@ -367,8 +368,8 @@ update_monitor_crtc_cursor (MetaMonitor         *monitor,
                        scaled_crtc_rect.origin.y) * scale;
       drmModeMoveCursor (kms_fd,
                          crtc->crtc_id,
-                         roundf (crtc_cursor_x),
-                         roundf (crtc_cursor_y));
+                         floorf (crtc_cursor_x),
+                         floorf (crtc_cursor_y));
 
       data->out_painted = data->out_painted || TRUE;
     }
@@ -387,7 +388,9 @@ update_hw_cursor (MetaCursorRendererNative *native,
   MetaCursorRendererNativePrivate *priv =
     meta_cursor_renderer_native_get_instance_private (native);
   MetaCursorRenderer *renderer = META_CURSOR_RENDERER (native);
-  MetaMonitorManager *monitor_manager = priv->monitor_manager;
+  MetaBackend *backend = priv->backend;
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
   GList *logical_monitors;
   GList *l;
   ClutterRect rect;
@@ -396,7 +399,7 @@ update_hw_cursor (MetaCursorRendererNative *native,
   if (cursor_sprite)
     rect = meta_cursor_renderer_calculate_rect (renderer, cursor_sprite);
   else
-    rect = (ClutterRect) { 0 };
+    rect = (ClutterRect) CLUTTER_RECT_INIT_ZERO;
 
   logical_monitors =
     meta_monitor_manager_get_logical_monitors (monitor_manager);
@@ -480,7 +483,9 @@ cursor_over_transformed_logical_monitor (MetaCursorRenderer *renderer,
     META_CURSOR_RENDERER_NATIVE (renderer);
   MetaCursorRendererNativePrivate *priv =
     meta_cursor_renderer_native_get_instance_private (cursor_renderer_native);
-  MetaMonitorManager *monitor_manager = priv->monitor_manager;
+  MetaBackend *backend = priv->backend;
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
   GList *logical_monitors;
   GList *l;
   ClutterRect cursor_rect;
@@ -538,7 +543,9 @@ can_draw_cursor_unscaled (MetaCursorRenderer *renderer,
     META_CURSOR_RENDERER_NATIVE (renderer);
   MetaCursorRendererNativePrivate *priv =
     meta_cursor_renderer_native_get_instance_private (cursor_renderer_native);
-  MetaMonitorManager *monitor_manager = priv->monitor_manager;
+  MetaBackend *backend = priv->backend;
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
   ClutterRect cursor_rect;
   GList *logical_monitors;
   GList *l;
@@ -585,6 +592,10 @@ should_have_hw_cursor (MetaCursorRenderer *renderer,
   CoglTexture *texture;
 
   if (!cursor_sprite)
+    return FALSE;
+
+  if (meta_cursor_renderer_is_hw_cursors_inhibited (renderer,
+                                                    cursor_sprite))
     return FALSE;
 
   for (l = gpus; l; l = l->next)
@@ -676,7 +687,9 @@ calculate_cursor_sprite_gpus (MetaCursorRenderer *renderer,
   MetaCursorRendererNative *native = META_CURSOR_RENDERER_NATIVE (renderer);
   MetaCursorRendererNativePrivate *priv =
     meta_cursor_renderer_native_get_instance_private (native);
-  MetaMonitorManager *monitor_manager = priv->monitor_manager;
+  MetaBackend *backend = priv->backend;
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
   GList *gpus = NULL;
   GList *logical_monitors;
   GList *l;
@@ -744,9 +757,29 @@ meta_cursor_renderer_native_update_cursor (MetaCursorRenderer *renderer,
 }
 
 static void
+unset_crtc_cursor_renderer_privates (MetaGpu       *gpu,
+                                     struct gbm_bo *bo)
+{
+  GList *l;
+
+  for (l = meta_gpu_get_crtcs (gpu); l; l = l->next)
+    {
+      MetaCrtc *crtc = l->data;
+
+      if (bo == crtc->cursor_renderer_private)
+        crtc->cursor_renderer_private = NULL;
+    }
+}
+
+static void
 cursor_gpu_state_free (MetaCursorNativeGpuState *cursor_gpu_state)
 {
   int i;
+  struct gbm_bo *active_bo;
+
+  active_bo = get_active_cursor_sprite_gbm_bo (cursor_gpu_state);
+  if (active_bo)
+    unset_crtc_cursor_renderer_privates (cursor_gpu_state->gpu, active_bo);
 
   for (i = 0; i < HW_CURSOR_BUFFER_COUNT; i++)
     g_clear_pointer (&cursor_gpu_state->bos[i], gbm_bo_destroy);
@@ -771,6 +804,7 @@ ensure_cursor_gpu_state (MetaCursorNativePrivate *cursor_priv,
     return cursor_gpu_state;
 
   cursor_gpu_state = g_new0 (MetaCursorNativeGpuState, 1);
+  cursor_gpu_state->gpu = META_GPU (gpu_kms);
   g_hash_table_insert (cursor_priv->gpu_states, gpu_kms, cursor_gpu_state);
 
   return cursor_gpu_state;
@@ -798,6 +832,7 @@ static void
 cursor_priv_free (MetaCursorNativePrivate *cursor_priv)
 {
   g_hash_table_destroy (cursor_priv->gpu_states);
+  g_free (cursor_priv);
 }
 
 static MetaCursorNativePrivate *
@@ -921,6 +956,7 @@ is_cursor_hw_state_valid (MetaCursorSprite *cursor_sprite,
     }
 
   g_assert_not_reached ();
+  return FALSE;
 }
 
 #ifdef HAVE_WAYLAND
@@ -1148,7 +1184,7 @@ init_hw_cursor_support (MetaCursorRendererNative *cursor_renderer_native)
   GList *gpus;
   GList *l;
 
-  gpus = meta_monitor_manager_get_gpus (priv->monitor_manager);
+  gpus = meta_backend_get_gpus (priv->backend);
   for (l = gpus; l; l = l->next)
     {
       MetaGpuKms *gpu_kms = l->data;
@@ -1196,7 +1232,7 @@ meta_cursor_renderer_native_new (MetaBackend *backend)
                            G_CALLBACK (on_monitors_changed),
                            cursor_renderer_native, 0);
 
-  priv->monitor_manager = monitor_manager;
+  priv->backend = backend;
   priv->hw_state_invalidated = TRUE;
 
   init_hw_cursor_support (cursor_renderer_native);

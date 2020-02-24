@@ -34,22 +34,25 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#define _XOPEN_SOURCE 500 /* for gethostname() */
+#define _XOPEN_SOURCE 600 /* for gethostname() */
 
-#include <config.h>
-#include "window-props.h"
-#include "window-x11.h"
-#include "window-x11-private.h"
-#include "x11/meta-x11-display-private.h"
-#include <meta/meta-x11-errors.h>
-#include "xprops.h"
-#include "frame.h"
-#include <meta/group.h>
+#include "config.h"
+
+#include "x11/window-props.h"
+
 #include <X11/Xatom.h>
 #include <unistd.h>
 #include <string.h>
-#include "util-private.h"
-#include "meta-workspace-manager-private.h"
+
+#include "core/frame.h"
+#include "core/meta-workspace-manager-private.h"
+#include "core/util-private.h"
+#include "meta/group.h"
+#include "meta/meta-x11-errors.h"
+#include "x11/meta-x11-display-private.h"
+#include "x11/window-x11-private.h"
+#include "x11/window-x11.h"
+#include "x11/xprops.h"
 
 #ifndef HOST_NAME_MAX
 /* Solaris headers apparently don't define this so do so manually; #326745 */
@@ -60,7 +63,8 @@ typedef void (* ReloadValueFunc) (MetaWindow    *window,
                                   MetaPropValue *value,
                                   gboolean       initial);
 
-typedef enum {
+typedef enum
+{
   NONE       = 0,
   LOAD_INIT  = (1 << 0),
   INCLUDE_OR = (1 << 1),
@@ -1528,9 +1532,9 @@ reload_wm_protocols (MetaWindow    *window,
 {
   int i;
 
-  window->take_focus = FALSE;
-  window->delete_window = FALSE;
-  window->can_ping = FALSE;
+  meta_window_x11_set_wm_take_focus (window, FALSE);
+  meta_window_x11_set_wm_ping (window, FALSE);
+  meta_window_x11_set_wm_delete_window (window, FALSE);
 
   if (value->type == META_PROP_VALUE_INVALID)
     return;
@@ -1540,13 +1544,13 @@ reload_wm_protocols (MetaWindow    *window,
     {
       if (value->v.atom_list.atoms[i] ==
           window->display->x11_display->atom_WM_TAKE_FOCUS)
-        window->take_focus = TRUE;
+        meta_window_x11_set_wm_take_focus (window, TRUE);
       else if (value->v.atom_list.atoms[i] ==
                window->display->x11_display->atom_WM_DELETE_WINDOW)
-        window->delete_window = TRUE;
+        meta_window_x11_set_wm_delete_window (window, TRUE);
       else if (value->v.atom_list.atoms[i] ==
                window->display->x11_display->atom__NET_WM_PING)
-        window->can_ping = TRUE;
+        meta_window_x11_set_wm_ping (window, TRUE);
       ++i;
     }
 
@@ -1621,6 +1625,22 @@ reload_wm_hints (MetaWindow    *window,
   meta_window_queue (window, META_QUEUE_UPDATE_ICON | META_QUEUE_MOVE_RESIZE);
 }
 
+static gboolean
+check_xtransient_for_loop (MetaWindow *window,
+                           MetaWindow *parent)
+{
+  while (parent)
+    {
+      if (parent == window)
+        return TRUE;
+
+      parent = meta_x11_display_lookup_x_window (parent->display->x11_display,
+                                                 parent->xtransient_for);
+    }
+
+  return FALSE;
+}
+
 static void
 reload_transient_for (MetaWindow    *window,
                       MetaPropValue *value,
@@ -1641,20 +1661,22 @@ reload_transient_for (MetaWindow    *window,
                         transient_for, window->desc);
           transient_for = None;
         }
+      else if (parent->override_redirect)
+        {
+          meta_warning ("WM_TRANSIENT_FOR window %s for top-level %s is an "
+                        "override-redirect window and this is not correct "
+                        "according to the standard, so we'll fallback to "
+                        "the root window.\n", parent->desc, window->desc);
+          transient_for = parent->display->x11_display->xroot;
+          parent = NULL;
+        }
 
       /* Make sure there is not a loop */
-      while (parent)
+      if (check_xtransient_for_loop (window, parent))
         {
-          if (parent == window)
-            {
-              meta_warning ("WM_TRANSIENT_FOR window 0x%lx for %s would create loop.\n",
-                            transient_for, window->desc);
-              transient_for = None;
-              break;
-            }
-
-          parent = meta_x11_display_lookup_x_window (parent->display->x11_display,
-                                                     parent->xtransient_for);
+          meta_warning ("WM_TRANSIENT_FOR window 0x%lx for %s would create a "
+                        "loop.\n", transient_for, window->desc);
+          transient_for = None;
         }
     }
   else
@@ -1675,8 +1697,6 @@ reload_transient_for (MetaWindow    *window,
     meta_window_set_transient_for (window, NULL);
   else
     {
-      parent = meta_x11_display_lookup_x_window (window->display->x11_display,
-                                                 window->xtransient_for);
       meta_window_set_transient_for (window, parent);
     }
 }
@@ -1701,35 +1721,6 @@ reload_gtk_theme_variant (MetaWindow    *window,
       g_free (current_variant);
 
       window->gtk_theme_variant = g_strdup (requested_variant);
-
-      if (window->frame)
-        meta_frame_update_style (window->frame);
-    }
-}
-
-static void
-reload_gtk_hide_titlebar_when_maximized (MetaWindow    *window,
-                                         MetaPropValue *value,
-                                         gboolean       initial)
-{
-  gboolean requested_value = FALSE;
-  gboolean current_value = window->hide_titlebar_when_maximized;
-
-  if (!meta_prefs_get_ignore_request_hide_titlebar () && value->type != META_PROP_VALUE_INVALID)
-    {
-      requested_value = ((int) value->v.cardinal == 1);
-      meta_verbose ("Request to hide titlebar for window %s.\n", window->desc);
-    }
-
-  if (requested_value == current_value)
-    return;
-
-  window->hide_titlebar_when_maximized = requested_value;
-
-  if (META_WINDOW_MAXIMIZED (window))
-    {
-      meta_window_queue (window, META_QUEUE_MOVE_RESIZE);
-      meta_window_frame_size_changed (window);
 
       if (window->frame)
         meta_frame_update_style (window->frame);
@@ -1851,7 +1842,6 @@ meta_x11_display_init_window_prop_hooks (MetaX11Display *x11_display)
     { x11_display->atom__MOTIF_WM_HINTS,   META_PROP_VALUE_MOTIF_HINTS, reload_mwm_hints,      LOAD_INIT },
     { XA_WM_TRANSIENT_FOR,                 META_PROP_VALUE_WINDOW,    reload_transient_for,    LOAD_INIT },
     { x11_display->atom__GTK_THEME_VARIANT, META_PROP_VALUE_UTF8,     reload_gtk_theme_variant, LOAD_INIT },
-    { x11_display->atom__GTK_HIDE_TITLEBAR_WHEN_MAXIMIZED, META_PROP_VALUE_CARDINAL,     reload_gtk_hide_titlebar_when_maximized, LOAD_INIT },
     { x11_display->atom__GTK_APPLICATION_ID,               META_PROP_VALUE_UTF8,         reload_gtk_application_id,               LOAD_INIT },
     { x11_display->atom__GTK_UNIQUE_BUS_NAME,              META_PROP_VALUE_UTF8,         reload_gtk_unique_bus_name,              LOAD_INIT },
     { x11_display->atom__GTK_APPLICATION_OBJECT_PATH,      META_PROP_VALUE_UTF8,         reload_gtk_application_object_path,      LOAD_INIT },

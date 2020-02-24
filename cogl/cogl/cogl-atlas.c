@@ -29,9 +29,7 @@
  *  Neil Roberts   <neil@linux.intel.com>
  */
 
-#ifdef HAVE_CONFIG_H
 #include "cogl-config.h"
-#endif
 
 #include "cogl-atlas.h"
 #include "cogl-rectangle-map.h"
@@ -40,11 +38,11 @@
 #include "cogl-texture-2d-private.h"
 #include "cogl-texture-2d-sliced.h"
 #include "cogl-texture-driver.h"
-#include "cogl-pipeline-opengl-private.h"
 #include "cogl-debug.h"
 #include "cogl-framebuffer-private.h"
 #include "cogl-blit.h"
 #include "cogl-private.h"
+#include "driver/gl/cogl-pipeline-opengl-private.h"
 
 #include <stdlib.h>
 
@@ -285,7 +283,7 @@ _cogl_atlas_create_texture (CoglAtlas *atlas,
                             int height)
 {
   CoglTexture2D *tex;
-  CoglError *ignore_error = NULL;
+  GError *ignore_error = NULL;
 
   _COGL_GET_CONTEXT (ctx, NULL);
 
@@ -311,7 +309,7 @@ _cogl_atlas_create_texture (CoglAtlas *atlas,
 
       if (!cogl_texture_allocate (COGL_TEXTURE (tex), &ignore_error))
         {
-          cogl_error_free (ignore_error);
+          g_error_free (ignore_error);
           cogl_object_unref (tex);
           tex = NULL;
         }
@@ -329,7 +327,7 @@ _cogl_atlas_create_texture (CoglAtlas *atlas,
 
       if (!cogl_texture_allocate (COGL_TEXTURE (tex), &ignore_error))
         {
-          cogl_error_free (ignore_error);
+          g_error_free (ignore_error);
           cogl_object_unref (tex);
           tex = NULL;
         }
@@ -364,7 +362,7 @@ _cogl_atlas_notify_post_reorganize (CoglAtlas *atlas)
   g_hook_list_invoke (&atlas->post_reorganize_callbacks, FALSE);
 }
 
-CoglBool
+gboolean
 _cogl_atlas_reserve_space (CoglAtlas             *atlas,
                            unsigned int           width,
                            unsigned int           height,
@@ -374,7 +372,7 @@ _cogl_atlas_reserve_space (CoglAtlas             *atlas,
   CoglRectangleMap *new_map;
   CoglTexture2D *new_tex;
   unsigned int map_width = 0, map_height = 0;
-  CoglBool ret;
+  gboolean ret;
   CoglRectangleMapEntry new_position;
 
   /* Check if we can fit the rectangle into the existing map */
@@ -562,31 +560,23 @@ create_migration_texture (CoglContext *ctx,
                           CoglPixelFormat internal_format)
 {
   CoglTexture *tex;
-  CoglError *skip_error = NULL;
+  GError *skip_error = NULL;
 
-  if ((_cogl_util_is_pot (width) && _cogl_util_is_pot (height)) ||
-      (cogl_has_feature (ctx, COGL_FEATURE_ID_TEXTURE_NPOT_BASIC) &&
-       cogl_has_feature (ctx, COGL_FEATURE_ID_TEXTURE_NPOT_MIPMAP)))
+  /* First try creating a fast-path non-sliced texture */
+  tex = COGL_TEXTURE (cogl_texture_2d_new_with_size (ctx, width, height));
+
+  _cogl_texture_set_internal_format (tex, internal_format);
+
+  /* TODO: instead of allocating storage here it would be better
+   * if we had some api that let us just check that the size is
+   * supported by the hardware so storage could be allocated
+   * lazily when uploading data. */
+  if (!cogl_texture_allocate (tex, &skip_error))
     {
-      /* First try creating a fast-path non-sliced texture */
-      tex = COGL_TEXTURE (cogl_texture_2d_new_with_size (ctx,
-                                                         width, height));
-
-      _cogl_texture_set_internal_format (tex, internal_format);
-
-      /* TODO: instead of allocating storage here it would be better
-       * if we had some api that let us just check that the size is
-       * supported by the hardware so storage could be allocated
-       * lazily when uploading data. */
-      if (!cogl_texture_allocate (tex, &skip_error))
-        {
-          cogl_error_free (skip_error);
-          cogl_object_unref (tex);
-          tex = NULL;
-        }
+      g_error_free (skip_error);
+      cogl_object_unref (tex);
+      tex = NULL;
     }
-  else
-    tex = NULL;
 
   if (!tex)
     {
@@ -615,7 +605,7 @@ _cogl_atlas_copy_rectangle (CoglAtlas *atlas,
 {
   CoglTexture *tex;
   CoglBlitData blit_data;
-  CoglError *ignore_error = NULL;
+  GError *ignore_error = NULL;
 
   _COGL_GET_CONTEXT (ctx, NULL);
 
@@ -623,7 +613,7 @@ _cogl_atlas_copy_rectangle (CoglAtlas *atlas,
   tex = create_migration_texture (ctx, width, height, internal_format);
   if (!cogl_texture_allocate (tex, &ignore_error))
     {
-      cogl_error_free (ignore_error);
+      g_error_free (ignore_error);
       cogl_object_unref (tex);
       return NULL;
     }

@@ -21,17 +21,16 @@
 
 #include "config.h"
 
-#include "x11/meta-x11-display-private.h"
-#include "iconcache.h"
-
-#include <meta/meta-x11-errors.h>
+#include "x11/iconcache.h"
 
 #include <cairo.h>
 #include <cairo-xlib.h>
 #include <cairo-xlib-xrender.h>
-
 #include <X11/Xatom.h>
 #include <X11/extensions/Xrender.h>
+
+#include "meta/meta-x11-errors.h"
+#include "x11/meta-x11-display-private.h"
 
 static gboolean
 find_largest_sizes (gulong *data,
@@ -289,33 +288,12 @@ get_pixmap_geometry (MetaX11Display *x11_display,
     *d = depth;
 }
 
-static int
-standard_pict_format_for_depth (int depth)
-{
-  switch (depth)
-    {
-    case 1:
-      return PictStandardA1;
-    case 24:
-      return PictStandardRGB24;
-    case 32:
-      return PictStandardARGB32;
-    default:
-      g_assert_not_reached ();
-    }
-}
-
-static XRenderPictFormat *
-pict_format_for_depth (Display *xdisplay, int depth)
-{
-  return XRenderFindStandardFormat (xdisplay, standard_pict_format_for_depth (depth));
-}
-
 static cairo_surface_t *
 surface_from_pixmap (Display *xdisplay, Pixmap xpixmap,
                      int width, int height)
 {
   Window root_return;
+  XVisualInfo visual_info;
   int x_ret, y_ret;
   unsigned int w_ret, h_ret, bw_ret, depth_ret;
 
@@ -323,8 +301,12 @@ surface_from_pixmap (Display *xdisplay, Pixmap xpixmap,
                      &x_ret, &y_ret, &w_ret, &h_ret, &bw_ret, &depth_ret))
     return NULL;
 
-  return cairo_xlib_surface_create_with_xrender_format (xdisplay, xpixmap, DefaultScreenOfDisplay (xdisplay),
-                                                        pict_format_for_depth (xdisplay, depth_ret), w_ret, h_ret);
+  if (!XMatchVisualInfo (xdisplay, DefaultScreen (xdisplay),
+                         depth_ret, TrueColor, &visual_info))
+    return NULL;
+
+  return cairo_xlib_surface_create (xdisplay, xpixmap, visual_info.visual,
+                                    w_ret, h_ret);
 }
 
 static gboolean

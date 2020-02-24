@@ -28,43 +28,46 @@
 #include <meta/types.h>
 
 #define META_TYPE_X11_DISPLAY (meta_x11_display_get_type ())
+
+META_EXPORT
 G_DECLARE_FINAL_TYPE (MetaX11Display, meta_x11_display, META, X11_DISPLAY, GObject)
 
+META_EXPORT
 gboolean meta_x11_init_gdk_display (GError **error);
 
+META_EXPORT
 int      meta_x11_display_get_screen_number (MetaX11Display *x11_display);
+
+META_EXPORT
 Display *meta_x11_display_get_xdisplay      (MetaX11Display *x11_display);
+
+META_EXPORT
 Window   meta_x11_display_get_xroot         (MetaX11Display *x11_display);
 
+META_EXPORT
 int      meta_x11_display_get_xinput_opcode     (MetaX11Display *x11_display);
+
+META_EXPORT
 int      meta_x11_display_get_damage_event_base (MetaX11Display *x11_display);
+
+META_EXPORT
 int      meta_x11_display_get_shape_event_base  (MetaX11Display *x11_display);
+
+META_EXPORT
 gboolean meta_x11_display_has_shape             (MetaX11Display *x11_display);
 
+META_EXPORT
 void meta_x11_display_set_cm_selection (MetaX11Display *x11_display);
 
+META_EXPORT
 gboolean meta_x11_display_xwindow_is_a_no_focus_window (MetaX11Display *x11_display,
                                                         Window xwindow);
 
-/* meta_x11_display_set_input_focus_window is like XSetInputFocus, except
- * that (a) it can't detect timestamps later than the current time,
- * since Mutter isn't part of the XServer, and thus gives erroneous
- * behavior in this circumstance (so don't do it), (b) it uses
- * display->last_focus_time since we don't have access to the true
- * Xserver one, (c) it makes use of display->user_time since checking
- * whether a window should be allowed to be focused should depend
- * on user_time events (see bug 167358, comment 15 in particular)
- */
-void meta_x11_display_set_input_focus_window (MetaX11Display *x11_display,
-                                              MetaWindow     *window,
-                                              gboolean        focus_frame,
-                                              guint32         timestamp);
+META_EXPORT
+void     meta_x11_display_set_stage_input_region (MetaX11Display *x11_display,
+                                                  XserverRegion   region);
 
-/* meta_x11_display_focus_the_no_focus_window is called when the
- * designated no_focus_window should be focused, but is otherwise the
- * same as meta_display_set_input_focus_window
- */
-void meta_x11_display_focus_the_no_focus_window (MetaX11Display *x11_display,
-                                                 guint32         timestamp);
+META_EXPORT
+void     meta_x11_display_clear_stage_input_region (MetaX11Display *x11_display);
 
 #endif /* META_X11_DISPLAY_H */

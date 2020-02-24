@@ -26,16 +26,18 @@
  * @short_description: Mutter preferences
  */
 
-#include <config.h>
-#include <meta/prefs.h>
-#include "util-private.h"
-#include "meta-plugin-manager.h"
+#include "config.h"
+
 #include <glib.h>
 #include <gio/gio.h>
 #include <string.h>
 #include <stdlib.h>
-#include "keybindings-private.h"
-#include "meta-accel-parse.h"
+
+#include "compositor/meta-plugin-manager.h"
+#include "core/keybindings-private.h"
+#include "core/meta-accel-parse.h"
+#include "core/util-private.h"
+#include "meta/prefs.h"
 #include "x11/meta-x11-display-private.h"
 
 /* If you add a key, it needs updating in init() and in the gsettings
@@ -58,6 +60,7 @@
 
 #define KEY_OVERLAY_KEY "overlay-key"
 #define KEY_WORKSPACES_ONLY_ON_PRIMARY "workspaces-only-on-primary"
+#define KEY_LOCATE_POINTER "locate-pointer"
 
 /* These are the different schemas we are keeping
  * a GSettings instance for */
@@ -79,6 +82,7 @@ static gboolean use_system_font = FALSE;
 static PangoFontDescription *titlebar_font = NULL;
 static MetaVirtualModifier mouse_button_mods = Mod1Mask;
 static MetaKeyCombo overlay_key_combo = { 0, 0, 0 };
+static MetaKeyCombo locate_pointer_key_combo = { 0, 0, 0 };
 static GDesktopFocusMode focus_mode = G_DESKTOP_FOCUS_MODE_CLICK;
 static GDesktopFocusNewWindows focus_new_windows = G_DESKTOP_FOCUS_NEW_WINDOWS_SMART;
 static gboolean raise_on_click = TRUE;
@@ -97,6 +101,7 @@ static gboolean bell_is_visible = FALSE;
 static gboolean bell_is_audible = TRUE;
 static gboolean gnome_accessibility = FALSE;
 static gboolean gnome_animations = TRUE;
+static gboolean locate_pointer_is_enabled = FALSE;
 static char *cursor_theme = NULL;
 /* cursor_size will, when running as an X11 compositing window manager, be the
  * actual cursor size, multiplied with the global window scaling factor. On
@@ -108,9 +113,8 @@ static int   drag_threshold;
 static gboolean resize_with_right_button = FALSE;
 static gboolean edge_tiling = FALSE;
 static gboolean force_fullscreen = TRUE;
-static gboolean ignore_request_hide_titlebar = FALSE;
 static gboolean auto_maximize = TRUE;
-static gboolean show_fallback_app_menu = FALSE;
+static gboolean show_fallback_app_menu = TRUE;
 
 static GDesktopVisualBellType visual_bell_type = G_DESKTOP_VISUAL_BELL_FULLSCREEN_FLASH;
 static MetaButtonLayout button_layout;
@@ -144,6 +148,8 @@ static gboolean titlebar_handler (GVariant*, gpointer*, gpointer);
 static gboolean mouse_button_mods_handler (GVariant*, gpointer*, gpointer);
 static gboolean button_layout_handler (GVariant*, gpointer*, gpointer);
 static gboolean overlay_key_handler (GVariant*, gpointer*, gpointer);
+static gboolean locate_pointer_key_handler (GVariant*, gpointer*, gpointer);
+
 static gboolean iso_next_group_handler (GVariant*, gpointer*, gpointer);
 
 static void     init_bindings             (void);
@@ -381,6 +387,13 @@ static MetaBoolPreference preferences_bool[] =
       },
       &auto_maximize,
     },
+    {
+      { KEY_LOCATE_POINTER,
+        SCHEMA_INTERFACE,
+        META_PREF_LOCATE_POINTER,
+      },
+      &locate_pointer_is_enabled,
+    },
     { { NULL, 0, 0 }, NULL },
   };
 
@@ -424,6 +437,14 @@ static MetaStringPreference preferences_string[] =
         META_PREF_KEYBINDINGS,
       },
       overlay_key_handler,
+      NULL,
+    },
+    {
+      { "locate-pointer-key",
+        SCHEMA_MUTTER,
+        META_PREF_KEYBINDINGS,
+      },
+      locate_pointer_key_handler,
       NULL,
     },
     { { NULL, 0, 0 }, NULL },
@@ -949,6 +970,8 @@ meta_prefs_init (void)
                     G_CALLBACK (settings_changed), NULL);
   g_signal_connect (settings, "changed::" KEY_GNOME_CURSOR_SIZE,
                     G_CALLBACK (settings_changed), NULL);
+  g_signal_connect (settings, "changed::" KEY_LOCATE_POINTER,
+                    G_CALLBACK (settings_changed), NULL);
   g_hash_table_insert (settings_schemas, g_strdup (SCHEMA_INTERFACE), settings);
 
   settings = g_settings_new (SCHEMA_INPUT_SOURCES);
@@ -1259,8 +1282,6 @@ button_function_from_string (const char *str)
 {
   if (strcmp (str, "menu") == 0)
     return META_BUTTON_FUNCTION_MENU;
-  else if (strcmp (str, "appmenu") == 0)
-    return META_BUTTON_FUNCTION_APPMENU;
   else if (strcmp (str, "minimize") == 0)
     return META_BUTTON_FUNCTION_MINIMIZE;
   else if (strcmp (str, "maximize") == 0)
@@ -1477,6 +1498,36 @@ overlay_key_handler (GVariant *value,
 }
 
 static gboolean
+locate_pointer_key_handler (GVariant *value,
+                            gpointer *result,
+                            gpointer  data)
+{
+  MetaKeyCombo combo;
+  const gchar *string_value;
+
+  *result = NULL; /* ignored */
+  string_value = g_variant_get_string (value, NULL);
+
+  if (!string_value || !meta_parse_accelerator (string_value, &combo))
+    {
+      meta_topic (META_DEBUG_KEYBINDINGS,
+                  "Failed to parse value for locate-pointer-key\n");
+      return FALSE;
+    }
+
+  combo.modifiers = 0;
+
+  if (locate_pointer_key_combo.keysym != combo.keysym ||
+      locate_pointer_key_combo.keycode != combo.keycode)
+    {
+      locate_pointer_key_combo = combo;
+      queue_changed (META_PREF_KEYBINDINGS);
+    }
+
+  return TRUE;
+}
+
+static gboolean
 iso_next_group_handler (GVariant *value,
                         gpointer *result,
                         gpointer  data)
@@ -1641,6 +1692,9 @@ meta_preference_to_string (MetaPreference pref)
 
     case META_PREF_AUTO_MAXIMIZE:
       return "AUTO_MAXIMIZE";
+
+    case META_PREF_LOCATE_POINTER:
+      return "LOCATE_POINTER";
     }
 
   return "(unknown)";
@@ -1689,7 +1743,15 @@ init_bindings (void)
   pref->combos = g_slist_prepend (pref->combos, &overlay_key_combo);
   pref->builtin = 1;
 
-  g_hash_table_insert (key_bindings, g_strdup ("overlay-key"), pref);
+  g_hash_table_insert (key_bindings, g_strdup (pref->name), pref);
+
+  pref = g_new0 (MetaKeyPref, 1);
+  pref->name = g_strdup ("locate-pointer-key");
+  pref->action = META_KEYBINDING_ACTION_LOCATE_POINTER_KEY;
+  pref->combos = g_slist_prepend (pref->combos, &locate_pointer_key_combo);
+  pref->builtin = 1;
+
+  g_hash_table_insert (key_bindings, g_strdup (pref->name), pref);
 }
 
 static gboolean
@@ -1967,6 +2029,18 @@ meta_prefs_get_overlay_binding (MetaKeyCombo *combo)
   *combo = overlay_key_combo;
 }
 
+void
+meta_prefs_get_locate_pointer_binding (MetaKeyCombo *combo)
+{
+  *combo = locate_pointer_key_combo;
+}
+
+gboolean
+meta_prefs_is_locate_pointer_enabled (void)
+{
+  return locate_pointer_is_enabled;
+}
+
 const char *
 meta_prefs_get_iso_next_group_option (void)
 {
@@ -2082,16 +2156,4 @@ void
 meta_prefs_set_force_fullscreen (gboolean whether)
 {
   force_fullscreen = whether;
-}
-
-gboolean
-meta_prefs_get_ignore_request_hide_titlebar (void)
-{
-  return ignore_request_hide_titlebar;
-}
-
-void
-meta_prefs_set_ignore_request_hide_titlebar (gboolean whether)
-{
-  ignore_request_hide_titlebar = whether;
 }

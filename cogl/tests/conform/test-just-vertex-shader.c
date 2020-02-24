@@ -4,6 +4,7 @@
 
 #include <string.h>
 
+#include "test-declarations.h"
 #include "test-utils.h"
 
 typedef struct _TestState
@@ -32,7 +33,7 @@ paint_legacy (TestState *state)
   CoglHandle material = cogl_material_new ();
   CoglTexture *tex;
   CoglColor color;
-  CoglError *error = NULL;
+  GError *error = NULL;
   CoglHandle shader, program;
 
   cogl_color_init_from_4ub (&color, 0, 0, 0, 255);
@@ -102,7 +103,7 @@ paint (TestState *state)
   CoglPipeline *pipeline = cogl_pipeline_new (test_ctx);
   CoglTexture *tex;
   CoglColor color;
-  CoglError *error = NULL;
+  GError *error = NULL;
   CoglHandle shader, program;
 
   cogl_color_init_from_4ub (&color, 0, 0, 0, 255);

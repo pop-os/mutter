@@ -19,12 +19,14 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <config.h>
-#include "edge-resistance.h"
-#include "boxes-private.h"
-#include "display-private.h"
-#include "meta-workspace-manager-private.h"
-#include "workspace-private.h"
+#include "config.h"
+
+#include "core/edge-resistance.h"
+
+#include "core/boxes-private.h"
+#include "core/display-private.h"
+#include "core/meta-workspace-manager-private.h"
+#include "core/workspace-private.h"
 
 /* A simple macro for whether a given window's edges are potentially
  * relevant for resistance/snapping during a move/resize operation
@@ -306,6 +308,7 @@ movement_towards_edge (MetaSide side, int increment)
       return increment > 0;
     default:
       g_assert_not_reached ();
+      return FALSE;
     }
 }
 
@@ -1154,13 +1157,7 @@ compute_resistance_and_snapping_edges (MetaDisplay *display)
   g_list_free (stacked_windows);
   /* Free the memory used by the obscuring windows/docks lists */
   g_slist_free (window_stacking);
-  /* FIXME: Shouldn't there be a helper function to make this one line of code
-   * to free a list instead of four ugly ones?
-   */
-  g_slist_foreach (obscuring_windows,
-                   (void (*)(gpointer,gpointer))&g_free, /* ew, for ugly */
-                   NULL);
-  g_slist_free (obscuring_windows);
+  g_slist_free_full (obscuring_windows, g_free);
 
   /* Sort the list.  FIXME: Should I bother with this sorting?  I just
    * sort again later in cache_edges() anyway...

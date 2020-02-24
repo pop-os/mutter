@@ -22,31 +22,38 @@
  *     Jasper St. Pierre <jstpierre@mecheye.net>
  */
 
+/**
+ * SECTION:meta-backend-x11
+ * @title: MetaBackendX11
+ * @short_description: A X11 MetaBackend
+ *
+ * MetaBackendX11 is an implementation of #MetaBackend using X and X
+ * extensions, like XInput and XKB.
+ */
+
 #include "config.h"
 
-#include <string.h>
-#include <stdlib.h>
+#include "backends/x11/meta-backend-x11.h"
 
-#include "meta-backend-x11.h"
-
-#include <clutter.h>
-#include <clutter/x11/clutter-x11.h>
-
-#include <X11/extensions/sync.h>
 #include <X11/XKBlib.h>
 #include <X11/Xlib-xcb.h>
+#include <X11/extensions/sync.h>
+#include <stdlib.h>
+#include <string.h>
 #include <xkbcommon/xkbcommon-x11.h>
 
+#include "backends/meta-idle-monitor-private.h"
 #include "backends/meta-stage-private.h"
 #include "backends/x11/meta-clutter-backend-x11.h"
+#include "backends/x11/meta-event-x11.h"
+#include "backends/x11/meta-stage-x11.h"
 #include "backends/x11/meta-renderer-x11.h"
-#include "meta/meta-cursor-tracker.h"
-
-#include <meta/util.h>
-#include "display-private.h"
+#include "clutter/clutter.h"
+#include "clutter/x11/clutter-x11.h"
 #include "compositor/compositor-private.h"
-#include "backends/meta-dnd-private.h"
-#include "backends/meta-idle-monitor-private.h"
+#include "core/display-private.h"
+#include "meta/meta-cursor-tracker.h"
+#include "meta/util.h"
 
 struct _MetaBackendX11Private
 {
@@ -59,6 +66,10 @@ struct _MetaBackendX11Private
   int xsync_error_base;
   XSyncAlarm user_active_alarm;
   XSyncCounter counter;
+
+  int current_touch_replay_sync_serial;
+  int pending_touch_replay_sync_serial;
+  Atom touch_replay_sync_atom;
 
   int xinput_opcode;
   int xinput_event_base;
@@ -169,6 +180,26 @@ meta_backend_x11_translate_device_event (MetaBackendX11 *x11,
 }
 
 static void
+maybe_translate_touch_replay_pointer_event (MetaBackendX11 *x11,
+                                            XIDeviceEvent  *device_event)
+{
+  MetaBackendX11Private *priv = meta_backend_x11_get_instance_private (x11);
+
+  if (!device_event->send_event &&
+      device_event->time != META_CURRENT_TIME &&
+      priv->current_touch_replay_sync_serial !=
+      priv->pending_touch_replay_sync_serial &&
+      XSERVER_TIME_IS_BEFORE (device_event->time, priv->latest_evtime))
+    {
+      /* Emulated pointer events received after XIRejectTouch is received
+       * on a passive touch grab will contain older timestamps, update those
+       * so we dont get InvalidTime at grabs.
+       */
+      device_event->time = priv->latest_evtime;
+    }
+}
+
+static void
 translate_device_event (MetaBackendX11 *x11,
                         XIDeviceEvent  *device_event)
 {
@@ -177,19 +208,7 @@ translate_device_event (MetaBackendX11 *x11,
   meta_backend_x11_translate_device_event (x11, device_event);
 
   if (!device_event->send_event && device_event->time != META_CURRENT_TIME)
-    {
-      if (XSERVER_TIME_IS_BEFORE (device_event->time, priv->latest_evtime))
-        {
-          /* Emulated pointer events received after XIRejectTouch is received
-           * on a passive touch grab will contain older timestamps, update those
-           * so we dont get InvalidTime at grabs.
-           */
-          device_event->time = priv->latest_evtime;
-        }
-
-      /* Update the internal latest evtime, for any possible later use */
-      priv->latest_evtime = device_event->time;
-    }
+    priv->latest_evtime = device_event->time;
 }
 
 static void
@@ -254,6 +273,9 @@ maybe_spoof_event_as_stage_event (MetaBackendX11 *x11,
     case XI_Motion:
     case XI_ButtonPress:
     case XI_ButtonRelease:
+      maybe_translate_touch_replay_pointer_event (x11,
+                                                  (XIDeviceEvent *) input_event);
+      /* Intentional fall-through */
     case XI_KeyPress:
     case XI_KeyRelease:
     case XI_TouchBegin:
@@ -320,22 +342,31 @@ handle_host_xevent (MetaBackend *backend,
   MetaBackendX11 *x11 = META_BACKEND_X11 (backend);
   MetaBackendX11Private *priv = meta_backend_x11_get_instance_private (x11);
   gboolean bypass_clutter = FALSE;
+  MetaDisplay *display;
+
+  switch (event->type)
+    {
+    case ClientMessage:
+      if (event->xclient.window == meta_backend_x11_get_xwindow (x11) &&
+          event->xclient.message_type == priv->touch_replay_sync_atom)
+        priv->current_touch_replay_sync_serial = event->xclient.data.l[0];
+      break;
+    default:
+      break;
+    }
 
   XGetEventData (priv->xdisplay, &event->xcookie);
 
-  {
-    MetaDisplay *display = meta_get_display ();
+  display = meta_get_display ();
+  if (display)
+    {
+      MetaCompositor *compositor = display->compositor;
+      MetaPluginManager *plugin_mgr =
+        meta_compositor_get_plugin_manager (compositor);
 
-    if (display)
-      {
-        MetaCompositor *compositor = display->compositor;
-        if (meta_plugin_manager_xevent_filter (compositor->plugin_mgr, event))
-          bypass_clutter = TRUE;
-
-        if (meta_dnd_handle_xdnd_event (backend, compositor, priv->xdisplay, event))
-          bypass_clutter = TRUE;
-      }
-  }
+      if (meta_plugin_manager_xevent_filter (plugin_mgr, event))
+        bypass_clutter = TRUE;
+    }
 
   bypass_clutter = (meta_backend_x11_handle_host_xevent (x11, event) ||
                     bypass_clutter);
@@ -380,7 +411,7 @@ handle_host_xevent (MetaBackend *backend,
   if (!bypass_clutter)
     {
       handle_input_event (x11, event);
-      clutter_x11_handle_event (event);
+      meta_x11_handle_event (event);
     }
 
   XFreeEventData (priv->xdisplay, &event->xcookie);
@@ -528,6 +559,10 @@ meta_backend_x11_post_init (MetaBackend *backend)
   monitor_manager = meta_backend_get_monitor_manager (backend);
   g_signal_connect (monitor_manager, "monitors-changed-internal",
                     G_CALLBACK (on_monitors_changed), backend);
+
+  priv->touch_replay_sync_atom = XInternAtom (priv->xdisplay,
+                                              "_MUTTER_TOUCH_SEQUENCE_SYNC",
+                                              False);
 }
 
 static ClutterBackend *
@@ -580,8 +615,46 @@ meta_backend_x11_ungrab_device (MetaBackend *backend,
   int ret;
 
   ret = XIUngrabDevice (priv->xdisplay, device_id, timestamp);
+  XFlush (priv->xdisplay);
 
   return (ret == Success);
+}
+
+static void
+meta_backend_x11_finish_touch_sequence (MetaBackend          *backend,
+                                        ClutterEventSequence *sequence,
+                                        MetaSequenceState     state)
+{
+  MetaBackendX11 *x11 = META_BACKEND_X11 (backend);
+  MetaBackendX11Private *priv = meta_backend_x11_get_instance_private (x11);
+  int event_mode;
+
+  if (state == META_SEQUENCE_ACCEPTED)
+    event_mode = XIAcceptTouch;
+  else if (state == META_SEQUENCE_REJECTED)
+    event_mode = XIRejectTouch;
+  else
+    g_return_if_reached ();
+
+  XIAllowTouchEvents (priv->xdisplay,
+                      META_VIRTUAL_CORE_POINTER_ID,
+                      meta_x11_event_sequence_get_touch_detail (sequence),
+                      DefaultRootWindow (priv->xdisplay), event_mode);
+
+  if (state == META_SEQUENCE_REJECTED)
+    {
+      XClientMessageEvent ev;
+
+      ev = (XClientMessageEvent) {
+        .type = ClientMessage,
+        .window = meta_backend_x11_get_xwindow (x11),
+        .message_type = priv->touch_replay_sync_atom,
+        .format = 32,
+        .data.l[0] = ++priv->pending_touch_replay_sync_serial,
+      };
+      XSendEvent (priv->xdisplay, meta_backend_x11_get_xwindow (x11),
+                  False, 0, (XEvent *) &ev);
+    }
 }
 
 static void
@@ -661,7 +734,13 @@ static void
 meta_backend_x11_set_numlock (MetaBackend *backend,
                               gboolean     numlock_state)
 {
-  /* TODO: Currently handled by gnome-settings-deamon */
+  MetaBackendX11 *x11 = META_BACKEND_X11 (backend);
+  MetaBackendX11Private *priv = meta_backend_x11_get_instance_private (x11);
+  unsigned int num_mask;
+
+  num_mask = XkbKeysymToModifiers (priv->xdisplay, XK_Num_Lock);
+  XkbLockModifiers (priv->xdisplay, XkbUseCoreKbd, num_mask,
+                    numlock_state ? num_mask : 0);
 }
 
 void
@@ -769,6 +848,7 @@ meta_backend_x11_class_init (MetaBackendX11Class *klass)
   backend_class->post_init = meta_backend_x11_post_init;
   backend_class->grab_device = meta_backend_x11_grab_device;
   backend_class->ungrab_device = meta_backend_x11_ungrab_device;
+  backend_class->finish_touch_sequence = meta_backend_x11_finish_touch_sequence;
   backend_class->warp_pointer = meta_backend_x11_warp_pointer;
   backend_class->get_current_logical_monitor = meta_backend_x11_get_current_logical_monitor;
   backend_class->get_keymap = meta_backend_x11_get_keymap;
@@ -779,14 +859,6 @@ meta_backend_x11_class_init (MetaBackendX11Class *klass)
 static void
 meta_backend_x11_init (MetaBackendX11 *x11)
 {
-  /* XInitThreads() is needed to use the "threaded swap wait" functionality
-   * in Cogl - see meta_renderer_x11_create_cogl_renderer(). We call it here
-   * to hopefully call it before any other use of XLib.
-   */
-  XInitThreads();
-
-  /* We do X11 event retrieval ourselves */
-  clutter_x11_disable_event_retrieval ();
 }
 
 Display *
@@ -801,7 +873,7 @@ Window
 meta_backend_x11_get_xwindow (MetaBackendX11 *x11)
 {
   ClutterActor *stage = meta_backend_get_stage (META_BACKEND (x11));
-  return clutter_x11_get_stage_window (CLUTTER_STAGE (stage));
+  return meta_x11_get_stage_window (CLUTTER_STAGE (stage));
 }
 
 void

@@ -46,7 +46,8 @@
 typedef struct _CoglTextureVtable     CoglTextureVtable;
 
 /* Encodes three possibiloities result of transforming a quad */
-typedef enum {
+typedef enum
+{
   /* quad doesn't cross the boundaries of a texture */
   COGL_TRANSFORM_NO_REPEAT,
   /* quad crosses boundaries, hardware wrap mode can handle */
@@ -58,7 +59,8 @@ typedef enum {
 } CoglTransformResult;
 
 /* Flags given to the pre_paint method */
-typedef enum {
+typedef enum
+{
   /* The texture is going to be used with filters that require
      mipmapping. This gives the texture the opportunity to
      automatically update the mipmap tree */
@@ -70,17 +72,17 @@ struct _CoglTextureVtable
   /* Virtual functions that must be implemented for a texture
      backend */
 
-  CoglBool is_primitive;
+  gboolean is_primitive;
 
-  CoglBool (* allocate) (CoglTexture *tex,
-                         CoglError **error);
+  gboolean (* allocate) (CoglTexture *tex,
+                         GError **error);
 
   /* This should update the specified sub region of the texture with a
      sub region of the given bitmap. The bitmap is not converted
      before being set so the caller is expected to have called
      _cogl_bitmap_convert_for_upload with a suitable internal_format
      before passing here */
-  CoglBool (* set_region) (CoglTexture *tex,
+  gboolean (* set_region) (CoglTexture *tex,
                            int src_x,
                            int src_y,
                            int dst_x,
@@ -89,14 +91,16 @@ struct _CoglTextureVtable
                            int dst_height,
                            int level,
                            CoglBitmap *bitmap,
-                           CoglError **error);
+                           GError **error);
+
+  gboolean (* is_get_data_supported) (CoglTexture *texture);
 
   /* This should copy the image data of the texture into @data. The
      requested format will have been first passed through
      ctx->texture_driver->find_best_gl_get_data_format so it should
      always be a format that is valid for GL (ie, no conversion should
      be necessary). */
-  CoglBool (* get_data) (CoglTexture *tex,
+  gboolean (* get_data) (CoglTexture *tex,
                          CoglPixelFormat format,
                          int rowstride,
                          uint8_t *data);
@@ -111,9 +115,9 @@ struct _CoglTextureVtable
 
   int (* get_max_waste) (CoglTexture *tex);
 
-  CoglBool (* is_sliced) (CoglTexture *tex);
+  gboolean (* is_sliced) (CoglTexture *tex);
 
-  CoglBool (* can_hardware_repeat) (CoglTexture *tex);
+  gboolean (* can_hardware_repeat) (CoglTexture *tex);
 
   void (* transform_coords_to_gl) (CoglTexture *tex,
                                    float *s,
@@ -121,7 +125,7 @@ struct _CoglTextureVtable
   CoglTransformResult (* transform_quad_coords_to_gl) (CoglTexture *tex,
 						       float *coords);
 
-  CoglBool (* get_gl_texture) (CoglTexture *tex,
+  gboolean (* get_gl_texture) (CoglTexture *tex,
                                GLuint *out_gl_handle,
                                GLenum *out_gl_target);
 
@@ -142,13 +146,11 @@ struct _CoglTextureVtable
   CoglPixelFormat (* get_format) (CoglTexture *tex);
   GLenum (* get_gl_format) (CoglTexture *tex);
 
-  CoglTextureType (* get_type) (CoglTexture *tex);
-
-  CoglBool (* is_foreign) (CoglTexture *tex);
+  gboolean (* is_foreign) (CoglTexture *tex);
 
   /* Only needs to be implemented if is_primitive == TRUE */
   void (* set_auto_mipmap) (CoglTexture *texture,
-                            CoglBool value);
+                            gboolean value);
 };
 
 typedef enum _CoglTextureSoureType {
@@ -172,7 +174,7 @@ typedef struct _CoglTextureLoader
       CoglBitmap *bitmap;
       int height; /* for 3d textures */
       int depth; /* for 3d textures */
-      CoglBool can_convert_in_place;
+      gboolean can_convert_in_place;
     } bitmap;
 #if defined (COGL_HAS_EGL_SUPPORT) && defined (EGL_KHR_image_base)
     struct {
@@ -180,6 +182,7 @@ typedef struct _CoglTextureLoader
       int width;
       int height;
       CoglPixelFormat format;
+      CoglEglImageFlags flags;
     } egl_image;
 #endif
 #if defined (COGL_HAS_EGL_SUPPORT)
@@ -208,7 +211,7 @@ struct _CoglTexture
   int max_level;
   int width;
   int height;
-  CoglBool allocated;
+  gboolean allocated;
 
   /*
    * Internal format
@@ -273,7 +276,7 @@ _cogl_texture_register_texture_type (const CoglObjectClass *klass);
   (TypeName, type_name,                                                 \
    _cogl_texture_register_texture_type (&_cogl_##type_name##_class))
 
-CoglBool
+gboolean
 _cogl_texture_can_hardware_repeat (CoglTexture *texture);
 
 void
@@ -323,7 +326,7 @@ void
 _cogl_texture_set_internal_format (CoglTexture *texture,
                                    CoglPixelFormat internal_format);
 
-CoglBool
+gboolean
 _cogl_texture_is_foreign (CoglTexture *texture);
 
 void
@@ -350,19 +353,7 @@ _cogl_texture_spans_foreach_in_region (CoglSpan *x_spans,
                                        CoglMetaTextureCallback callback,
                                        void *user_data);
 
-/*
- * _cogl_texture_get_type:
- * @texture: a #CoglTexture pointer
- *
- * Retrieves the texture type of the underlying hardware texture that
- * this #CoglTexture will use.
- *
- * Return value: The type of the hardware texture.
- */
-CoglTextureType
-_cogl_texture_get_type (CoglTexture *texture);
-
-CoglBool
+gboolean
 _cogl_texture_set_region (CoglTexture *texture,
                           int width,
                           int height,
@@ -372,9 +363,9 @@ _cogl_texture_set_region (CoglTexture *texture,
                           int dst_x,
                           int dst_y,
                           int level,
-                          CoglError **error);
+                          GError **error);
 
-CoglBool
+gboolean
 _cogl_texture_set_region_from_bitmap (CoglTexture *texture,
                                       int src_x,
                                       int src_y,
@@ -384,9 +375,9 @@ _cogl_texture_set_region_from_bitmap (CoglTexture *texture,
                                       int dst_x,
                                       int dst_y,
                                       int level,
-                                      CoglError **error);
+                                      GError **error);
 
-CoglBool
+gboolean
 _cogl_texture_needs_premult_conversion (CoglPixelFormat src_format,
                                         CoglPixelFormat dst_format);
 

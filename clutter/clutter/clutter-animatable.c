@@ -30,7 +30,7 @@
  * to control how a #ClutterAnimation will animate a property.
  *
  * Each #ClutterAnimatable should implement the
- * #ClutterAnimatableIface.interpolate_property() virtual function of the
+ * #ClutterAnimatableInterface.interpolate_property() virtual function of the
  * interface to compute the animation state between two values of an interval
  * depending on a progress factor, expressed as a floating point value.
  *
@@ -45,9 +45,7 @@
  * #ClutterAnimatable is available since Clutter 1.0
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #define CLUTTER_DISABLE_DEPRECATION_WARNINGS
 
@@ -59,7 +57,6 @@
 #include "deprecated/clutter-animatable.h"
 #include "deprecated/clutter-animation.h"
 
-typedef ClutterAnimatableIface  ClutterAnimatableInterface;
 G_DEFINE_INTERFACE (ClutterAnimatable, clutter_animatable, G_TYPE_OBJECT);
 
 static void
@@ -103,7 +100,7 @@ clutter_animatable_animate_property (ClutterAnimatable *animatable,
                                      gdouble            progress,
                                      GValue            *value)
 {
-  ClutterAnimatableIface *iface;
+  ClutterAnimatableInterface *iface;
   gboolean res;
 
   g_return_val_if_fail (CLUTTER_IS_ANIMATABLE (animatable), FALSE);
@@ -157,7 +154,7 @@ GParamSpec *
 clutter_animatable_find_property (ClutterAnimatable *animatable,
                                   const gchar       *property_name)
 {
-  ClutterAnimatableIface *iface;
+  ClutterAnimatableInterface *iface;
 
   g_return_val_if_fail (CLUTTER_IS_ANIMATABLE (animatable), NULL);
   g_return_val_if_fail (property_name != NULL, NULL);
@@ -187,7 +184,7 @@ clutter_animatable_get_initial_state (ClutterAnimatable *animatable,
                                       const gchar       *property_name,
                                       GValue            *value)
 {
-  ClutterAnimatableIface *iface;
+  ClutterAnimatableInterface *iface;
 
   g_return_if_fail (CLUTTER_IS_ANIMATABLE (animatable));
   g_return_if_fail (property_name != NULL);
@@ -216,7 +213,7 @@ clutter_animatable_set_final_state (ClutterAnimatable *animatable,
                                     const gchar       *property_name,
                                     const GValue      *value)
 {
-  ClutterAnimatableIface *iface;
+  ClutterAnimatableInterface *iface;
 
   g_return_if_fail (CLUTTER_IS_ANIMATABLE (animatable));
   g_return_if_fail (property_name != NULL);
@@ -262,7 +259,7 @@ clutter_animatable_interpolate_value (ClutterAnimatable *animatable,
                                       gdouble            progress,
                                       GValue            *value)
 {
-  ClutterAnimatableIface *iface;
+  ClutterAnimatableInterface *iface;
 
   g_return_val_if_fail (CLUTTER_IS_ANIMATABLE (animatable), FALSE);
   g_return_val_if_fail (property_name != NULL, FALSE);

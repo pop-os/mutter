@@ -34,15 +34,11 @@
 #include <math.h>
 #include <stdlib.h>
 
-#define COGL_VERSION_MIN_REQUIRED COGL_VERSION_1_4
-
 #include "cogl-i18n-private.h"
 #include "cogl-debug.h"
 #include "cogl-util.h"
 #include "cogl-context-private.h"
 #include "cogl-pipeline-private.h"
-#include "cogl-pipeline-opengl-private.h"
-#include "cogl-winsys-private.h"
 #include "cogl-framebuffer-private.h"
 #include "cogl-matrix-private.h"
 #include "cogl-journal-private.h"
@@ -56,12 +52,14 @@
 #include "cogl-private.h"
 #include "cogl1-context.h"
 #include "cogl-offscreen.h"
-#include "cogl-attribute-gl-private.h"
-#include "cogl-clutter.h"
+#include "driver/gl/cogl-pipeline-opengl-private.h"
+#include "driver/gl/cogl-attribute-gl-private.h"
+#include "winsys/cogl-winsys-private.h"
+#include "deprecated/cogl-clutter.h"
 
 #include "deprecated/cogl-framebuffer-deprecated.h"
 
-CoglFuncPtr
+GCallback
 cogl_get_proc_address (const char* name)
 {
   _COGL_GET_CONTEXT (ctx, NULL);
@@ -69,7 +67,7 @@ cogl_get_proc_address (const char* name)
   return _cogl_renderer_get_proc_address (ctx->display->renderer, name, FALSE);
 }
 
-CoglBool
+gboolean
 _cogl_check_extension (const char *name, char * const *ext)
 {
   while (*ext)
@@ -82,7 +80,7 @@ _cogl_check_extension (const char *name, char * const *ext)
 }
 
 /* XXX: This has been deprecated as public API */
-CoglBool
+gboolean
 cogl_check_extension (const char *name, const char *ext)
 {
   return cogl_clutter_check_extension (name, ext);
@@ -98,7 +96,7 @@ cogl_clear (const CoglColor *color, unsigned long buffers)
 
 /* XXX: This API has been deprecated */
 void
-cogl_set_depth_test_enabled (CoglBool setting)
+cogl_set_depth_test_enabled (gboolean setting)
 {
   _COGL_GET_CONTEXT (ctx, NO_RETVAL);
 
@@ -113,7 +111,7 @@ cogl_set_depth_test_enabled (CoglBool setting)
 }
 
 /* XXX: This API has been deprecated */
-CoglBool
+gboolean
 cogl_get_depth_test_enabled (void)
 {
   _COGL_GET_CONTEXT (ctx, FALSE);
@@ -121,7 +119,7 @@ cogl_get_depth_test_enabled (void)
 }
 
 void
-cogl_set_backface_culling_enabled (CoglBool setting)
+cogl_set_backface_culling_enabled (gboolean setting)
 {
   _COGL_GET_CONTEXT (ctx, NO_RETVAL);
 
@@ -136,7 +134,7 @@ cogl_set_backface_culling_enabled (CoglBool setting)
     ctx->legacy_state_set--;
 }
 
-CoglBool
+gboolean
 cogl_get_backface_culling_enabled (void)
 {
   _COGL_GET_CONTEXT (ctx, FALSE);
@@ -203,7 +201,7 @@ cogl_get_features (void)
   return ctx->feature_flags;
 }
 
-CoglBool
+gboolean
 cogl_features_available (CoglFeatureFlags features)
 {
   _COGL_GET_CONTEXT (ctx, 0);
@@ -211,13 +209,13 @@ cogl_features_available (CoglFeatureFlags features)
   return (ctx->feature_flags & features) == features;
 }
 
-CoglBool
+gboolean
 cogl_has_feature (CoglContext *ctx, CoglFeatureID feature)
 {
   return COGL_FLAGS_GET (ctx->features, feature);
 }
 
-CoglBool
+gboolean
 cogl_has_features (CoglContext *ctx, ...)
 {
   va_list args;
@@ -350,82 +348,6 @@ cogl_read_pixels (int x,
 }
 
 void
-cogl_begin_gl (void)
-{
-  CoglPipeline *pipeline;
-
-  _COGL_GET_CONTEXT (ctx, NO_RETVAL);
-
-  if (ctx->in_begin_gl_block)
-    {
-      static CoglBool shown = FALSE;
-      if (!shown)
-        g_warning ("You should not nest cogl_begin_gl/cogl_end_gl blocks");
-      shown = TRUE;
-      return;
-    }
-  ctx->in_begin_gl_block = TRUE;
-
-  /* Flush all batched primitives */
-  cogl_flush ();
-
-  /* Flush framebuffer state, including clip state, modelview and
-   * projection matrix state
-   *
-   * NB: _cogl_framebuffer_flush_state may disrupt various state (such
-   * as the pipeline state) when flushing the clip stack, so should
-   * always be done first when preparing to draw. */
-  _cogl_framebuffer_flush_state (cogl_get_draw_framebuffer (),
-                                 _cogl_get_read_framebuffer (),
-                                 COGL_FRAMEBUFFER_STATE_ALL);
-
-  /* Setup the state for the current pipeline */
-
-  /* We considered flushing a specific, minimal pipeline here to try and
-   * simplify the GL state, but decided to avoid special cases and second
-   * guessing what would be actually helpful.
-   *
-   * A user should instead call cogl_set_source_color4ub() before
-   * cogl_begin_gl() to simplify the state flushed.
-   *
-   * XXX: note defining n_tex_coord_attribs using
-   * cogl_pipeline_get_n_layers is a hack, but the problem is that
-   * n_tex_coord_attribs is usually defined when drawing a primitive
-   * which isn't happening here.
-   *
-   * Maybe it would be more useful if this code did flush the
-   * opaque_color_pipeline and then call into cogl-pipeline-opengl.c to then
-   * restore all state for the material's backend back to default OpenGL
-   * values.
-   */
-  pipeline = cogl_get_source ();
-  _cogl_pipeline_flush_gl_state (ctx,
-                                 pipeline,
-                                 cogl_get_draw_framebuffer (),
-                                 FALSE,
-                                 FALSE);
-
-  /* Disable any cached vertex arrays */
-  _cogl_gl_disable_all_attributes (ctx);
-}
-
-void
-cogl_end_gl (void)
-{
-  _COGL_GET_CONTEXT (ctx, NO_RETVAL);
-
-  if (!ctx->in_begin_gl_block)
-    {
-      static CoglBool shown = FALSE;
-      if (!shown)
-        g_warning ("cogl_end_gl is being called before cogl_begin_gl");
-      shown = TRUE;
-      return;
-    }
-  ctx->in_begin_gl_block = FALSE;
-}
-
-void
 cogl_push_matrix (void)
 {
   cogl_framebuffer_push_matrix (cogl_get_draw_framebuffer ());
@@ -534,11 +456,11 @@ typedef struct _CoglSourceState
      necessary because some internal Cogl code expects to be able to
      push a temporary pipeline to put GL into a known state. For that
      to work it also needs to prevent applying the legacy state */
-  CoglBool enable_legacy;
+  gboolean enable_legacy;
 } CoglSourceState;
 
 static void
-_push_source_real (CoglPipeline *pipeline, CoglBool enable_legacy)
+_push_source_real (CoglPipeline *pipeline, gboolean enable_legacy)
 {
   CoglSourceState *top = g_slice_new (CoglSourceState);
   _COGL_GET_CONTEXT (ctx, NO_RETVAL);
@@ -558,7 +480,7 @@ cogl_push_source (void *material_or_pipeline)
 {
   CoglPipeline *pipeline = COGL_PIPELINE (material_or_pipeline);
 
-  _COGL_RETURN_IF_FAIL (cogl_is_pipeline (pipeline));
+  g_return_if_fail (cogl_is_pipeline (pipeline));
 
   _cogl_push_source (pipeline, TRUE);
 }
@@ -567,13 +489,13 @@ cogl_push_source (void *material_or_pipeline)
    never applies the legacy state. Some parts of Cogl use this
    internally to set a temporary pipeline with a known state */
 void
-_cogl_push_source (CoglPipeline *pipeline, CoglBool enable_legacy)
+_cogl_push_source (CoglPipeline *pipeline, gboolean enable_legacy)
 {
   CoglSourceState *top;
 
   _COGL_GET_CONTEXT (ctx, NO_RETVAL);
 
-  _COGL_RETURN_IF_FAIL (cogl_is_pipeline (pipeline));
+  g_return_if_fail (cogl_is_pipeline (pipeline));
 
   if (ctx->source_stack)
     {
@@ -598,7 +520,7 @@ cogl_pop_source (void)
 
   _COGL_GET_CONTEXT (ctx, NO_RETVAL);
 
-  _COGL_RETURN_IF_FAIL (ctx->source_stack);
+  g_return_if_fail (ctx->source_stack);
 
   top = ctx->source_stack->data;
   top->push_count--;
@@ -619,20 +541,20 @@ cogl_get_source (void)
 
   _COGL_GET_CONTEXT (ctx, NULL);
 
-  _COGL_RETURN_VAL_IF_FAIL (ctx->source_stack, NULL);
+  g_return_val_if_fail (ctx->source_stack, NULL);
 
   top = ctx->source_stack->data;
   return top->pipeline;
 }
 
-CoglBool
+gboolean
 _cogl_get_enable_legacy_state (void)
 {
   CoglSourceState *top;
 
   _COGL_GET_CONTEXT (ctx, FALSE);
 
-  _COGL_RETURN_VAL_IF_FAIL (ctx->source_stack, FALSE);
+  g_return_val_if_fail (ctx->source_stack, FALSE);
 
   top = ctx->source_stack->data;
   return top->enable_legacy;
@@ -646,8 +568,8 @@ cogl_set_source (void *material_or_pipeline)
 
   _COGL_GET_CONTEXT (ctx, NO_RETVAL);
 
-  _COGL_RETURN_IF_FAIL (cogl_is_pipeline (pipeline));
-  _COGL_RETURN_IF_FAIL (ctx->source_stack);
+  g_return_if_fail (cogl_is_pipeline (pipeline));
+  g_return_if_fail (ctx->source_stack);
 
   top = ctx->source_stack->data;
   if (top->pipeline == pipeline && top->enable_legacy)
@@ -674,7 +596,7 @@ cogl_set_source_texture (CoglTexture *texture)
 {
   _COGL_GET_CONTEXT (ctx, NO_RETVAL);
 
-  _COGL_RETURN_IF_FAIL (texture != NULL);
+  g_return_if_fail (texture != NULL);
 
   cogl_pipeline_set_layer_texture (ctx->texture_pipeline, 0, texture);
   cogl_set_source (ctx->texture_pipeline);
@@ -753,7 +675,7 @@ _cogl_system_error_quark (void)
 void
 _cogl_init (void)
 {
-  static CoglBool initialized = FALSE;
+  static gboolean initialized = FALSE;
 
   if (initialized == FALSE)
     {
@@ -765,56 +687,4 @@ _cogl_init (void)
       _cogl_debug_check_environment ();
       initialized = TRUE;
     }
-}
-
-/*
- * Returns the number of bytes-per-pixel of a given format. The bpp
- * can be extracted from the least significant nibble of the pixel
- * format (see CoglPixelFormat).
- *
- * The mapping is the following (see discussion on bug #660188):
- *
- * 0     = undefined
- * 1, 8  = 1 bpp (e.g. A_8, G_8)
- * 2     = 3 bpp, aligned (e.g. 888)
- * 3     = 4 bpp, aligned (e.g. 8888)
- * 4-6   = 2 bpp, not aligned (e.g. 565, 4444, 5551)
- * 7     = undefined yuv
- * 9     = 2 bpp, aligned
- * 10     = undefined
- * 11     = undefined
- * 12    = 3 bpp, not aligned
- * 13    = 4 bpp, not aligned (e.g. 2101010)
- * 14-15 = undefined
- */
-int
-_cogl_pixel_format_get_bytes_per_pixel (CoglPixelFormat format)
-{
-  int bpp_lut[] = { 0, 1, 3, 4,
-                    2, 2, 2, 0,
-                    1, 2, 0, 0,
-                    3, 4, 0, 0 };
-
-  return bpp_lut [format & 0xf];
-}
-
-/* Note: this also refers to the mapping defined above for
- * _cogl_pixel_format_get_bytes_per_pixel() */
-CoglBool
-_cogl_pixel_format_is_endian_dependant (CoglPixelFormat format)
-{
-  int aligned_lut[] = { -1, 1,  1,  1,
-                         0, 0,  0, -1,
-                         1, 1, -1, -1,
-                         0, 0, -1, -1};
-  int aligned = aligned_lut[format & 0xf];
-
-  _COGL_RETURN_VAL_IF_FAIL (aligned != -1, FALSE);
-
-  /* NB: currently checking whether the format components are aligned
-   * or not determines whether the format is endian dependent or not.
-   * In the future though we might consider adding formats with
-   * aligned components that are also endian independant. */
-
-  return aligned;
 }

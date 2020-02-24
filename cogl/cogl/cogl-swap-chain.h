@@ -37,7 +37,7 @@
 
 #include <glib-object.h>
 
-COGL_BEGIN_DECLS
+G_BEGIN_DECLS
 
 typedef struct _CoglSwapChain CoglSwapChain;
 
@@ -53,15 +53,15 @@ cogl_swap_chain_new (void);
 
 void
 cogl_swap_chain_set_has_alpha (CoglSwapChain *swap_chain,
-                               CoglBool has_alpha);
+                               gboolean has_alpha);
 
 void
 cogl_swap_chain_set_length (CoglSwapChain *swap_chain,
                             int length);
 
-CoglBool
+gboolean
 cogl_is_swap_chain (void *object);
 
-COGL_END_DECLS
+G_END_DECLS
 
 #endif /* __COGL_SWAP_CHAIN_H__ */

@@ -28,20 +28,35 @@
 
 #include <meta/common.h>
 
+META_EXPORT
 gboolean meta_is_verbose  (void);
+
+META_EXPORT
 gboolean meta_is_debugging (void);
+
+META_EXPORT
 gboolean meta_is_syncing (void);
+
+META_EXPORT
 gboolean meta_is_wayland_compositor (void);
 
+META_EXPORT
 void meta_debug_spew_real (const char *format,
                            ...) G_GNUC_PRINTF (1, 2);
+
+META_EXPORT
 void meta_verbose_real    (const char *format,
                            ...) G_GNUC_PRINTF (1, 2);
 
+META_EXPORT
 void meta_bug        (const char *format,
                       ...) G_GNUC_PRINTF (1, 2);
+
+META_EXPORT
 void meta_warning    (const char *format,
                       ...) G_GNUC_PRINTF (1, 2);
+
+META_EXPORT
 void meta_fatal      (const char *format,
                       ...) G_GNUC_PRINTF (1, 2) G_GNUC_NORETURN G_ANALYZER_NORETURN;
 
@@ -99,28 +114,42 @@ typedef enum
   META_DEBUG_DBUS            = 1 << 22
 } MetaDebugTopic;
 
+META_EXPORT
 void meta_topic_real      (MetaDebugTopic topic,
                            const char    *format,
                            ...) G_GNUC_PRINTF (2, 3);
+
+META_EXPORT
 void meta_add_verbose_topic    (MetaDebugTopic topic);
+
+META_EXPORT
 void meta_remove_verbose_topic (MetaDebugTopic topic);
 
+META_EXPORT
 void meta_push_no_msg_prefix (void);
+
+META_EXPORT
 void meta_pop_no_msg_prefix  (void);
 
+META_EXPORT
 gint  meta_unsigned_long_equal (gconstpointer v1,
                                 gconstpointer v2);
+
+META_EXPORT
 guint meta_unsigned_long_hash  (gconstpointer v);
 
+META_EXPORT
 const char* meta_frame_type_to_string (MetaFrameType type);
+META_EXPORT
 const char* meta_gravity_to_string (int gravity);
 
+META_EXPORT
 char* meta_external_binding_name_for_action (guint keybinding_action);
 
+META_EXPORT
 char* meta_g_utf8_strndup (const gchar *src, gsize n);
 
-void  meta_free_gslist_and_elements (GSList *list_to_deep_free);
-
+META_EXPORT
 GPid meta_show_dialog (const char *type,
                        const char *message,
                        const char *timeout,
@@ -166,7 +195,8 @@ GPid meta_show_dialog (const char *type,
  * @META_LATER_IDLE: call at a very low priority (can be blocked
  *    by running animations or redrawing applications)
  **/
-typedef enum {
+typedef enum
+{
   META_LATER_RESIZE,
   META_LATER_CALC_SHOWING,
   META_LATER_CHECK_FULLSCREEN,
@@ -175,10 +205,13 @@ typedef enum {
   META_LATER_IDLE
 } MetaLaterType;
 
+META_EXPORT
 guint meta_later_add    (MetaLaterType  when,
                          GSourceFunc    func,
                          gpointer       data,
                          GDestroyNotify notify);
+
+META_EXPORT
 void  meta_later_remove (guint          later_id);
 
 typedef enum
@@ -187,8 +220,7 @@ typedef enum
   META_LOCALE_DIRECTION_RTL,
 } MetaLocaleDirection;
 
+META_EXPORT
 MetaLocaleDirection meta_get_locale_direction (void);
 
 #endif /* META_UTIL_H */
-
-

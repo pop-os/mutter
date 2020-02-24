@@ -37,9 +37,7 @@
  * #ClutterClone is available since Clutter 1.0
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #define CLUTTER_ENABLE_EXPERIMENTAL_API
 #include "clutter-actor-private.h"
@@ -253,6 +251,13 @@ clutter_clone_allocate (ClutterActor           *self,
 
   if (priv->clone_source == NULL)
     return;
+
+  /* ClutterActor delays allocating until the actor is shown; however
+   * we cannot paint it correctly in that case, so force an allocation.
+   */
+  if (clutter_actor_get_parent (priv->clone_source) != NULL &&
+      !clutter_actor_has_allocation (priv->clone_source))
+    clutter_actor_allocate_preferred_size (priv->clone_source, flags);
 
 #if 0
   /* XXX - this is wrong: ClutterClone cannot clone unparented

@@ -4,6 +4,7 @@
  * A Low Level GPU Graphics and Utilities API
  *
  * Copyright (C) 2009, 2011 Intel Corporation.
+ * Copyright (C) 2019 DisplayLink (UK) Ltd.
  *
  * Permission is hereby granted, free of charge, to any person
  * obtaining a copy of this software and associated documentation
@@ -59,10 +60,6 @@
 /* The functions in this file are part of the core GL,GLES1 and GLES2 apis */
 #include "cogl-core-functions.h"
 
-/* The functions in this file are core to GLES1 only but may also be
- * extensions available for GLES2 and GL */
-#include "cogl-in-gles1-core-functions.h"
-
 /* The functions in this file are core to GLES2 only but
  * may be extensions for GLES1 and GL */
 #include "cogl-in-gles2-core-functions.h"
@@ -113,31 +110,10 @@ COGL_EXT_FUNCTION (GLboolean, glUnmapBuffer,
                    (GLenum		 target))
 COGL_EXT_END ()
 
-COGL_EXT_BEGIN (texture_3d, 1, 2,
-                0, /* not in either GLES */
-                "OES\0",
-                "texture_3D\0")
-COGL_EXT_FUNCTION (void, glTexImage3D,
-                   (GLenum target, GLint level,
-                    GLint internalFormat,
-                    GLsizei width, GLsizei height,
-                    GLsizei depth, GLint border,
-                    GLenum format, GLenum type,
-                    const GLvoid *pixels))
-COGL_EXT_FUNCTION (void, glTexSubImage3D,
-                   (GLenum target, GLint level,
-                    GLint xoffset, GLint yoffset,
-                    GLint zoffset, GLsizei width,
-                    GLsizei height, GLsizei depth,
-                    GLenum format,
-                    GLenum type, const GLvoid *pixels))
-COGL_EXT_END ()
-
-
 
 COGL_EXT_BEGIN (offscreen_blit, 3, 0,
-                0, /* not in either GLES */
-                "EXT\0ANGLE\0",
+                COGL_EXT_IN_GLES3,
+                "EXT\0NV\0",
                 "framebuffer_blit\0")
 COGL_EXT_FUNCTION (void, glBlitFramebuffer,
                    (GLint                 srcX0,
@@ -150,31 +126,6 @@ COGL_EXT_FUNCTION (void, glBlitFramebuffer,
                     GLint                 dstY1,
                     GLbitfield            mask,
                     GLenum                filter))
-COGL_EXT_END ()
-
-/* ARB_fragment_program */
-COGL_EXT_BEGIN (arbfp, 255, 255,
-                0, /* not in either GLES */
-                "ARB\0",
-                "fragment_program\0")
-COGL_EXT_FUNCTION (void, glGenPrograms,
-                   (GLsizei               n,
-                    GLuint               *programs))
-COGL_EXT_FUNCTION (void, glDeletePrograms,
-                   (GLsizei               n,
-                    GLuint               *programs))
-COGL_EXT_FUNCTION (void, glBindProgram,
-                   (GLenum                target,
-                    GLuint                program))
-COGL_EXT_FUNCTION (void, glProgramString,
-                   (GLenum                target,
-                    GLenum                format,
-                    GLsizei               len,
-                    const void           *program))
-COGL_EXT_FUNCTION (void, glProgramLocalParameter4fv,
-                   (GLenum                target,
-                    GLuint                index,
-                    GLfloat              *params))
 COGL_EXT_END ()
 
 COGL_EXT_BEGIN (EGL_image, 255, 255,
@@ -333,4 +284,12 @@ COGL_EXT_BEGIN (robustness, 255, 255,
                 "robustness\0")
 COGL_EXT_FUNCTION (GLenum, glGetGraphicsResetStatus,
                    (void))
+COGL_EXT_END ()
+
+COGL_EXT_BEGIN (multitexture_part1, 1, 3,
+                0,
+                "ARB\0",
+                "multitexture\0")
+COGL_EXT_FUNCTION (void, glClientActiveTexture,
+                   (GLenum                texture))
 COGL_EXT_END ()

@@ -3,7 +3,8 @@
  *
  * A Low Level GPU Graphics and Utilities API
  *
- * Copyright (C) 2011 Intel Corporation.
+ * Copyright (C) 2007,2008,2009,2011 Intel Corporation.
+ * Copyright (C) 2019 DisplayLink (UK) Ltd.
  *
  * Permission is hereby granted, free of charge, to any person
  * obtaining a copy of this software and associated documentation
@@ -56,7 +57,7 @@ typedef struct _CoglFramebuffer CoglFramebuffer;
 #include <cogl/cogl-texture.h>
 #include <glib-object.h>
 
-COGL_BEGIN_DECLS
+G_BEGIN_DECLS
 
 /**
  * SECTION:cogl-framebuffer
@@ -106,7 +107,7 @@ GType cogl_framebuffer_get_gtype (void);
 /**
  * cogl_framebuffer_allocate:
  * @framebuffer: A #CoglFramebuffer
- * @error: A pointer to a #CoglError for returning exceptions.
+ * @error: A pointer to a #GError for returning exceptions.
  *
  * Explicitly allocates a configured #CoglFramebuffer allowing developers to
  * check and handle any errors that might arise from an unsupported
@@ -123,9 +124,9 @@ GType cogl_framebuffer_get_gtype (void);
  * Since: 1.8
  * Stability: unstable
  */
-CoglBool
+gboolean
 cogl_framebuffer_allocate (CoglFramebuffer *framebuffer,
-                           CoglError **error);
+                           GError **error);
 
 /**
  * cogl_framebuffer_get_width:
@@ -602,7 +603,7 @@ cogl_framebuffer_push_rectangle_clip (CoglFramebuffer *framebuffer,
                                       float y_2);
 
 /**
- * cogl_framebuffer_push_primitive_clip:
+ * cogl_framebuffer_push_primitive_clip: (skip)
  * @framebuffer: A #CoglFramebuffer pointer
  * @primitive: A #CoglPrimitive describing a flat 2D shape
  * @bounds_x1: x coordinate for the top-left corner of the primitives
@@ -736,7 +737,7 @@ cogl_framebuffer_get_depth_bits (CoglFramebuffer *framebuffer);
  * Since: 1.20
  * Stability: unstable
  */
-CoglBool
+gboolean
 cogl_framebuffer_get_is_stereo (CoglFramebuffer *framebuffer);
 
 /**
@@ -754,7 +755,7 @@ cogl_framebuffer_get_is_stereo (CoglFramebuffer *framebuffer);
  * Since: 1.8
  * Stability: unstable
  */
-CoglBool
+gboolean
 cogl_framebuffer_get_dither_enabled (CoglFramebuffer *framebuffer);
 
 /**
@@ -781,7 +782,7 @@ cogl_framebuffer_get_dither_enabled (CoglFramebuffer *framebuffer);
  */
 void
 cogl_framebuffer_set_dither_enabled (CoglFramebuffer *framebuffer,
-                                     CoglBool dither_enabled);
+                                     gboolean dither_enabled);
 
 /**
  * cogl_framebuffer_get_depth_write_enabled:
@@ -794,7 +795,7 @@ cogl_framebuffer_set_dither_enabled (CoglFramebuffer *framebuffer,
  * Since: 1.18
  * Stability: unstable
  */
-CoglBool
+gboolean
 cogl_framebuffer_get_depth_write_enabled (CoglFramebuffer *framebuffer);
 
 /**
@@ -814,39 +815,7 @@ cogl_framebuffer_get_depth_write_enabled (CoglFramebuffer *framebuffer);
  */
 void
 cogl_framebuffer_set_depth_write_enabled (CoglFramebuffer *framebuffer,
-                                          CoglBool depth_write_enabled);
-
-/**
- * cogl_framebuffer_get_color_mask:
- * @framebuffer: a pointer to a #CoglFramebuffer
- *
- * Gets the current #CoglColorMask of which channels would be written to the
- * current framebuffer. Each bit set in the mask means that the
- * corresponding color would be written.
- *
- * Returns: A #CoglColorMask
- * Since: 1.8
- * Stability: unstable
- */
-CoglColorMask
-cogl_framebuffer_get_color_mask (CoglFramebuffer *framebuffer);
-
-/**
- * cogl_framebuffer_set_color_mask:
- * @framebuffer: a pointer to a #CoglFramebuffer
- * @color_mask: A #CoglColorMask of which color channels to write to
- *              the current framebuffer.
- *
- * Defines a bit mask of which color channels should be written to the
- * given @framebuffer. If a bit is set in @color_mask that means that
- * color will be written.
- *
- * Since: 1.8
- * Stability: unstable
- */
-void
-cogl_framebuffer_set_color_mask (CoglFramebuffer *framebuffer,
-                                 CoglColorMask color_mask);
+                                          gboolean depth_write_enabled);
 
 /**
  * cogl_framebuffer_get_stereo_mode:
@@ -904,7 +873,7 @@ cogl_framebuffer_set_stereo_mode (CoglFramebuffer *framebuffer,
  */
 void
 cogl_framebuffer_set_depth_texture_enabled (CoglFramebuffer *framebuffer,
-                                            CoglBool enabled);
+                                            gboolean enabled);
 
 /**
  * cogl_framebuffer_get_depth_texture_enabled:
@@ -919,7 +888,7 @@ cogl_framebuffer_set_depth_texture_enabled (CoglFramebuffer *framebuffer,
  * Since: 1.14
  * Stability: unstable
  */
-CoglBool
+gboolean
 cogl_framebuffer_get_depth_texture_enabled (CoglFramebuffer *framebuffer);
 
 /**
@@ -1087,7 +1056,7 @@ cogl_framebuffer_resolve_samples_region (CoglFramebuffer *framebuffer,
                                          int height);
 
 /**
- * cogl_framebuffer_get_context:
+ * cogl_framebuffer_get_context: (skip)
  * @framebuffer: A #CoglFramebuffer
  *
  * Can be used to query the #CoglContext a given @framebuffer was
@@ -1150,7 +1119,7 @@ cogl_framebuffer_clear4f (CoglFramebuffer *framebuffer,
                           float alpha);
 
 /**
- * cogl_framebuffer_draw_primitive:
+ * cogl_framebuffer_draw_primitive: (skip)
  * @framebuffer: A destination #CoglFramebuffer
  * @pipeline: A #CoglPipeline state object
  * @primitive: A #CoglPrimitive geometry object
@@ -1161,8 +1130,8 @@ cogl_framebuffer_clear4f (CoglFramebuffer *framebuffer,
  * This drawing api doesn't support high-level meta texture types such
  * as #CoglTexture2DSliced so it is the user's responsibility to
  * ensure that only low-level textures that can be directly sampled by
- * a GPU such as #CoglTexture2D, #CoglTextureRectangle or #CoglTexture3D
- * are associated with layers of the given @pipeline.
+ * a GPU such as #CoglTexture2D are associated with layers of the given
+ * @pipeline.
  *
  * <note>This api doesn't support any of the legacy global state options such
  * as cogl_set_depth_test_enabled(), cogl_set_backface_culling_enabled() or
@@ -1173,7 +1142,7 @@ cogl_framebuffer_clear4f (CoglFramebuffer *framebuffer,
  * Deprecated: 1.16: Use #CoglPrimitive<!-- -->s and
  *                   cogl_primitive_draw() instead
  */
-COGL_DEPRECATED_IN_1_16_FOR (cogl_primitive_draw)
+COGL_DEPRECATED_FOR (cogl_primitive_draw)
 void
 cogl_framebuffer_draw_primitive (CoglFramebuffer *framebuffer,
                                  CoglPipeline *pipeline,
@@ -1203,25 +1172,25 @@ cogl_framebuffer_draw_primitive (CoglFramebuffer *framebuffer,
  * This drawing api doesn't support high-level meta texture types such
  * as #CoglTexture2DSliced so it is the user's responsibility to
  * ensure that only low-level textures that can be directly sampled by
- * a GPU such as #CoglTexture2D, #CoglTextureRectangle or #CoglTexture3D
- * are associated with layers of the given @pipeline.
+ * a GPU such as #CoglTexture2D are associated with layers of the given
+ * @pipeline.
  *
  * Stability: unstable
  * Since: 1.10
  * Deprecated: 1.16: Use #CoglPrimitive<!-- -->s and
  *                   cogl_primitive_draw() instead
  */
-COGL_DEPRECATED_IN_1_16_FOR (cogl_primitive_draw)
+COGL_DEPRECATED_FOR (cogl_primitive_draw)
 void
 cogl_framebuffer_vdraw_attributes (CoglFramebuffer *framebuffer,
                                    CoglPipeline *pipeline,
                                    CoglVerticesMode mode,
                                    int first_vertex,
                                    int n_vertices,
-                                   ...) COGL_GNUC_NULL_TERMINATED;
+                                   ...) G_GNUC_NULL_TERMINATED;
 
 /**
- * cogl_framebuffer_draw_attributes:
+ * cogl_framebuffer_draw_attributes: (skip)
  * @framebuffer: A destination #CoglFramebuffer
  * @pipeline: A #CoglPipeline state object
  * @mode: The #CoglVerticesMode defining the topology of vertices
@@ -1246,8 +1215,8 @@ cogl_framebuffer_vdraw_attributes (CoglFramebuffer *framebuffer,
  * This drawing api doesn't support high-level meta texture types such
  * as #CoglTexture2DSliced so it is the user's responsibility to
  * ensure that only low-level textures that can be directly sampled by
- * a GPU such as #CoglTexture2D, #CoglTextureRectangle or #CoglTexture3D
- * are associated with layers of the given @pipeline.
+ * a GPU such as #CoglTexture2D are associated with layers of the given
+ * @pipeline.
  *
  * <note>This api doesn't support any of the legacy global state options such
  * as cogl_set_depth_test_enabled(), cogl_set_backface_culling_enabled() or
@@ -1258,7 +1227,7 @@ cogl_framebuffer_vdraw_attributes (CoglFramebuffer *framebuffer,
  * Deprecated: 1.16: Use #CoglPrimitive<!-- -->s and
  *                   cogl_primitive_draw() instead
  */
-COGL_DEPRECATED_IN_1_16_FOR (cogl_primitive_draw)
+COGL_DEPRECATED_FOR (cogl_primitive_draw)
 void
 cogl_framebuffer_draw_attributes (CoglFramebuffer *framebuffer,
                                   CoglPipeline *pipeline,
@@ -1269,7 +1238,7 @@ cogl_framebuffer_draw_attributes (CoglFramebuffer *framebuffer,
                                   int n_attributes);
 
 /**
- * cogl_framebuffer_vdraw_indexed_attributes:
+ * cogl_framebuffer_vdraw_indexed_attributes: (skip)
  * @framebuffer: A destination #CoglFramebuffer
  * @pipeline: A #CoglPipeline state object
  * @mode: The #CoglVerticesMode defining the topology of vertices
@@ -1312,8 +1281,8 @@ cogl_framebuffer_draw_attributes (CoglFramebuffer *framebuffer,
  * This drawing api doesn't support high-level meta texture types such
  * as #CoglTexture2DSliced so it is the user's responsibility to
  * ensure that only low-level textures that can be directly sampled by
- * a GPU such as #CoglTexture2D, #CoglTextureRectangle or
- * #CoglTexture3D are associated with layers of the given @pipeline.
+ * a GPU such as #CoglTexture2D are associated with layers of the given
+ * @pipeline.
  *
  * <note>This api doesn't support any of the legacy global state
  * options such as cogl_set_depth_test_enabled(),
@@ -1324,7 +1293,7 @@ cogl_framebuffer_draw_attributes (CoglFramebuffer *framebuffer,
  * Deprecated: 1.16: Use #CoglPrimitive<!-- -->s and
  *                   cogl_primitive_draw() instead
  */
-COGL_DEPRECATED_IN_1_16_FOR (cogl_primitive_draw)
+COGL_DEPRECATED_FOR (cogl_primitive_draw)
 void
 cogl_framebuffer_vdraw_indexed_attributes (CoglFramebuffer *framebuffer,
                                            CoglPipeline *pipeline,
@@ -1332,10 +1301,10 @@ cogl_framebuffer_vdraw_indexed_attributes (CoglFramebuffer *framebuffer,
                                            int first_vertex,
                                            int n_vertices,
                                            CoglIndices *indices,
-                                           ...) COGL_GNUC_NULL_TERMINATED;
+                                           ...) G_GNUC_NULL_TERMINATED;
 
 /**
- * cogl_framebuffer_draw_indexed_attributes:
+ * cogl_framebuffer_draw_indexed_attributes: (skip)
  * @framebuffer: A destination #CoglFramebuffer
  * @pipeline: A #CoglPipeline state object
  * @mode: The #CoglVerticesMode defining the topology of vertices
@@ -1380,8 +1349,8 @@ cogl_framebuffer_vdraw_indexed_attributes (CoglFramebuffer *framebuffer,
  * This drawing api doesn't support high-level meta texture types such
  * as #CoglTexture2DSliced so it is the user's responsibility to
  * ensure that only low-level textures that can be directly sampled by
- * a GPU such as #CoglTexture2D, #CoglTextureRectangle or
- * #CoglTexture3D are associated with layers of the given @pipeline.
+ * a GPU such as #CoglTexture2D are associated with layers of the given
+ * @pipeline.
  *
  * <note>This api doesn't support any of the legacy global state
  * options such as cogl_set_depth_test_enabled(),
@@ -1392,7 +1361,7 @@ cogl_framebuffer_vdraw_indexed_attributes (CoglFramebuffer *framebuffer,
  * Deprecated: 1.16: Use #CoglPrimitive<!-- -->s and
  *                   cogl_primitive_draw() instead
  */
-COGL_DEPRECATED_IN_1_16_FOR (cogl_primitive_draw)
+COGL_DEPRECATED_FOR (cogl_primitive_draw)
 void
 cogl_framebuffer_draw_indexed_attributes (CoglFramebuffer *framebuffer,
                                           CoglPipeline *pipeline,
@@ -1475,11 +1444,6 @@ cogl_framebuffer_draw_rectangle (CoglFramebuffer *framebuffer,
  * bottom right. To map an entire texture across the rectangle pass
  * in @s_1=0, @t_1=0, @s_2=1, @t_2=1.
  *
- * <note>Even if you have associated a #CoglTextureRectangle texture
- * with one of your @pipeline layers which normally implies working
- * with non-normalized texture coordinates this api should still be
- * passed normalized texture coordinates.</note>
- *
  * Since: 1.10
  * Stability: unstable
  */
@@ -1532,9 +1496,7 @@ cogl_framebuffer_draw_textured_rectangle (CoglFramebuffer *framebuffer,
  * <note>This api can not currently handle multiple high-level meta
  * texture layers. The first layer may be a high level meta texture
  * such as #CoglTexture2DSliced but all other layers much be low
- * level textures such as #CoglTexture2D and additionally they
- * should be textures that can be sampled using normalized coordinates
- * (so not #CoglTextureRectangle textures).</note>
+ * level textures such as #CoglTexture2D.
  *
  * The top left texture coordinate for layer 0 of any pipeline will be
  * (tex_coords[0], tex_coords[1]) and the bottom right coordinate will
@@ -1547,11 +1509,6 @@ cogl_framebuffer_draw_textured_rectangle (CoglFramebuffer *framebuffer,
  * bottom right. To map an entire texture across the rectangle pass
  * in tex_coords[0]=0, tex_coords[1]=0, tex_coords[2]=1,
  * tex_coords[3]=1.
- *
- * <note>Even if you have associated a #CoglTextureRectangle texture
- * which normally implies working with non-normalized texture
- * coordinates this api should still be passed normalized texture
- * coordinates.</note>
  *
  * The first pair of coordinates are for the first layer (with the
  * smallest layer index) and if you supply less texture coordinates
@@ -1656,11 +1613,6 @@ cogl_framebuffer_draw_rectangles (CoglFramebuffer *framebuffer,
  * in tex_coords[0]=0, tex_coords[1]=0, tex_coords[2]=1,
  * tex_coords[3]=1.
  *
- * <note>Even if you have associated a #CoglTextureRectangle texture
- * which normally implies working with non-normalized texture
- * coordinates this api should still be passed normalized texture
- * coordinates.</note>
- *
  * Since: 1.10
  * Stability: unstable
  */
@@ -1749,7 +1701,7 @@ cogl_framebuffer_finish (CoglFramebuffer *framebuffer);
  * Since: 1.10
  * Stability: unstable
  */
-CoglBool
+gboolean
 cogl_framebuffer_read_pixels_into_bitmap (CoglFramebuffer *framebuffer,
                                           int x,
                                           int y,
@@ -1795,7 +1747,7 @@ cogl_framebuffer_read_pixels_into_bitmap (CoglFramebuffer *framebuffer,
  * Since: 1.10
  * Stability: unstable
  */
-CoglBool
+gboolean
 cogl_framebuffer_read_pixels (CoglFramebuffer *framebuffer,
                               int x,
                               int y,
@@ -1827,7 +1779,8 @@ cogl_framebuffer_error_quark (void);
  */
 #define COGL_FRAMEBUFFER_ERROR (cogl_framebuffer_error_quark ())
 
-typedef enum { /*< prefix=COGL_FRAMEBUFFER_ERROR >*/
+typedef enum /*< prefix=COGL_FRAMEBUFFER_ERROR >*/
+{
   COGL_FRAMEBUFFER_ERROR_ALLOCATE
 } CoglFramebufferError;
 
@@ -1842,9 +1795,72 @@ typedef enum { /*< prefix=COGL_FRAMEBUFFER_ERROR >*/
  * Since: 1.10
  * Stability: unstable
  */
-CoglBool
+gboolean
 cogl_is_framebuffer (void *object);
 
-COGL_END_DECLS
+/**
+ * cogl_blit_framebuffer:
+ * @src: The source #CoglFramebuffer
+ * @dest: The destination #CoglFramebuffer
+ * @src_x: Source x position
+ * @src_y: Source y position
+ * @dst_x: Destination x position
+ * @dst_y: Destination y position
+ * @width: Width of region to copy
+ * @height: Height of region to copy
+ * @error: optional error object
+ *
+ * @return FALSE for an immediately detected error, TRUE otherwise.
+ *
+ * This blits a region of the color buffer of the source buffer
+ * to the destination buffer. This function should only be
+ * called if the COGL_PRIVATE_FEATURE_BLIT_FRAMEBUFFER feature is
+ * advertised.
+ *
+ * The source and destination rectangles are defined in offscreen
+ * framebuffer orientation. When copying between an offscreen and
+ * onscreen framebuffers, the image is y-flipped accordingly.
+ *
+ * The two buffers must have the same value types (e.g. floating-point,
+ * unsigned int, signed int, or fixed-point), but color formats do not
+ * need to match. This limitation comes from OpenGL ES 3.0 definition
+ * of glBlitFramebuffer.
+ *
+ * Note that this function differs a lot from the glBlitFramebuffer
+ * function provided by the GL_EXT_framebuffer_blit extension. Notably
+ * it doesn't support having different sizes for the source and
+ * destination rectangle. This doesn't seem
+ * like a particularly useful feature. If the application wanted to
+ * scale the results it may make more sense to draw a primitive
+ * instead.
+ *
+ * The GL function is documented to be affected by the scissor. This
+ * function therefore ensure that an empty clip stack is flushed
+ * before performing the blit which means the scissor is effectively
+ * ignored.
+ *
+ * The function also doesn't support specifying the buffers to copy
+ * and instead only the color buffer is copied. When copying the depth
+ * or stencil buffers the extension on GLES2.0 only supports copying
+ * the full buffer which would be awkward to document with this
+ * API. If we wanted to support that feature it may be better to have
+ * a separate function to copy the entire buffer for a given mask.
+ *
+ * The @c error argument is optional, it can be NULL. If it is not NULL
+ * and this function returns FALSE, an error object with a code from
+ * COGL_SYSTEM_ERROR will be created.
+ */
+gboolean
+cogl_blit_framebuffer (CoglFramebuffer *src,
+                       CoglFramebuffer *dest,
+                       int src_x,
+                       int src_y,
+                       int dst_x,
+                       int dst_y,
+                       int width,
+                       int height,
+                       GError **error);
+
+G_END_DECLS
 
 #endif /* __COGL_FRAMEBUFFER_H */

@@ -20,21 +20,29 @@
 #ifndef META_STAGE_PRIVATE_H
 #define META_STAGE_PRIVATE_H
 
-#include <meta/meta-stage.h>
-
-#include "meta-cursor.h"
-#include <meta/boxes.h>
+#include "backends/meta-cursor.h"
+#include "meta/boxes.h"
+#include "meta/meta-stage.h"
+#include "meta/types.h"
 
 G_BEGIN_DECLS
 
+typedef struct _MetaStageWatch MetaStageWatch;
 typedef struct _MetaOverlay    MetaOverlay;
 
-struct _MetaStage
+typedef enum
 {
-  ClutterStage parent;
-};
+  META_STAGE_WATCH_BEFORE_PAINT,
+  META_STAGE_WATCH_AFTER_ACTOR_PAINT,
+  META_STAGE_WATCH_AFTER_OVERLAY_PAINT,
+  META_STAGE_WATCH_AFTER_PAINT,
+} MetaStageWatchPhase;
 
-ClutterActor     *meta_stage_new                     (void);
+typedef void (* MetaStageWatchFunc) (MetaStage        *stage,
+                                     ClutterStageView *view,
+                                     gpointer          user_data);
+
+ClutterActor     *meta_stage_new                     (MetaBackend *backend);
 
 MetaOverlay      *meta_stage_create_cursor_overlay   (MetaStage   *stage);
 void              meta_stage_remove_cursor_overlay   (MetaStage   *stage,
@@ -48,7 +56,14 @@ void              meta_stage_update_cursor_overlay   (MetaStage   *stage,
 void meta_stage_set_active (MetaStage *stage,
                             gboolean   is_active);
 
-void meta_stage_update_view_layout (MetaStage *stage);
+MetaStageWatch * meta_stage_watch_view (MetaStage           *stage,
+                                        ClutterStageView    *view,
+                                        MetaStageWatchPhase  watch_mode,
+                                        MetaStageWatchFunc   callback,
+                                        gpointer             user_data);
+
+void meta_stage_remove_watch (MetaStage      *stage,
+                              MetaStageWatch *watch);
 
 G_END_DECLS
 

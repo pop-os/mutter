@@ -27,10 +27,14 @@
 #include <xkbcommon/xkbcommon-x11.h>
 
 #include "backends/meta-backend-private.h"
+#include "backends/meta-dnd-private.h"
 #include "backends/x11/meta-cursor-renderer-x11.h"
+#include "backends/x11/meta-gpu-xrandr.h"
 #include "backends/x11/meta-input-settings-x11.h"
 #include "backends/x11/meta-monitor-manager-xrandr.h"
 #include "backends/x11/cm/meta-renderer-x11-cm.h"
+#include "compositor/meta-compositor-x11.h"
+#include "core/display-private.h"
 
 struct _MetaBackendX11Cm
 {
@@ -327,6 +331,20 @@ meta_backend_x11_cm_handle_host_xevent (MetaBackendX11 *backend_x11,
   MetaMonitorManagerXrandr *monitor_manager_xrandr =
     META_MONITOR_MANAGER_XRANDR (monitor_manager);
   Display *xdisplay = meta_backend_x11_get_xdisplay (x11);
+  gboolean bypass_clutter = FALSE;
+  MetaDisplay *display;
+
+  display = meta_get_display ();
+  if (display)
+    {
+      MetaCompositor *compositor = display->compositor;
+      MetaCompositorX11 *compositor_x11 = META_COMPOSITOR_X11 (compositor);
+      Display *xdisplay = meta_backend_x11_get_xdisplay (x11);
+
+      if (meta_dnd_handle_xdnd_event (backend, compositor_x11,
+                                      xdisplay, event))
+        bypass_clutter = TRUE;
+    }
 
   if (event->type == meta_backend_x11_get_xkb_event_base (x11))
     {
@@ -350,8 +368,10 @@ meta_backend_x11_cm_handle_host_xevent (MetaBackendX11 *backend_x11,
         }
     }
 
-  return meta_monitor_manager_xrandr_handle_xevent (monitor_manager_xrandr,
-                                                    event);
+  bypass_clutter |=
+    meta_monitor_manager_xrandr_handle_xevent (monitor_manager_xrandr, event);
+
+  return bypass_clutter;
 }
 
 static void
@@ -389,6 +409,16 @@ meta_backend_x11_cm_translate_crossing_event (MetaBackendX11 *x11,
 static void
 meta_backend_x11_cm_init (MetaBackendX11Cm *backend_x11_cm)
 {
+  MetaGpuXrandr *gpu_xrandr;
+
+  /*
+   * The X server deals with multiple GPUs for us, so we just see what the X
+   * server gives us as one single GPU, even though it may actually be backed
+   * by multiple.
+   */
+  gpu_xrandr = meta_gpu_xrandr_new (META_BACKEND_X11 (backend_x11_cm));
+  meta_backend_add_gpu (META_BACKEND (backend_x11_cm),
+                        META_GPU (gpu_xrandr));
 }
 
 static void

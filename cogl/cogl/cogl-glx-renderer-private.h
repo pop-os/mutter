@@ -48,7 +48,8 @@ typedef struct _CoglGLXRenderer
 
   /* enumeration with relatioship between OML_sync_control
    * UST (unadjusted-system-time) and the system clock */
-  enum {
+  enum
+{
     COGL_GLX_UST_IS_UNKNOWN,
     COGL_GLX_UST_IS_GETTIMEOFDAY,
     COGL_GLX_UST_IS_MONOTONIC_TIME,
@@ -96,7 +97,7 @@ typedef struct _CoglGLXRenderer
 
 #define COGL_WINSYS_FEATURE_END()
 
-#include "cogl-winsys-glx-feature-functions.h"
+#include "winsys/cogl-winsys-glx-feature-functions.h"
 
 #undef COGL_WINSYS_FEATURE_BEGIN
 #undef COGL_WINSYS_FEATURE_FUNCTION

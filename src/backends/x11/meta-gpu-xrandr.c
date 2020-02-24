@@ -31,7 +31,9 @@
 #include <X11/extensions/dpms.h>
 #include <X11/Xlibint.h>
 
+#include "backends/meta-backend-private.h"
 #include "backends/meta-output.h"
+#include "backends/x11/meta-backend-x11.h"
 #include "backends/x11/meta-crtc-xrandr.h"
 #include "backends/x11/meta-monitor-manager-xrandr.h"
 #include "backends/x11/meta-output-xrandr.h"
@@ -86,7 +88,9 @@ meta_gpu_xrandr_read_current (MetaGpu  *gpu,
                               GError  **error)
 {
   MetaGpuXrandr *gpu_xrandr = META_GPU_XRANDR (gpu);
-  MetaMonitorManager *monitor_manager = meta_gpu_get_monitor_manager (gpu);
+  MetaBackend *backend = meta_gpu_get_backend (gpu);
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
   MetaMonitorManagerXrandr *monitor_manager_xrandr =
     META_MONITOR_MANAGER_XRANDR (monitor_manager);
   Display *xdisplay =
@@ -97,8 +101,6 @@ meta_gpu_xrandr_read_current (MetaGpu  *gpu,
   GList *l;
   int min_width, min_height;
   Screen *screen;
-  BOOL dpms_capable, dpms_enabled;
-  CARD16 dpms_state;
   GList *outputs = NULL;
   GList *modes = NULL;
   GList *crtcs = NULL;
@@ -106,36 +108,6 @@ meta_gpu_xrandr_read_current (MetaGpu  *gpu,
   if (gpu_xrandr->resources)
     XRRFreeScreenResources (gpu_xrandr->resources);
   gpu_xrandr->resources = NULL;
-
-  dpms_capable = DPMSCapable (xdisplay);
-
-  if (dpms_capable &&
-      DPMSInfo (xdisplay, &dpms_state, &dpms_enabled) &&
-      dpms_enabled)
-    {
-      switch (dpms_state)
-        {
-        case DPMSModeOn:
-          monitor_manager->power_save_mode = META_POWER_SAVE_ON;
-          break;
-        case DPMSModeStandby:
-          monitor_manager->power_save_mode = META_POWER_SAVE_STANDBY;
-          break;
-        case DPMSModeSuspend:
-          monitor_manager->power_save_mode = META_POWER_SAVE_SUSPEND;
-          break;
-        case DPMSModeOff:
-          monitor_manager->power_save_mode = META_POWER_SAVE_OFF;
-          break;
-        default:
-          monitor_manager->power_save_mode = META_POWER_SAVE_UNSUPPORTED;
-          break;
-        }
-    }
-  else
-    {
-      monitor_manager->power_save_mode = META_POWER_SAVE_UNSUPPORTED;
-    }
 
   XRRGetScreenSizeRange (xdisplay, DefaultRootWindow (xdisplay),
                          &min_width,
@@ -261,10 +233,10 @@ meta_gpu_xrandr_read_current (MetaGpu  *gpu,
 }
 
 MetaGpuXrandr *
-meta_gpu_xrandr_new (MetaMonitorManagerXrandr *monitor_manager_xrandr)
+meta_gpu_xrandr_new (MetaBackendX11 *backend_x11)
 {
   return g_object_new (META_TYPE_GPU_XRANDR,
-                       "monitor-manager", monitor_manager_xrandr,
+                       "backend", backend_x11,
                        NULL);
 }
 

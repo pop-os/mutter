@@ -21,25 +21,24 @@
  */
 
 #include "config.h"
-#include "events.h"
 
-#include <meta/meta-backend.h>
+#include "core/events.h"
 
-#include "display-private.h"
-#include "window-private.h"
-#include "backends/x11/meta-backend-x11.h"
 #include "backends/meta-cursor-tracker-private.h"
+#include "backends/meta-idle-monitor-private.h"
+#include "backends/x11/meta-backend-x11.h"
+#include "compositor/meta-window-actor-private.h"
+#include "core/display-private.h"
+#include "core/window-private.h"
+#include "meta/meta-backend.h"
 
 #ifdef HAVE_NATIVE_BACKEND
 #include "backends/native/meta-backend-native.h"
 #endif
 
-#include "backends/meta-idle-monitor-private.h"
-
 #ifdef HAVE_WAYLAND
 #include "wayland/meta-wayland-private.h"
 #endif
-#include "meta-surface-actor.h"
 
 #define IS_GESTURE_EVENT(e) ((e)->type == CLUTTER_TOUCHPAD_SWIPE || \
                              (e)->type == CLUTTER_TOUCHPAD_PINCH || \
@@ -50,6 +49,12 @@
 
 #define IS_KEY_EVENT(e) ((e)->type == CLUTTER_KEY_PRESS || \
                          (e)->type == CLUTTER_KEY_RELEASE)
+
+typedef enum
+{
+  EVENTS_UNFREEZE_SYNC,
+  EVENTS_UNFREEZE_REPLAY,
+} EventsUnfreezeMethod;
 
 static gboolean
 stage_has_key_focus (void)
@@ -69,14 +74,16 @@ get_window_for_event (MetaDisplay        *display,
     case META_EVENT_ROUTE_NORMAL:
       {
         ClutterActor *source;
+        MetaWindowActor *window_actor;
 
         /* Always use the key focused window for key events. */
         if (IS_KEY_EVENT (event))
             return stage_has_key_focus () ? display->focus_window : NULL;
 
         source = clutter_event_get_source (event);
-        if (META_IS_SURFACE_ACTOR (source))
-          return meta_surface_actor_get_window (META_SURFACE_ACTOR (source));
+        window_actor = meta_window_actor_from_actor (source);
+        if (window_actor)
+          return meta_window_actor_get_meta_window (window_actor);
         else
           return NULL;
       }
@@ -87,6 +94,7 @@ get_window_for_event (MetaDisplay        *display,
       return display->grab_window;
     default:
       g_assert_not_reached ();
+      return NULL;
     }
 }
 
@@ -165,6 +173,43 @@ sequence_is_pointer_emulated (MetaDisplay        *display,
 #endif /* HAVE_NATIVE_BACKEND */
 
   return FALSE;
+}
+
+static void
+maybe_unfreeze_pointer_events (MetaBackend          *backend,
+                               const ClutterEvent   *event,
+                               EventsUnfreezeMethod  unfreeze_method)
+{
+  Display *xdisplay;
+  int event_mode;
+  int device_id;
+
+  if (event->type != CLUTTER_BUTTON_PRESS)
+    return;
+
+  if (!META_IS_BACKEND_X11 (backend))
+    return;
+
+  device_id = clutter_event_get_device_id (event);
+  switch (unfreeze_method)
+    {
+    case EVENTS_UNFREEZE_SYNC:
+      event_mode = XISyncDevice;
+      meta_verbose ("Syncing events time %u device %i\n",
+                    (unsigned int) event->button.time, device_id);
+      break;
+    case EVENTS_UNFREEZE_REPLAY:
+      event_mode = XIReplayDevice;
+      meta_verbose ("Replaying events time %u device %i\n",
+                    (unsigned int) event->button.time, device_id);
+      break;
+    default:
+      g_assert_not_reached ();
+      return;
+    }
+
+  xdisplay = meta_backend_x11_get_xdisplay (META_BACKEND_X11 (backend));
+  XIAllowEvents (xdisplay, device_id, event_mode, event->button.time);
 }
 
 static gboolean
@@ -350,7 +395,21 @@ meta_display_handle_event (MetaDisplay        *display,
        */
       bypass_clutter = !IS_GESTURE_EVENT (event);
 
-      meta_window_handle_ungrabbed_event (window, event);
+      /* When double clicking to un-maximize an X11 window under Wayland,
+       * there is a race between X11 and Wayland protocols and the X11
+       * XConfigureWindow may be processed by Xwayland before the button
+       * press event is forwarded via the Wayland protocol.
+       * As a result, the second click may reach another X11 window placed
+       * immediately underneath in the X11 stack.
+       * The following is to make sure we do not forward the button press
+       * event to Wayland if it was handled by the frame UI.
+       * See: https://gitlab.gnome.org/GNOME/mutter/issues/88
+       */
+      if (meta_window_handle_ui_frame_event (window, event))
+        bypass_wayland = (event->type == CLUTTER_BUTTON_PRESS ||
+                          event->type == CLUTTER_TOUCH_BEGIN);
+      else
+        meta_window_handle_ungrabbed_event (window, event);
 
       /* This might start a grab op. If it does, then filter out the
        * event, and if it doesn't, replay the event to release our
@@ -366,17 +425,7 @@ meta_display_handle_event (MetaDisplay        *display,
         {
           /* Only replay button press events, since that's where we
            * have the synchronous grab. */
-          if (event->type == CLUTTER_BUTTON_PRESS)
-            {
-              if (META_IS_BACKEND_X11 (backend))
-                {
-                  Display *xdisplay = meta_backend_x11_get_xdisplay (META_BACKEND_X11 (backend));
-                  meta_verbose ("Allowing events time %u\n",
-                                (unsigned int)event->button.time);
-                  XIAllowEvents (xdisplay, clutter_event_get_device_id (event),
-                                 XIReplayDevice, event->button.time);
-                }
-            }
+          maybe_unfreeze_pointer_events (backend, event, EVENTS_UNFREEZE_REPLAY);
 
           /* If the focus window has an active close dialog let clutter
            * events go through, so fancy clutter dialogs can get to handle
@@ -391,6 +440,13 @@ meta_display_handle_event (MetaDisplay        *display,
         }
 
       goto out;
+    }
+  else
+    {
+      /* We could not match the event with a window, make sure we sync
+       * the pointer to discard the sequence and don't keep events frozen.
+       */
+       maybe_unfreeze_pointer_events (backend, event, EVENTS_UNFREEZE_SYNC);
     }
 
  out:
