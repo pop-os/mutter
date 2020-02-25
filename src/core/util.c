@@ -762,11 +762,7 @@ unref_later (MetaLater *later)
 static void
 destroy_later (MetaLater *later)
 {
-  if (later->source)
-    {
-      g_source_remove (later->source);
-      later->source = 0;
-    }
+  g_clear_handle_id (&later->source, g_source_remove);
   later->func = NULL;
   unref_later (later);
 }
@@ -1028,6 +1024,23 @@ meta_generate_random_id (GRand *rand,
     id[i] = (char) g_rand_int_range (rand, 32, 127);
 
   return id;
+}
+
+
+void
+meta_add_clutter_debug_flags (ClutterDebugFlag     debug_flags,
+                              ClutterDrawDebugFlag draw_flags,
+                              ClutterPickDebugFlag pick_flags)
+{
+  clutter_add_debug_flags (debug_flags, draw_flags, pick_flags);
+}
+
+void
+meta_remove_clutter_debug_flags (ClutterDebugFlag     debug_flags,
+                                 ClutterDrawDebugFlag draw_flags,
+                                 ClutterPickDebugFlag pick_flags)
+{
+  clutter_remove_debug_flags (debug_flags, draw_flags, pick_flags);
 }
 
 /* eof util.c */

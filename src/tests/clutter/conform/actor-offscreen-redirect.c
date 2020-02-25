@@ -37,10 +37,15 @@ G_DEFINE_TYPE (FooActor, foo_actor, CLUTTER_TYPE_ACTOR);
 static gboolean group_has_overlaps;
 
 static void
-foo_actor_paint (ClutterActor *actor)
+foo_actor_paint (ClutterActor        *actor,
+                 ClutterPaintContext *paint_context)
 {
+  CoglContext *ctx =
+    clutter_backend_get_cogl_context (clutter_get_default_backend ());
   FooActor *foo_actor = (FooActor *) actor;
   ClutterActorBox allocation;
+  CoglPipeline *pipeline;
+  CoglFramebuffer *framebuffer;
 
   foo_actor->last_paint_opacity = clutter_actor_get_paint_opacity (actor);
   foo_actor->paint_count++;
@@ -48,14 +53,19 @@ foo_actor_paint (ClutterActor *actor)
   clutter_actor_get_allocation_box (actor, &allocation);
 
   /* Paint a red rectangle with the right opacity */
-  cogl_set_source_color4ub (255,
-                            0,
-                            0,
-                            foo_actor->last_paint_opacity);
-  cogl_rectangle (allocation.x1,
-                  allocation.y1,
-                  allocation.x2,
-                  allocation.y2);
+  pipeline = cogl_pipeline_new (ctx);
+  cogl_pipeline_set_color4ub (pipeline,
+                              255, 0, 0,
+                              foo_actor->last_paint_opacity);
+
+  framebuffer = clutter_paint_context_get_framebuffer (paint_context);
+  cogl_framebuffer_draw_rectangle (framebuffer,
+                                   pipeline,
+                                   allocation.x1,
+                                   allocation.y1,
+                                   allocation.x2,
+                                   allocation.y2);
+  cogl_object_unref (pipeline);
 }
 
 static gboolean
@@ -156,7 +166,7 @@ static void
 verify_redraw (Data *data, int expected_paint_count)
 {
   GMainLoop *main_loop = g_main_loop_new (NULL, TRUE);
-  guint paint_handler;
+  gulong paint_handler;
 
   paint_handler = g_signal_connect_data (data->stage,
                                          "paint",
@@ -173,7 +183,7 @@ verify_redraw (Data *data, int expected_paint_count)
   /* Wait for it to paint */
   g_main_loop_run (main_loop);
 
-  g_signal_handler_disconnect (data->stage, paint_handler);
+  g_clear_signal_handler (&paint_handler, data->stage);
 
   g_assert_cmpint (data->foo_actor->paint_count, ==, expected_paint_count);
 }
@@ -314,11 +324,11 @@ actor_offscreen_redirect (void)
 {
   Data data = { 0 };
 
-  if (!cogl_features_available (COGL_FEATURE_OFFSCREEN))
-    return;
-
   data.stage = clutter_test_get_stage ();
   data.parent_container = clutter_actor_new ();
+  clutter_actor_set_background_color (data.parent_container,
+                                      &(ClutterColor) { 255, 255, 255, 255 });
+
   data.container = g_object_new (foo_group_get_type (), NULL);
   data.foo_actor = g_object_new (foo_actor_get_type (), NULL);
   clutter_actor_set_size (CLUTTER_ACTOR (data.foo_actor), 100, 100);

@@ -37,6 +37,10 @@
 #include "backends/meta-monitor.h"
 #include "backends/meta-monitor-manager-private.h"
 #include "backends/meta-output.h"
+#include "backends/native/meta-crtc-kms.h"
+#include "backends/native/meta-kms-device.h"
+#include "backends/native/meta-kms-update.h"
+#include "backends/native/meta-kms.h"
 #include "backends/native/meta-renderer-native.h"
 #include "core/boxes-private.h"
 #include "meta/boxes.h"
@@ -166,8 +170,7 @@ meta_cursor_renderer_native_finalize (GObject *object)
   MetaCursorRendererNativePrivate *priv =
     meta_cursor_renderer_native_get_instance_private (renderer);
 
-  if (priv->animation_timeout_id)
-    g_source_remove (priv->animation_timeout_id);
+  g_clear_handle_id (&priv->animation_timeout_id, g_source_remove);
 
   G_OBJECT_CLASS (meta_cursor_renderer_native_parent_class)->finalize (object);
 }
@@ -212,82 +215,109 @@ set_pending_cursor_sprite_gbm_bo (MetaCursorSprite *cursor_sprite,
 
 static void
 set_crtc_cursor (MetaCursorRendererNative *native,
+                 MetaKmsUpdate            *kms_update,
                  MetaCrtc                 *crtc,
+                 int                       x,
+                 int                       y,
                  MetaCursorSprite         *cursor_sprite)
 {
   MetaCursorRendererNativePrivate *priv =
     meta_cursor_renderer_native_get_instance_private (native);
-  MetaCursorRendererNativeGpuData *cursor_renderer_gpu_data;
-  MetaGpuKms *gpu_kms;
-  int kms_fd;
-
-  gpu_kms = META_GPU_KMS (meta_crtc_get_gpu (crtc));
-  cursor_renderer_gpu_data =
+  MetaCursorNativePrivate *cursor_priv = get_cursor_priv (cursor_sprite);
+  MetaGpuKms *gpu_kms = META_GPU_KMS (meta_crtc_get_gpu (crtc));
+  MetaCursorRendererNativeGpuData *cursor_renderer_gpu_data =
     meta_cursor_renderer_native_gpu_data_from_gpu (gpu_kms);
-  kms_fd = meta_gpu_kms_get_fd (gpu_kms);
+  MetaCursorNativeGpuState *cursor_gpu_state =
+    get_cursor_gpu_state (cursor_priv, gpu_kms);
+  MetaKmsCrtc *kms_crtc;
+  MetaKmsDevice *kms_device;
+  MetaKmsPlane *cursor_plane;
+  struct gbm_bo *bo;
+  union gbm_bo_handle handle;
+  int cursor_width, cursor_height;
+  MetaFixed16Rectangle src_rect;
+  MetaFixed16Rectangle dst_rect;
+  MetaKmsAssignPlaneFlag flags;
 
-  if (cursor_sprite)
-    {
-      MetaCursorNativePrivate *cursor_priv;
-      MetaCursorNativeGpuState *cursor_gpu_state;
-      struct gbm_bo *bo;
-      union gbm_bo_handle handle;
-      int hot_x, hot_y;
-
-      cursor_priv = get_cursor_priv (cursor_sprite);
-      cursor_gpu_state = get_cursor_gpu_state (cursor_priv, gpu_kms);
-
-      if (cursor_gpu_state->pending_bo_state == META_CURSOR_GBM_BO_STATE_SET)
-        bo = get_pending_cursor_sprite_gbm_bo (cursor_gpu_state);
-      else
-        bo = get_active_cursor_sprite_gbm_bo (cursor_gpu_state);
-
-      if (!priv->hw_state_invalidated && bo == crtc->cursor_renderer_private)
-        return;
-
-      crtc->cursor_renderer_private = bo;
-
-      handle = gbm_bo_get_handle (bo);
-      meta_cursor_sprite_get_hotspot (cursor_sprite, &hot_x, &hot_y);
-
-      if (drmModeSetCursor2 (kms_fd, crtc->crtc_id, handle.u32,
-                             cursor_renderer_gpu_data->cursor_width,
-                             cursor_renderer_gpu_data->cursor_height,
-                             hot_x, hot_y) < 0)
-        {
-          if (errno != EACCES)
-            {
-              g_warning ("drmModeSetCursor2 failed with (%s), "
-                         "drawing cursor with OpenGL from now on",
-                         strerror (errno));
-              priv->has_hw_cursor = FALSE;
-              cursor_renderer_gpu_data->hw_cursor_broken = TRUE;
-            }
-        }
-
-      if (cursor_gpu_state->pending_bo_state == META_CURSOR_GBM_BO_STATE_SET)
-        {
-          cursor_gpu_state->active_bo =
-            (cursor_gpu_state->active_bo + 1) % HW_CURSOR_BUFFER_COUNT;
-          cursor_gpu_state->pending_bo_state = META_CURSOR_GBM_BO_STATE_NONE;
-        }
-    }
+  if (cursor_gpu_state->pending_bo_state == META_CURSOR_GBM_BO_STATE_SET)
+    bo = get_pending_cursor_sprite_gbm_bo (cursor_gpu_state);
   else
+    bo = get_active_cursor_sprite_gbm_bo (cursor_gpu_state);
+
+  kms_crtc = meta_crtc_kms_get_kms_crtc (crtc);
+  kms_device = meta_kms_crtc_get_device (kms_crtc);
+  cursor_plane = meta_kms_device_get_cursor_plane_for (kms_device, kms_crtc);
+  g_return_if_fail (cursor_plane);
+
+  handle = gbm_bo_get_handle (bo);
+
+  cursor_width = cursor_renderer_gpu_data->cursor_width;
+  cursor_height = cursor_renderer_gpu_data->cursor_height;
+  src_rect = (MetaFixed16Rectangle) {
+    .x = meta_fixed_16_from_int (0),
+    .y = meta_fixed_16_from_int (0),
+    .width = meta_fixed_16_from_int (cursor_width),
+    .height = meta_fixed_16_from_int (cursor_height),
+  };
+  dst_rect = (MetaFixed16Rectangle) {
+    .x = meta_fixed_16_from_int (x),
+    .y = meta_fixed_16_from_int (y),
+    .width = meta_fixed_16_from_int (cursor_width),
+    .height = meta_fixed_16_from_int (cursor_height),
+  };
+
+  flags = META_KMS_ASSIGN_PLANE_FLAG_NONE;
+  if (!priv->hw_state_invalidated && bo == crtc->cursor_renderer_private)
+    flags |= META_KMS_ASSIGN_PLANE_FLAG_FB_UNCHANGED;
+
+  meta_kms_update_assign_plane (kms_update,
+                                kms_crtc,
+                                cursor_plane,
+                                handle.u32,
+                                src_rect,
+                                dst_rect,
+                                flags);
+
+  crtc->cursor_renderer_private = bo;
+
+  if (cursor_gpu_state->pending_bo_state == META_CURSOR_GBM_BO_STATE_SET)
     {
-      if (priv->hw_state_invalidated || crtc->cursor_renderer_private != NULL)
-        {
-          drmModeSetCursor2 (kms_fd, crtc->crtc_id, 0, 0, 0, 0, 0);
-          crtc->cursor_renderer_private = NULL;
-        }
+      cursor_gpu_state->active_bo =
+        (cursor_gpu_state->active_bo + 1) % HW_CURSOR_BUFFER_COUNT;
+      cursor_gpu_state->pending_bo_state = META_CURSOR_GBM_BO_STATE_NONE;
     }
+}
+
+static void
+unset_crtc_cursor (MetaCursorRendererNative *native,
+                   MetaKmsUpdate            *kms_update,
+                   MetaCrtc                 *crtc)
+{
+  MetaCursorRendererNativePrivate *priv =
+    meta_cursor_renderer_native_get_instance_private (native);
+  MetaKmsCrtc *kms_crtc;
+  MetaKmsDevice *kms_device;
+  MetaKmsPlane *cursor_plane;
+
+  kms_crtc = meta_crtc_kms_get_kms_crtc (crtc);
+  kms_device = meta_kms_crtc_get_device (kms_crtc);
+  cursor_plane = meta_kms_device_get_cursor_plane_for (kms_device, kms_crtc);
+  g_return_if_fail (cursor_plane);
+
+  if (!priv->hw_state_invalidated && !crtc->cursor_renderer_private)
+    return;
+
+  meta_kms_update_unassign_plane (kms_update, kms_crtc, cursor_plane);
+  crtc->cursor_renderer_private = NULL;
 }
 
 typedef struct
 {
   MetaCursorRendererNative *in_cursor_renderer_native;
   MetaLogicalMonitor *in_logical_monitor;
-  ClutterRect in_local_cursor_rect;
+  graphene_rect_t in_local_cursor_rect;
   MetaCursorSprite *in_cursor_sprite;
+  MetaKmsUpdate *in_kms_update;
 
   gboolean out_painted;
 } UpdateCrtcCursorData;
@@ -306,7 +336,7 @@ update_monitor_crtc_cursor (MetaMonitor         *monitor,
     meta_cursor_renderer_native_get_instance_private (cursor_renderer_native);
   MetaCrtc *crtc;
   MetaMonitorTransform transform;
-  ClutterRect scaled_crtc_rect;
+  graphene_rect_t scaled_crtc_rect;
   float scale;
   int crtc_x, crtc_y;
   int crtc_width, crtc_height;
@@ -334,7 +364,7 @@ update_monitor_crtc_cursor (MetaMonitor         *monitor,
       crtc_height = monitor_crtc_mode->crtc_mode->height;
     }
 
-  scaled_crtc_rect = (ClutterRect) {
+  scaled_crtc_rect = (graphene_rect_t) {
     .origin = {
       .x = crtc_x / scale,
       .y = crtc_y / scale
@@ -348,37 +378,49 @@ update_monitor_crtc_cursor (MetaMonitor         *monitor,
   crtc = meta_output_get_assigned_crtc (monitor_crtc_mode->output);
 
   if (priv->has_hw_cursor &&
-      clutter_rect_intersection (&scaled_crtc_rect,
-                                 &data->in_local_cursor_rect,
-                                 NULL))
+      graphene_rect_intersection (&scaled_crtc_rect,
+                                  &data->in_local_cursor_rect,
+                                  NULL))
     {
-      MetaGpuKms *gpu_kms;
-      int kms_fd;
       float crtc_cursor_x, crtc_cursor_y;
 
-      set_crtc_cursor (data->in_cursor_renderer_native,
-                       crtc,
-                       data->in_cursor_sprite);
-
-      gpu_kms = META_GPU_KMS (meta_monitor_get_gpu (monitor));
-      kms_fd = meta_gpu_kms_get_fd (gpu_kms);
       crtc_cursor_x = (data->in_local_cursor_rect.origin.x -
                        scaled_crtc_rect.origin.x) * scale;
       crtc_cursor_y = (data->in_local_cursor_rect.origin.y -
                        scaled_crtc_rect.origin.y) * scale;
-      drmModeMoveCursor (kms_fd,
-                         crtc->crtc_id,
-                         floorf (crtc_cursor_x),
-                         floorf (crtc_cursor_y));
+
+      set_crtc_cursor (data->in_cursor_renderer_native,
+                       data->in_kms_update,
+                       crtc,
+                       (int) floorf (crtc_cursor_x),
+                       (int) floorf (crtc_cursor_y),
+                       data->in_cursor_sprite);
 
       data->out_painted = data->out_painted || TRUE;
     }
   else
     {
-      set_crtc_cursor (data->in_cursor_renderer_native, crtc, NULL);
+      unset_crtc_cursor (data->in_cursor_renderer_native,
+                         data->in_kms_update,
+                         crtc);
     }
 
   return TRUE;
+}
+
+static void
+disable_hw_cursor_for_crtc (MetaKmsCrtc  *kms_crtc,
+                            const GError *error)
+{
+  MetaCrtc *crtc = meta_crtc_kms_from_kms_crtc (kms_crtc);
+  MetaGpuKms *gpu_kms = META_GPU_KMS (meta_crtc_get_gpu (crtc));
+  MetaCursorRendererNativeGpuData *cursor_renderer_gpu_data =
+    meta_cursor_renderer_native_gpu_data_from_gpu (gpu_kms);
+
+  g_warning ("Failed to set hardware cursor (%s), "
+             "using OpenGL from now on",
+             error->message);
+  cursor_renderer_gpu_data->hw_cursor_broken = TRUE;
 }
 
 static void
@@ -389,17 +431,23 @@ update_hw_cursor (MetaCursorRendererNative *native,
     meta_cursor_renderer_native_get_instance_private (native);
   MetaCursorRenderer *renderer = META_CURSOR_RENDERER (native);
   MetaBackend *backend = priv->backend;
+  MetaBackendNative *backend_native = META_BACKEND_NATIVE (priv->backend);
+  MetaKms *kms = meta_backend_native_get_kms (backend_native);
   MetaMonitorManager *monitor_manager =
     meta_backend_get_monitor_manager (backend);
+  MetaKmsUpdate *kms_update;
   GList *logical_monitors;
   GList *l;
-  ClutterRect rect;
+  graphene_rect_t rect;
   gboolean painted = FALSE;
+  g_autoptr (MetaKmsFeedback) feedback = NULL;
+
+  kms_update = meta_kms_ensure_pending_update (kms);
 
   if (cursor_sprite)
     rect = meta_cursor_renderer_calculate_rect (renderer, cursor_sprite);
   else
-    rect = (ClutterRect) CLUTTER_RECT_INIT_ZERO;
+    rect = GRAPHENE_RECT_INIT_ZERO;
 
   logical_monitors =
     meta_monitor_manager_get_logical_monitors (monitor_manager);
@@ -413,14 +461,15 @@ update_hw_cursor (MetaCursorRendererNative *native,
       data = (UpdateCrtcCursorData) {
         .in_cursor_renderer_native = native,
         .in_logical_monitor = logical_monitor,
-        .in_local_cursor_rect = (ClutterRect) {
+        .in_local_cursor_rect = (graphene_rect_t) {
           .origin = {
             .x = rect.origin.x - logical_monitor->rect.x,
             .y = rect.origin.y - logical_monitor->rect.y
           },
           .size = rect.size
         },
-        .in_cursor_sprite = cursor_sprite
+        .in_cursor_sprite = cursor_sprite,
+        .in_kms_update = kms_update,
       };
 
       monitors = meta_logical_monitor_get_monitors (logical_monitor);
@@ -437,6 +486,25 @@ update_hw_cursor (MetaCursorRendererNative *native,
         }
 
       painted = painted || data.out_painted;
+    }
+
+  feedback = meta_kms_post_pending_update_sync (kms);
+  if (meta_kms_feedback_get_result (feedback) != META_KMS_FEEDBACK_PASSED)
+    {
+      for (l = meta_kms_feedback_get_failed_planes (feedback); l; l = l->next)
+        {
+          MetaKmsPlaneFeedback *plane_feedback = l->data;
+
+          if (!g_error_matches (plane_feedback->error,
+                                G_IO_ERROR,
+                                G_IO_ERROR_PERMISSION_DENIED))
+            {
+              disable_hw_cursor_for_crtc (plane_feedback->crtc,
+                                          plane_feedback->error);
+            }
+        }
+
+      priv->has_hw_cursor = FALSE;
     }
 
   priv->hw_state_invalidated = FALSE;
@@ -488,7 +556,7 @@ cursor_over_transformed_logical_monitor (MetaCursorRenderer *renderer,
     meta_backend_get_monitor_manager (backend);
   GList *logical_monitors;
   GList *l;
-  ClutterRect cursor_rect;
+  graphene_rect_t cursor_rect;
 
   cursor_rect = meta_cursor_renderer_calculate_rect (renderer, cursor_sprite);
 
@@ -498,17 +566,17 @@ cursor_over_transformed_logical_monitor (MetaCursorRenderer *renderer,
     {
       MetaLogicalMonitor *logical_monitor = l->data;
       MetaRectangle logical_monitor_layout;
-      ClutterRect logical_monitor_rect;
+      graphene_rect_t logical_monitor_rect;
       MetaMonitorTransform transform;
       GList *monitors, *l_mon;
 
       logical_monitor_layout =
         meta_logical_monitor_get_layout (logical_monitor);
       logical_monitor_rect =
-        meta_rectangle_to_clutter_rect (&logical_monitor_layout);
+        meta_rectangle_to_graphene_rect (&logical_monitor_layout);
 
-      if (!clutter_rect_intersection (&cursor_rect, &logical_monitor_rect,
-                                      NULL))
+      if (!graphene_rect_intersection (&cursor_rect, &logical_monitor_rect,
+                                       NULL))
         continue;
 
       monitors = meta_logical_monitor_get_monitors (logical_monitor);
@@ -546,7 +614,7 @@ can_draw_cursor_unscaled (MetaCursorRenderer *renderer,
   MetaBackend *backend = priv->backend;
   MetaMonitorManager *monitor_manager =
     meta_backend_get_monitor_manager (backend);
-  ClutterRect cursor_rect;
+  graphene_rect_t cursor_rect;
   GList *logical_monitors;
   GList *l;
   gboolean has_visible_crtc_sprite = FALSE;
@@ -565,12 +633,12 @@ can_draw_cursor_unscaled (MetaCursorRenderer *renderer,
   for (l = logical_monitors; l; l = l->next)
     {
       MetaLogicalMonitor *logical_monitor = l->data;
-      ClutterRect logical_monitor_rect =
-        meta_rectangle_to_clutter_rect (&logical_monitor->rect);
+      graphene_rect_t logical_monitor_rect =
+        meta_rectangle_to_graphene_rect (&logical_monitor->rect);
 
-      if (!clutter_rect_intersection (&cursor_rect,
-                                      &logical_monitor_rect,
-                                      NULL))
+      if (!graphene_rect_intersection (&cursor_rect,
+                                       &logical_monitor_rect,
+                                       NULL))
         continue;
 
       if (calculate_cursor_crtc_sprite_scale (cursor_sprite,
@@ -658,11 +726,7 @@ maybe_schedule_cursor_sprite_animation_frame (MetaCursorRendererNative *native,
   if (!cursor_change && priv->animation_timeout_id)
     return;
 
-  if (priv->animation_timeout_id)
-    {
-      g_source_remove (priv->animation_timeout_id);
-      priv->animation_timeout_id = 0;
-    }
+  g_clear_handle_id (&priv->animation_timeout_id, g_source_remove);
 
   if (cursor_sprite && meta_cursor_sprite_is_animated (cursor_sprite))
     {
@@ -693,7 +757,7 @@ calculate_cursor_sprite_gpus (MetaCursorRenderer *renderer,
   GList *gpus = NULL;
   GList *logical_monitors;
   GList *l;
-  ClutterRect cursor_rect;
+  graphene_rect_t cursor_rect;
 
   cursor_rect = meta_cursor_renderer_calculate_rect (renderer, cursor_sprite);
 
@@ -703,16 +767,16 @@ calculate_cursor_sprite_gpus (MetaCursorRenderer *renderer,
     {
       MetaLogicalMonitor *logical_monitor = l->data;
       MetaRectangle logical_monitor_layout;
-      ClutterRect logical_monitor_rect;
+      graphene_rect_t logical_monitor_rect;
       GList *monitors, *l_mon;
 
       logical_monitor_layout =
         meta_logical_monitor_get_layout (logical_monitor);
       logical_monitor_rect =
-        meta_rectangle_to_clutter_rect (&logical_monitor_layout);
+        meta_rectangle_to_graphene_rect (&logical_monitor_layout);
 
-      if (!clutter_rect_intersection (&cursor_rect, &logical_monitor_rect,
-                                      NULL))
+      if (!graphene_rect_intersection (&cursor_rect, &logical_monitor_rect,
+                                       NULL))
         continue;
 
       monitors = meta_logical_monitor_get_monitors (logical_monitor);
@@ -1188,8 +1252,8 @@ init_hw_cursor_support (MetaCursorRendererNative *cursor_renderer_native)
   for (l = gpus; l; l = l->next)
     {
       MetaGpuKms *gpu_kms = l->data;
+      MetaKmsDevice *kms_device = meta_gpu_kms_get_kms_device (gpu_kms);
       MetaCursorRendererNativeGpuData *cursor_renderer_gpu_data;
-      int kms_fd;
       struct gbm_device *gbm_device;
       uint64_t width, height;
 
@@ -1200,18 +1264,14 @@ init_hw_cursor_support (MetaCursorRendererNative *cursor_renderer_native)
       cursor_renderer_gpu_data =
         meta_create_cursor_renderer_native_gpu_data (gpu_kms);
 
-      kms_fd = meta_gpu_kms_get_fd (gpu_kms);
-      if (drmGetCap (kms_fd, DRM_CAP_CURSOR_WIDTH, &width) == 0 &&
-          drmGetCap (kms_fd, DRM_CAP_CURSOR_HEIGHT, &height) == 0)
+      if (!meta_kms_device_get_cursor_size (kms_device, &width, &height))
         {
-          cursor_renderer_gpu_data->cursor_width = width;
-          cursor_renderer_gpu_data->cursor_height = height;
+          width = 64;
+          height = 64;
         }
-      else
-        {
-          cursor_renderer_gpu_data->cursor_width = 64;
-          cursor_renderer_gpu_data->cursor_height = 64;
-        }
+
+      cursor_renderer_gpu_data->cursor_width = width;
+      cursor_renderer_gpu_data->cursor_height = height;
     }
 }
 

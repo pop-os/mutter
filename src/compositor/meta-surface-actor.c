@@ -20,6 +20,7 @@
 #include "compositor/meta-surface-actor.h"
 
 #include "clutter/clutter.h"
+#include "compositor/clutter-utils.h"
 #include "compositor/meta-cullable.h"
 #include "compositor/meta-shaped-texture-private.h"
 #include "compositor/meta-window-actor-private.h"
@@ -77,6 +78,21 @@ effective_unobscured_region (MetaSurfaceActor *surface_actor)
   return priv->unobscured_region;
 }
 
+static cairo_region_t*
+get_scaled_region (MetaSurfaceActor *surface_actor,
+                   cairo_region_t   *region)
+{
+  MetaWindowActor *window_actor;
+  int geometry_scale;
+
+  window_actor = meta_window_actor_from_actor (CLUTTER_ACTOR (surface_actor));
+  geometry_scale = meta_window_actor_get_geometry_scale (window_actor);
+
+  return meta_region_scale_double (region,
+                                   1.0 / geometry_scale,
+                                   META_ROUNDING_STRATEGY_GROW);
+}
+
 static void
 set_unobscured_region (MetaSurfaceActor *surface_actor,
                        cairo_region_t   *unobscured_region)
@@ -98,7 +114,9 @@ set_unobscured_region (MetaSurfaceActor *surface_actor,
         .height = height,
       };
 
-      priv->unobscured_region = cairo_region_copy (unobscured_region);
+      priv->unobscured_region =
+        get_scaled_region (surface_actor, unobscured_region);
+
       cairo_region_intersect_rectangle (priv->unobscured_region, &bounds);
     }
 }
@@ -112,11 +130,12 @@ set_clip_region (MetaSurfaceActor *surface_actor,
 
   g_clear_pointer (&priv->clip_region, cairo_region_destroy);
   if (clip_region)
-    priv->clip_region = cairo_region_copy (clip_region);
+    priv->clip_region = get_scaled_region (surface_actor, clip_region);
 }
 
 static void
-meta_surface_actor_paint (ClutterActor *actor)
+meta_surface_actor_paint (ClutterActor        *actor,
+                          ClutterPaintContext *paint_context)
 {
   MetaSurfaceActor *surface_actor = META_SURFACE_ACTOR (actor);
   MetaSurfaceActorPrivate *priv =
@@ -125,12 +144,13 @@ meta_surface_actor_paint (ClutterActor *actor)
   if (priv->clip_region && cairo_region_is_empty (priv->clip_region))
     return;
 
-  CLUTTER_ACTOR_CLASS (meta_surface_actor_parent_class)->paint (actor);
+  CLUTTER_ACTOR_CLASS (meta_surface_actor_parent_class)->paint (actor,
+                                                                paint_context);
 }
 
 static void
 meta_surface_actor_pick (ClutterActor       *actor,
-                         const ClutterColor *color)
+                         ClutterPickContext *pick_context)
 {
   MetaSurfaceActor *self = META_SURFACE_ACTOR (actor);
   MetaSurfaceActorPrivate *priv =
@@ -143,7 +163,12 @@ meta_surface_actor_pick (ClutterActor       *actor,
 
   /* If there is no region then use the regular pick */
   if (priv->input_region == NULL)
-    CLUTTER_ACTOR_CLASS (meta_surface_actor_parent_class)->pick (actor, color);
+    {
+      ClutterActorClass *actor_class =
+        CLUTTER_ACTOR_CLASS (meta_surface_actor_parent_class);
+
+      actor_class->pick (actor, pick_context);
+    }
   else
     {
       int n_rects;
@@ -162,14 +187,14 @@ meta_surface_actor_pick (ClutterActor       *actor,
           box.y1 = rect.y;
           box.x2 = rect.x + rect.width;
           box.y2 = rect.y + rect.height;
-          clutter_actor_pick_box (actor, &box);
+          clutter_actor_pick_box (actor, pick_context, &box);
         }
     }
 
   clutter_actor_iter_init (&iter, actor);
 
   while (clutter_actor_iter_next (&iter, &child))
-    clutter_actor_paint (child);
+    clutter_actor_pick (child, pick_context);
 }
 
 static gboolean
@@ -221,6 +246,12 @@ meta_surface_actor_class_init (MetaSurfaceActorClass *klass)
                                         G_TYPE_NONE, 0);
 }
 
+gboolean
+meta_surface_actor_is_opaque (MetaSurfaceActor *self)
+{
+  return META_SURFACE_ACTOR_GET_CLASS (self)->is_opaque (self);
+}
+
 static void
 meta_surface_actor_cull_out (MetaCullable   *cullable,
                              cairo_region_t *unobscured_region,
@@ -262,6 +293,27 @@ meta_surface_actor_cull_out (MetaCullable   *cullable,
     }
 }
 
+static gboolean
+meta_surface_actor_is_untransformed (MetaCullable *cullable)
+{
+  ClutterActor *actor = CLUTTER_ACTOR (cullable);
+  MetaWindowActor *window_actor;
+  float width, height;
+  graphene_point3d_t verts[4];
+  int geometry_scale;
+
+  clutter_actor_get_size (actor, &width, &height);
+  clutter_actor_get_abs_allocation_vertices (actor, verts);
+
+  window_actor = meta_window_actor_from_actor (actor);
+  geometry_scale = meta_window_actor_get_geometry_scale (window_actor);
+
+  return meta_actor_vertices_are_untransformed (verts,
+                                                width * geometry_scale,
+                                                height * geometry_scale,
+                                                NULL, NULL);
+}
+
 static void
 meta_surface_actor_reset_culling (MetaCullable *cullable)
 {
@@ -274,6 +326,7 @@ static void
 cullable_iface_init (MetaCullableInterface *iface)
 {
   iface->cull_out = meta_surface_actor_cull_out;
+  iface->is_untransformed = meta_surface_actor_is_untransformed;
   iface->reset_culling = meta_surface_actor_reset_culling;
 }
 
@@ -429,15 +482,6 @@ meta_surface_actor_get_opaque_region (MetaSurfaceActor *self)
   return meta_shaped_texture_get_opaque_region (priv->texture);
 }
 
-static gboolean
-is_frozen (MetaSurfaceActor *self)
-{
-  MetaSurfaceActorPrivate *priv =
-    meta_surface_actor_get_instance_private (self);
-
-  return priv->frozen;
-}
-
 void
 meta_surface_actor_process_damage (MetaSurfaceActor *self,
                                    int x, int y, int width, int height)
@@ -445,7 +489,7 @@ meta_surface_actor_process_damage (MetaSurfaceActor *self,
   MetaSurfaceActorPrivate *priv =
     meta_surface_actor_get_instance_private (self);
 
-  if (is_frozen (self))
+  if (meta_surface_actor_is_frozen (self))
     {
       /* The window is frozen due to an effect in progress: we ignore damage
        * here on the off chance that this will stop the corresponding
@@ -482,38 +526,6 @@ meta_surface_actor_pre_paint (MetaSurfaceActor *self)
 }
 
 gboolean
-meta_surface_actor_is_argb32 (MetaSurfaceActor *self)
-{
-  MetaShapedTexture *stex = meta_surface_actor_get_texture (self);
-  CoglTexture *texture = meta_shaped_texture_get_texture (stex);
-
-  /* If we don't have a texture, like during initialization, assume
-   * that we're ARGB32.
-   *
-   * If we are unredirected and we have no texture assume that we are
-   * not ARGB32 otherwise we wouldn't be unredirected in the first
-   * place. This prevents us from continually redirecting and
-   * unredirecting on every paint.
-   */
-  if (!texture)
-    return !meta_surface_actor_is_unredirected (self);
-
-  switch (cogl_texture_get_components (texture))
-    {
-    case COGL_TEXTURE_COMPONENTS_A:
-    case COGL_TEXTURE_COMPONENTS_RGBA:
-      return TRUE;
-    case COGL_TEXTURE_COMPONENTS_RG:
-    case COGL_TEXTURE_COMPONENTS_RGB:
-    case COGL_TEXTURE_COMPONENTS_DEPTH:
-      return FALSE;
-    default:
-      g_assert_not_reached ();
-      return FALSE;
-    }
-}
-
-gboolean
 meta_surface_actor_is_visible (MetaSurfaceActor *self)
 {
   return META_SURFACE_ACTOR_GET_CLASS (self)->is_visible (self);
@@ -547,22 +559,12 @@ meta_surface_actor_set_frozen (MetaSurfaceActor *self,
 }
 
 gboolean
-meta_surface_actor_should_unredirect (MetaSurfaceActor *self)
+meta_surface_actor_is_frozen (MetaSurfaceActor *self)
 {
-  return META_SURFACE_ACTOR_GET_CLASS (self)->should_unredirect (self);
-}
+  MetaSurfaceActorPrivate *priv =
+    meta_surface_actor_get_instance_private (self);
 
-void
-meta_surface_actor_set_unredirected (MetaSurfaceActor *self,
-                                     gboolean          unredirected)
-{
-  META_SURFACE_ACTOR_GET_CLASS (self)->set_unredirected (self, unredirected);
-}
-
-gboolean
-meta_surface_actor_is_unredirected (MetaSurfaceActor *self)
-{
-  return META_SURFACE_ACTOR_GET_CLASS (self)->is_unredirected (self);
+  return priv->frozen;
 }
 
 MetaWindow *
@@ -582,8 +584,8 @@ meta_surface_actor_set_transform (MetaSurfaceActor     *self,
 }
 
 void
-meta_surface_actor_set_viewport_src_rect (MetaSurfaceActor  *self,
-                                          ClutterRect       *src_rect)
+meta_surface_actor_set_viewport_src_rect (MetaSurfaceActor *self,
+                                          graphene_rect_t  *src_rect)
 {
   MetaSurfaceActorPrivate *priv =
     meta_surface_actor_get_instance_private (self);

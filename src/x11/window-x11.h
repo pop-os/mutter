@@ -81,4 +81,16 @@ void     meta_window_x11_configure_notify        (MetaWindow      *window,
 
 Window   meta_window_x11_get_toplevel_xwindow    (MetaWindow *window);
 
+void     meta_window_x11_freeze_commits          (MetaWindow *window);
+void     meta_window_x11_thaw_commits            (MetaWindow *window);
+
+void     meta_window_x11_set_thaw_after_paint    (MetaWindow *window,
+                                                  gboolean    thaw_after_paint);
+gboolean meta_window_x11_should_thaw_after_paint (MetaWindow *window);
+gboolean meta_window_x11_always_update_shape     (MetaWindow *window);
+
+void meta_window_x11_buffer_rect_to_frame_rect   (MetaWindow    *window,
+                                                  MetaRectangle *buffer_rect,
+                                                  MetaRectangle *frame_rect);
+
 #endif

@@ -28,10 +28,11 @@ Build-Depends: debhelper-compat (= 12),
                libgles2-mesa-dev (>= 7.1~rc3-1~) | libgles2-dev,
                libglib2.0-dev (>= 2.61.1),
                libgnome-desktop-3-dev (>= 3.33.4),
+               libgraphene-1.0-dev (>= 1.9.3),
                libgtk-3-dev (>= 3.19.8),
                libgudev-1.0-dev (>= 232) [linux-any],
                libice-dev,
-               libinput-dev (>= 1.4) [linux-any],
+               libinput-dev (>= 1.7) [linux-any],
                libjson-glib-dev (>= 0.13.2-1~),
                libnvidia-egl-wayland-dev [linux-any],
                libpam0g-dev,
@@ -60,7 +61,7 @@ Build-Depends: debhelper-compat (= 12),
                libxrandr-dev,
                libxrender-dev,
                libxt-dev,
-               meson (>= 0.46),
+               meson (>= 0.50),
                pkg-config (>= 0.22),
                wayland-protocols (>= 1.18) [linux-any],
                xauth <!nocheck>,
@@ -100,11 +101,11 @@ Description: Example window manager using GNOME's window manager library
  This package contains the mutter executable. It can be used as a
  standalone window manager, but is primarily intended for debugging.
 
-Package: gir1.2-mutter-5
+Package: gir1.2-mutter-6
 Section: introspection
 Architecture: any
 Multi-Arch: same
-Depends: libmutter-5-0 (= ${binary:Version}),
+Depends: libmutter-6-0 (= ${binary:Version}),
          ${gir:Depends},
          ${misc:Depends},
          ${shlibs:Depends}
@@ -121,7 +122,7 @@ Description: GObject introspection data for Mutter
  This package contains the GObject introspection data which may be
  used to generate dynamic bindings.
 
-Package: libmutter-5-0
+Package: libmutter-6-0
 Section: libs
 Architecture: any
 Multi-Arch: same
@@ -146,11 +147,11 @@ Description: window manager library from the Mutter window manager
  This package contains the window manager shared library, used by mutter
  itself, and gnome-shell.
 
-Package: libmutter-5-dev
+Package: libmutter-6-dev
 Section: libdevel
 Architecture: any
 Multi-Arch: same
-Depends: gir1.2-mutter-5 (= ${binary:Version}),
+Depends: gir1.2-mutter-6 (= ${binary:Version}),
          gsettings-desktop-schemas-dev (>= 3.33.0),
          libatk1.0-dev,
          libcairo2-dev,
@@ -160,10 +161,11 @@ Depends: gir1.2-mutter-5 (= ${binary:Version}),
          libgdk-pixbuf2.0-dev,
          libgles2-mesa-dev (>= 7.1~rc3-1~) | libgles2-dev,
          libglib2.0-dev,
+         libgraphene-1.0-dev (>= 1.9.3),
          libgtk-3-dev,
-         libinput-dev (>= 1.4),
+         libinput-dev (>= 1.7),
          libjson-glib-dev,
-         libmutter-5-0 (= ${binary:Version}),
+         libmutter-6-0 (= ${binary:Version}),
          libpango1.0-dev,
          libudev-dev,
          libwayland-dev,

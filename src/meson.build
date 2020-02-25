@@ -244,8 +244,6 @@ mutter_sources = [
   'backends/x11/meta-crtc-xrandr.h',
   'backends/x11/meta-cursor-renderer-x11.c',
   'backends/x11/meta-cursor-renderer-x11.h',
-  'backends/x11/meta-device-manager-x11.c',
-  'backends/x11/meta-device-manager-x11.h',
   'backends/x11/meta-event-x11.c',
   'backends/x11/meta-event-x11.h',
   'backends/x11/meta-gpu-xrandr.c',
@@ -256,6 +254,8 @@ mutter_sources = [
   'backends/x11/meta-input-device-tool-x11.h',
   'backends/x11/meta-input-settings-x11.c',
   'backends/x11/meta-input-settings-x11.h',
+  'backends/x11/meta-seat-x11.c',
+  'backends/x11/meta-seat-x11.h',
   'backends/x11/meta-keymap-x11.c',
   'backends/x11/meta-keymap-x11.h',
   'backends/x11/meta-monitor-manager-xrandr.c',
@@ -330,8 +330,6 @@ mutter_sources = [
   'core/boxes-private.h',
   'core/constraints.c',
   'core/constraints.h',
-  'core/core.c',
-  'core/core.h',
   'core/delete.c',
   'core/display.c',
   'core/display-private.h',
@@ -414,6 +412,8 @@ mutter_sources = [
   'x11/meta-x11-selection-output-stream-private.h',
   'x11/meta-x11-stack.c',
   'x11/meta-x11-stack-private.h',
+  'x11/meta-x11-window-control.c',
+  'x11/meta-x11-window-control.h',
   'x11/mutter-Xatomtype.h',
   'x11/session.c',
   'x11/session.h',
@@ -565,6 +565,8 @@ if have_wayland
     'wayland/meta-wayland-versions.h',
     'wayland/meta-wayland-viewporter.c',
     'wayland/meta-wayland-viewporter.h',
+    'wayland/meta-wayland-window-configuration.c',
+    'wayland/meta-wayland-window-configuration.h',
     'wayland/meta-wayland-wl-shell.c',
     'wayland/meta-wayland-wl-shell.h',
     'wayland/meta-wayland-xdg-foreign.c',
@@ -601,12 +603,12 @@ if have_native_backend
     'backends/native/meta-crtc-kms.h',
     'backends/native/meta-cursor-renderer-native.c',
     'backends/native/meta-cursor-renderer-native.h',
-    'backends/native/meta-device-manager-native.c',
-    'backends/native/meta-device-manager-native.h',
     'backends/native/meta-drm-buffer-dumb.c',
     'backends/native/meta-drm-buffer-dumb.h',
     'backends/native/meta-drm-buffer-gbm.c',
     'backends/native/meta-drm-buffer-gbm.h',
+    'backends/native/meta-drm-buffer-import.c',
+    'backends/native/meta-drm-buffer-import.h',
     'backends/native/meta-drm-buffer.c',
     'backends/native/meta-drm-buffer.h',
     'backends/native/meta-event-native.c',
@@ -646,6 +648,7 @@ if have_native_backend
     'backends/native/meta-kms-page-flip.c',
     'backends/native/meta-kms-page-flip-private.h',
     'backends/native/meta-kms-plane.c',
+    'backends/native/meta-kms-plane-private.h',
     'backends/native/meta-kms-plane.h',
     'backends/native/meta-kms-private.h',
     'backends/native/meta-kms-types.h',
@@ -767,6 +770,10 @@ if have_remote_desktop
   mutter_built_sources += dbus_screen_cast_built_sources
 endif
 
+wayland_protocol_server_headers = []
+wayland_protocol_client_headers = []
+wayland_protocol_sources = []
+
 if have_wayland
   # Format:
   #  - protocol name
@@ -829,7 +836,7 @@ if have_wayland
                                                   output_base))
     endif
 
-    mutter_built_sources += custom_target('@0@ server header'.format(output_base),
+    wayland_protocol_server_headers += custom_target('@0@ server header'.format(output_base),
       input: input,
       output: '@0@-server-protocol.h'.format(output_base),
       command: [
@@ -839,7 +846,18 @@ if have_wayland
       ]
     )
 
-    mutter_built_sources += custom_target('@0@ source'.format(output_base),
+    # used by tests
+    wayland_protocol_client_headers += custom_target('@0@ client header'.format(output_base),
+      input: input,
+      output: '@0@-client-protocol.h'.format(output_base),
+      command: [
+        wayland_scanner,
+        'client-header',
+        '@INPUT@', '@OUTPUT@',
+      ]
+    )
+
+    wayland_protocol_sources += custom_target('@0@ source'.format(output_base),
       input: input,
       output: '@0@-protocol.c'.format(output_base),
       command: [
@@ -850,6 +868,9 @@ if have_wayland
     )
   endforeach
 endif
+
+mutter_built_sources += wayland_protocol_server_headers
+mutter_built_sources += wayland_protocol_sources
 
 subdir('meta')
 

@@ -22,6 +22,30 @@
  *     Jasper St. Pierre <jstpierre@mecheye.net>
  */
 
+/**
+ * SECTION:meta-wayland-buffer
+ * @title: MetaWaylandBuffer
+ * @short_description: A wrapper for wayland buffers
+ *
+ * #MetaWaylandBuffer is a general wrapper around wl_buffer, the basic way of
+ * passing rendered data from Wayland clients to the compositor. Note that a
+ * buffer can be backed by several types of memory, as specified by
+ * #MetaWaylandBufferType.
+ */
+
+/**
+ * MetaWaylandBufferType:
+ * @META_WAYLAND_BUFFER_TYPE_UNKNOWN: Unknown type.
+ * @META_WAYLAND_BUFFER_TYPE_SHM: wl_buffer backed by shared memory
+ * @META_WAYLAND_BUFFER_TYPE_EGL_IMAGE: wl_buffer backed by an EGLImage
+ * @META_WAYLAND_BUFFER_TYPE_EGL_STREAM: wl_buffer backed by an EGLStream (NVIDIA-specific)
+ * @META_WAYLAND_BUFFER_TYPE_DMA_BUF: wl_buffer backed by a Linux DMA-BUF
+ *
+ * Specifies the backing memory for a #MetaWaylandBuffer. Depending on the type
+ * of buffer, this will lead to different handling for the compositor.  For
+ * example, a shared-memory buffer will still need to be uploaded to the GPU.
+ */
+
 #include "config.h"
 
 #include "wayland/meta-wayland-buffer.h"
@@ -198,7 +222,6 @@ shm_buffer_get_cogl_pixel_format (struct wl_shm_buffer  *shm_buffer,
 static gboolean
 shm_buffer_attach (MetaWaylandBuffer  *buffer,
                    CoglTexture       **texture,
-                   gboolean           *changed_texture,
                    GError            **error)
 {
   MetaBackend *backend = meta_get_backend ();
@@ -224,7 +247,6 @@ shm_buffer_attach (MetaWaylandBuffer  *buffer,
       _cogl_texture_get_format (*texture) == format)
     {
       buffer->is_y_inverted = TRUE;
-      *changed_texture = FALSE;
       return TRUE;
     }
 
@@ -269,7 +291,6 @@ shm_buffer_attach (MetaWaylandBuffer  *buffer,
     return FALSE;
 
   *texture = new_texture;
-  *changed_texture = TRUE;
   buffer->is_y_inverted = TRUE;
 
   return TRUE;
@@ -278,7 +299,6 @@ shm_buffer_attach (MetaWaylandBuffer  *buffer,
 static gboolean
 egl_image_buffer_attach (MetaWaylandBuffer  *buffer,
                          CoglTexture       **texture,
-                         gboolean           *changed_texture,
                          GError            **error)
 {
   MetaBackend *backend = meta_get_backend ();
@@ -294,7 +314,6 @@ egl_image_buffer_attach (MetaWaylandBuffer  *buffer,
 
   if (buffer->egl_image.texture)
     {
-      *changed_texture = *texture != buffer->egl_image.texture;
       cogl_clear_object (texture);
       *texture = cogl_object_ref (buffer->egl_image.texture);
       return TRUE;
@@ -362,7 +381,6 @@ egl_image_buffer_attach (MetaWaylandBuffer  *buffer,
 
   cogl_clear_object (texture);
   *texture = cogl_object_ref (buffer->egl_image.texture);
-  *changed_texture = TRUE;
 
   return TRUE;
 }
@@ -371,7 +389,6 @@ egl_image_buffer_attach (MetaWaylandBuffer  *buffer,
 static gboolean
 egl_stream_buffer_attach (MetaWaylandBuffer  *buffer,
                           CoglTexture       **texture,
-                          gboolean           *changed_texture,
                           GError            **error)
 {
   MetaWaylandEglStream *stream = buffer->egl_stream.stream;
@@ -381,7 +398,6 @@ egl_stream_buffer_attach (MetaWaylandBuffer  *buffer,
   if (!meta_wayland_egl_stream_attach (stream, error))
     return FALSE;
 
-  *changed_texture = *texture != buffer->egl_stream.texture;
   cogl_clear_object (texture);
   *texture = cogl_object_ref (buffer->egl_stream.texture);
 
@@ -411,7 +427,6 @@ egl_stream_buffer_attach (MetaWaylandBuffer  *buffer,
 gboolean
 meta_wayland_buffer_attach (MetaWaylandBuffer  *buffer,
                             CoglTexture       **texture,
-                            gboolean           *changed_texture,
                             GError            **error)
 {
   g_return_val_if_fail (buffer->resource, FALSE);
@@ -428,17 +443,16 @@ meta_wayland_buffer_attach (MetaWaylandBuffer  *buffer,
   switch (buffer->type)
     {
     case META_WAYLAND_BUFFER_TYPE_SHM:
-      return shm_buffer_attach (buffer, texture, changed_texture, error);
+      return shm_buffer_attach (buffer, texture, error);
     case META_WAYLAND_BUFFER_TYPE_EGL_IMAGE:
-      return egl_image_buffer_attach (buffer, texture, changed_texture, error);
+      return egl_image_buffer_attach (buffer, texture, error);
 #ifdef HAVE_WAYLAND_EGLSTREAM
     case META_WAYLAND_BUFFER_TYPE_EGL_STREAM:
-      return egl_stream_buffer_attach (buffer, texture, changed_texture, error);
+      return egl_stream_buffer_attach (buffer, texture, error);
 #endif
     case META_WAYLAND_BUFFER_TYPE_DMA_BUF:
       return meta_wayland_dma_buf_buffer_attach (buffer,
                                                  texture,
-                                                 changed_texture,
                                                  error);
     case META_WAYLAND_BUFFER_TYPE_UNKNOWN:
       g_assert_not_reached ();
@@ -449,6 +463,15 @@ meta_wayland_buffer_attach (MetaWaylandBuffer  *buffer,
   return FALSE;
 }
 
+/**
+ * meta_wayland_buffer_create_snippet:
+ * @buffer: A #MetaWaylandBuffer object
+ *
+ * If needed, this method creates a #CoglSnippet to make sure the buffer can be
+ * dealt with appropriately in a #CoglPipeline that renders it.
+ *
+ * Returns: (transfer full) (nullable): A new #CoglSnippet, or %NULL.
+ */
 CoglSnippet *
 meta_wayland_buffer_create_snippet (MetaWaylandBuffer *buffer)
 {
@@ -456,7 +479,7 @@ meta_wayland_buffer_create_snippet (MetaWaylandBuffer *buffer)
   if (!buffer->egl_stream.stream)
     return NULL;
 
-  return meta_wayland_egl_stream_create_snippet ();
+  return meta_wayland_egl_stream_create_snippet (buffer->egl_stream.stream);
 #else
   return NULL;
 #endif /* HAVE_WAYLAND_EGLSTREAM */
@@ -477,22 +500,25 @@ process_shm_buffer_damage (MetaWaylandBuffer *buffer,
   struct wl_shm_buffer *shm_buffer;
   int i, n_rectangles;
   gboolean set_texture_failed = FALSE;
+  CoglPixelFormat format;
 
   n_rectangles = cairo_region_num_rectangles (region);
 
   shm_buffer = wl_shm_buffer_get (buffer->resource);
+
+  shm_buffer_get_cogl_pixel_format (shm_buffer, &format, NULL);
+  g_return_val_if_fail (cogl_pixel_format_get_n_planes (format) == 1, FALSE);
+
   wl_shm_buffer_begin_access (shm_buffer);
 
   for (i = 0; i < n_rectangles; i++)
     {
       const uint8_t *data = wl_shm_buffer_get_data (shm_buffer);
       int32_t stride = wl_shm_buffer_get_stride (shm_buffer);
-      CoglPixelFormat format;
-      int bpp;
       cairo_rectangle_int_t rect;
+      int bpp;
 
-      shm_buffer_get_cogl_pixel_format (shm_buffer, &format, NULL);
-      bpp = _cogl_pixel_format_get_bytes_per_pixel (format);
+      bpp = cogl_pixel_format_get_bytes_per_pixel (format, 0);
       cairo_region_get_rectangle (region, i, &rect);
 
       if (!_cogl_texture_set_region (texture,
@@ -579,6 +605,11 @@ meta_wayland_buffer_class_init (MetaWaylandBufferClass *klass)
 
   object_class->finalize = meta_wayland_buffer_finalize;
 
+  /**
+   * MetaWaylandBuffer::resource-destroyed:
+   *
+   * Called when the underlying wl_resource was destroyed.
+   */
   signals[RESOURCE_DESTROYED] = g_signal_new ("resource-destroyed",
                                               G_TYPE_FROM_CLASS (object_class),
                                               G_SIGNAL_RUN_LAST,

@@ -519,7 +519,7 @@ meta_x11_drag_dest_update (MetaWaylandDataDevice *data_device,
   MetaWaylandCompositor *compositor = meta_wayland_compositor_get_default ();
   MetaXWaylandDnd *dnd = compositor->xwayland_manager.dnd;
   MetaWaylandSeat *seat = compositor->seat;
-  ClutterPoint pos;
+  graphene_point_t pos;
 
   clutter_input_device_get_coords (seat->pointer->device, NULL, &pos);
   xdnd_send_position (dnd, dnd->dnd_dest,
@@ -562,7 +562,7 @@ meta_xwayland_data_source_fetch_mimetype_list (MetaWaylandDataSource *source,
   XGetWindowProperty (xdisplay, window, prop,
                       0, /* offset */
                       0x1fffffff, /* length */
-                      True, /* delete */
+                      False, /* delete */
                       AnyPropertyType,
                       &type_ret,
                       &format_ret,
@@ -602,7 +602,7 @@ pick_drop_surface (MetaWaylandCompositor *compositor,
 {
   MetaDisplay *display = meta_get_display ();
   MetaWindow *focus_window = NULL;
-  ClutterPoint pos;
+  graphene_point_t pos;
 
   clutter_event_get_coords (event, &pos.x, &pos.y);
   focus_window = meta_stack_get_default_focus_window_at_point (display->stack,
@@ -787,13 +787,17 @@ meta_xwayland_dnd_handle_client_message (MetaWaylandCompositor *compositor,
                                                              xdnd_atoms[ATOM_DND_TYPE_LIST]);
             }
 
+          meta_wayland_data_source_set_actions (dnd->source,
+                                                WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY |
+                                                WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE |
+                                                WL_DATA_DEVICE_MANAGER_DND_ACTION_ASK);
           meta_wayland_drag_grab_set_focus (drag_grab, dnd->focus_surface);
           return TRUE;
         }
       else if (event->message_type == xdnd_atoms[ATOM_DND_POSITION])
         {
           ClutterEvent *motion;
-          ClutterPoint pos;
+          graphene_point_t pos;
           uint32_t action = 0;
 
           dnd->client_message_timestamp = event->data.l[3];
@@ -806,7 +810,7 @@ meta_xwayland_dnd_handle_client_message (MetaWaylandCompositor *compositor,
           clutter_event_set_time (motion, dnd->last_motion_time);
 
           action = atom_to_action ((Atom) event->data.l[4]);
-          meta_wayland_data_source_set_actions (dnd->source, action);
+          meta_wayland_data_source_set_user_action (dnd->source, action);
 
           meta_wayland_surface_drag_dest_motion (drag_focus, motion);
           xdnd_send_status (dnd, (Window) event->data.l[0],

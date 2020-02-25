@@ -204,8 +204,8 @@ clutter_stage_view_copy_to_framebuffer (ClutterStageView            *view,
 }
 
 void
-clutter_stage_view_blit_offscreen (ClutterStageView            *view,
-                                   const cairo_rectangle_int_t *rect)
+clutter_stage_view_after_paint (ClutterStageView            *view,
+                                const cairo_rectangle_int_t *rect)
 {
   ClutterStageViewPrivate *priv =
     clutter_stage_view_get_instance_private (view);

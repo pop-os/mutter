@@ -145,8 +145,6 @@ typedef struct
    */
   GList  *usable_screen_region;
   GList  *usable_monitor_region;
-
-  gboolean should_unmanage;
 } ConstraintInfo;
 
 static gboolean do_screen_and_monitor_relative_constraints (MetaWindow     *window,
@@ -255,14 +253,6 @@ do_all_constraints (MetaWindow         *window,
       satisfied = satisfied &&
                   (*constraint->func) (window, info, priority, check_only);
 
-      if (info->should_unmanage)
-        {
-          meta_topic (META_DEBUG_GEOMETRY,
-                      "constraint %s wants to unmanage window.\n",
-                      constraint->name);
-          return TRUE;
-        }
-
       if (!check_only)
         {
           /* Log how the constraint modified the position */
@@ -321,12 +311,6 @@ meta_window_constrain (MetaWindow          *window,
      * satisfied
      */
     satisfied = do_all_constraints (window, &info, priority, check_only);
-
-    if (info.should_unmanage)
-      {
-        meta_window_unmanage_on_idle (window);
-        return;
-      }
 
     /* Drop the least important constraints if we can't satisfy them all */
     priority++;
@@ -413,11 +397,7 @@ setup_constraint_info (ConstraintInfo      *info,
                                                  logical_monitor,
                                                  &info->work_area_monitor);
 
-  if (!window->fullscreen || !meta_window_has_fullscreen_monitors (window))
-    {
-      info->entire_monitor = logical_monitor->rect;
-    }
-  else
+  if (window->fullscreen && meta_window_has_fullscreen_monitors (window))
     {
       info->entire_monitor = window->fullscreen_monitors.top->rect;
       meta_rectangle_union (&info->entire_monitor,
@@ -430,14 +410,18 @@ setup_constraint_info (ConstraintInfo      *info,
                             &window->fullscreen_monitors.right->rect,
                             &info->entire_monitor);
     }
+  else
+    {
+      info->entire_monitor = logical_monitor->rect;
+      if (window->fullscreen)
+        meta_window_adjust_fullscreen_monitor_rect (window, &info->entire_monitor);
+    }
 
   cur_workspace = window->display->workspace_manager->active_workspace;
   info->usable_screen_region   =
     meta_workspace_get_onscreen_region (cur_workspace);
   info->usable_monitor_region =
     meta_workspace_get_onmonitor_region (cur_workspace, logical_monitor);
-
-  info->should_unmanage = FALSE;
 
   /* Log all this information for debugging */
   meta_topic (META_DEBUG_GEOMETRY,
@@ -853,27 +837,8 @@ constrain_custom_rule (MetaWindow         *window,
   switch (window->placement_state)
     {
     case META_PLACEMENT_STATE_CONSTRAINED:
-      {
-        MetaRectangle parent_buffer_rect;
-
-        meta_window_get_buffer_rect (parent, &parent_buffer_rect);
-        if (!meta_rectangle_overlap (&adjusted_unconstrained,
-                                     &parent_buffer_rect) &&
-            !meta_rectangle_is_adjacent_to (&adjusted_unconstrained,
-                                            &parent_buffer_rect))
-          {
-            g_warning ("Buggy client caused popup to be placed outside of "
-                       "parent window");
-            info->should_unmanage = TRUE;
-            return TRUE;
-          }
-        else
-          {
-            info->current = adjusted_unconstrained;
-            goto done;
-          }
-        break;
-      }
+      info->current = adjusted_unconstrained;
+      goto done;
     case META_PLACEMENT_STATE_UNCONSTRAINED:
       break;
     }

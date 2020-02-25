@@ -1,5 +1,5 @@
 project('mutter', 'c',
-  version: '3.34.3',
+  version: '3.35.91',
   meson_version: '>= 0.50.0',
   license: 'GPLv2+'
 )
@@ -17,6 +17,7 @@ libmutter_api_version = '@0@'.format(api_version)
 fribidi_req = '>= 1.0.0'
 glib_req = '>= 2.61.1'
 gi_req = '>= 0.9.5'
+graphene_req = '>= 1.9.3'
 gtk3_req = '>= 3.19.8'
 gdk_pixbuf_req = '>= 2.0'
 uprof_req = '>= 0.3'
@@ -45,7 +46,7 @@ wayland_server_req = '>= 1.13.0'
 wayland_protocols_req = '>= 1.18'
 
 # native backend version requirements
-libinput_req = '>= 1.4'
+libinput_req = '>= 1.7'
 gbm_req = '>= 10.3'
 
 # screen cast version requirements
@@ -86,6 +87,7 @@ mutter_installed_tests_libexecdir = join_paths(
 
 m_dep = cc.find_library('m', required: true)
 x11_dep = dependency('x11')
+graphene_dep = dependency('graphene-gobject-1.0', version: graphene_req)
 gtk3_dep = dependency('gtk+-3.0', version: gtk3_req)
 gdk_pixbuf_dep = dependency('gdk-pixbuf-2.0')
 pango_dep = dependency('pango', version: pango_req)
@@ -162,6 +164,7 @@ endif
 have_wayland = get_option('wayland')
 if have_wayland
   wayland_server_dep = dependency('wayland-server', version: wayland_server_req)
+  wayland_client_dep = dependency('wayland-client', version: wayland_server_req)
   wayland_protocols_dep = dependency('wayland-protocols',
                                      version: wayland_protocols_req)
   wayland_egl_dep = dependency('wayland-egl')
