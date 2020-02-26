@@ -690,7 +690,7 @@ libmutter-6.so.0 libmutter-6-0 #MINVER#
  meta_x11_error_trap_pop_with_return@Base 3.29.4
  meta_x11_error_trap_push@Base 3.29.4
  meta_x11_init_gdk_display@Base 3.29.4
- meta_xwayland_override_display_number@Base 3.31.90
+ (arch=linux-any)meta_xwayland_override_display_number@Base 3.31.90
 libmutter-clutter-6.so.0 libmutter-6-0 #MINVER#
 * Build-Depends-Package: libmutter-6-dev
  _clutter_backend_translate_event@Base 3.33.92

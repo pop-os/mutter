@@ -17,8 +17,10 @@ CONFFLAGS = \
 	-Dnative_backend=true
 else
 CONFFLAGS += \
-	-Degl=false \
+	-Dudev=false \
+	-Dlibwacom=false \
 	-Dwayland=false \
+	-Dcore_tests=false \
 	-Dnative_backend=false \
 	-Dremote_desktop=false
 endif
@@ -43,6 +45,7 @@ endif
 override_dh_auto_configure:
 	dh_auto_configure -- \
 		-Dstartup_notification=true \
+		-Degl=true \
 		-Dgles2=true \
 		-Dgles2_libname=libGLESv2.so.2 \
 		-Dinstalled_tests=false \
