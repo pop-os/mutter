@@ -227,8 +227,11 @@ sync_focus_surface (MetaWaylandPointer *pointer)
   MetaDisplay *display = meta_get_display ();
   MetaBackend *backend = meta_get_backend ();
   MetaCursorTracker *cursor_tracker = meta_backend_get_cursor_tracker (backend);
+  ClutterBackend *clutter_backend = clutter_get_default_backend ();
+  ClutterSeat *clutter_seat = clutter_backend_get_default_seat (clutter_backend);
 
-  if (!meta_cursor_tracker_get_pointer_visible (cursor_tracker))
+  if (!meta_cursor_tracker_get_pointer_visible (cursor_tracker) &&
+      !clutter_seat_is_unfocus_inhibited (clutter_seat))
     {
       meta_wayland_pointer_set_focus (pointer, NULL);
       return;
@@ -430,11 +433,14 @@ default_grab_focus (MetaWaylandPointerGrab *grab,
   MetaDisplay *display = meta_get_display ();
   MetaBackend *backend = meta_get_backend ();
   MetaCursorTracker *cursor_tracker = meta_backend_get_cursor_tracker (backend);
+  ClutterBackend *clutter_backend = clutter_get_default_backend ();
+  ClutterSeat *clutter_seat = clutter_backend_get_default_seat (clutter_backend);
 
   if (!meta_wayland_seat_has_pointer (seat))
     return;
 
-  if (!meta_cursor_tracker_get_pointer_visible (cursor_tracker))
+  if (!meta_cursor_tracker_get_pointer_visible (cursor_tracker) &&
+      !clutter_seat_is_unfocus_inhibited (clutter_seat))
     return;
 
   if (pointer->button_count > 0)
@@ -488,13 +494,6 @@ meta_wayland_pointer_on_cursor_changed (MetaCursorTracker *cursor_tracker,
     meta_wayland_surface_update_outputs (pointer->cursor_surface);
 }
 
-static void
-meta_wayland_pointer_on_cursor_visibility_changed (MetaCursorTracker  *cursor_tracker,
-                                                   MetaWaylandPointer *pointer)
-{
-  sync_focus_surface (pointer);
-}
-
 void
 meta_wayland_pointer_enable (MetaWaylandPointer *pointer)
 {
@@ -516,10 +515,15 @@ meta_wayland_pointer_enable (MetaWaylandPointer *pointer)
                     G_CALLBACK (meta_wayland_pointer_on_cursor_changed),
                     pointer);
 
-  g_signal_connect (cursor_tracker,
-                    "visibility-changed",
-                    G_CALLBACK (meta_wayland_pointer_on_cursor_visibility_changed),
-                    pointer);
+  g_signal_connect_swapped (cursor_tracker,
+                            "visibility-changed",
+                            G_CALLBACK (sync_focus_surface),
+                            pointer);
+
+  g_signal_connect_swapped (clutter_seat,
+                            "is-unfocus-inhibited-changed",
+                            G_CALLBACK (sync_focus_surface),
+                            pointer);
 }
 
 void
@@ -527,13 +531,19 @@ meta_wayland_pointer_disable (MetaWaylandPointer *pointer)
 {
   MetaBackend *backend = meta_get_backend ();
   MetaCursorTracker *cursor_tracker = meta_backend_get_cursor_tracker (backend);
+  ClutterBackend *clutter_backend = clutter_get_default_backend ();
+  ClutterSeat *clutter_seat = clutter_backend_get_default_seat (clutter_backend);
 
   g_signal_handlers_disconnect_by_func (cursor_tracker,
                                         (gpointer) meta_wayland_pointer_on_cursor_changed,
                                         pointer);
 
   g_signal_handlers_disconnect_by_func (cursor_tracker,
-                                        meta_wayland_pointer_on_cursor_visibility_changed,
+                                        sync_focus_surface,
+                                        pointer);
+
+  g_signal_handlers_disconnect_by_func (clutter_seat,
+                                        sync_focus_surface,
                                         pointer);
 
   if (pointer->cursor_surface)
@@ -897,9 +907,12 @@ meta_wayland_pointer_set_focus (MetaWaylandPointer *pointer,
   MetaWaylandInputDevice *input_device = META_WAYLAND_INPUT_DEVICE (pointer);
   MetaBackend *backend = meta_get_backend ();
   MetaCursorTracker *cursor_tracker = meta_backend_get_cursor_tracker (backend);
+  ClutterBackend *clutter_backend = clutter_get_default_backend ();
+  ClutterSeat *clutter_seat = clutter_backend_get_default_seat (clutter_backend);
 
   g_return_if_fail (meta_cursor_tracker_get_pointer_visible (cursor_tracker) ||
-		    surface == NULL);
+                    clutter_seat_is_unfocus_inhibited (clutter_seat) ||
+                    surface == NULL);
 
   if (pointer->focus_surface == surface)
     return;
@@ -927,6 +940,7 @@ meta_wayland_pointer_set_focus (MetaWaylandPointer *pointer,
     {
       struct wl_client *client = wl_resource_get_client (surface->resource);
       graphene_point_t pos;
+      MetaWindow *focus_window;
 
       pointer->focus_surface = surface;
 
@@ -937,8 +951,9 @@ meta_wayland_pointer_set_focus (MetaWaylandPointer *pointer,
 
       clutter_input_device_get_coords (pointer->device, NULL, &pos);
 
-      if (pointer->focus_surface->window)
-        meta_window_handle_enter (pointer->focus_surface->window,
+      focus_window = meta_wayland_surface_get_window (pointer->focus_surface);
+      if (focus_window)
+        meta_window_handle_enter (focus_window,
                                   /* XXX -- can we reliably get a timestamp for setting focus? */
                                   clutter_get_current_event_time (),
                                   pos.x, pos.y);

@@ -85,6 +85,7 @@ typedef enum
   META_MOVE_RESIZE_FORCE_MOVE = 1 << 8,
   META_MOVE_RESIZE_WAYLAND_STATE_CHANGED = 1 << 9,
   META_MOVE_RESIZE_FORCE_UPDATE_MONITOR = 1 << 10,
+  META_MOVE_RESIZE_PLACEMENT_CHANGED = 1 << 11,
 } MetaMoveResizeFlags;
 
 typedef enum
@@ -141,12 +142,19 @@ typedef struct _MetaPlacementRule
   int offset_y;
   int width;
   int height;
+
+  gboolean is_reactive;
+
+  MetaRectangle parent_rect;
 } MetaPlacementRule;
 
 typedef enum _MetaPlacementState
 {
   META_PLACEMENT_STATE_UNCONSTRAINED,
-  META_PLACEMENT_STATE_CONSTRAINED,
+  META_PLACEMENT_STATE_CONSTRAINED_PENDING,
+  META_PLACEMENT_STATE_CONSTRAINED_CONFIGURED,
+  META_PLACEMENT_STATE_CONSTRAINED_FINISHED,
+  META_PLACEMENT_STATE_INVALIDATED,
 } MetaPlacementState;
 
 typedef enum
@@ -534,10 +542,22 @@ struct _MetaWindow
   /* Bypass compositor hints */
   guint bypass_compositor;
 
-  MetaPlacementRule *placement_rule;
-  MetaPlacementState placement_state;
-  int constrained_placement_rule_offset_x;
-  int constrained_placement_rule_offset_y;
+  struct {
+    MetaPlacementRule *rule;
+    MetaPlacementState state;
+
+    struct {
+      int x;
+      int y;
+      int rel_x;
+      int rel_y;
+    } pending;
+
+    struct {
+      int rel_x;
+      int rel_y;
+    } current;
+  } placement;
 
   guint unmanage_idle_id;
 };
@@ -561,9 +581,12 @@ struct _MetaWindowClass
                                   MetaGrabOp  op);
   void (*current_workspace_changed) (MetaWindow *window);
   void (*move_resize_internal)   (MetaWindow                *window,
-                                  int                        gravity,
+                                  MetaGravity                gravity,
                                   MetaRectangle              unconstrained_rect,
                                   MetaRectangle              constrained_rect,
+                                  MetaRectangle              temporary_rect,
+                                  int                        rel_x,
+                                  int                        rel_y,
                                   MetaMoveResizeFlags        flags,
                                   MetaMoveResizeResultFlags *result);
   gboolean (*update_struts)      (MetaWindow *window);
@@ -661,7 +684,7 @@ void        meta_window_resize_frame_with_gravity (MetaWindow  *window,
                                                    gboolean     user_op,
                                                    int          w,
                                                    int          h,
-                                                   int          gravity);
+                                                   MetaGravity  gravity);
 
 /* Return whether the window should be currently mapped */
 gboolean    meta_window_should_be_showing   (MetaWindow  *window);
@@ -674,7 +697,7 @@ void        meta_window_update_struts      (MetaWindow  *window);
  * request.
  */
 void        meta_window_get_gravity_position (MetaWindow  *window,
-                                              int          gravity,
+                                              MetaGravity  gravity,
                                               int         *x,
                                               int         *y);
 /* Get geometry for saving in the session; x/y are gravity
@@ -833,7 +856,7 @@ void meta_window_update_resize (MetaWindow *window,
 
 void meta_window_move_resize_internal (MetaWindow          *window,
                                        MetaMoveResizeFlags  flags,
-                                       int                  gravity,
+                                       MetaGravity          gravity,
                                        MetaRectangle        frame_rect);
 
 void meta_window_grab_op_began (MetaWindow *window, MetaGrabOp op);

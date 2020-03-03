@@ -1,5 +1,5 @@
 project('mutter', 'c',
-  version: '3.35.91',
+  version: '3.35.92',
   meson_version: '>= 0.50.0',
   license: 'GPLv2+'
 )
@@ -43,14 +43,17 @@ gudev_req = '>= 232'
 
 # wayland version requirements
 wayland_server_req = '>= 1.13.0'
-wayland_protocols_req = '>= 1.18'
+wayland_protocols_req = '>= 1.19'
 
 # native backend version requirements
 libinput_req = '>= 1.7'
 gbm_req = '>= 10.3'
 
 # screen cast version requirements
-libpipewire_req = '>= 0.2.5'
+libpipewire_req = '>= 0.3.0'
+
+# profiler requirements
+sysprof_req = '>= 3.35.2'
 
 gnome = import('gnome')
 pkg = import('pkgconfig')
@@ -127,6 +130,7 @@ xau_dep = dependency('xau')
 ice_dep = dependency('ice')
 atk_dep = dependency('atk', version: atk_req)
 libcanberra_dep = dependency('libcanberra', version: libcanberra_req)
+dbus_dep = dependency('dbus-1')
 
 # For now always require X11 support
 have_x11 = true
@@ -241,7 +245,7 @@ endif
 
 have_remote_desktop = get_option('remote_desktop')
 if have_remote_desktop
-  libpipewire_dep = dependency('libpipewire-0.2', version: libpipewire_req)
+  libpipewire_dep = dependency('libpipewire-0.3', version: libpipewire_req)
 endif
 
 have_introspection = get_option('introspection')
@@ -275,7 +279,7 @@ endif
 
 have_profiler = get_option('profiler')
 if have_profiler
-  sysprof_dep = dependency('sysprof-capture-3')
+  sysprof_dep = dependency('sysprof-capture-3', version: sysprof_req)
 endif
 
 required_functions = [
@@ -373,6 +377,7 @@ if cc.has_header_symbol('sys/prctl.h', 'prctl')
   cdata.set('HAVE_SYS_PRCTL', 1)
 endif
 
+have_xwayland_initfd = false
 if have_wayland
   xwayland_path = get_option('xwayland_path')
   if xwayland_path == ''
@@ -387,6 +392,19 @@ if have_wayland
     cdata.set('HAVE_LINUX_RANDOM', 1)
   else
     error('Required function getrandom not found')
+  endif
+
+  # For Xwayland -initfd usage
+  use_initfd = get_option('xwayland_initfd')
+  if use_initfd.auto()
+    xwayland_options = run_command(xwayland_path, '-help')
+    have_xwayland_initfd = xwayland_options.stderr().contains('-initfd')
+  else
+    have_xwayland_initfd = use_initfd.enabled()
+  endif
+
+  if (have_xwayland_initfd)
+    cdata.set('HAVE_XWAYLAND_INITFD', 1)
   endif
 endif
 
@@ -446,6 +464,7 @@ output = [
   '        Startup notification..... ' + have_startup_notification.to_string(),
   '        Introspection............ ' + have_introspection.to_string(),
   '        Profiler................. ' + have_profiler.to_string(),
+  '        Xwayland initfd.......... ' + have_xwayland_initfd.to_string(),
   '',
   '    Tests:',
   '',
