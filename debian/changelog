@@ -1,6 +1,21 @@
 mutter (3.35.92-1) UNRELEASED; urgency=medium
 
   * New upstream release
+    + Add side channel for starting required X11 services
+    + Allow remote desktop services to inhibit animations
+    + Avoid flicker when (un)redirecting windows
+    + Fix clipping glitches in long text entries
+    + Fix visibility of initially hidden windows
+    + Implement scaled/transformed hardware cursors
+    + Let BindConstraints update the preferred size
+    + Make check-alive timeouts configurable
+    + Make each stage view correspond to a single CRTC
+    + Make Xwayland startup asynchronous
+    + Ping windows on every window focus
+    + Remove overhead from hot code paths
+    + Support synchronized wayland popup moving
+    + Update screen-cast code to PipeWire 0.3 API
+    + Use DMA buffers for screencasting if possible
 
  -- Iain Lane <iain.lane@canonical.com>  Tue, 03 Mar 2020 10:52:01 +0000
 
