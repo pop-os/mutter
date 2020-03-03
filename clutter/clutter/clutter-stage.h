@@ -84,8 +84,9 @@ struct _ClutterStageClass
   gboolean (* delete_event) (ClutterStage *stage,
                              ClutterEvent *event);
 
-  void (* paint_view) (ClutterStage     *stage,
-                       ClutterStageView *view);
+  void (* paint_view) (ClutterStage         *stage,
+                       ClutterStageView     *view,
+                       const cairo_region_t *redraw_clip);
 
   /*< private >*/
   /* padding for future expansion */
@@ -205,8 +206,6 @@ guchar *        clutter_stage_read_pixels                       (ClutterStage   
                                                                  gint                   width,
                                                                  gint                   height);
 
-CLUTTER_EXPORT
-cairo_region_t * clutter_stage_get_redraw_clip                  (ClutterStage          *stage);
 CLUTTER_EXPORT
 void            clutter_stage_ensure_viewport                   (ClutterStage          *stage);
 CLUTTER_EXPORT

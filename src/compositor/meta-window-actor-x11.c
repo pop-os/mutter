@@ -1138,7 +1138,10 @@ handle_updates (MetaWindowActorX11 *actor_x11)
        * which causes the shadows to look bad.
        */
       if (surface && meta_window_x11_always_update_shape (window))
-        update_shape_region (actor_x11);
+        {
+          update_opaque_region (actor_x11);
+          update_shape_region (actor_x11);
+        }
 
       return;
     }
@@ -1444,9 +1447,11 @@ meta_window_actor_x11_cull_out (MetaCullable   *cullable,
                                 cairo_region_t *unobscured_region,
                                 cairo_region_t *clip_region)
 {
+  MetaWindowActorX11 *self = META_WINDOW_ACTOR_X11 (cullable);
+
   cullable_parent_iface->cull_out (cullable, unobscured_region, clip_region);
 
-  set_clip_region_beneath (META_WINDOW_ACTOR_X11 (cullable), clip_region);
+  set_clip_region_beneath (self, clip_region);
 }
 
 static void
