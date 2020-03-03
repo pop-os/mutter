@@ -1,4 +1,4 @@
-mutter (3.35.92-1) UNRELEASED; urgency=medium
+mutter (3.35.92-1) experimental; urgency=medium
 
   * New upstream release
     + Add side channel for starting required X11 services
@@ -23,7 +23,7 @@ mutter (3.35.92-1) UNRELEASED; urgency=medium
   * debian/libmutter-6-0.symbols: Add new symbols for this release. One symbol
     which was introduced in .90 was dropped; -6's ABI is not stable yet.
 
- -- Iain Lane <laney@debian.org>  Tue, 03 Mar 2020 14:33:06 +0000
+ -- Iain Lane <laney@debian.org>  Tue, 03 Mar 2020 16:34:25 +0000
 
 mutter (3.35.91-1) experimental; urgency=medium
 
