@@ -38,7 +38,9 @@ ifeq ($(DEB_HOST_ARCH_OS),linux)
 ifeq ($(shell dpkg-vendor --query vendor),Ubuntu)
 	CONFFLAGS += -Dremote_desktop=false
 else
-	CONFFLAGS += -Dremote_desktop=true
+	# this depends on Pipewire 0.3, which is not packaged yet
+	# and is quite complicated (e.g. it replaces Pulseaudio)
+	CONFFLAGS += -Dremote_desktop=false
 endif
 endif
 
