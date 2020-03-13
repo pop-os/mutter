@@ -1,11 +1,11 @@
-mutter (3.36.0-1) UNRELEASED; urgency=medium
+mutter (3.36.0-1) experimental; urgency=medium
 
   * New upstream release
     + Fix placement of popup windows in multi-monitor setups
     + Fix invisible mouse cursor on some hardware
     + Updated translations
 
- -- Andre Moreira Magalhaes <andre@endlessm.com>  Tue, 10 Mar 2020 19:37:45 -0300
+ -- Andre Moreira Magalhaes <andre@endlessm.com>  Fri, 13 Mar 2020 19:36:29 +0000
 
 mutter (3.35.92-1) experimental; urgency=medium
 
