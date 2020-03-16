@@ -1,4 +1,4 @@
-mutter (3.36.0-2) UNRELEASED; urgency=medium
+mutter (3.36.0-2) experimental; urgency=medium
 
   * control: Build against gnome-desktop 3.36 and break old gnome-shell. So we
     get dependencies on libgnome-desktop-3-19. Otherwise we get two different
@@ -6,7 +6,7 @@ mutter (3.36.0-2) UNRELEASED; urgency=medium
     old gnome-shell for the inverse reason - it needs to be upgraded otherwise
     we get the mismatch the other way around.
 
- -- Iain Lane <laney@debian.org>  Mon, 16 Mar 2020 13:20:33 +0000
+ -- Iain Lane <laney@debian.org>  Mon, 16 Mar 2020 13:20:44 +0000
 
 mutter (3.36.0-1) experimental; urgency=medium
 
