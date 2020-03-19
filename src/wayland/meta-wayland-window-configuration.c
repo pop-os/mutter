@@ -25,10 +25,12 @@
 static uint32_t global_serial_counter = 0;
 
 MetaWaylandWindowConfiguration *
-meta_wayland_window_configuration_new (int x,
-                                       int y,
-                                       int width,
-                                       int height)
+meta_wayland_window_configuration_new (int                 x,
+                                       int                 y,
+                                       int                 width,
+                                       int                 height,
+                                       MetaMoveResizeFlags flags,
+                                       MetaGravity         gravity)
 {
   MetaWaylandWindowConfiguration *configuration;
 
@@ -39,6 +41,33 @@ meta_wayland_window_configuration_new (int x,
     .has_position = TRUE,
     .x = x,
     .y = y,
+
+    .has_size = TRUE,
+    .width = width,
+    .height = height,
+
+    .gravity = gravity,
+    .flags = flags,
+  };
+
+  return configuration;
+}
+
+MetaWaylandWindowConfiguration *
+meta_wayland_window_configuration_new_relative (int rel_x,
+                                                int rel_y,
+                                                int width,
+                                                int height)
+{
+  MetaWaylandWindowConfiguration *configuration;
+
+  configuration = g_new0 (MetaWaylandWindowConfiguration, 1);
+  *configuration = (MetaWaylandWindowConfiguration) {
+    .serial = ++global_serial_counter,
+
+    .has_relative_position = TRUE,
+    .rel_x = rel_x,
+    .rel_y = rel_y,
 
     .has_size = TRUE,
     .width = width,

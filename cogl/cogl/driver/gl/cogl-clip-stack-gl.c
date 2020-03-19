@@ -57,37 +57,26 @@ add_stencil_clip_rectangle (CoglFramebuffer *framebuffer,
                             float y_1,
                             float x_2,
                             float y_2,
-                            gboolean first)
+                            gboolean merge)
 {
   CoglMatrixStack *projection_stack =
     _cogl_framebuffer_get_projection_stack (framebuffer);
   CoglContext *ctx = cogl_framebuffer_get_context (framebuffer);
+  CoglMatrixEntry *old_projection_entry, *old_modelview_entry;
 
   /* NB: This can be called while flushing the journal so we need
    * to be very conservative with what state we change.
    */
+  old_projection_entry = g_steal_pointer (&ctx->current_projection_entry);
+  old_modelview_entry = g_steal_pointer (&ctx->current_modelview_entry);
 
-  _cogl_context_set_current_projection_entry (ctx,
-                                              projection_stack->last_entry);
-  _cogl_context_set_current_modelview_entry (ctx, modelview_entry);
+  ctx->current_projection_entry = projection_stack->last_entry;
+  ctx->current_modelview_entry = modelview_entry;
 
-  if (first)
-    {
-      GE( ctx, glEnable (GL_STENCIL_TEST) );
+  GE( ctx, glColorMask (FALSE, FALSE, FALSE, FALSE) );
+  GE( ctx, glDepthMask (FALSE) );
 
-      /* Initially disallow everything */
-      GE( ctx, glClearStencil (0) );
-      GE( ctx, glClear (GL_STENCIL_BUFFER_BIT) );
-
-      /* Punch out a hole to allow the rectangle */
-      GE( ctx, glStencilFunc (GL_NEVER, 0x1, 0x1) );
-      GE( ctx, glStencilOp (GL_REPLACE, GL_REPLACE, GL_REPLACE) );
-
-      _cogl_rectangle_immediate (framebuffer,
-                                 ctx->stencil_pipeline,
-                                 x_1, y_1, x_2, y_2);
-    }
-  else
+  if (merge)
     {
       /* Add one to every pixel of the stencil buffer in the
 	 rectangle */
@@ -102,15 +91,36 @@ add_stencil_clip_rectangle (CoglFramebuffer *framebuffer,
 	 rectangle are set will be valid */
       GE( ctx, glStencilOp (GL_DECR, GL_DECR, GL_DECR) );
 
-      _cogl_context_set_current_projection_entry (ctx, &ctx->identity_entry);
-      _cogl_context_set_current_modelview_entry (ctx, &ctx->identity_entry);
+      ctx->current_projection_entry = &ctx->identity_entry;
+      ctx->current_modelview_entry = &ctx->identity_entry;
 
       _cogl_rectangle_immediate (framebuffer,
                                  ctx->stencil_pipeline,
                                  -1.0, -1.0, 1.0, 1.0);
     }
+  else
+    {
+      GE( ctx, glEnable (GL_STENCIL_TEST) );
+      GE( ctx, glStencilMask (0x1) );
+
+      /* Initially disallow everything */
+      GE( ctx, glClearStencil (0) );
+      GE( ctx, glClear (GL_STENCIL_BUFFER_BIT) );
+
+      /* Punch out a hole to allow the rectangle */
+      GE( ctx, glStencilFunc (GL_ALWAYS, 0x1, 0x1) );
+      GE( ctx, glStencilOp (GL_KEEP, GL_KEEP, GL_REPLACE) );
+      _cogl_rectangle_immediate (framebuffer,
+                                 ctx->stencil_pipeline,
+                                 x_1, y_1, x_2, y_2);
+    }
+
+  ctx->current_projection_entry = old_projection_entry;
+  ctx->current_modelview_entry = old_modelview_entry;
 
   /* Restore the stencil mode */
+  GE( ctx, glDepthMask (TRUE) );
+  GE( ctx, glColorMask (TRUE, TRUE, TRUE, TRUE) );
   GE( ctx, glStencilFunc (GL_EQUAL, 0x1, 0x1) );
   GE( ctx, glStencilOp (GL_KEEP, GL_KEEP, GL_KEEP) );
 }
@@ -121,6 +131,7 @@ add_stencil_clip_region (CoglFramebuffer *framebuffer,
                          gboolean         merge)
 {
   CoglContext *ctx = cogl_framebuffer_get_context (framebuffer);
+  CoglMatrixEntry *old_projection_entry, *old_modelview_entry;
   CoglMatrix matrix;
   int num_rectangles = cairo_region_num_rectangles (region);
   int i;
@@ -129,8 +140,11 @@ add_stencil_clip_region (CoglFramebuffer *framebuffer,
   /* NB: This can be called while flushing the journal so we need
    * to be very conservative with what state we change.
    */
-  _cogl_context_set_current_projection_entry (ctx, &ctx->identity_entry);
-  _cogl_context_set_current_modelview_entry (ctx, &ctx->identity_entry);
+  old_projection_entry = g_steal_pointer (&ctx->current_projection_entry);
+  old_modelview_entry = g_steal_pointer (&ctx->current_modelview_entry);
+
+  ctx->current_projection_entry = &ctx->identity_entry;
+  ctx->current_modelview_entry = &ctx->identity_entry;
 
   /* The coordinates in the region are meant to be window coordinates,
    * make a matrix that translates those across the viewport, and into
@@ -147,8 +161,6 @@ add_stencil_clip_region (CoglFramebuffer *framebuffer,
                          - framebuffer->viewport_y,
                          0);
 
-  GE( ctx, glEnable (GL_STENCIL_TEST) );
-
   GE( ctx, glColorMask (FALSE, FALSE, FALSE, FALSE) );
   GE( ctx, glDepthMask (FALSE) );
 
@@ -159,6 +171,9 @@ add_stencil_clip_region (CoglFramebuffer *framebuffer,
     }
   else
     {
+      GE( ctx, glEnable (GL_STENCIL_TEST) );
+      GE( ctx, glStencilMask (0x1) );
+
       /* Initially disallow everything */
       GE( ctx, glClearStencil (0) );
       GE( ctx, glClear (GL_STENCIL_BUFFER_BIT) );
@@ -224,6 +239,9 @@ add_stencil_clip_region (CoglFramebuffer *framebuffer,
                                  -1.0, -1.0, 1.0, 1.0);
     }
 
+  ctx->current_projection_entry = old_projection_entry;
+  ctx->current_modelview_entry = old_modelview_entry;
+
   /* Restore the stencil mode */
   GE (ctx, glDepthMask (TRUE));
   GE (ctx, glColorMask (TRUE, TRUE, TRUE, TRUE));
@@ -250,14 +268,16 @@ add_stencil_clip_silhouette (CoglFramebuffer *framebuffer,
   CoglMatrixStack *projection_stack =
     _cogl_framebuffer_get_projection_stack (framebuffer);
   CoglContext *ctx = cogl_framebuffer_get_context (framebuffer);
+  CoglMatrixEntry *old_projection_entry, *old_modelview_entry;
 
   /* NB: This can be called while flushing the journal so we need
    * to be very conservative with what state we change.
    */
+  old_projection_entry = g_steal_pointer (&ctx->current_projection_entry);
+  old_modelview_entry = g_steal_pointer (&ctx->current_modelview_entry);
 
-  _cogl_context_set_current_projection_entry (ctx,
-                                              projection_stack->last_entry);
-  _cogl_context_set_current_modelview_entry (ctx, modelview_entry);
+  ctx->current_projection_entry = projection_stack->last_entry;
+  ctx->current_modelview_entry = modelview_entry;
 
   _cogl_pipeline_flush_gl_state (ctx, ctx->stencil_pipeline,
                                  framebuffer, FALSE, FALSE);
@@ -315,14 +335,17 @@ add_stencil_clip_silhouette (CoglFramebuffer *framebuffer,
       /* Decrement all of the bits twice so that only pixels where the
          value is 3 will remain */
 
-      _cogl_context_set_current_projection_entry (ctx, &ctx->identity_entry);
-      _cogl_context_set_current_modelview_entry (ctx, &ctx->identity_entry);
+      ctx->current_projection_entry = &ctx->identity_entry;
+      ctx->current_modelview_entry = &ctx->identity_entry;
 
       _cogl_rectangle_immediate (framebuffer, ctx->stencil_pipeline,
                                  -1.0, -1.0, 1.0, 1.0);
       _cogl_rectangle_immediate (framebuffer, ctx->stencil_pipeline,
                                  -1.0, -1.0, 1.0, 1.0);
     }
+
+  ctx->current_projection_entry = old_projection_entry;
+  ctx->current_modelview_entry = old_modelview_entry;
 
   GE (ctx, glStencilMask (~(GLuint) 0));
   GE (ctx, glDepthMask (TRUE));
@@ -491,7 +514,7 @@ _cogl_clip_stack_gl_flush (CoglClipStack *stack,
                                               rect->y0,
                                               rect->x1,
                                               rect->y1,
-                                              !using_stencil_buffer);
+                                              using_stencil_buffer);
                   using_stencil_buffer = TRUE;
                 }
               break;

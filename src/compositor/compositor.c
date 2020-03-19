@@ -558,9 +558,6 @@ meta_compositor_manage (MetaCompositor *compositor)
   MetaDisplay *display = priv->display;
   MetaBackend *backend = meta_get_backend ();
 
-  if (display->x11_display)
-    meta_x11_display_set_cm_selection (display->x11_display);
-
   priv->stage = meta_backend_get_stage (backend);
 
   priv->stage_presented_id =
@@ -591,8 +588,6 @@ meta_compositor_manage (MetaCompositor *compositor)
   clutter_actor_add_child (priv->stage, priv->feedback_group);
 
   META_COMPOSITOR_GET_CLASS (compositor)->manage (compositor);
-
-  meta_compositor_redirect_x11_windows (compositor);
 
   priv->plugin_mgr = meta_plugin_manager_new (compositor);
 }
@@ -631,6 +626,7 @@ meta_compositor_add_window (MetaCompositor    *compositor,
 
   window_actor = g_object_new (window_actor_type,
                                "meta-window", window,
+                               "show-on-set-parent", FALSE,
                                NULL);
 
   if (window->layer == META_LAYER_OVERRIDE_REDIRECT)

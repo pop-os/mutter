@@ -253,6 +253,10 @@ _cogl_driver_update_features (CoglContext *context,
     (void *) _cogl_renderer_get_proc_address (context->display->renderer,
                                               "glGetString",
                                               TRUE);
+  context->glGetStringi =
+    (void *) _cogl_renderer_get_proc_address (context->display->renderer,
+                                              "glGetStringi",
+                                              TRUE);
 
   gl_extensions = _cogl_context_get_gl_extensions (context);
 
@@ -310,6 +314,9 @@ _cogl_driver_update_features (CoglContext *context,
   COGL_FLAGS_SET (private_features, COGL_PRIVATE_FEATURE_ANY_GL, TRUE);
   COGL_FLAGS_SET (private_features, COGL_PRIVATE_FEATURE_ALPHA_TEXTURES, TRUE);
 
+  if (context->glGenSamplers)
+    COGL_FLAGS_SET (private_features, COGL_PRIVATE_FEATURE_SAMPLER_OBJECTS, TRUE);
+
   if (context->glBlitFramebuffer)
     COGL_FLAGS_SET (private_features,
                     COGL_PRIVATE_FEATURE_BLIT_FRAMEBUFFER, TRUE);
@@ -359,6 +366,9 @@ _cogl_driver_update_features (CoglContext *context,
       _cogl_check_extension ("GL_OES_egl_sync", gl_extensions))
     COGL_FLAGS_SET (private_features, COGL_PRIVATE_FEATURE_OES_EGL_SYNC, TRUE);
 
+  if (context->glFenceSync)
+    COGL_FLAGS_SET (context->features, COGL_FEATURE_ID_FENCE, TRUE);
+
   if (_cogl_check_extension ("GL_EXT_texture_rg", gl_extensions))
     COGL_FLAGS_SET (context->features,
                     COGL_FEATURE_ID_TEXTURE_RG,
@@ -393,6 +403,7 @@ _cogl_driver_gles =
     _cogl_framebuffer_gl_clear,
     _cogl_framebuffer_gl_query_bits,
     _cogl_framebuffer_gl_finish,
+    _cogl_framebuffer_gl_flush,
     _cogl_framebuffer_gl_discard_buffers,
     _cogl_framebuffer_gl_draw_attributes,
     _cogl_framebuffer_gl_draw_indexed_attributes,

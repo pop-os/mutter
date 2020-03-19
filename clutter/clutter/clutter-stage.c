@@ -144,8 +144,6 @@ struct _ClutterStagePrivate
   gpointer paint_data;
   GDestroyNotify paint_notify;
 
-  cairo_rectangle_int_t view_clip;
-
   int update_freeze_count;
 
   guint redraw_pending         : 1;
@@ -559,6 +557,33 @@ pick_record_contains_point (ClutterStage     *stage,
   return TRUE;
 }
 
+static void
+clutter_stage_add_redraw_clip (ClutterStage          *stage,
+                               cairo_rectangle_int_t *clip)
+{
+  GList *l;
+
+  for (l = _clutter_stage_peek_stage_views (stage); l; l = l->next)
+    {
+      ClutterStageView *view = l->data;
+
+      if (!clip)
+        {
+          clutter_stage_view_add_redraw_clip (view, NULL);
+        }
+      else
+        {
+          cairo_rectangle_int_t view_layout;
+          cairo_rectangle_int_t intersection;
+
+          clutter_stage_view_get_layout (view, &view_layout);
+          if (_clutter_util_rectangle_intersection (&view_layout, clip,
+                                                    &intersection))
+            clutter_stage_view_add_redraw_clip (view, &intersection);
+        }
+    }
+}
+
 static inline void
 queue_full_redraw (ClutterStage *stage)
 {
@@ -577,7 +602,7 @@ queue_full_redraw (ClutterStage *stage)
   if (stage_window == NULL)
     return;
 
-  _clutter_stage_window_add_redraw_clip (stage_window, NULL);
+  clutter_stage_add_redraw_clip (stage, NULL);
 }
 
 static gboolean
@@ -903,15 +928,18 @@ setup_view_for_pick_or_paint (ClutterStage                *stage,
 }
 
 static void
-clutter_stage_do_paint_view (ClutterStage                *stage,
-                             ClutterStageView            *view,
-                             const cairo_rectangle_int_t *clip)
+clutter_stage_do_paint_view (ClutterStage         *stage,
+                             ClutterStageView     *view,
+                             const cairo_region_t *redraw_clip)
 {
   ClutterPaintContext *paint_context;
+  cairo_rectangle_int_t clip_rect;
 
-  paint_context = clutter_paint_context_new_for_view (view);
+  paint_context = clutter_paint_context_new_for_view (view, redraw_clip);
 
-  setup_view_for_pick_or_paint (stage, view, clip);
+  cairo_region_get_extents (redraw_clip, &clip_rect);
+  setup_view_for_pick_or_paint (stage, view, &clip_rect);
+
   clutter_actor_paint (CLUTTER_ACTOR (stage), paint_context);
   clutter_paint_context_destroy (paint_context);
 }
@@ -920,9 +948,9 @@ clutter_stage_do_paint_view (ClutterStage                *stage,
  * for picking or painting...
  */
 void
-_clutter_stage_paint_view (ClutterStage                *stage,
-                           ClutterStageView            *view,
-                           const cairo_rectangle_int_t *clip)
+clutter_stage_paint_view (ClutterStage         *stage,
+                          ClutterStageView     *view,
+                          const cairo_region_t *redraw_clip)
 {
   ClutterStagePrivate *priv = stage->priv;
 
@@ -931,15 +959,11 @@ _clutter_stage_paint_view (ClutterStage                *stage,
 
   COGL_TRACE_BEGIN_SCOPED (ClutterStagePaintView, "Paint (view)");
 
-  priv->view_clip = *clip;
-
   if (g_signal_has_handler_pending (stage, stage_signals[PAINT_VIEW],
                                     0, TRUE))
-    g_signal_emit (stage, stage_signals[PAINT_VIEW], 0, view);
+    g_signal_emit (stage, stage_signals[PAINT_VIEW], 0, view, redraw_clip);
   else
-    CLUTTER_STAGE_GET_CLASS (stage)->paint_view (stage, view);
-
-  priv->view_clip = (cairo_rectangle_int_t) { 0 };
+    CLUTTER_STAGE_GET_CLASS (stage)->paint_view (stage, view, redraw_clip);
 }
 
 void
@@ -1416,15 +1440,11 @@ clutter_stage_do_redraw (ClutterStage *stage)
 static GSList *
 _clutter_stage_check_updated_pointers (ClutterStage *stage)
 {
-  ClutterStagePrivate *priv = stage->priv;
   ClutterBackend *backend;
   ClutterSeat *seat;
   GSList *updating = NULL;
   GList *l, *devices;
-  cairo_region_t *clip;
   graphene_point_t point;
-
-  clip = _clutter_stage_window_get_redraw_clip (priv->impl);
 
   backend = clutter_get_default_backend ();
   seat = clutter_backend_get_default_seat (backend);
@@ -1433,6 +1453,8 @@ _clutter_stage_check_updated_pointers (ClutterStage *stage)
   for (l = devices; l; l = l->next)
     {
       ClutterInputDevice *dev = l->data;
+      ClutterStageView *view;
+      const cairo_region_t *clip;
 
       if (clutter_input_device_get_device_mode (dev) !=
           CLUTTER_INPUT_MODE_MASTER)
@@ -1448,6 +1470,11 @@ _clutter_stage_check_updated_pointers (ClutterStage *stage)
           if (!clutter_input_device_get_coords (dev, NULL, &point))
             continue;
 
+          view = clutter_stage_get_view_at (stage, point.x, point.y);
+          if (!view)
+            continue;
+
+          clip = clutter_stage_view_peek_redraw_clip (view);
           if (!clip || cairo_region_contains_point (clip, point.x, point.y))
             updating = g_slist_prepend (updating, dev);
           break;
@@ -1558,6 +1585,22 @@ clutter_stage_real_queue_relayout (ClutterActor *self)
 }
 
 static gboolean
+is_full_stage_redraw_queued (ClutterStage *stage)
+{
+  GList *l;
+
+  for (l = _clutter_stage_peek_stage_views (stage); l; l = l->next)
+    {
+      ClutterStageView *view = l->data;
+
+      if (!clutter_stage_view_has_full_redraw_clip (view))
+        return FALSE;
+    }
+
+  return TRUE;
+}
+
+static gboolean
 clutter_stage_real_queue_redraw (ClutterActor       *actor,
                                  ClutterActor       *leaf,
                                  ClutterPaintVolume *redraw_clip)
@@ -1578,12 +1621,12 @@ clutter_stage_real_queue_redraw (ClutterActor       *actor,
   if (stage_window == NULL)
     return TRUE;
 
-  if (_clutter_stage_window_ignoring_redraw_clips (stage_window))
+  if (is_full_stage_redraw_queued (stage))
     return FALSE;
 
   if (redraw_clip == NULL)
     {
-      _clutter_stage_window_add_redraw_clip (stage_window, NULL);
+      clutter_stage_add_redraw_clip (stage, NULL);
       return FALSE;
     }
 
@@ -1615,43 +1658,20 @@ clutter_stage_real_queue_redraw (ClutterActor       *actor,
   stage_clip.width = intersection_box.x2 - stage_clip.x;
   stage_clip.height = intersection_box.y2 - stage_clip.y;
 
-  _clutter_stage_window_add_redraw_clip (stage_window, &stage_clip);
+  clutter_stage_add_redraw_clip (stage, &stage_clip);
   return FALSE;
 }
 
 gboolean
 _clutter_stage_has_full_redraw_queued (ClutterStage *stage)
 {
-  ClutterStageWindow *stage_window = _clutter_stage_get_window (stage);
-
-  if (CLUTTER_ACTOR_IN_DESTRUCTION (stage) || stage_window == NULL)
+  if (CLUTTER_ACTOR_IN_DESTRUCTION (stage))
     return FALSE;
 
-  if (stage->priv->redraw_pending &&
-      !_clutter_stage_window_has_redraw_clips (stage_window))
-    return TRUE;
-  else
+  if (!stage->priv->redraw_pending)
     return FALSE;
-}
 
-cairo_region_t *
-clutter_stage_get_redraw_clip (ClutterStage *stage)
-{
-  ClutterStagePrivate *priv;
-  cairo_rectangle_int_t clip;
-  cairo_region_t *region;
-
-  g_return_val_if_fail (CLUTTER_IS_STAGE (stage), NULL);
-
-  priv = stage->priv;
-
-  region = _clutter_stage_window_get_redraw_clip (priv->impl);
-  if (region)
-    return region;
-
-  /* Set clip to the full extents of the stage */
-  _clutter_stage_window_get_geometry (priv->impl, &clip);
-  return cairo_region_create_rectangle (&clip);
+  return is_full_stage_redraw_queued (stage);
 }
 
 static ClutterActor *
@@ -1980,13 +2000,11 @@ clutter_stage_finalize (GObject *object)
 }
 
 static void
-clutter_stage_real_paint_view (ClutterStage     *stage,
-                               ClutterStageView *view)
+clutter_stage_real_paint_view (ClutterStage         *stage,
+                               ClutterStageView     *view,
+                               const cairo_region_t *redraw_clip)
 {
-  ClutterStagePrivate *priv = stage->priv;
-  const cairo_rectangle_int_t *clip = &priv->view_clip;
-
-  clutter_stage_do_paint_view (stage, view, clip);
+  clutter_stage_do_paint_view (stage, view, redraw_clip);
 }
 
 static void
@@ -2212,6 +2230,7 @@ clutter_stage_class_init (ClutterStageClass *klass)
    * ClutterStage::paint-view:
    * @stage: the stage that received the event
    * @view: a #ClutterStageView
+   * @redraw_clip: a #cairo_region_t with the redraw clip
    *
    * The ::paint-view signal is emitted before a #ClutterStageView is being
    * painted.
@@ -2226,8 +2245,9 @@ clutter_stage_class_init (ClutterStageClass *klass)
                   G_SIGNAL_RUN_LAST,
                   G_STRUCT_OFFSET (ClutterStageClass, paint_view),
                   NULL, NULL, NULL,
-                  G_TYPE_NONE, 1,
-                  CLUTTER_TYPE_STAGE_VIEW);
+                  G_TYPE_NONE, 2,
+                  CLUTTER_TYPE_STAGE_VIEW,
+                  G_TYPE_POINTER);
 
   /**
    * ClutterStage::presented: (skip)
@@ -2803,13 +2823,17 @@ clutter_stage_read_pixels (ClutterStage *stage,
                                       .height = height,
                                     });
   cairo_region_get_extents (clip, &clip_rect);
-  cairo_region_destroy (clip);
 
   if (clip_rect.width == 0 || clip_rect.height == 0)
-    return NULL;
+    {
+      cairo_region_destroy (clip);
+      return NULL;
+    }
 
   framebuffer = clutter_stage_view_get_framebuffer (view);
-  clutter_stage_do_paint_view (stage, view, &clip_rect);
+  clutter_stage_do_paint_view (stage, view, clip);
+
+  cairo_region_destroy (clip);
 
   view_scale = clutter_stage_view_get_scale (view);
   pixel_width = roundf (clip_rect.width * view_scale);
@@ -4316,7 +4340,6 @@ capture_view (ClutterStage          *stage,
                                       texture_width, texture_height);
   cairo_surface_set_device_scale (image, view_scale, view_scale);
 
-
   data = cairo_image_surface_get_data (image);
   stride = cairo_image_surface_get_stride (image);
 
@@ -4450,8 +4473,12 @@ capture_view_into (ClutterStage          *stage,
 
   if (paint)
     {
+      cairo_region_t *region;
+
       _clutter_stage_maybe_setup_viewport (stage, view);
-      clutter_stage_do_paint_view (stage, view, rect);
+      region = cairo_region_create_rectangle (rect);
+      clutter_stage_do_paint_view (stage, view, region);
+      cairo_region_destroy (region);
     }
 
   view_scale = clutter_stage_view_get_scale (view);
@@ -4477,49 +4504,42 @@ capture_view_into (ClutterStage          *stage,
   cogl_object_unref (bitmap);
 }
 
-static ClutterStageView *
-get_view_at_rect (ClutterStage          *stage,
-                  cairo_rectangle_int_t *rect)
-{
-  ClutterStagePrivate *priv = stage->priv;
-  GList *views = _clutter_stage_window_get_views (priv->impl);
-  GList *l;
-
-  for (l = views; l; l = l->next)
-    {
-      ClutterStageView *view = l->data;
-      cairo_rectangle_int_t view_layout;
-      cairo_region_t *region;
-      cairo_rectangle_int_t view_capture_rect;
-
-      clutter_stage_view_get_layout (view, &view_layout);
-      region = cairo_region_create_rectangle (&view_layout);
-      cairo_region_intersect_rectangle (region, rect);
-      cairo_region_get_extents (region, &view_capture_rect);
-      cairo_region_destroy (region);
-
-      if (view_capture_rect.width == 0 || view_capture_rect.height == 0)
-        continue;
-
-      g_assert (view_capture_rect.width == rect->width &&
-                view_capture_rect.height == rect->height);
-      return view;
-    }
-
-  return NULL;
-}
-
 void
 clutter_stage_capture_into (ClutterStage          *stage,
                             gboolean               paint,
                             cairo_rectangle_int_t *rect,
                             uint8_t               *data)
 {
-  ClutterStageView *view;
+  ClutterStagePrivate *priv = stage->priv;
+  GList *l;
   int bpp = 4;
+  int stride;
 
-  view = get_view_at_rect (stage, rect);
-  capture_view_into (stage, paint, view, rect, data, rect->width * bpp);
+  stride = rect->width * 4;
+
+  for (l = _clutter_stage_window_get_views (priv->impl); l; l = l->next)
+    {
+      ClutterStageView *view = l->data;
+      cairo_rectangle_int_t view_layout;
+      cairo_region_t *region;
+      cairo_rectangle_int_t capture_rect;
+      int x_offset, y_offset;
+
+      clutter_stage_view_get_layout (view, &view_layout);
+      region = cairo_region_create_rectangle (&view_layout);
+      cairo_region_intersect_rectangle (region, rect);
+
+      cairo_region_get_extents (region, &capture_rect);
+      cairo_region_destroy (region);
+
+      x_offset = capture_rect.x - rect->x;
+      y_offset = capture_rect.y - rect->y;
+
+      capture_view_into (stage, paint, view,
+                         &capture_rect,
+                         data + (x_offset * bpp) + (y_offset * stride),
+                         stride);
+    }
 }
 
 /**

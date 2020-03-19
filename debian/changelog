@@ -1,3 +1,49 @@
+mutter (3.36.0-2) experimental; urgency=medium
+
+  * control: Build against gnome-desktop 3.36 and break old gnome-shell. So we
+    get dependencies on libgnome-desktop-3-19. Otherwise we get two different
+    versions of gnome-desktop loaded into GNOME Shell, which crashes. Break
+    old gnome-shell for the inverse reason - it needs to be upgraded otherwise
+    we get the mismatch the other way around.
+
+ -- Iain Lane <laney@debian.org>  Mon, 16 Mar 2020 13:20:44 +0000
+
+mutter (3.36.0-1) experimental; urgency=medium
+
+  * New upstream release
+    + Fix placement of popup windows in multi-monitor setups
+    + Fix invisible mouse cursor on some hardware
+    + Updated translations
+
+ -- Andre Moreira Magalhaes <andre@endlessm.com>  Fri, 13 Mar 2020 19:36:29 +0000
+
+mutter (3.35.92-1) experimental; urgency=medium
+
+  * New upstream release
+    + Add side channel for starting required X11 services
+    + Allow remote desktop services to inhibit animations
+    + Avoid flicker when (un)redirecting windows
+    + Fix clipping glitches in long text entries
+    + Fix visibility of initially hidden windows
+    + Implement scaled/transformed hardware cursors
+    + Let BindConstraints update the preferred size
+    + Make check-alive timeouts configurable
+    + Make each stage view correspond to a single CRTC
+    + Make Xwayland startup asynchronous
+    + Ping windows on every window focus
+    + Remove overhead from hot code paths
+    + Support synchronized wayland popup moving
+    + Update screen-cast code to PipeWire 0.3 API
+    + Use DMA buffers for screencasting if possible
+  * d/p/*: Rebase
+  * rules: Disable remote-desktop temporarily. This now requires pipewire 0.3
+    which is not packaged yet and needs to be worked on
+  * control: Bump wayland-protocols dep to 1.19 per meson.build
+  * debian/libmutter-6-0.symbols: Add new symbols for this release. One symbol
+    which was introduced in .90 was dropped; -6's ABI is not stable yet.
+
+ -- Iain Lane <laney@debian.org>  Tue, 03 Mar 2020 16:34:25 +0000
+
 mutter (3.35.91-1ubuntu1) focal; urgency=medium
 
   * Merge with debian. Remaining changes:
