@@ -1,4 +1,4 @@
-mutter (3.36.0-2ubuntu1) UNRELEASED; urgency=medium
+mutter (3.36.0-2ubuntu1) focal; urgency=medium
 
   * Merge with debian. Remaining changes:
     + debian/control:
@@ -17,7 +17,7 @@ mutter (3.36.0-2ubuntu1) UNRELEASED; urgency=medium
     - Restarting displays apps running on other workspaces (LP: #1819890)
     - Volume/brightness OSD make fullscreen video flicker (LP: #1828697)
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Thu, 19 Mar 2020 06:25:59 +0100
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Thu, 19 Mar 2020 15:51:05 +0000
 
 mutter (3.36.0-2) experimental; urgency=medium
 
