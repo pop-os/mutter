@@ -1,3 +1,18 @@
+mutter (3.36.0-2ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge with debian. Remaining changes:
+    + debian/control:
+      - Update VCS flags to point to ubuntu salsa branch
+    + debian/gbp.conf: update branch to point to ubuntu/master
+    + debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+      - X11: Add support for fractional scaling using Randr
+  * d/p/clutter-master-clock-default-Sync-timelines-to-hardware-v.patch:
+    - Improves smoothness and reduce input-to-output latency
+  * debian/libmutter-6-0.symbols:
+    - Update as per background mipmap levels patch symbol addition
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Thu, 19 Mar 2020 06:25:59 +0100
+
 mutter (3.36.0-2) experimental; urgency=medium
 
   * control: Build against gnome-desktop 3.36 and break old gnome-shell. So we
