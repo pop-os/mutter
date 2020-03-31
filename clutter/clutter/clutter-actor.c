@@ -710,6 +710,7 @@ struct _ClutterActorPrivate
 
   guint8 opacity;
   gint opacity_override;
+  unsigned int inhibit_culling_counter;
 
   ClutterOffscreenRedirect offscreen_redirect;
 
@@ -3951,6 +3952,7 @@ clutter_actor_paint (ClutterActor        *self,
   g_autoptr (ClutterPaintNode) root_node = NULL;
   ClutterActorPrivate *priv;
   ClutterActorBox clip;
+  gboolean culling_inhibited;
   gboolean clip_set = FALSE;
 
   g_return_if_fail (CLUTTER_IS_ACTOR (self));
@@ -4099,7 +4101,8 @@ clutter_actor_paint (ClutterActor        *self,
    * paint then the last-paint-volume would likely represent the new
    * actor position not the old.
    */
-  if (!in_clone_paint ())
+  culling_inhibited = priv->inhibit_culling_counter > 0;
+  if (!culling_inhibited && !in_clone_paint ())
     {
       gboolean success;
       /* annoyingly gcc warns if uninitialized even though
@@ -16002,6 +16005,63 @@ clutter_actor_get_opacity_override (ClutterActor *self)
   return self->priv->opacity_override;
 }
 
+/**
+ * clutter_actor_inhibit_culling:
+ * @actor: a #ClutterActor
+ *
+ * Increases the culling inhibitor counter. Inhibiting culling
+ * forces the actor to be painted even when outside the visible
+ * bounds of the stage view.
+ *
+ * This is usually necessary when an actor is being painted on
+ * another paint context.
+ *
+ * Pair with clutter_actor_uninhibit_culling() when the actor doesn't
+ * need to be painted anymore.
+ */
+void
+clutter_actor_inhibit_culling (ClutterActor *actor)
+{
+  ClutterActorPrivate *priv;
+
+  g_return_if_fail (CLUTTER_IS_ACTOR (actor));
+
+  priv = actor->priv;
+
+  priv->inhibit_culling_counter++;
+  _clutter_actor_set_enable_paint_unmapped (actor, TRUE);
+}
+
+/**
+ * clutter_actor_uninhibit_culling:
+ * @actor: a #ClutterActor
+ *
+ * Decreases the culling inhibitor counter. See clutter_actor_inhibit_culling()
+ * for when inhibit culling is necessary.
+ *
+ * Calling this function without a matching call to
+ * clutter_actor_inhibit_culling() is a programming error.
+ */
+void
+clutter_actor_uninhibit_culling (ClutterActor *actor)
+{
+  ClutterActorPrivate *priv;
+
+  g_return_if_fail (CLUTTER_IS_ACTOR (actor));
+
+  priv = actor->priv;
+
+  if (priv->inhibit_culling_counter == 0)
+    {
+      g_critical ("Unpaired call to clutter_actor_uninhibit_culling");
+      return;
+    }
+
+  priv->inhibit_culling_counter--;
+  if (priv->inhibit_culling_counter == 0)
+    _clutter_actor_set_enable_paint_unmapped (actor, FALSE);
+}
+
 /* Allows you to disable applying the actors model view transform during
  * a paint. Used by ClutterClone. */
 void
@@ -17715,10 +17775,42 @@ _clutter_actor_compute_resource_scale (ClutterActor *self,
                                                    resource_scale))
     {
       if (priv->parent)
-        return _clutter_actor_compute_resource_scale (priv->parent,
-                                                      resource_scale);
+        {
+          gboolean in_clone_paint;
+          gboolean was_parent_in_clone_paint;
+          gboolean was_parent_unmapped;
+          gboolean was_parent_paint_unmapped;
+          gboolean ret;
+
+          in_clone_paint = clutter_actor_is_in_clone_paint (self);
+          was_parent_unmapped = !clutter_actor_is_mapped (priv->parent);
+          was_parent_in_clone_paint =
+            clutter_actor_is_in_clone_paint (priv->parent);
+          was_parent_paint_unmapped = priv->parent->priv->enable_paint_unmapped;
+
+          if (in_clone_paint && was_parent_unmapped)
+            {
+              _clutter_actor_set_in_clone_paint (priv->parent, TRUE);
+              _clutter_actor_set_enable_paint_unmapped (priv->parent, TRUE);
+            }
+
+          ret = _clutter_actor_compute_resource_scale (priv->parent,
+                                                       resource_scale);
+
+          if (in_clone_paint && was_parent_unmapped)
+            {
+              _clutter_actor_set_in_clone_paint (priv->parent,
+                                                 was_parent_in_clone_paint);
+              _clutter_actor_set_enable_paint_unmapped (priv->parent,
+                                                        was_parent_paint_unmapped);
+            }
+
+          return ret;
+        }
       else
-        return FALSE;
+        {
+          return FALSE;
+        }
     }
 
   return TRUE;

@@ -30,8 +30,8 @@
 #include "backends/meta-cursor-tracker-private.h"
 #include "clutter/clutter.h"
 #include "clutter/wayland/clutter-wayland-compositor.h"
-#include "cogl/cogl-trace.h"
 #include "cogl/cogl-wayland-server.h"
+#include "cogl/cogl.h"
 #include "compositor/meta-surface-actor-wayland.h"
 #include "compositor/meta-surface-actor.h"
 #include "compositor/meta-window-actor-private.h"
@@ -1745,6 +1745,9 @@ meta_wayland_surface_role_get_window (MetaWaylandSurfaceRole *surface_role)
 MetaWindow *
 meta_wayland_surface_get_window (MetaWaylandSurface *surface)
 {
+  if (!surface->role)
+    return NULL;
+
   return meta_wayland_surface_role_get_window (surface->role);
 }
 

@@ -99,8 +99,6 @@ struct _MetaWindowActorX11
   gboolean recompute_focused_shadow;
   gboolean recompute_unfocused_shadow;
   gboolean is_frozen;
-
-  cairo_rectangle_int_t client_area;
 };
 
 static MetaCullableInterface *cullable_parent_iface;
@@ -840,6 +838,41 @@ scan_visible_region (guchar         *mask_data,
 }
 
 static void
+get_client_area_rect_from_texture (MetaWindowActorX11    *actor_x11,
+                                   MetaShapedTexture     *shaped_texture,
+                                   cairo_rectangle_int_t *client_area)
+{
+  MetaWindow *window =
+    meta_window_actor_get_meta_window (META_WINDOW_ACTOR (actor_x11));
+  cairo_rectangle_int_t surface_rect = { 0 };
+
+  surface_rect.width = meta_shaped_texture_get_width (shaped_texture);
+  surface_rect.height = meta_shaped_texture_get_height (shaped_texture);
+  meta_window_x11_surface_rect_to_client_rect (window,
+                                               &surface_rect,
+                                               client_area);
+}
+
+static void
+get_client_area_rect (MetaWindowActorX11    *actor_x11,
+                      cairo_rectangle_int_t *client_area)
+{
+  MetaSurfaceActor *surface =
+    meta_window_actor_get_surface (META_WINDOW_ACTOR (actor_x11));
+  MetaWindow *window =
+    meta_window_actor_get_meta_window (META_WINDOW_ACTOR (actor_x11));
+  MetaShapedTexture *stex = meta_surface_actor_get_texture (surface);
+
+  if (!meta_window_x11_always_update_shape (window) || !stex)
+    {
+      meta_window_get_client_area_rect (window, client_area);
+      return;
+    }
+
+  get_client_area_rect_from_texture (actor_x11, stex, client_area);
+}
+
+static void
 build_and_scan_frame_mask (MetaWindowActorX11    *actor_x11,
                            cairo_region_t        *shape_region)
 {
@@ -852,7 +885,6 @@ build_and_scan_frame_mask (MetaWindowActorX11    *actor_x11,
   uint8_t *mask_data;
   unsigned int tex_width, tex_height;
   MetaShapedTexture *stex;
-  CoglTexture *paint_tex;
   CoglTexture2D *mask_texture;
   int stride;
   cairo_t *cr;
@@ -864,12 +896,8 @@ build_and_scan_frame_mask (MetaWindowActorX11    *actor_x11,
 
   meta_shaped_texture_set_mask_texture (stex, NULL);
 
-  paint_tex = meta_shaped_texture_get_texture (stex);
-  if (paint_tex == NULL)
-    return;
-
-  tex_width = cogl_texture_get_width (paint_tex);
-  tex_height = cogl_texture_get_height (paint_tex);
+  tex_width = meta_shaped_texture_get_width (stex);
+  tex_height = meta_shaped_texture_get_height (stex);
 
   stride = cairo_format_stride_for_width (CAIRO_FORMAT_A8, tex_width);
 
@@ -890,6 +918,7 @@ build_and_scan_frame_mask (MetaWindowActorX11    *actor_x11,
     {
       cairo_region_t *frame_paint_region, *scanned_region;
       cairo_rectangle_int_t rect = { 0, 0, tex_width, tex_height };
+      cairo_rectangle_int_t client_area;
       cairo_rectangle_int_t frame_rect;
 
       /* If we update the shape regardless of the frozen state of the actor,
@@ -899,14 +928,19 @@ build_and_scan_frame_mask (MetaWindowActorX11    *actor_x11,
        * point.
        */
       if (meta_window_x11_always_update_shape (window))
-        meta_window_x11_buffer_rect_to_frame_rect (window, &rect, &frame_rect);
+        {
+          meta_window_x11_surface_rect_to_frame_rect (window, &rect, &frame_rect);
+          get_client_area_rect_from_texture (actor_x11, stex, &client_area);
+        }
       else
-        meta_window_get_frame_rect (window, &frame_rect);
+        {
+          meta_window_get_frame_rect (window, &frame_rect);
+          meta_window_get_client_area_rect (window, &client_area);
+        }
 
       /* Make sure we don't paint the frame over the client window. */
       frame_paint_region = cairo_region_create_rectangle (&rect);
-      cairo_region_subtract_rectangle (frame_paint_region,
-                                       &actor_x11->client_area);
+      cairo_region_subtract_rectangle (frame_paint_region, &client_area);
 
       gdk_cairo_region (cr, frame_paint_region);
       cairo_clip (cr);
@@ -964,13 +998,14 @@ update_shape_region (MetaWindowActorX11 *actor_x11)
   MetaWindow *window =
     meta_window_actor_get_meta_window (META_WINDOW_ACTOR (actor_x11));
   cairo_region_t *region = NULL;
+  cairo_rectangle_int_t client_area;
+
+  get_client_area_rect (actor_x11, &client_area);
 
   if (window->frame && window->shape_region)
     {
       region = cairo_region_copy (window->shape_region);
-      cairo_region_translate (region,
-                              actor_x11->client_area.x,
-                              actor_x11->client_area.y);
+      cairo_region_translate (region, client_area.x, client_area.y);
     }
   else if (window->shape_region != NULL)
     {
@@ -981,7 +1016,7 @@ update_shape_region (MetaWindowActorX11 *actor_x11)
       /* If we don't have a shape on the server, that means that
        * we have an implicit shape of one rectangle covering the
        * entire window. */
-      region = cairo_region_create_rectangle (&actor_x11->client_area);
+      region = cairo_region_create_rectangle (&client_area);
     }
 
   if (window->shape_region || window->frame)
@@ -1059,6 +1094,10 @@ update_opaque_region (MetaWindowActorX11 *actor_x11)
   is_maybe_transparent = is_actor_maybe_transparent (actor_x11);
   if (is_maybe_transparent && window->opaque_region)
     {
+      cairo_rectangle_int_t client_area;
+
+      get_client_area_rect (actor_x11, &client_area);
+
       /* The opaque region is defined to be a part of the
        * window which ARGB32 will always paint with opaque
        * pixels. For these regions, we want to avoid painting
@@ -1070,9 +1109,7 @@ update_opaque_region (MetaWindowActorX11 *actor_x11)
        * case, graphical glitches will occur.
        */
       opaque_region = cairo_region_copy (window->opaque_region);
-      cairo_region_translate (opaque_region,
-                              actor_x11->client_area.x,
-                              actor_x11->client_area.y);
+      cairo_region_translate (opaque_region, client_area.x, client_area.y);
       cairo_region_intersect (opaque_region, actor_x11->shape_region);
     }
   else if (is_maybe_transparent)
@@ -1090,7 +1127,7 @@ update_opaque_region (MetaWindowActorX11 *actor_x11)
 }
 
 static void
-check_needs_reshape (MetaWindowActorX11 *actor_x11)
+update_regions (MetaWindowActorX11 *actor_x11)
 {
   if (!actor_x11->needs_reshape)
     return;
@@ -1100,6 +1137,18 @@ check_needs_reshape (MetaWindowActorX11 *actor_x11)
   update_opaque_region (actor_x11);
 
   actor_x11->needs_reshape = FALSE;
+}
+
+static void
+check_needs_reshape (MetaWindowActorX11 *actor_x11)
+{
+  MetaWindow *window =
+    meta_window_actor_get_meta_window (META_WINDOW_ACTOR (actor_x11));
+
+  if (meta_window_x11_always_update_shape (window))
+    return;
+
+  update_regions (actor_x11);
 }
 
 void
@@ -1138,10 +1187,7 @@ handle_updates (MetaWindowActorX11 *actor_x11)
        * which causes the shadows to look bad.
        */
       if (surface && meta_window_x11_always_update_shape (window))
-        {
-          update_opaque_region (actor_x11);
-          update_shape_region (actor_x11);
-        }
+        check_needs_reshape (actor_x11);
 
       return;
     }
@@ -1151,7 +1197,6 @@ handle_updates (MetaWindowActorX11 *actor_x11)
   if (!meta_surface_actor_is_visible (surface))
     return;
 
-  meta_window_get_client_area_rect (window, &actor_x11->client_area);
   check_needs_reshape (actor_x11);
   check_needs_shadow (actor_x11);
 }
@@ -1357,6 +1402,12 @@ meta_window_actor_x11_set_frozen (MetaWindowActor *actor,
 }
 
 static void
+meta_window_actor_x11_update_regions (MetaWindowActor *actor)
+{
+  update_regions (META_WINDOW_ACTOR_X11 (actor));
+}
+
+static void
 meta_window_actor_x11_set_property (GObject      *object,
                                     guint         prop_id,
                                     const GValue *value,
@@ -1528,6 +1579,7 @@ meta_window_actor_x11_class_init (MetaWindowActorX11Class *klass)
   window_actor_class->post_paint = meta_window_actor_x11_post_paint;
   window_actor_class->queue_destroy = meta_window_actor_x11_queue_destroy;
   window_actor_class->set_frozen = meta_window_actor_x11_set_frozen;
+  window_actor_class->update_regions = meta_window_actor_x11_update_regions;
 
   actor_class->paint = meta_window_actor_x11_paint;
   actor_class->get_paint_volume = meta_window_actor_x11_get_paint_volume;

@@ -63,6 +63,15 @@
 #define META_KEY_BINDING_PRIMARY_LAYOUT 0
 #define META_KEY_BINDING_SECONDARY_LAYOUT 1
 
+/* Only for special modifier keys */
+#define IGNORED_MODIFIERS (CLUTTER_LOCK_MASK |          \
+                           CLUTTER_MOD2_MASK |          \
+                           CLUTTER_BUTTON1_MASK |       \
+                           CLUTTER_BUTTON2_MASK |       \
+                           CLUTTER_BUTTON3_MASK |       \
+                           CLUTTER_BUTTON4_MASK |       \
+                           CLUTTER_BUTTON5_MASK)
+
 static gboolean add_builtin_keybinding (MetaDisplay          *display,
                                         const char           *name,
                                         GSettings            *settings,
@@ -1820,12 +1829,12 @@ meta_window_grab_all_keys (MetaWindow  *window,
       meta_topic (META_DEBUG_KEYBINDINGS,
                   "Grabbing all keys on window %s\n", window->desc);
       retval = grab_keyboard (grabwindow, timestamp, XIGrabModeAsync);
-      if (retval)
-        {
-          window->keys_grabbed = FALSE;
-          window->all_keys_grabbed = TRUE;
-          window->grab_on_frame = window->frame != NULL;
-        }
+    }
+  if (retval)
+    {
+      window->keys_grabbed = FALSE;
+      window->all_keys_grabbed = TRUE;
+      window->grab_on_frame = window->frame != NULL;
     }
 
   return retval;
@@ -1835,9 +1844,10 @@ void
 meta_window_ungrab_all_keys (MetaWindow *window,
                              guint32     timestamp)
 {
-  if (!meta_is_wayland_compositor () && window->all_keys_grabbed)
+  if (window->all_keys_grabbed)
     {
-      ungrab_keyboard (timestamp);
+      if (!meta_is_wayland_compositor())
+        ungrab_keyboard (timestamp);
 
       window->grab_on_frame = FALSE;
       window->all_keys_grabbed = FALSE;
@@ -2036,6 +2046,13 @@ process_special_modifier_key (MetaDisplay          *display,
         {
           *modifier_press_only = FALSE;
 
+          /* If this is a wayland session, we can avoid the shenanigans
+           * about passive grabs below, and let the event continue to
+           * be processed through the regular paths.
+           */
+          if (!xdisplay)
+            return FALSE;
+
           /* OK, the user hit modifier+key rather than pressing and
            * releasing the modifier key alone. We want to handle the key
            * sequence "normally". Unfortunately, using
@@ -2068,8 +2085,6 @@ process_special_modifier_key (MetaDisplay          *display,
                 XIAllowEvents (xdisplay,
                                clutter_input_device_get_device_id (event->device),
                                XIReplayDevice, event->time);
-
-              return FALSE;
             }
         }
       else if (event->type == CLUTTER_KEY_RELEASE)
@@ -2114,6 +2129,7 @@ process_special_modifier_key (MetaDisplay          *display,
       return TRUE;
     }
   else if (event->type == CLUTTER_KEY_PRESS &&
+           (event->modifier_state & ~(IGNORED_MODIFIERS)) == 0 &&
            resolved_key_combo_has_keycode (resolved_key_combo,
                                            event->hardware_keycode))
     {
