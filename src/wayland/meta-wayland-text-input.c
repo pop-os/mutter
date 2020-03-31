@@ -166,17 +166,24 @@ meta_wayland_text_input_focus_defer_done (ClutterInputFocus *focus)
 
 static void
 meta_wayland_text_input_focus_delete_surrounding (ClutterInputFocus *focus,
-                                                  guint              cursor,
+                                                  int                offset,
                                                   guint              len)
 {
   MetaWaylandTextInput *text_input;
+  uint32_t before_length;
+  uint32_t after_length;
   struct wl_resource *resource;
 
   text_input = META_WAYLAND_TEXT_INPUT_FOCUS (focus)->text_input;
+  before_length = ABS (MIN (offset, 0));
+  after_length = MAX (0, offset + len);
+  g_warn_if_fail (ABS (offset) <= len);
 
   wl_resource_for_each (resource, &text_input->focus_resource_list)
     {
-      zwp_text_input_v3_send_delete_surrounding_text (resource, cursor, len);
+      zwp_text_input_v3_send_delete_surrounding_text (resource,
+                                                      before_length,
+                                                      after_length);
     }
 
   meta_wayland_text_input_focus_defer_done (focus);
@@ -207,12 +214,16 @@ meta_wayland_text_input_focus_set_preedit_text (ClutterInputFocus *focus,
 {
   MetaWaylandTextInput *text_input;
   struct wl_resource *resource;
+  gsize pos = 0;
 
   text_input = META_WAYLAND_TEXT_INPUT_FOCUS (focus)->text_input;
 
+  if (text)
+    pos = g_utf8_offset_to_pointer (text, cursor) - text;
+
   wl_resource_for_each (resource, &text_input->focus_resource_list)
     {
-      zwp_text_input_v3_send_preedit_string (resource, text, cursor, cursor);
+      zwp_text_input_v3_send_preedit_string (resource, text, pos, pos);
     }
 
   meta_wayland_text_input_focus_defer_done (focus);

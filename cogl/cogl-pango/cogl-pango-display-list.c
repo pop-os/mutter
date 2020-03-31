@@ -81,6 +81,7 @@ struct _CoglPangoDisplayListNode
       GArray *rectangles;
       /* A primitive representing those vertices */
       CoglPrimitive *primitive;
+      guint has_color : 1;
     } texture;
 
     struct
@@ -420,7 +421,9 @@ _cogl_pango_display_list_render (CoglFramebuffer *fb,
                                   cogl_color_get_red_byte (&node->color),
                                   cogl_color_get_green_byte (&node->color),
                                   cogl_color_get_blue_byte (&node->color),
-                                  cogl_color_get_alpha_byte (color));
+                                  (cogl_color_get_alpha_byte (&node->color) *
+                                   cogl_color_get_alpha_byte (color) /
+                                   255));
       else
         draw_color = *color;
       cogl_color_premultiply (&draw_color);

@@ -94,17 +94,24 @@ meta_wayland_text_input_focus_request_surrounding (ClutterInputFocus *focus)
 
 static void
 meta_wayland_text_input_focus_delete_surrounding (ClutterInputFocus *focus,
-                                                  guint              cursor,
+                                                  int                offset,
                                                   guint              len)
 {
   MetaWaylandGtkTextInput *text_input;
+  uint32_t before_length;
+  uint32_t after_length;
   struct wl_resource *resource;
 
   text_input = META_WAYLAND_GTK_TEXT_INPUT_FOCUS (focus)->text_input;
+  before_length = ABS (MIN (offset, 0));
+  after_length = MAX (0, offset + len);
+  g_warn_if_fail (ABS (offset) <= len);
 
   wl_resource_for_each (resource, &text_input->focus_resource_list)
     {
-      gtk_text_input_send_delete_surrounding_text (resource, cursor, len);
+      gtk_text_input_send_delete_surrounding_text (resource,
+                                                   before_length,
+                                                   after_length);
     }
 }
 
