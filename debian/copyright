@@ -63,7 +63,7 @@ Copyright:
    Copyright © 2005-2007  Olivier Fourdan
    Copyright © 2013       Keith Packard
    Copyright © 2014       Endless Mobile
-   Copyright © 2018-2019  DisplayLink (UK) Ltd.
+   Copyright © 2018-2020  DisplayLink (UK) Ltd.
    Copyright © 2018-2019  Robert Mader
    Copyright © 2018       Canonical Ltd.
 License: GPL-2+
@@ -86,6 +86,8 @@ License: Expat
 Files:
  clutter/clutter/*
  src/backends/edid.h
+ src/backends/meta-input-device-private.h
+ src/backends/meta-input-device.c
  src/backends/meta-renderer-view.c
  src/backends/meta-renderer-view.h
  src/backends/native/meta-device-manager-native.c
@@ -139,7 +141,7 @@ Copyright:
  1999-2000 Erik Walthinsen
  2001-2003 Sun Microsystems Inc
  2006-2008 OpenedHand Ltd
- 2007-2018 Red Hat, Inc
+ 2007-2020 Red Hat, Inc
  2007-2015 Intel Corporation
  2008-2009 Igalia, S.L.
  2010-2012 Inclusive Design Research Centre, OCAD University
