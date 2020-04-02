@@ -8,7 +8,6 @@ mutter (3.36.0-2ubuntu1) focal; urgency=medium
       - X11: Add support for fractional scaling using Randr
   * d/p/clutter-master-clock-default-Sync-timelines-to-hardware-v.patch:
     - Improves smoothness and reduce input-to-output latency
-      levels (LP: #1862308)
   * debian/libmutter-6-0.symbols:
     - Update as per background mipmap levels patch symbol addition
   * Ubuntu bugs resolved since 3.35.91-1ubuntu1:
