@@ -1,8 +1,21 @@
 mutter (3.36.1-1) UNRELEASED; urgency=medium
 
   * New upstream release
+  * d/copyright: Update
+  * Refresh patches
+  * Update symbols file.
+    Note that this includes ABI breaks: some symbols that are only used
+    internally have disappeared from mutter's private fork of Clutter and
+    Cogl. The only user of this version of mutter is GNOME Shell, which
+    does not use these symbols.
+  * d/p/clutter-stage-Don-t-assume-stage-relayouts-reallocate-eve.patch:
+    Add patch proposed upstream to fix a gnome-shell crash with the
+    "Native window placement" extension.
+  * d/p/cogl-Don-t-allow-creating-sized-textures-with-0-pixels.patch,
+    d/p/cogl-Defend-against-empty-or-unallocated-framebuffers.patch:
+    Add patches from upstream 3.36.1 branch to improve robustness.
 
- -- Simon McVittie <smcv@debian.org>  Tue, 31 Mar 2020 19:00:17 +0100
+ -- Simon McVittie <smcv@debian.org>  Fri, 03 Apr 2020 14:01:52 +0100
 
 mutter (3.36.0-2) experimental; urgency=medium
 
