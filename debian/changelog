@@ -1,5 +1,6 @@
-mutter (3.36.1-1) UNRELEASED; urgency=medium
+mutter (3.36.1-1) experimental; urgency=medium
 
+  * Team upload
   * New upstream release
   * d/copyright: Update
   * Refresh patches
@@ -13,7 +14,7 @@ mutter (3.36.1-1) UNRELEASED; urgency=medium
     Add patch proposed upstream to fix a gnome-shell crash with the
     "Native window placement" extension.
 
- -- Simon McVittie <smcv@debian.org>  Fri, 03 Apr 2020 14:01:52 +0100
+ -- Simon McVittie <smcv@debian.org>  Fri, 03 Apr 2020 14:23:52 +0100
 
 mutter (3.36.0-2) experimental; urgency=medium
 
