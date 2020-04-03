@@ -8,12 +8,10 @@ mutter (3.36.1-1) UNRELEASED; urgency=medium
     internally have disappeared from mutter's private fork of Clutter and
     Cogl. The only user of this version of mutter is GNOME Shell, which
     does not use these symbols.
+  * d/patches: Update from gnome-3-36 branch up to 3.36.1-8-ge339a57dd
   * d/p/clutter-stage-Don-t-assume-stage-relayouts-reallocate-eve.patch:
     Add patch proposed upstream to fix a gnome-shell crash with the
     "Native window placement" extension.
-  * d/p/cogl-Don-t-allow-creating-sized-textures-with-0-pixels.patch,
-    d/p/cogl-Defend-against-empty-or-unallocated-framebuffers.patch:
-    Add patches from upstream 3.36.1 branch to improve robustness.
 
  -- Simon McVittie <smcv@debian.org>  Fri, 03 Apr 2020 14:01:52 +0100
 

@@ -42,7 +42,7 @@ Applied-upstream: no
  1 file changed, 6 deletions(-)
 
 diff --git a/clutter/clutter/clutter-stage.c b/clutter/clutter/clutter-stage.c
-index 07ba9df..e51dad4 100644
+index fb73a02..4587786 100644
 --- a/clutter/clutter/clutter-stage.c
 +++ b/clutter/clutter/clutter-stage.c
 @@ -1320,15 +1320,9 @@ clutter_stage_queue_actor_relayout (ClutterStage *stage,
