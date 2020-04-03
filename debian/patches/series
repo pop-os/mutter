@@ -3,3 +3,6 @@ theme-load-icons-as-Gtk-does-with-fallback-and-RTL-suppor.patch
 meson-add-back-default_driver-option.patch
 debian/synaptics-support.patch
 debian/tests-Tag-closed-transient-no-input-tests-as-flaky.patch
+cogl-Don-t-allow-creating-sized-textures-with-0-pixels.patch
+cogl-Defend-against-empty-or-unallocated-framebuffers.patch
+clutter-stage-Don-t-assume-stage-relayouts-reallocate-eve.patch
