@@ -1,3 +1,12 @@
+mutter (3.36.1-2) experimental; urgency=medium
+
+  * Team upload
+  * Standards-Version: 4.5.0 (no changes required)
+  * d/copyright: Consolidate entries and update
+  * Update to upstream gnome-3-36 branch, commit 3.36.1-13-gbc47f0a1a
+
+ -- Simon McVittie <smcv@debian.org>  Tue, 07 Apr 2020 18:27:45 +0100
+
 mutter (3.36.1-1) experimental; urgency=medium
 
   * Team upload
