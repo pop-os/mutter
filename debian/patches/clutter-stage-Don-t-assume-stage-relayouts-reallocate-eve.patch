@@ -1,5 +1,5 @@
 From: =?utf-8?q?Jonas_Dre=C3=9Fler?= <verdre@v0yd.nl>
-Date: Fri, 3 Apr 2020 10:40:46 +0200
+Date: Fri, 3 Apr 2020 08:40:46 +0000
 Subject: clutter/stage: Don't assume stage relayouts reallocate everything
 
 With the introduction of "shallow" relayouts, we are now able to enter
@@ -34,9 +34,13 @@ too, because as soon as an actor got allocated once, it doesn't need an
 allocation anymore and should bail out in clutter_actor_allocate() as
 long as it's absolute position didn't change.
 
-Bug: https://gitlab.gnome.org/GNOME/gnome-shell/-/issues/2538
-Forwarded: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1173
-Applied-upstream: no
+Fixes https://gitlab.gnome.org/GNOME/gnome-shell/-/issues/2538
+
+https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1173
+
+(cherry picked from commit e74c2e42cf3dc744aaa53cb5a683138425cda9b6)
+
+Origin: upstream, 3.36.2
 ---
  clutter/clutter/clutter-stage.c | 6 ------
  1 file changed, 6 deletions(-)
