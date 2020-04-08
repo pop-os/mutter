@@ -1,3 +1,25 @@
+mutter (3.36.1-3ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge with debian, with new upstream releases and cherry-picked fixes:
+    - Screens turn off when setting display scaling to 200% (LP: #1869750)
+    - Use hardware cursor for DisplayLink devices (LP: #1867757)
+    - Fix popup menus with using focus-follow-mouse (LP: #1871107)
+    - Window manager key events are sent to the terminal (LP: #1866094)
+    - Ensure assertion 'window->unmanaging || workspace != NULL' (LP: #1864326)
+    - Shell crash on meta_wayland_surface_role_get_window (LP: #1869837)
+  * d/p/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+    - Refreshed to respect upstream changes
+    - Fixed a bug causing windows using direct-rendering to be continuously
+      resized, keeping ability to use shell UI (LP: #1862081)
+  * Remaining changes with debian:
+    - debian/control:
+      + Update VCS flags to point to ubuntu salsa branch
+    - debian/gbp.conf: update branch to point to ubuntu/master
+    - debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+      + X11: Add support for fractional scaling using Randr
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 08 Apr 2020 21:26:08 +0200
+
 mutter (3.36.1-3) experimental; urgency=medium
 
   * Team upload
