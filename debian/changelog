@@ -1,3 +1,41 @@
+mutter (3.36.1-3) experimental; urgency=medium
+
+  * Team upload
+  * Update to upstream gnome-3-36 branch, commit 3.36.1-16-gdb164bcfa
+    - Fix a crash during X11 drag-and-drop, for example when dragging
+      a JPEG file onto GIMP's splash screen
+    - Fix a crash in X11 input device handling
+    - Translate coordinates of absolute input devices for rotated screens
+
+ -- Simon McVittie <smcv@debian.org>  Wed, 08 Apr 2020 11:18:37 +0100
+
+mutter (3.36.1-2) experimental; urgency=medium
+
+  * Team upload
+  * Standards-Version: 4.5.0 (no changes required)
+  * d/copyright: Consolidate entries and update
+  * Update to upstream gnome-3-36 branch, commit 3.36.1-13-gbc47f0a1a
+
+ -- Simon McVittie <smcv@debian.org>  Tue, 07 Apr 2020 18:27:45 +0100
+
+mutter (3.36.1-1) experimental; urgency=medium
+
+  * Team upload
+  * New upstream release
+  * d/copyright: Update
+  * Refresh patches
+  * Update symbols file.
+    Note that this includes ABI breaks: some symbols that are only used
+    internally have disappeared from mutter's private fork of Clutter and
+    Cogl. The only user of this version of mutter is GNOME Shell, which
+    does not use these symbols.
+  * d/patches: Update from gnome-3-36 branch up to 3.36.1-8-ge339a57dd
+  * d/p/clutter-stage-Don-t-assume-stage-relayouts-reallocate-eve.patch:
+    Add patch proposed upstream to fix a gnome-shell crash with the
+    "Native window placement" extension.
+
+ -- Simon McVittie <smcv@debian.org>  Fri, 03 Apr 2020 14:23:52 +0100
+
 mutter (3.36.0-2ubuntu1) focal; urgency=medium
 
   * Merge with debian. Remaining changes:

@@ -456,10 +456,7 @@ meta_screen_cast_stream_src_maybe_record_frame (MetaScreenCastStreamSrc *src)
 
   buffer = pw_stream_dequeue_buffer (priv->pipewire_stream);
   if (!buffer)
-    {
-      g_warning ("Failed to dequeue at PipeWire buffer");
-      return;
-    }
+    return;
 
   spa_buffer = buffer->buffer;
   data = spa_buffer->datas[0].data;
@@ -888,7 +885,7 @@ create_pipewire_source (void)
   pipewire_source->pipewire_loop = pw_loop_new (NULL);
   if (!pipewire_source->pipewire_loop)
     {
-      g_source_destroy ((GSource *) pipewire_source);
+      g_source_unref ((GSource *) pipewire_source);
       return NULL;
     }
 
@@ -983,6 +980,7 @@ meta_screen_cast_stream_src_finalize (GObject *object)
   g_clear_pointer (&priv->pipewire_core, pw_core_disconnect);
   g_clear_pointer (&priv->pipewire_context, pw_context_destroy);
   g_source_destroy (&priv->pipewire_source->base);
+  g_source_unref (&priv->pipewire_source->base);
 
   G_OBJECT_CLASS (meta_screen_cast_stream_src_parent_class)->finalize (object);
 }

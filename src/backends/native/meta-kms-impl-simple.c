@@ -567,7 +567,12 @@ mode_set_fallback (MetaKmsImplSimple       *impl_simple,
 
   cached_mode_set = g_hash_table_lookup (impl_simple->cached_mode_sets,
                                          crtc);
-  g_assert (cached_mode_set);
+  if (!cached_mode_set)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Missing mode set for page flip fallback");
+      return FALSE;
+    }
 
   fill_connector_ids_array (cached_mode_set->connectors,
                             &connectors,
@@ -766,14 +771,27 @@ process_cursor_plane_assignment (MetaKmsImpl             *impl,
   if (!(plane_assignment->flags & META_KMS_ASSIGN_PLANE_FLAG_FB_UNCHANGED))
     {
       int width, height;
-      int ret;
+      int ret = -1;
 
       width = meta_fixed_16_to_int (plane_assignment->dst_rect.width);
       height = meta_fixed_16_to_int (plane_assignment->dst_rect.height);
 
-      ret = drmModeSetCursor (fd, meta_kms_crtc_get_id (plane_assignment->crtc),
-                              plane_assignment->fb_id,
-                              width, height);
+      if (plane_assignment->cursor_hotspot.is_valid)
+        {
+          ret = drmModeSetCursor2 (fd, meta_kms_crtc_get_id (plane_assignment->crtc),
+                                   plane_assignment->fb_id,
+                                   width, height,
+                                   plane_assignment->cursor_hotspot.x,
+                                   plane_assignment->cursor_hotspot.y);
+        }
+
+      if (ret != 0)
+        {
+          ret = drmModeSetCursor (fd, meta_kms_crtc_get_id (plane_assignment->crtc),
+                                  plane_assignment->fb_id,
+                                  width, height);
+        }
+
       if (ret != 0)
         {
           g_set_error (error, G_IO_ERROR, g_io_error_from_errno (-ret),

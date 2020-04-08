@@ -12,6 +12,7 @@ cdata.set('COGL_HAS_X11', have_x11)
 cdata.set('COGL_HAS_X11_SUPPORT', have_x11)
 cdata.set('COGL_HAS_XLIB', have_x11)
 cdata.set('COGL_HAS_XLIB_SUPPORT', have_x11)
+cdata.set('COGL_HAS_TRACING', have_profiler)
 
 cogl_defines_h = configure_file(
   input: 'cogl-defines.h.meson',
@@ -89,6 +90,7 @@ cogl_headers = [
   'cogl-texture-2d.h',
   'cogl-texture-2d-sliced.h',
   'cogl-types.h',
+  'cogl-trace.h',
   'cogl.h',
 ]
 
@@ -288,7 +290,6 @@ cogl_sources = [
   'cogl-blend-string.h',
   'cogl-debug.c',
   'cogl-trace.c',
-  'cogl-trace.h',
   'cogl-sub-texture-private.h',
   'cogl-texture-private.h',
   'cogl-texture-2d-private.h',
@@ -426,34 +427,20 @@ cogl_headers_all = [
 ]
 
 cogl_test_deps = []
-cogl_unit_tests_map_data = configuration_data()
 
 if have_cogl_tests
   cogl_test_deps += [libmutter_cogl_test_fixtures_dep]
-
-  cogl_unit_tests_map_data.set('unit_tests_symbols', 'test_*; unit_test_*;')
 endif
 
-libmutter_cogl_map = configure_file(
-  input: 'libmutter-cogl.map.in',
-  output: 'libmutter-cogl.map',
-  configuration: cogl_unit_tests_map_data,
-  install: false,
-)
-
 libmutter_cogl_name = 'mutter-cogl-' + libmutter_api_version
-libmutter_cogl_link_args = [
-  '-Wl,--version-script,@0@'.format(libmutter_cogl_map),
-]
 libmutter_cogl = shared_library(libmutter_cogl_name,
   sources: [cogl_sources, cogl_headers_all],
   version: '0.0.0',
   soversion: 0,
   c_args: cogl_c_args,
   include_directories: cogl_includepath,
-  link_depends: libmutter_cogl_map,
-  link_args: libmutter_cogl_link_args,
   dependencies: [cogl_deps, cogl_test_deps],
+  gnu_symbol_visibility: 'hidden',
   install_rpath: pkglibdir,
   install_dir: pkglibdir,
   install: true,
@@ -478,6 +465,7 @@ if have_introspection
       '-D__COGL_GLX_H_INSIDE__',
       '-DCOGL_GIR_SCANNING',
     ],
+    header: 'cogl/cogl.h',
     install_dir_gir: pkglibdir,
     install_dir_typelib: pkglibdir,
     install: true

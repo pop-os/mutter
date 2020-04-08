@@ -44,6 +44,7 @@
 #include "backends/meta-cursor-sprite-xcursor.h"
 #include "backends/meta-cursor-tracker-private.h"
 #include "backends/meta-idle-monitor-dbus.h"
+#include "backends/meta-input-device-private.h"
 #include "backends/meta-input-settings-private.h"
 #include "backends/meta-logical-monitor.h"
 #include "backends/meta-stage-private.h"
@@ -53,7 +54,7 @@
 #include "clutter/x11/clutter-x11.h"
 #include "compositor/compositor-private.h"
 #include "compositor/meta-compositor-x11.h"
-#include "cogl/cogl-trace.h"
+#include "cogl/cogl.h"
 #include "core/bell.h"
 #include "core/boxes-private.h"
 #include "core/display-private.h"
@@ -701,7 +702,13 @@ meta_display_init_x11_finish (MetaDisplay   *display,
   g_assert (g_task_get_source_tag (G_TASK (result)) == meta_display_init_x11);
 
   if (!g_task_propagate_boolean (G_TASK (result), error))
-    return FALSE;
+    {
+      if (*error == NULL)
+        g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Unknown error");
+
+      return FALSE;
+    }
+
   if (display->x11_display)
     return TRUE;
 
@@ -778,8 +785,10 @@ on_x11_initialized (MetaDisplay  *display,
                     GAsyncResult *result,
                     gpointer      user_data)
 {
-  if (!meta_display_init_x11_finish (display, result, NULL))
-    g_critical ("Failed to init X11 display");
+  g_autoptr (GError) error = NULL;
+
+  if (!meta_display_init_x11_finish (display, result, &error))
+    g_critical ("Failed to init X11 display: %s", error->message);
 }
 #endif
 
@@ -2980,8 +2989,7 @@ meta_display_request_pad_osd (MetaDisplay        *display,
       logical_monitor =
         meta_input_settings_get_tablet_logical_monitor (input_settings, pad);
 #ifdef HAVE_LIBWACOM
-      wacom_device = meta_input_settings_get_tablet_wacom_device (input_settings,
-                                                                  pad);
+      wacom_device = meta_input_device_get_wacom_device (META_INPUT_DEVICE (pad));
       layout_path = libwacom_get_layout_filename (wacom_device);
 #endif
     }
