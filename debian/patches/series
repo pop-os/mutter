@@ -11,6 +11,9 @@ Update-Slovak-translation.patch
 x11-fix-compilation-if-libwacom-false.patch
 window-Check-aliveness-a-bit-less-aggressively.patch
 clutter-stage-Don-t-assume-stage-relayouts-reallocate-eve.patch
+backends-x11-Fix-access-to-WacomDevice.patch
+backends-native-Translate-coordinates-of-absolute-motion-.patch
+wayland-xdnd-Add-error-traps-around-Xdnd-IPC.patch
 theme-use-gtk_render_icon_suface-to-paint-button-icon.patch
 theme-load-icons-as-Gtk-does-with-fallback-and-RTL-suppor.patch
 meson-add-back-default_driver-option.patch
