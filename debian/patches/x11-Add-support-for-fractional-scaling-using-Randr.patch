@@ -30,7 +30,7 @@ Forwarded: No, forwarding is in progress and planned though
  src/backends/x11/meta-monitor-manager-xrandr.c     | 503 +++++++++++++++------
  src/backends/x11/meta-monitor-manager-xrandr.h     |   4 +-
  src/backends/x11/meta-output-xrandr.c              |   5 +-
- src/compositor/meta-compositor-x11.c               |  52 ++-
+ src/compositor/meta-compositor-x11.c               |  98 +++-
  src/core/boxes-private.h                           |   4 +
  src/core/boxes.c                                   |  21 +
  .../meta-selection-source-memory-pool-private.h    |  47 ++
@@ -38,7 +38,7 @@ Forwarded: No, forwarding is in progress and planned though
  src/core/window.c                                  |  19 +
  src/org.gnome.Mutter.DisplayConfig.xml             |   5 +
  src/tests/meta-monitor-manager-test.c              |  13 +-
- 30 files changed, 1611 insertions(+), 256 deletions(-)
+ 30 files changed, 1646 insertions(+), 267 deletions(-)
  create mode 100644 data/org.gnome.mutter.x11.gschema.xml.in
  create mode 100644 src/core/meta-selection-source-memory-pool-private.h
  create mode 100644 src/core/meta-selection-source-memory-pool.c
@@ -2778,7 +2778,7 @@ index 869a39e..c274df2 100644
  
    tile_atom = XInternAtom (xdisplay, "TILE", FALSE);
 diff --git a/src/compositor/meta-compositor-x11.c b/src/compositor/meta-compositor-x11.c
-index 1737e97..5c42c0e 100644
+index 1737e97..755e733 100644
 --- a/src/compositor/meta-compositor-x11.c
 +++ b/src/compositor/meta-compositor-x11.c
 @@ -31,6 +31,7 @@
@@ -2797,7 +2797,7 @@ index 1737e97..5c42c0e 100644
  };
  
  G_DEFINE_TYPE (MetaCompositorX11, meta_compositor_x11, META_TYPE_COMPOSITOR)
-@@ -206,20 +208,60 @@ shape_cow_for_window (MetaCompositorX11 *compositor_x11,
+@@ -206,20 +208,91 @@ shape_cow_for_window (MetaCompositorX11 *compositor_x11,
      }
  }
  
@@ -2817,17 +2817,37 @@ index 1737e97..5c42c0e 100644
 +                                       on_redirected_monitor_changed,
 +                                       compositor_x11);
 +
-+      compositor_x11->randr_scale_disabled =
-+        meta_monitor_manager_disable_scale_for_monitor (monitor_manager,
-+                                                        window->monitor);
++      if (!compositor_x11->randr_scale_disabled)
++        {
++          compositor_x11->randr_scale_disabled =
++            meta_monitor_manager_disable_scale_for_monitor (monitor_manager,
++                                                            window->monitor);
++        }
++
 +      g_signal_handlers_unblock_by_func (window,
 +                                         on_redirected_monitor_changed,
 +                                         compositor_x11);
 +    }
 +  else
-+    {
-+      shape_cow_for_window (compositor_x11, window);
-+    }
++    shape_cow_for_window (META_COMPOSITOR_X11 (compositor_x11), window);
++}
++
++static MetaWindow *
++get_unredirectable_window (MetaCompositorX11 *compositor_x11)
++{
++  MetaCompositor *compositor = META_COMPOSITOR (compositor_x11);
++  MetaWindowActor *window_actor;
++  MetaWindowActorX11 *window_actor_x11;
++
++  window_actor = meta_compositor_get_top_window_actor (compositor);
++  if (!window_actor)
++    return NULL;
++
++  window_actor_x11 = META_WINDOW_ACTOR_X11 (window_actor);
++  if (!meta_window_actor_x11_should_unredirect (window_actor_x11))
++    return NULL;
++
++  return meta_window_actor_get_meta_window (window_actor);
 +}
 +
  static void
@@ -2839,11 +2859,25 @@ index 1737e97..5c42c0e 100644
    MetaWindow *prev_unredirected_window = compositor_x11->unredirected_window;
  
    if (prev_unredirected_window == window)
-     return;
- 
+-    return;
++    {
++      if (!window && compositor_x11->randr_scale_disabled &&
++          !get_unredirectable_window (compositor_x11))
++        {
++          backend = meta_get_backend ();
++          monitor_manager = meta_backend_get_monitor_manager (backend);
++
++          compositor_x11->randr_scale_disabled =
++            meta_monitor_manager_disable_scale_for_monitor (monitor_manager,
++                                                            NULL);
++        }
++
++      return;
++    }
++
 +  backend = meta_get_backend ();
 +  monitor_manager = meta_backend_get_monitor_manager (backend);
-+
+ 
    if (prev_unredirected_window)
      {
        MetaWindowActor *window_actor;
@@ -2852,36 +2886,51 @@ index 1737e97..5c42c0e 100644
 +      g_signal_handlers_disconnect_by_func (prev_unredirected_window,
 +                                            on_redirected_monitor_changed,
 +                                            compositor_x11);
-+      compositor_x11->randr_scale_disabled =
-+        meta_monitor_manager_disable_scale_for_monitor (monitor_manager, NULL);
 +
        window_actor = meta_window_actor_from_window (prev_unredirected_window);
        window_actor_x11 = META_WINDOW_ACTOR_X11 (window_actor);
        meta_window_actor_x11_set_unredirected (window_actor_x11, FALSE);
-@@ -233,6 +275,13 @@ set_unredirected_window (MetaCompositorX11 *compositor_x11,
+@@ -233,6 +306,17 @@ set_unredirected_window (MetaCompositorX11 *compositor_x11,
        MetaWindowActor *window_actor;
        MetaWindowActorX11 *window_actor_x11;
  
-+      compositor_x11->randr_scale_disabled =
-+        meta_monitor_manager_disable_scale_for_monitor (monitor_manager,
-+                                                        window->monitor);
++      if (!compositor_x11->randr_scale_disabled)
++        {
++          compositor_x11->randr_scale_disabled =
++            meta_monitor_manager_disable_scale_for_monitor (monitor_manager,
++                                                            window->monitor);
++        }
++
 +      g_signal_connect_object (window, "monitor-changed",
-+                               G_CALLBACK (on_redirected_monitor_changed),
-+                               compositor_x11, 0);
++                              G_CALLBACK (on_redirected_monitor_changed),
++                              compositor_x11, 0);
 +
        window_actor = meta_window_actor_from_window (window);
        window_actor_x11 = META_WINDOW_ACTOR_X11 (window_actor);
        meta_window_actor_x11_set_unredirected (window_actor_x11, TRUE);
-@@ -247,7 +296,8 @@ maybe_unredirect_top_window (MetaCompositorX11 *compositor_x11)
-   MetaWindowActor *window_actor;
-   MetaWindowActorX11 *window_actor_x11;
+@@ -244,21 +328,11 @@ maybe_unredirect_top_window (MetaCompositorX11 *compositor_x11)
+ {
+   MetaCompositor *compositor = META_COMPOSITOR (compositor_x11);
+   MetaWindow *window_to_unredirect = NULL;
+-  MetaWindowActor *window_actor;
+-  MetaWindowActorX11 *window_actor_x11;
  
--  if (meta_compositor_is_unredirect_inhibited (compositor))
-+  if (!compositor_x11->randr_scale_disabled &&
-+      meta_compositor_is_unredirect_inhibited (compositor))
+   if (meta_compositor_is_unredirect_inhibited (compositor))
      goto out;
  
-   window_actor = meta_compositor_get_top_window_actor (compositor);
+-  window_actor = meta_compositor_get_top_window_actor (compositor);
+-  if (!window_actor)
+-    goto out;
+-
+-  window_actor_x11 = META_WINDOW_ACTOR_X11 (window_actor);
+-  if (!meta_window_actor_x11_should_unredirect (window_actor_x11))
+-    goto out;
+-
+-  window_to_unredirect = meta_window_actor_get_meta_window (window_actor);
++  window_to_unredirect = get_unredirectable_window (compositor_x11);
+ 
+ out:
+   set_unredirected_window (compositor_x11, window_to_unredirect);
 diff --git a/src/core/boxes-private.h b/src/core/boxes-private.h
 index 7616d6c..1034a58 100644
 --- a/src/core/boxes-private.h
