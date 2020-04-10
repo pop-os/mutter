@@ -14,6 +14,7 @@ clutter-stage-Don-t-assume-stage-relayouts-reallocate-eve.patch
 backends-x11-Fix-access-to-WacomDevice.patch
 backends-native-Translate-coordinates-of-absolute-motion-.patch
 wayland-xdnd-Add-error-traps-around-Xdnd-IPC.patch
+wayland-preserve-xkb_state-on-VT-switch.patch
 theme-use-gtk_render_icon_suface-to-paint-button-icon.patch
 theme-load-icons-as-Gtk-does-with-fallback-and-RTL-suppor.patch
 meson-add-back-default_driver-option.patch
