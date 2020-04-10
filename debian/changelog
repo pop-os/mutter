@@ -1,4 +1,4 @@
-mutter (3.36.1-4) unstable; urgency=medium
+mutter (3.36.1-4) UNRELEASED; urgency=medium
 
   * Team upload
   * Upload to unstable (starts transition: #954422)
@@ -6,6 +6,16 @@ mutter (3.36.1-4) unstable; urgency=medium
     - Fix caps-lock state becoming confused on VT switch
 
  -- Simon McVittie <smcv@debian.org>  Fri, 10 Apr 2020 14:42:54 +0100
+
+mutter (3.34.4-1) unstable; urgency=medium
+
+  * Team upload
+  * d/gbp.conf: Follow debian/unstable branch
+  * New upstream release
+  * d/patches: Apply post-release fixes up to 3.34.4-5-g2709a4ffb
+  * Standards-Version: 4.5.0 (no changes required)
+
+ -- Simon McVittie <smcv@debian.org>  Tue, 25 Feb 2020 16:26:10 +0000
 
 mutter (3.36.1-3) experimental; urgency=medium
 
