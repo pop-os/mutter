@@ -1,11 +1,13 @@
-mutter (3.36.1-4) UNRELEASED; urgency=medium
+mutter (3.36.1-4) unstable; urgency=medium
 
   * Team upload
+  * Merge changelog from unstable
   * Upload to unstable (starts transition: #954422)
   * Update to upstream gnome-3-36 branch, commit 3.36.1-17-g9a2471db4
     - Fix caps-lock state becoming confused on VT switch
+  * d/gbp.conf: Follow upstream/3.36.x branch
 
- -- Simon McVittie <smcv@debian.org>  Fri, 10 Apr 2020 14:42:54 +0100
+ -- Simon McVittie <smcv@debian.org>  Fri, 10 Apr 2020 17:56:10 +0100
 
 mutter (3.34.4-1) unstable; urgency=medium
 
