@@ -106,6 +106,3 @@ override_dh_makeshlibs:
 
 override_dh_shlibdeps:
 	dh_shlibdeps -Llibmutter-6-0 -l/usr/lib/$(DEB_HOST_MULTIARCH)/mutter-6
-
-override_dh_strip:
-	dh_strip --dbgsym-migration='mutter-dbg (<< 3.18.3-2~)'
