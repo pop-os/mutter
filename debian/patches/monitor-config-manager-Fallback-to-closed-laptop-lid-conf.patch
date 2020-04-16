@@ -1,0 +1,69 @@
+From: =?utf-8?b?Ik1hcmNvIFRyZXZpc2FuIChUcmV2acOxbyki?= <mail@3v1n0.net>
+Date: Thu, 16 Apr 2020 00:28:05 +0200
+Subject: monitor-config-manager: Fallback to closed laptop lid configuration
+
+When closing the lid of a laptop, we reconfigure all the monitors in order
+to update the CRTCs and (if enabled) the global UI scaling factor.
+
+To do this, we try first to reuse the current configuration for the usable
+monitors, but if we have only monitor enabled and this one is on the laptop
+lid we just end up creating a new configuration where the primary monitor is
+the laptop one (as per find_primary_monitor() in MetaMonitorConfigManager),
+but ignoring the user parameters.
+
+In case the user selected a different resolution / scaling compared to the
+default one, while the laptop lid is closed we might change the monitors
+layout, causing applications to rescale or reposition.
+
+To avoid this, when creating the monitors configuration from the current
+current state, in case we have only one monitor available and that one is
+the laptop panel, let's just reuse this configuration.
+
+https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1200
+---
+ src/backends/meta-monitor-config-manager.c | 18 +++++++++++++++---
+ 1 file changed, 15 insertions(+), 3 deletions(-)
+
+diff --git a/src/backends/meta-monitor-config-manager.c b/src/backends/meta-monitor-config-manager.c
+index 5739ca1..6e31432 100644
+--- a/src/backends/meta-monitor-config-manager.c
++++ b/src/backends/meta-monitor-config-manager.c
+@@ -443,23 +443,35 @@ MetaMonitorsConfigKey *
+ meta_create_monitors_config_key_for_current_state (MetaMonitorManager *monitor_manager)
+ {
+   MetaMonitorsConfigKey *config_key;
++  MetaMonitorSpec *laptop_monitor_spec;
+   GList *l;
+   GList *monitor_specs;
+ 
++  laptop_monitor_spec = NULL;
+   monitor_specs = NULL;
+   for (l = monitor_manager->monitors; l; l = l->next)
+     {
+       MetaMonitor *monitor = l->data;
+       MetaMonitorSpec *monitor_spec;
+ 
+-      if (meta_monitor_is_laptop_panel (monitor) &&
+-          is_lid_closed (monitor_manager))
+-        continue;
++      if (meta_monitor_is_laptop_panel (monitor))
++        {
++          laptop_monitor_spec = meta_monitor_get_spec (monitor);
++
++          if (is_lid_closed (monitor_manager))
++            continue;
++        }
+ 
+       monitor_spec = meta_monitor_spec_clone (meta_monitor_get_spec (monitor));
+       monitor_specs = g_list_prepend (monitor_specs, monitor_spec);
+     }
+ 
++  if (!monitor_specs && laptop_monitor_spec)
++    {
++      monitor_specs =
++        g_list_prepend (NULL, meta_monitor_spec_clone (laptop_monitor_spec));
++    }
++
+   if (!monitor_specs)
+     return NULL;
+ 
