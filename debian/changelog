@@ -1,3 +1,13 @@
+mutter (3.36.1-3ubuntu2) UNRELEASED; urgency=medium
+
+  * d/p/monitor-config-manager-Fallback-to-closed-laptop-lid-conf.patch:
+    -  Fallback to closed laptop lid configuration if no other available
+       (LP: #1793496)
+  * d/p/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+    - Don't override non-fractionally scaled monitors scaling (LP: #1873348)
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Thu, 16 Apr 2020 21:48:40 +0200
+
 mutter (3.36.1-3ubuntu1) focal; urgency=medium
 
   * Merge with debian, with new upstream releases and cherry-picked fixes:
