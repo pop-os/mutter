@@ -86,7 +86,7 @@ ifeq (,$(filter nocheck, $(DEB_BUILD_OPTIONS)))
 	glib-compile-schemas $(BUILDDIR)/data
 	mkdir -m 700 $(BUILDDIR)/HOME
 	mkdir -m 700 $(BUILDDIR)/XRD
-ifneq (,$(filter hurd-i386 kfreebsd-i386 kfreebsd-amd64 s390x,$(DEB_HOST_ARCH)))
+ifneq (,$(filter hurd-i386 kfreebsd-i386 kfreebsd-amd64 riscv64 s390x,$(DEB_HOST_ARCH)))
 	-$(TEST_COMMAND)
 	-$(TEST_COMMAND_FLAKY)
 else ifeq (,$(filter mips mips64el mipsel,$(DEB_HOST_ARCH)))

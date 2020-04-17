@@ -1,3 +1,10 @@
+mutter (3.36.1-3ubuntu3) focal; urgency=medium
+
+  * Ignore test failures on riscv64, like s390x, to unblock
+    gnome-settings-daemon etc.
+
+ -- William Grant <wgrant@ubuntu.com>  Fri, 17 Apr 2020 11:08:01 +1000
+
 mutter (3.36.1-3ubuntu2) focal; urgency=medium
 
   * d/p/monitor-config-manager-Fallback-to-closed-laptop-lid-conf.patch:
