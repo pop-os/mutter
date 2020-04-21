@@ -1,0 +1,128 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Thu, 16 Apr 2020 23:45:31 +0200
+Subject: wayland: Rely on MetaSelection::owner-changed for .selection event
+ emission
+
+We already have a signal callback that translates selection ownership changes to
+data_device/primary .selection events. Given both will be run when a data source
+is being replaced, and this event emission being deleted is kinda short sighted
+in that in only knows about Wayland, rely entirely on MetaSelection::owner-changed
+emission.
+
+Fixes spurious .selection(null) events being sent when a compositor-local source
+takes over the selection without the focus changing (eg. screenshot to clipboard).
+
+Closes: https://gitlab.gnome.org/GNOME/mutter/-/issues/1160
+
+https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1204
+
+(cherry picked from commit 1363246d4452c0eebf404f2668df9931d06eae92)
+
+Origin: upstream, 3.36.2
+---
+ src/wayland/meta-wayland-data-device.c | 53 ----------------------------------
+ 1 file changed, 53 deletions(-)
+
+diff --git a/src/wayland/meta-wayland-data-device.c b/src/wayland/meta-wayland-data-device.c
+index 28daf11..fb5992e 100644
+--- a/src/wayland/meta-wayland-data-device.c
++++ b/src/wayland/meta-wayland-data-device.c
+@@ -1344,20 +1344,8 @@ static void
+ selection_data_source_destroyed (gpointer data, GObject *object_was_here)
+ {
+   MetaWaylandDataDevice *data_device = data;
+-  MetaWaylandSeat *seat = wl_container_of (data_device, seat, data_device);
+-  struct wl_resource *data_device_resource;
+-  struct wl_client *focus_client = NULL;
+ 
+   data_device->selection_data_source = NULL;
+-
+-  focus_client = meta_wayland_keyboard_get_focus_client (seat->keyboard);
+-  if (focus_client)
+-    {
+-      data_device_resource = wl_resource_find_for_client (&data_device->resource_list, focus_client);
+-      if (data_device_resource)
+-        wl_data_device_send_selection (data_device_resource, NULL);
+-    }
+-
+   unset_selection_source (data_device, META_SELECTION_CLIPBOARD);
+ }
+ 
+@@ -1659,8 +1647,6 @@ meta_wayland_data_device_set_selection (MetaWaylandDataDevice *data_device,
+                                         guint32 serial)
+ {
+   MetaWaylandSeat *seat = wl_container_of (data_device, seat, data_device);
+-  struct wl_resource *data_device_resource;
+-  struct wl_client *focus_client;
+   MetaSelectionSource *selection_source;
+ 
+   if (data_device->selection_data_source &&
+@@ -1695,18 +1681,6 @@ meta_wayland_data_device_set_selection (MetaWaylandDataDevice *data_device,
+   set_selection_source (data_device, META_SELECTION_CLIPBOARD,
+                         selection_source);
+   g_object_unref (selection_source);
+-
+-  focus_client = meta_wayland_keyboard_get_focus_client (seat->keyboard);
+-  if (focus_client)
+-    {
+-      data_device_resource = wl_resource_find_for_client (&data_device->resource_list, focus_client);
+-      if (data_device_resource)
+-        {
+-          struct wl_resource *offer;
+-          offer = create_and_send_clipboard_offer (data_device, data_device_resource);
+-          wl_data_device_send_selection (data_device_resource, offer);
+-        }
+-    }
+ }
+ 
+ static void
+@@ -1757,21 +1731,8 @@ primary_source_destroyed (gpointer  data,
+                           GObject  *object_was_here)
+ {
+   MetaWaylandDataDevice *data_device = data;
+-  MetaWaylandSeat *seat = wl_container_of (data_device, seat, data_device);
+-  struct wl_client *focus_client = NULL;
+ 
+   data_device->primary_data_source = NULL;
+-
+-  focus_client = meta_wayland_keyboard_get_focus_client (seat->keyboard);
+-  if (focus_client)
+-    {
+-      struct wl_resource *data_device_resource;
+-
+-      data_device_resource = wl_resource_find_for_client (&data_device->primary_resource_list, focus_client);
+-      if (data_device_resource)
+-        gtk_primary_selection_device_send_selection (data_device_resource, NULL);
+-    }
+-
+   unset_selection_source (data_device, META_SELECTION_PRIMARY);
+ }
+ 
+@@ -1781,8 +1742,6 @@ meta_wayland_data_device_set_primary (MetaWaylandDataDevice *data_device,
+                                       guint32                serial)
+ {
+   MetaWaylandSeat *seat = wl_container_of (data_device, seat, data_device);
+-  struct wl_resource *data_device_resource;
+-  struct wl_client *focus_client;
+   MetaSelectionSource *selection_source;
+ 
+   g_assert (!source || META_IS_WAYLAND_DATA_SOURCE_PRIMARY (source));
+@@ -1818,18 +1777,6 @@ meta_wayland_data_device_set_primary (MetaWaylandDataDevice *data_device,
+   set_selection_source (data_device, META_SELECTION_PRIMARY,
+                         selection_source);
+   g_object_unref (selection_source);
+-
+-  focus_client = meta_wayland_keyboard_get_focus_client (seat->keyboard);
+-  if (focus_client)
+-    {
+-      data_device_resource = wl_resource_find_for_client (&data_device->primary_resource_list, focus_client);
+-      if (data_device_resource)
+-        {
+-          struct wl_resource *offer;
+-          offer = create_and_send_primary_offer (data_device, data_device_resource);
+-          gtk_primary_selection_device_send_selection (data_device_resource, offer);
+-        }
+-    }
+ }
+ 
+ static void

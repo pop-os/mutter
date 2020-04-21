@@ -1,0 +1,28 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Sat, 11 Apr 2020 16:44:28 +0200
+Subject: x11: Intern INCR atom
+
+We want to use it, despite it not existing previously.
+
+https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1198
+
+(cherry picked from commit a32cb7133b1dc97f02ad20496fd03908f0d9328e)
+
+Origin: upstream, 3.36.2
+---
+ src/x11/meta-x11-selection-output-stream.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/x11/meta-x11-selection-output-stream.c b/src/x11/meta-x11-selection-output-stream.c
+index 67b375b..9a25d5f 100644
+--- a/src/x11/meta-x11-selection-output-stream.c
++++ b/src/x11/meta-x11-selection-output-stream.c
+@@ -229,7 +229,7 @@ meta_x11_selection_output_stream_perform_flush (MetaX11SelectionOutputStream *st
+       XChangeProperty (xdisplay,
+                        priv->xwindow,
+                        priv->xproperty,
+-                       XInternAtom (priv->x11_display->xdisplay, "INCR", True),
++                       XInternAtom (priv->x11_display->xdisplay, "INCR", False),
+                        32,
+                        PropModeReplace,
+                        (guchar *) &(long) { n_elements },

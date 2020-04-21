@@ -1,0 +1,35 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Sat, 11 Apr 2020 17:21:49 +0200
+Subject: x11: Fix iterative INCR property checks
+
+It does not make sense to check for the stream not being closed,
+this might happen multiple times during the lifetime of the stream
+for a single transfer. We want to notify the INCR transfer just
+once.
+
+Check for the explicit conditions that we want, that the remaining
+data is bigger than we can transfer at once, and that we are not
+yet within the INCR transfer.
+
+https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1198
+
+(cherry picked from commit a4596becc43959c3cd049fd49a236a9920fd9f24)
+
+Origin: upstream, 3.36.2
+---
+ src/x11/meta-x11-selection-output-stream.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/x11/meta-x11-selection-output-stream.c b/src/x11/meta-x11-selection-output-stream.c
+index 7179074..bc13dbc 100644
+--- a/src/x11/meta-x11-selection-output-stream.c
++++ b/src/x11/meta-x11-selection-output-stream.c
+@@ -223,7 +223,7 @@ meta_x11_selection_output_stream_perform_flush (MetaX11SelectionOutputStream *st
+   if (!priv->incr)
+     first_chunk = TRUE;
+ 
+-  if (!g_output_stream_is_closing (G_OUTPUT_STREAM (stream)))
++  if (!priv->incr && priv->data->len > max_size)
+     {
+       XWindowAttributes attrs;
+ 

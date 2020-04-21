@@ -1,0 +1,175 @@
+From: =?utf-8?b?Ik1hcmNvIFRyZXZpc2FuIChUcmV2acOxbyki?= <mail@3v1n0.net>
+Date: Thu, 16 Apr 2020 08:58:43 +0000
+Subject: monitor-unit-tests: Ensure configuration is preserved in laptop with
+ closed lid
+
+https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1200
+
+(cherry picked from commit f15ce01e2b48ec0127367392d6d49153fadea087)
+
+Origin: upstream, 3.36.2
+---
+ src/tests/monitor-configs/lid-scale.xml |  23 +++++++
+ src/tests/monitor-unit-tests.c          | 112 ++++++++++++++++++++++++++++++++
+ 2 files changed, 135 insertions(+)
+ create mode 100644 src/tests/monitor-configs/lid-scale.xml
+
+diff --git a/src/tests/monitor-configs/lid-scale.xml b/src/tests/monitor-configs/lid-scale.xml
+new file mode 100644
+index 0000000..9b40f0f
+--- /dev/null
++++ b/src/tests/monitor-configs/lid-scale.xml
+@@ -0,0 +1,23 @@
++<monitors version="2">
++  <configuration>
++    <logicalmonitor>
++      <x>0</x>
++      <y>0</y>
++      <primary>yes</primary>
++      <scale>2</scale>
++      <monitor>
++	<monitorspec>
++	  <connector>eDP-1</connector>
++	  <vendor>MetaProduct's Inc.</vendor>
++	  <product>MetaMonitor</product>
++	  <serial>0x123456</serial>
++	</monitorspec>
++	<mode>
++	  <width>1920</width>
++	  <height>1080</height>
++	  <rate>60.000495910644531</rate>
++	</mode>
++      </monitor>
++    </logicalmonitor>
++  </configuration>
++</monitors>
+diff --git a/src/tests/monitor-unit-tests.c b/src/tests/monitor-unit-tests.c
+index 13f0f21..8e41662 100644
+--- a/src/tests/monitor-unit-tests.c
++++ b/src/tests/monitor-unit-tests.c
+@@ -2868,6 +2868,116 @@ meta_test_monitor_lid_closed_with_hotplugged_external (void)
+   check_monitor_configuration (&test_case);
+ }
+ 
++static void
++meta_test_monitor_lid_scaled_closed_opened (void)
++{
++  MonitorTestCase test_case = {
++    .setup = {
++      .modes = {
++        {
++          .width = 1920,
++          .height = 1080,
++          .refresh_rate = 60.000495910644531
++        }
++      },
++      .n_modes = 1,
++      .outputs = {
++        {
++          .crtc = 0,
++          .modes = { 0 },
++          .n_modes = 1,
++          .preferred_mode = 0,
++          .possible_crtcs = { 0 },
++          .n_possible_crtcs = 1,
++          .width_mm = 222,
++          .height_mm = 125,
++          .is_laptop_panel = TRUE
++        },
++      },
++      .n_outputs = 1,
++      .crtcs = {
++        {
++          .current_mode = 0
++        },
++      },
++      .n_crtcs = 1
++    },
++
++    .expect = {
++      .monitors = {
++        {
++          .outputs = { 0 },
++          .n_outputs = 1,
++          .modes = {
++            {
++              .width = 1920,
++              .height = 1080,
++              .refresh_rate = 60.000495910644531,
++              .crtc_modes = {
++                {
++                  .output = 0,
++                  .crtc_mode = 0
++                }
++              }
++            }
++          },
++          .n_modes = 1,
++          .current_mode = 0,
++          .width_mm = 222,
++          .height_mm = 125,
++        }
++      },
++      .n_monitors = 1,
++      .logical_monitors = {
++        {
++          .monitors = { 0 },
++          .n_monitors = 1,
++          .layout = { .x = 0, .y = 0, .width = 960, .height = 540 },
++          .scale = 2
++        }
++      },
++      .n_logical_monitors = 1,
++      .primary_logical_monitor = 0,
++      .n_outputs = 1,
++      .crtcs = {
++        {
++          .current_mode = 0,
++        }
++      },
++      .n_crtcs = 1,
++      .n_tiled_monitors = 0,
++      .screen_width = 960,
++      .screen_height = 540
++    }
++  };
++  MetaMonitorTestSetup *test_setup;
++  MetaBackend *backend = meta_get_backend ();
++  MetaMonitorManager *monitor_manager =
++    meta_backend_get_monitor_manager (backend);
++
++  if (!meta_is_stage_views_enabled ())
++    {
++      g_test_skip ("Not using stage views");
++      return;
++    }
++
++  test_setup = create_monitor_test_setup (&test_case,
++                                          MONITOR_TEST_FLAG_NONE);
++  set_custom_monitor_config ("lid-scale.xml");
++  emulate_hotplug (test_setup);
++  check_monitor_configuration (&test_case);
++
++  meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), TRUE);
++  meta_monitor_manager_lid_is_closed_changed (monitor_manager);
++
++  check_monitor_configuration (&test_case);
++
++  meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), FALSE);
++  meta_monitor_manager_lid_is_closed_changed (monitor_manager);
++
++  check_monitor_configuration (&test_case);
++}
++
+ static void
+ meta_test_monitor_no_outputs (void)
+ {
+@@ -6251,6 +6361,8 @@ init_monitor_tests (void)
+                     meta_test_monitor_lid_closed_no_external);
+   add_monitor_test ("/backends/monitor/lid-closed-with-hotplugged-external",
+                     meta_test_monitor_lid_closed_with_hotplugged_external);
++  add_monitor_test ("/backends/monitor/lid-scaled-closed-opened",
++                    meta_test_monitor_lid_scaled_closed_opened);
+   add_monitor_test ("/backends/monitor/no-outputs",
+                     meta_test_monitor_no_outputs);
+   add_monitor_test ("/backends/monitor/underscanning-config",

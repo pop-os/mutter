@@ -1,0 +1,39 @@
+From: =?utf-8?q?Jonas_=C3=85dahl?= <jadahl@gmail.com>
+Date: Tue, 14 Apr 2020 21:14:24 +0200
+Subject: cursor-renderer-native: Take CRTC transform into account
+
+The CRTC level transform (not necessarily the hw transform) must be
+taken into account when calculating the position of the CRTC in the
+stage coordinate space, when placing the hw cursor, otherwise we'll
+place the cursor as if the monitor was not rotated.
+
+This wasn't a problem in the past, as with rotation, we always used the
+OpenGL cursor, so the issue newer showed.
+
+https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1199
+---
+ src/backends/native/meta-cursor-renderer-native.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/backends/native/meta-cursor-renderer-native.c b/src/backends/native/meta-cursor-renderer-native.c
+index 2450e19..578a9a0 100644
+--- a/src/backends/native/meta-cursor-renderer-native.c
++++ b/src/backends/native/meta-cursor-renderer-native.c
+@@ -407,13 +407,14 @@ update_monitor_crtc_cursor (MetaMonitor         *monitor,
+   else
+     scale = 1.0;
+ 
++  transform = meta_logical_monitor_get_transform (data->in_logical_monitor);
++  transform = meta_monitor_logical_to_crtc_transform (monitor, transform);
++
+   meta_monitor_calculate_crtc_pos (monitor, monitor_mode,
+                                    monitor_crtc_mode->output,
+-                                   META_MONITOR_TRANSFORM_NORMAL,
++                                   transform,
+                                    &crtc_x, &crtc_y);
+ 
+-  transform = meta_logical_monitor_get_transform (data->in_logical_monitor);
+-  transform = meta_monitor_logical_to_crtc_transform (monitor, transform);
+   if (meta_monitor_transform_is_rotated (transform))
+     {
+       crtc_width = monitor_crtc_mode->crtc_mode->height;

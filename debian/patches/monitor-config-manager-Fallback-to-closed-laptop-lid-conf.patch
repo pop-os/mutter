@@ -1,5 +1,5 @@
 From: =?utf-8?b?Ik1hcmNvIFRyZXZpc2FuIChUcmV2acOxbyki?= <mail@3v1n0.net>
-Date: Thu, 16 Apr 2020 00:28:05 +0200
+Date: Wed, 15 Apr 2020 22:28:05 +0000
 Subject: monitor-config-manager: Fallback to closed laptop lid configuration
 
 When closing the lid of a laptop, we reconfigure all the monitors in order
@@ -21,17 +21,16 @@ the laptop panel, let's just reuse this configuration.
 
 https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1200
 
-Origin: https://gitlab.gnome.org/GNOME/mutter/-/commit/e4851667
-Applied-Upstream: 3.36.2
+(cherry picked from commit e48516679c02bb265a80d6680a4ea34d188127e0)
 ---
  src/backends/meta-monitor-config-manager.c | 18 +++++++++++++++---
  1 file changed, 15 insertions(+), 3 deletions(-)
 
 diff --git a/src/backends/meta-monitor-config-manager.c b/src/backends/meta-monitor-config-manager.c
-index 5739ca1..6e31432 100644
+index cc91596..6a7c807 100644
 --- a/src/backends/meta-monitor-config-manager.c
 +++ b/src/backends/meta-monitor-config-manager.c
-@@ -443,23 +443,35 @@ MetaMonitorsConfigKey *
+@@ -446,23 +446,35 @@ MetaMonitorsConfigKey *
  meta_create_monitors_config_key_for_current_state (MetaMonitorManager *monitor_manager)
  {
    MetaMonitorsConfigKey *config_key;

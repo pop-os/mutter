@@ -1,0 +1,41 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Sat, 11 Apr 2020 17:13:52 +0200
+Subject: x11: Don't invariably queue a pending delete request
+
+We don't need doing this roundtrip for non-INCR transfers.
+
+https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1198
+
+(cherry picked from commit d2c762cc66718f1b79bb476b68439d00a16fd2a2)
+
+Origin: upstream, 3.36.2
+---
+ src/x11/meta-x11-selection-output-stream.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/x11/meta-x11-selection-output-stream.c b/src/x11/meta-x11-selection-output-stream.c
+index c6df055..4cdde8a 100644
+--- a/src/x11/meta-x11-selection-output-stream.c
++++ b/src/x11/meta-x11-selection-output-stream.c
+@@ -243,9 +243,13 @@ meta_x11_selection_output_stream_perform_flush (MetaX11SelectionOutputStream *st
+                        PropModeReplace,
+                        (guchar *) &(long) { n_elements },
+                        1);
++      priv->delete_pending = TRUE;
+     }
+   else
+     {
++      if (priv->incr && priv->data->len > 0)
++        priv->delete_pending = TRUE;
++
+       XChangeProperty (xdisplay,
+                        priv->xwindow,
+                        priv->xproperty,
+@@ -260,7 +264,6 @@ meta_x11_selection_output_stream_perform_flush (MetaX11SelectionOutputStream *st
+   if (first_chunk)
+     meta_x11_selection_output_stream_notify_selection (stream);
+ 
+-  priv->delete_pending = TRUE;
+   g_cond_broadcast (&priv->cond);
+   g_mutex_unlock (&priv->mutex);
+ 

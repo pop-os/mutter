@@ -1,0 +1,67 @@
+From: =?utf-8?q?Jonas_=C3=85dahl?= <jadahl@gmail.com>
+Date: Tue, 14 Apr 2020 21:11:28 +0200
+Subject: monitor: Fix tile coordinate calculation
+
+Previously the tile coordinate was used to offset a CRTC scanout
+coordinate within a larger framebuffer. Since 3.36 we're always
+scanning out from (0, 0) as we always have one framebuffer per CRTC; we
+instead use the tile coordinate to calculate the coordinate the tile has
+in the stage view. Adapt calculation to fulfil this promise instead of
+the old one.
+
+This also corrects the tiled custom monitor test case.
+
+Bug: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1199
+Origin: upstream, 3.36.2
+---
+ src/backends/meta-monitor.c    | 8 ++++----
+ src/tests/monitor-unit-tests.c | 3 ++-
+ 2 files changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/src/backends/meta-monitor.c b/src/backends/meta-monitor.c
+index f4d71f0..07857e0 100644
+--- a/src/backends/meta-monitor.c
++++ b/src/backends/meta-monitor.c
+@@ -817,19 +817,19 @@ calculate_tile_coordinate (MetaMonitor         *monitor,
+         case META_MONITOR_TRANSFORM_270:
+         case META_MONITOR_TRANSFORM_FLIPPED_270:
+           if (other_output->tile_info.loc_v_tile == output->tile_info.loc_v_tile &&
+-              other_output->tile_info.loc_h_tile < output->tile_info.loc_h_tile)
++              other_output->tile_info.loc_h_tile > output->tile_info.loc_h_tile)
+             y += other_output->tile_info.tile_w;
+           if (other_output->tile_info.loc_h_tile == output->tile_info.loc_h_tile &&
+-              other_output->tile_info.loc_v_tile < output->tile_info.loc_v_tile)
++              other_output->tile_info.loc_v_tile > output->tile_info.loc_v_tile)
+             x += other_output->tile_info.tile_h;
+           break;
+         case META_MONITOR_TRANSFORM_90:
+         case META_MONITOR_TRANSFORM_FLIPPED_90:
+           if (other_output->tile_info.loc_v_tile == output->tile_info.loc_v_tile &&
+-              other_output->tile_info.loc_h_tile > output->tile_info.loc_h_tile)
++              other_output->tile_info.loc_h_tile < output->tile_info.loc_h_tile)
+             y += other_output->tile_info.tile_w;
+           if (other_output->tile_info.loc_h_tile == output->tile_info.loc_h_tile &&
+-              other_output->tile_info.loc_v_tile > output->tile_info.loc_v_tile)
++              other_output->tile_info.loc_v_tile < output->tile_info.loc_v_tile)
+             x += other_output->tile_info.tile_h;
+           break;
+         }
+diff --git a/src/tests/monitor-unit-tests.c b/src/tests/monitor-unit-tests.c
+index ad0cdda..883de1b 100644
+--- a/src/tests/monitor-unit-tests.c
++++ b/src/tests/monitor-unit-tests.c
+@@ -4828,12 +4828,13 @@ meta_test_monitor_custom_second_rotated_tiled_config (void)
+           .current_mode = 1,
+           .transform = META_MONITOR_TRANSFORM_90,
+           .x = 1024,
+-          .y = 400,
++          .y = 0,
+         },
+         {
+           .current_mode = 1,
+           .transform = META_MONITOR_TRANSFORM_90,
+           .x = 1024,
++          .y = 400,
+         }
+       },
+       .n_crtcs = 3,

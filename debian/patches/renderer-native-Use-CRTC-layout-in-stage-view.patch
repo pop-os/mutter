@@ -1,0 +1,47 @@
+From: =?utf-8?q?Jonas_=C3=85dahl?= <jadahl@gmail.com>
+Date: Tue, 14 Apr 2020 10:44:16 +0200
+Subject: renderer-native: Use CRTC layout in stage view
+
+The port to per CRTC views was incomplete; we still used the logical
+monitor layout as the stage view layout, while still using one view per
+CRTC.
+
+This worked fine for most cases, e.g. regular monitors, tiled or
+non-tiled, transformed or non-transformed. Where it broke, however, was
+when a monitor consists of multiple CRTCs. We already have the layout a
+CRTC corresponds to on the stage kept with the CRTC metadata, so use
+this directly.
+
+https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1199`
+
+Bug: https://gitlab.gnome.org/GNOME/mutter/-/issues/1170
+Origin: upstream, 3.36.2
+---
+ src/backends/native/meta-renderer-native.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/backends/native/meta-renderer-native.c b/src/backends/native/meta-renderer-native.c
+index d1d7130..8d82ad7 100644
+--- a/src/backends/native/meta-renderer-native.c
++++ b/src/backends/native/meta-renderer-native.c
+@@ -3037,6 +3037,7 @@ meta_renderer_native_create_view (MetaRenderer       *renderer,
+   float scale;
+   int onscreen_width;
+   int onscreen_height;
++  MetaRectangle view_layout;
+   MetaRendererView *view;
+   GError *error = NULL;
+ 
+@@ -3108,8 +3109,11 @@ meta_renderer_native_create_view (MetaRenderer       *renderer,
+   else
+     scale = 1.0;
+ 
++  meta_rectangle_from_graphene_rect (&crtc->config->layout,
++                                     META_ROUNDING_STRATEGY_ROUND,
++                                     &view_layout);
+   view = g_object_new (META_TYPE_RENDERER_VIEW,
+-                       "layout", &logical_monitor->rect,
++                       "layout", &view_layout,
+                        "scale", scale,
+                        "framebuffer", onscreen,
+                        "offscreen", offscreen,

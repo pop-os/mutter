@@ -1,0 +1,35 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Sat, 11 Apr 2020 17:12:18 +0200
+Subject: x11: Finish INCR transfers properly
+
+INCR transfers are mandated to finish with a final 0-size XChangeProperty
+roundtrip after the final data chunk. Actually honor this and ensure we
+iterate just once more for this.
+
+https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1198
+
+(cherry picked from commit 04d429b743a641c81e2fd8b683a8ec40775b3213)
+
+Origin: upstream, 3.36.2
+---
+ src/x11/meta-x11-selection-output-stream.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/x11/meta-x11-selection-output-stream.c b/src/x11/meta-x11-selection-output-stream.c
+index 59ca1d4..c6df055 100644
+--- a/src/x11/meta-x11-selection-output-stream.c
++++ b/src/x11/meta-x11-selection-output-stream.c
+@@ -125,7 +125,12 @@ meta_x11_selection_output_stream_needs_flush_unlocked (MetaX11SelectionOutputStr
+     meta_x11_selection_output_stream_get_instance_private (stream);
+ 
+   if (priv->data->len == 0)
+-    return FALSE;
++    {
++      if (priv->incr)
++        return g_output_stream_is_closing (G_OUTPUT_STREAM (stream));
++      else
++        return FALSE;
++    }
+ 
+   if (g_output_stream_is_closing (G_OUTPUT_STREAM (stream)))
+     return TRUE;

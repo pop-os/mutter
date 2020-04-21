@@ -1,0 +1,53 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Thu, 16 Apr 2020 21:06:15 +0200
+Subject: wayland: Shuffle wl_data_source.cancelled version checks on DnD
+
+We are meant to send a .cancelled event after the drop is performed
+in certain situations, but only for version>3 clients. Since this is
+all version 3 business, only set the drop_performed flag for v3
+clients. This drops the need to perform version checks at the time
+of cancelling (which is present for other usecases in v1).
+
+Fixes emission of wl_data_source.cancelled for v1 clients.
+
+Closes: https://gitlab.gnome.org/GNOME/mutter/-/issues/1177
+
+https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1203
+
+(cherry picked from commit d4c3870286353e58d7e4c95111f1cdd354ba17ce)
+
+Origin: upstream, 3.36.2
+---
+ src/wayland/meta-wayland-data-device.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/src/wayland/meta-wayland-data-device.c b/src/wayland/meta-wayland-data-device.c
+index 3a7cfd4..b20864b 100644
+--- a/src/wayland/meta-wayland-data-device.c
++++ b/src/wayland/meta-wayland-data-device.c
+@@ -1392,8 +1392,7 @@ meta_wayland_source_cancel (MetaWaylandDataSource *source)
+   if (!priv->resource)
+     return;
+ 
+-  if (wl_resource_get_version(priv->resource) >= WL_DATA_SOURCE_DND_FINISHED_SINCE_VERSION)
+-    wl_data_source_send_cancelled (priv->resource);
++  wl_data_source_send_cancelled (priv->resource);
+ }
+ 
+ static void
+@@ -1414,11 +1413,12 @@ meta_wayland_source_drop_performed (MetaWaylandDataSource *source)
+   MetaWaylandDataSourcePrivate *priv =
+     meta_wayland_data_source_get_instance_private (source);
+ 
+-  priv->drop_performed = TRUE;
+-
+   if (wl_resource_get_version (priv->resource) >=
+       WL_DATA_SOURCE_DND_DROP_PERFORMED_SINCE_VERSION)
+-    wl_data_source_send_dnd_drop_performed (priv->resource);
++    {
++      priv->drop_performed = TRUE;
++      wl_data_source_send_dnd_drop_performed (priv->resource);
++    }
+ }
+ 
+ static void
