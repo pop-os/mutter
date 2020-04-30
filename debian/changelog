@@ -12,6 +12,7 @@ mutter (3.36.2-1) UNRELEASED; urgency=medium
     - Fix screencasting of non-maximized windows (LP: #1873942)
     - Various misc fixes and cleanups (LP: #1874818)
     - Update translation: de
+  * debian/libmutter-6-0.symbols: Update
  -- Simon McVittie <smcv@debian.org>  Thu, 30 Apr 2020 17:58:28 +0100
 
 mutter (3.36.1+git20200419-1) unstable; urgency=medium
