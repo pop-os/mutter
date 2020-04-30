@@ -1,3 +1,18 @@
+mutter (3.36.2-1) UNRELEASED; urgency=medium
+
+  * New upstream stable release
+    - Fix FTBFS with Wayland disabled (non-Linux kernels)
+    - X11 copy/paste/selection fixes
+    - Fix freeze with some DisplayLink devices
+    - Fix a memory leak
+    - Synchronize shadows to server-side decorations
+    - Fix overview key on X11 when using multiple keyboard layouts
+    - Fix painting the redraw clip with the damage region
+    - Fix capturing with multiple stage views
+    - Update translation: de
+
+ -- Simon McVittie <smcv@debian.org>  Thu, 30 Apr 2020 17:58:28 +0100
+
 mutter (3.36.1+git20200419-1) unstable; urgency=medium
 
   * Team upload
