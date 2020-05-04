@@ -2410,6 +2410,7 @@ clutter_actor_should_pick_paint (ClutterActor *self)
   g_return_val_if_fail (CLUTTER_IS_ACTOR (self), FALSE);
 
   if (CLUTTER_ACTOR_IS_MAPPED (self) &&
+      clutter_actor_has_allocation (self) &&
       (_clutter_context_get_pick_mode () == CLUTTER_PICK_ALL ||
        CLUTTER_ACTOR_IS_REACTIVE (self)))
     return TRUE;
@@ -4193,7 +4194,9 @@ clutter_actor_continue_paint (ClutterActor        *self,
       clutter_paint_node_unref (dummy);
 
       /* XXX:2.0 - Call the paint() virtual directly */
-      if (g_signal_has_handler_pending (self, actor_signals[PAINT],
+      if (!(clutter_paint_context_get_paint_flags (paint_context) &
+            CLUTTER_PAINT_FLAG_NO_PAINT_SIGNAL) &&
+          g_signal_has_handler_pending (self, actor_signals[PAINT],
                                         0, TRUE))
         g_signal_emit (self, actor_signals[PAINT], 0, paint_context);
       else

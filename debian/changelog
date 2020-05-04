@@ -1,3 +1,61 @@
+mutter (3.36.2-1) unstable; urgency=medium
+
+  * Team upload
+
+  [ Simon McVittie ]
+  * New upstream stable release
+    - Fix FTBFS with Wayland disabled (non-Linux kernels)
+    - X11 copy/paste/selection fixes (LP: #1852183)
+    - Fix freeze with some DisplayLink devices
+    - Fix a memory leak
+    - Synchronize shadows to server-side decorations
+    - Fix overview key on X11 when using multiple keyboard layouts
+    - Fix painting the redraw clip with the damage region
+    - Fix capturing with multiple stage views
+    - Fix screencasting of non-maximized windows (LP: #1873942)
+    - Various misc fixes and cleanups (LP: #1874818)
+    - Update translation: de
+
+  [ Marco Trevisan (Treviño) ]
+  * debian/libmutter-6-0.symbols: Update
+  * debian/rules: Ignore build failures on riscv64
+
+ -- Simon McVittie <smcv@debian.org>  Fri, 01 May 2020 11:26:55 +0100
+
+mutter (3.36.1+git20200419-1) unstable; urgency=medium
+
+  * Team upload
+
+  [ Simon McVittie ]
+  * New upstream snapshot from gnome-3-36 branch (3.36.1-42-gda9eb4718)
+    - Fix trackball button scrolling
+    - Fix tiled (MST) displays
+    - Copy/paste fixes, particularly for large images and incremental
+      transfers
+    - Fall back to closed laptop lid configuration if no other available
+      (LP: #1793496)
+
+  [ Jeremy Bicha ]
+  * Drop obsolete dh_strip dbgsym migration rule
+  * Bump debhelper-compat to 13
+    - dh_missing --fail-missing is the default
+    - dh_auto_test has several default improvements
+    - dh_autoreconf isn't needed with meson
+  * debian/watch: Only watch for stable releases
+
+ -- Simon McVittie <smcv@debian.org>  Tue, 21 Apr 2020 13:46:42 +0100
+
+mutter (3.36.1-4) unstable; urgency=medium
+
+  * Team upload
+  * Merge changelog from unstable
+  * Upload to unstable (starts transition: #954422)
+  * Update to upstream gnome-3-36 branch, commit 3.36.1-17-g9a2471db4
+    - Fix caps-lock state becoming confused on VT switch
+  * d/gbp.conf: Follow upstream/3.36.x branch
+
+ -- Simon McVittie <smcv@debian.org>  Fri, 10 Apr 2020 17:56:10 +0100
+
 mutter (3.36.1-3ubuntu3) focal; urgency=medium
 
   * Ignore test failures on riscv64, like s390x, to unblock
@@ -36,6 +94,16 @@ mutter (3.36.1-3ubuntu1) focal; urgency=medium
       + X11: Add support for fractional scaling using Randr
 
  -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Thu, 09 Apr 2020 14:40:58 +0200
+
+mutter (3.34.4-1) unstable; urgency=medium
+
+  * Team upload
+  * d/gbp.conf: Follow debian/unstable branch
+  * New upstream release
+  * d/patches: Apply post-release fixes up to 3.34.4-5-g2709a4ffb
+  * Standards-Version: 4.5.0 (no changes required)
+
+ -- Simon McVittie <smcv@debian.org>  Tue, 25 Feb 2020 16:26:10 +0000
 
 mutter (3.36.1-3) experimental; urgency=medium
 
