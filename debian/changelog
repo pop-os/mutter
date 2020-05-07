@@ -11,7 +11,7 @@ mutter (3.36.2-1ubuntu1) groovy; urgency=medium
 
   * Merge with debian, including new upstream release:
     - Fix super key not working with secondary layout (LP: #1871913)
-  * xrandr-scaling: Fix compiler warnings (LP: #1875608)
+  * xrandr-scaling: Fix compiler warnings (LP: #1874207)
   * xrandr-scaling: Take care of global UI scale when restoring from config
     (LP: #1825593)
   * Remaining changes with debian:
