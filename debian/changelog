@@ -1,3 +1,19 @@
+mutter (3.36.2-1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge with debian, including new upstream release:
+    - Fix super key not working with secondary layout (LP: #1871913)
+  * xrandr-scaling: Fix compiler warnings (LP: #1875608)
+  * xrandr-scaling: Take care of global UI scale when restoring from config
+    (LP: #1825593)
+  * Remaining changes with debian:
+    - debian/control:
+      + Update VCS flags to point to ubuntu salsa branch
+    - debian/gbp.conf: update branch to point to ubuntu/master
+    - debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+      + X11: Add support for fractional scaling using Randr
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Thu, 07 May 2020 00:18:47 +0200
+
 mutter (3.36.2-1) unstable; urgency=medium
 
   * Team upload
