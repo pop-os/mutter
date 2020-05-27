@@ -1,5 +1,6 @@
-mutter (3.36.2-3) UNRELEASED; urgency=medium
+mutter (3.36.2-3) unstable; urgency=medium
 
+  [ Simon McVittie ]
   * d/rules, d/with-temp-xdg-runtime-dir: Create temporary XDG_RUNTIME_DIR
     debhelper 13.1 creates a temporary XDG_RUNTIME_DIR so we don't have to.
     Unfortunately, its absolute path is sufficiently long that the path to
@@ -13,7 +14,7 @@ mutter (3.36.2-3) UNRELEASED; urgency=medium
     individual tests.
     (Works around: #961655)
 
- -- Simon McVittie <smcv@debian.org>  Wed, 27 May 2020 11:37:36 +0100
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 27 May 2020 13:54:19 +0200
 
 mutter (3.36.2-2) unstable; urgency=medium
 
