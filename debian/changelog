@@ -1,3 +1,20 @@
+mutter (3.36.2-3) UNRELEASED; urgency=medium
+
+  * d/rules, d/with-temp-xdg-runtime-dir: Create temporary XDG_RUNTIME_DIR
+    debhelper 13.1 creates a temporary XDG_RUNTIME_DIR so we don't have to.
+    Unfortunately, its absolute path is sufficiently long that the path to
+    Mutter's Wayland display socket no longer fits in the 108 bytes allowed
+    by struct sockaddr_un, causing FTBFS when the tests fail. Until this is
+    fixed, we'll have to create our own XDG_RUNTIME_DIR with a shorter
+    absolute path.
+    Wrapping with-temp-xdg-runtime-dir around dh_auto_test doesn't work,
+    because dh_auto_test will reset XDG_RUNTIME_DIR, so use
+    meson test --wrapper to wrap with-temp-xdg-runtime-dir around the
+    individual tests.
+    (Works around: #961655)
+
+ -- Simon McVittie <smcv@debian.org>  Wed, 27 May 2020 11:37:36 +0100
+
 mutter (3.36.2-2) unstable; urgency=medium
 
   [ Daniel van Vugt ]
