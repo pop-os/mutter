@@ -1,6 +1,12 @@
 mutter (3.36.3-1) UNRELEASED; urgency=medium
 
-  * New upstream release
+  * New upstream release (LP: #1881971)
+   - Broadcast clipboard/primary offers
+   - Fix monitor screen cast on X11
+   - Implement touch-mode detecation for the X11 backend (LP: #1880596)
+   - Drop external keyboard detection from touch-mode heuristics
+   - Fix leaked DMA buffers in screencasts
+   - Fixed crashes
 
  -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 03 Jun 2020 17:21:37 +0200
 
