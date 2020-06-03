@@ -1,4 +1,4 @@
-mutter (3.36.3-1) UNRELEASED; urgency=medium
+mutter (3.36.3-1) unstable; urgency=medium
 
   * New upstream release (LP: #1881971)
    - Broadcast clipboard/primary offers
@@ -8,7 +8,7 @@ mutter (3.36.3-1) UNRELEASED; urgency=medium
    - Fix leaked DMA buffers in screencasts
    - Fixed crashes
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 03 Jun 2020 17:21:37 +0200
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 03 Jun 2020 23:33:29 +0200
 
 mutter (3.36.2+12+gb425f1153-1) experimental; urgency=medium
 
