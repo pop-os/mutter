@@ -11,6 +11,7 @@ Uploaders: Iain Lane <laney@debian.org>, Jeremy Bicha <jbicha@debian.org>
 Build-Depends: debhelper-compat (= 13),
                dh-sequence-gir,
                dh-sequence-gnome,
+               adwaita-icon-theme (>= 3.36.1-2ubuntu3) <!nocheck>,
                at-spi2-core <!nocheck>,
                dbus <!nocheck>,
                dmz-cursor-theme <!nocheck>,
