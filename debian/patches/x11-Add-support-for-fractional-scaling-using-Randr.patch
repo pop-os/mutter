@@ -8,41 +8,37 @@ Origin: https://gitlab.gnome.org/3v1n0/mutter/commits/xrandr-scaling
 Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/mutter/+bug/1820850
 Forwarded: No, forwarding is in progress and planned though
 ---
- data/meson.build                                   |   7 +
- data/org.gnome.mutter.gschema.xml.in               |   4 +
- data/org.gnome.mutter.x11.gschema.xml.in           |  30 ++
- src/backends/meta-crtc.h                           |   1 +
- src/backends/meta-monitor-config-manager.c         | 147 +++++-
- src/backends/meta-monitor-config-manager.h         |   1 +
- src/backends/meta-monitor-config-migration.c       |  15 +-
- src/backends/meta-monitor-config-store.c           |  17 +
- src/backends/meta-monitor-manager-dummy.c          |  24 +-
- src/backends/meta-monitor-manager-private.h        |  34 +-
- src/backends/meta-monitor-manager.c                | 382 ++++++++++++++--
- src/backends/meta-monitor.c                        |  60 ++-
- src/backends/meta-monitor.h                        |   6 +-
- src/backends/meta-settings-private.h               |   9 +
- src/backends/meta-settings.c                       |  76 +++-
- src/backends/native/meta-monitor-manager-kms.c     |  44 +-
- src/backends/x11/meta-crtc-xrandr.c                |  88 +++-
- src/backends/x11/meta-crtc-xrandr.h                |  13 +-
- src/backends/x11/meta-gpu-xrandr.c                 |  89 +++-
- src/backends/x11/meta-gpu-xrandr.h                 |   4 +
- src/backends/x11/meta-monitor-manager-xrandr.c     | 503 +++++++++++++++------
- src/backends/x11/meta-monitor-manager-xrandr.h     |   4 +-
- src/backends/x11/meta-output-xrandr.c              |   5 +-
- src/compositor/meta-compositor-x11.c               |  98 +++-
- src/core/boxes-private.h                           |   4 +
- src/core/boxes.c                                   |  21 +
- .../meta-selection-source-memory-pool-private.h    |  47 ++
- src/core/meta-selection-source-memory-pool.c       | 195 ++++++++
- src/core/window.c                                  |  19 +
- src/org.gnome.Mutter.DisplayConfig.xml             |   5 +
- src/tests/meta-monitor-manager-test.c              |  13 +-
- 31 files changed, 1694 insertions(+), 271 deletions(-)
+ data/meson.build                               |   7 +
+ data/org.gnome.mutter.gschema.xml.in           |   4 +
+ data/org.gnome.mutter.x11.gschema.xml.in       |  30 ++
+ src/backends/meta-crtc.h                       |   1 +
+ src/backends/meta-monitor-config-manager.c     | 147 +++++-
+ src/backends/meta-monitor-config-manager.h     |   1 +
+ src/backends/meta-monitor-config-migration.c   |  15 +-
+ src/backends/meta-monitor-config-store.c       |  17 +
+ src/backends/meta-monitor-manager-dummy.c      |  24 +-
+ src/backends/meta-monitor-manager-private.h    |  34 +-
+ src/backends/meta-monitor-manager.c            | 382 ++++++++++++++--
+ src/backends/meta-monitor.c                    |  60 ++-
+ src/backends/meta-monitor.h                    |   6 +-
+ src/backends/meta-settings-private.h           |   9 +
+ src/backends/meta-settings.c                   |  76 +++-
+ src/backends/native/meta-monitor-manager-kms.c |  44 +-
+ src/backends/x11/meta-crtc-xrandr.c            |  88 +++-
+ src/backends/x11/meta-crtc-xrandr.h            |  13 +-
+ src/backends/x11/meta-gpu-xrandr.c             |  89 +++-
+ src/backends/x11/meta-gpu-xrandr.h             |   4 +
+ src/backends/x11/meta-monitor-manager-xrandr.c | 503 +++++++++++++++------
+ src/backends/x11/meta-monitor-manager-xrandr.h |   4 +-
+ src/backends/x11/meta-output-xrandr.c          |   5 +-
+ src/compositor/meta-compositor-x11.c           |  98 +++-
+ src/core/boxes-private.h                       |   4 +
+ src/core/boxes.c                               |  21 +
+ src/core/window.c                              |  19 +
+ src/org.gnome.Mutter.DisplayConfig.xml         |   5 +
+ src/tests/meta-monitor-manager-test.c          |  13 +-
+ 29 files changed, 1454 insertions(+), 269 deletions(-)
  create mode 100644 data/org.gnome.mutter.x11.gschema.xml.in
- create mode 100644 src/core/meta-selection-source-memory-pool-private.h
- create mode 100644 src/core/meta-selection-source-memory-pool.c
 
 diff --git a/data/meson.build b/data/meson.build
 index 3ac94cf..730258b 100644
@@ -3097,260 +3093,6 @@ index 37d04bb..93a2b6b 100644
  
  void
  meta_rectangle_clamp_to_fit_into_region (const GList         *spanning_rects,
-diff --git a/src/core/meta-selection-source-memory-pool-private.h b/src/core/meta-selection-source-memory-pool-private.h
-new file mode 100644
-index 0000000..a02d484
---- /dev/null
-+++ b/src/core/meta-selection-source-memory-pool-private.h
-@@ -0,0 +1,47 @@
-+/*
-+ * Copyright (C) 2019 Canonical Ltd.
-+ *
-+ * This program is free software; you can redistribute it and/or
-+ * modify it under the terms of the GNU General Public License as
-+ * published by the Free Software Foundation; either version 2 of the
-+ * License, or (at your option) any later version.
-+ *
-+ * This program is distributed in the hope that it will be useful, but
-+ * WITHOUT ANY WARRANTY; without even the implied warranty of
-+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-+ * General Public License for more details.
-+ *
-+ * You should have received a copy of the GNU General Public License
-+ * along with this program; if not, write to the Free Software
-+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
-+ * 02111-1307, USA.
-+ *
-+ * Author: Marco Trevisan <marco.trevisan@canonical.com>
-+ */
-+
-+#ifndef META_MEMORY_POOL_SELECTION_SOURCE_H
-+#define META_MEMORY_POOL_SELECTION_SOURCE_H
-+
-+#include "meta/meta-selection-source.h"
-+#include "meta/meta-selection-source-memory.h"
-+
-+#define META_TYPE_SELECTION_SOURCE_MEMORY_POOL (meta_selection_source_memory_pool_get_type ())
-+
-+G_DECLARE_FINAL_TYPE (MetaSelectionSourceMemoryPool,
-+                      meta_selection_source_memory_pool,
-+                      META, SELECTION_SOURCE_MEMORY_POOL,
-+                      MetaSelectionSource)
-+
-+MetaSelectionSource * meta_selection_source_memory_pool_new (void);
-+
-+void meta_selection_source_memory_pool_add (MetaSelectionSourceMemoryPool *pool,
-+                                            MetaSelectionSourceMemory     *source);
-+
-+void meta_selection_source_memory_pool_remove (MetaSelectionSourceMemoryPool *pool,
-+                                               MetaSelectionSourceMemory *source);
-+
-+void meta_selection_source_memory_pool_clear (MetaSelectionSourceMemoryPool *pool);
-+
-+gboolean meta_selection_source_memory_pool_has_sources (MetaSelectionSourceMemoryPool *pool);
-+
-+#endif /* META_MEMORY_POOL_SELECTION_SOURCE_H */
-diff --git a/src/core/meta-selection-source-memory-pool.c b/src/core/meta-selection-source-memory-pool.c
-new file mode 100644
-index 0000000..32d806e
---- /dev/null
-+++ b/src/core/meta-selection-source-memory-pool.c
-@@ -0,0 +1,195 @@
-+/*
-+ * Copyright (C) 2019 Canonical Ltd.
-+ *
-+ * This program is free software; you can redistribute it and/or
-+ * modify it under the terms of the GNU General Public License as
-+ * published by the Free Software Foundation; either version 2 of the
-+ * License, or (at your option) any later version.
-+ *
-+ * This program is distributed in the hope that it will be useful, but
-+ * WITHOUT ANY WARRANTY; without even the implied warranty of
-+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-+ * General Public License for more details.
-+ *
-+ * You should have received a copy of the GNU General Public License
-+ * along with this program; if not, write to the Free Software
-+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
-+ * 02111-1307, USA.
-+ *
-+ * Author: Marco Trevisan <marco.trevisan@canonical.com>
-+ */
-+
-+#include "config.h"
-+
-+#include "meta-selection-source-memory-pool-private.h"
-+#include "meta/meta-selection-source.h"
-+
-+struct _MetaSelectionSourceMemoryPool
-+{
-+  MetaSelectionSource parent_instance;
-+  GList *sources;
-+};
-+
-+G_DEFINE_TYPE (MetaSelectionSourceMemoryPool,
-+               meta_selection_source_memory_pool,
-+               META_TYPE_SELECTION_SOURCE)
-+
-+static void
-+meta_selection_source_memory_pool_read_async (MetaSelectionSource *source,
-+                                              const char          *mimetype,
-+                                              GCancellable        *cancellable,
-+                                              GAsyncReadyCallback  callback,
-+                                              gpointer             user_data)
-+{
-+  MetaSelectionSourceMemoryPool *pool =
-+    META_SELECTION_SOURCE_MEMORY_POOL (source);
-+  MetaSelectionSource *pool_source = NULL;
-+  GTask *task;
-+  GList *l;
-+  // gboolean has_mimetype;
-+
-+  // has_mimetype = FALSE;
-+
-+  for (l = pool->sources; l; l = l->next)
-+    {
-+      GList *mimetypes = meta_selection_source_get_mimetypes (l->data);
-+
-+      if (g_list_find_custom (mimetypes, mimetype, (GCompareFunc) g_strcmp0))
-+        pool_source = l->data;
-+
-+      g_list_free_full (mimetypes, g_free);
-+
-+      if (pool_source)
-+        break;
-+    }
-+
-+  if (!pool_source)
-+    {
-+      g_task_report_new_error (source, callback, user_data,
-+                               meta_selection_source_memory_pool_read_async,
-+                               G_IO_ERROR, G_IO_ERROR_FAILED,
-+                               "Mimetype %s not in selection",
-+                               mimetype);
-+      return;
-+    }
-+
-+  // source = l->data;
-+  // task = g_task_new (source, cancellable, callback, user_data);
-+  // g_task_set_source_tag (task, meta_selection_source_memory_pool_read_async);
-+
-+  meta_selection_source_read_async (pool_source, mimetype, cancellable,
-+                                    callback, user_data);
-+}
-+
-+static GInputStream *
-+meta_selection_source_memory_pool_read_finish (MetaSelectionSource  *source,
-+                                               GAsyncResult         *result,
-+                                               GError              **error)
-+{
-+  // g_assert (g_task_get_source_tag (G_TASK (result)) ==
-+  //           meta_selection_source_memory_pool_read_async);
-+  g_print("FINISH READING FROM MEMORY POOOL\n");
-+  return g_task_propagate_pointer (G_TASK (result), error);
-+}
-+
-+static GList *
-+meta_selection_source_memory_pool_get_mimetypes (MetaSelectionSource *source)
-+{
-+  MetaSelectionSourceMemoryPool *pool =
-+    META_SELECTION_SOURCE_MEMORY_POOL (source);
-+  GList *sources = NULL;
-+  GList *l;
-+
-+  if (!pool->sources)
-+    return NULL;
-+
-+  for (l = pool->sources; l; l = l->next)
-+    {
-+      GList *mimetypes;
-+
-+      mimetypes = meta_selection_source_get_mimetypes (l->data);
-+      sources = g_list_concat (sources, mimetypes);
-+    }
-+
-+  return sources;
-+}
-+
-+static void
-+meta_selection_source_memory_pool_finalize (GObject *object)
-+{
-+  MetaSelectionSourceMemoryPool *pool =
-+    META_SELECTION_SOURCE_MEMORY_POOL (object);
-+
-+  g_list_free_full (pool->sources, g_object_unref);
-+
-+  G_OBJECT_CLASS (meta_selection_source_memory_pool_parent_class)->finalize (object);
-+}
-+
-+static void
-+meta_selection_source_memory_pool_class_init (MetaSelectionSourceMemoryPoolClass *klass)
-+{
-+  MetaSelectionSourceClass *source_class = META_SELECTION_SOURCE_CLASS (klass);
-+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
-+
-+  object_class->finalize = meta_selection_source_memory_pool_finalize;
-+
-+  source_class->read_async = meta_selection_source_memory_pool_read_async;
-+  source_class->read_finish = meta_selection_source_memory_pool_read_finish;
-+  source_class->get_mimetypes = meta_selection_source_memory_pool_get_mimetypes;
-+}
-+
-+static void
-+meta_selection_source_memory_pool_init (MetaSelectionSourceMemoryPool *source)
-+{
-+}
-+
-+MetaSelectionSource *
-+meta_selection_source_memory_pool_new (void)
-+{
-+  MetaSelectionSourceMemoryPool *pool;
-+
-+  pool = g_object_new (META_TYPE_SELECTION_SOURCE_MEMORY_POOL, NULL);
-+
-+  return META_SELECTION_SOURCE (pool);
-+}
-+
-+void
-+meta_selection_source_memory_pool_add (MetaSelectionSourceMemoryPool *pool,
-+                                       MetaSelectionSourceMemory     *source)
-+{
-+  g_return_if_fail (META_IS_SELECTION_SOURCE_MEMORY_POOL (pool));
-+  g_return_if_fail (META_IS_SELECTION_SOURCE_MEMORY (source));
-+  g_return_if_fail (g_list_find (pool->sources, source) == NULL);
-+
-+  pool->sources = g_list_prepend (pool->sources, g_object_ref (source));
-+}
-+
-+void
-+meta_selection_source_memory_pool_remove (MetaSelectionSourceMemoryPool *pool,
-+                                          MetaSelectionSourceMemory     *source)
-+{
-+  g_return_if_fail (META_IS_SELECTION_SOURCE_MEMORY_POOL (pool));
-+  g_return_if_fail (META_IS_SELECTION_SOURCE_MEMORY (source));
-+  g_return_if_fail (g_list_find (pool->sources, source) != NULL);
-+
-+  pool->sources = g_list_remove (pool->sources, source);
-+  g_object_unref (source);
-+}
-+
-+void
-+meta_selection_source_memory_pool_clear (MetaSelectionSourceMemoryPool *pool)
-+{
-+  g_return_if_fail (META_IS_SELECTION_SOURCE_MEMORY_POOL (pool));
-+
-+  g_list_free_full (pool->sources, g_object_unref);
-+  pool->sources = NULL;
-+}
-+
-+gboolean
-+meta_selection_source_memory_pool_has_sources (MetaSelectionSourceMemoryPool *pool)
-+{
-+  g_return_val_if_fail (META_IS_SELECTION_SOURCE_MEMORY_POOL (pool), FALSE);
-+
-+  return g_list_length(pool->sources) == 2;
-+  // return pool->sources != NULL;
-+}
 diff --git a/src/core/window.c b/src/core/window.c
 index ea721f7..e34868d 100644
 --- a/src/core/window.c
