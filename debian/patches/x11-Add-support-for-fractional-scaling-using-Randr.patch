@@ -12,32 +12,32 @@ Forwarded: No, forwarding is in progress and planned though
  data/org.gnome.mutter.gschema.xml.in           |   4 +
  data/org.gnome.mutter.x11.gschema.xml.in       |  30 ++
  src/backends/meta-crtc.h                       |   1 +
- src/backends/meta-monitor-config-manager.c     | 180 ++++++++-
+ src/backends/meta-monitor-config-manager.c     | 180 +++++++-
  src/backends/meta-monitor-config-manager.h     |   6 +
  src/backends/meta-monitor-config-migration.c   |  15 +-
  src/backends/meta-monitor-config-store.c       |  17 +
  src/backends/meta-monitor-manager-dummy.c      |  24 +-
  src/backends/meta-monitor-manager-private.h    |  34 +-
- src/backends/meta-monitor-manager.c            | 505 +++++++++++++++++++++--
+ src/backends/meta-monitor-manager.c            | 505 ++++++++++++++++++++--
  src/backends/meta-monitor.c                    |  60 ++-
  src/backends/meta-monitor.h                    |   6 +-
  src/backends/meta-settings-private.h           |  13 +
  src/backends/meta-settings.c                   | 148 ++++++-
  src/backends/native/meta-monitor-manager-kms.c |  44 +-
- src/backends/x11/meta-crtc-xrandr.c            |  92 ++++-
+ src/backends/x11/meta-crtc-xrandr.c            |  92 +++-
  src/backends/x11/meta-crtc-xrandr.h            |  14 +-
  src/backends/x11/meta-gpu-xrandr.c             | 106 ++++-
  src/backends/x11/meta-gpu-xrandr.h             |   4 +
- src/backends/x11/meta-monitor-manager-xrandr.c | 538 +++++++++++++++++++------
+ src/backends/x11/meta-monitor-manager-xrandr.c | 564 +++++++++++++++++++------
  src/backends/x11/meta-monitor-manager-xrandr.h |   4 +-
  src/backends/x11/meta-output-xrandr.c          |   5 +-
- src/compositor/meta-compositor-x11.c           |  98 +++-
+ src/compositor/meta-compositor-x11.c           |  98 ++++-
  src/core/boxes-private.h                       |   4 +
  src/core/boxes.c                               |  21 +
  src/core/window.c                              |  19 +
  src/org.gnome.Mutter.DisplayConfig.xml         |   5 +
  src/tests/meta-monitor-manager-test.c          |  13 +-
- 29 files changed, 1747 insertions(+), 270 deletions(-)
+ 29 files changed, 1772 insertions(+), 271 deletions(-)
  create mode 100644 data/org.gnome.mutter.x11.gschema.xml.in
 
 diff --git a/data/meson.build b/data/meson.build
@@ -2420,7 +2420,7 @@ index 2086f86..a1f3b48 100644
                                            int           *max_width,
                                            int           *max_height);
 diff --git a/src/backends/x11/meta-monitor-manager-xrandr.c b/src/backends/x11/meta-monitor-manager-xrandr.c
-index 5c16189..a973a67 100644
+index 5c16189..c76149a 100644
 --- a/src/backends/x11/meta-monitor-manager-xrandr.c
 +++ b/src/backends/x11/meta-monitor-manager-xrandr.c
 @@ -63,6 +63,9 @@
@@ -2549,7 +2549,7 @@ index 5c16189..a973a67 100644
  static xcb_randr_rotation_t
  meta_monitor_transform_to_xrandr (MetaMonitorTransform transform)
  {
-@@ -240,13 +318,49 @@ xrandr_set_crtc_config (MetaMonitorManagerXrandr *manager_xrandr,
+@@ -240,13 +318,50 @@ xrandr_set_crtc_config (MetaMonitorManagerXrandr *manager_xrandr,
    return TRUE;
  }
  
@@ -2578,7 +2578,8 @@ index 5c16189..a973a67 100644
 +is_crtc_assignment_changed (MetaMonitorManager *monitor_manager,
 +                            MetaCrtc           *crtc,
 +                            MetaCrtcInfo      **crtc_infos,
-+                            unsigned int        n_crtc_infos)
++                            unsigned int        n_crtc_infos,
++                            gboolean           *weak_change)
  {
 +  MetaLogicalMonitorLayoutMode layout_mode;
 +  gboolean have_scaling;
@@ -2602,7 +2603,7 @@ index 5c16189..a973a67 100644
    for (i = 0; i < n_crtc_infos; i++)
      {
        MetaCrtcInfo *crtc_info = crtc_infos[i];
-@@ -254,7 +368,34 @@ is_crtc_assignment_changed (MetaCrtc      *crtc,
+@@ -254,7 +369,42 @@ is_crtc_assignment_changed (MetaCrtc      *crtc,
        if (crtc_info->crtc != crtc)
          continue;
  
@@ -2615,7 +2616,15 @@ index 5c16189..a973a67 100644
 +          float crtc_scale = crtc->scale;
 +          float req_output_scale = crtc_info->scale;
 +
-+          if (layout_mode == META_LOGICAL_MONITOR_LAYOUT_MODE_GLOBAL_UI_LOGICAL)
++          if (layout_mode == META_LOGICAL_MONITOR_LAYOUT_MODE_PHYSICAL)
++            {
++              if (fmodf (crtc_scale, 1.0) == 0.0f)
++                {
++                  *weak_change = fabsf (crtc_scale - req_output_scale) > 0.001;
++                  return FALSE;
++                }
++            }
++          else if (layout_mode == META_LOGICAL_MONITOR_LAYOUT_MODE_GLOBAL_UI_LOGICAL)
 +            {
 +              /* In scale ui-down mode we need to check if the actual output
 +               * scale that will be applied to the crtc has actually changed
@@ -2638,7 +2647,7 @@ index 5c16189..a973a67 100644
      }
  
    return !!meta_crtc_xrandr_get_current_mode (crtc);
-@@ -328,7 +469,8 @@ is_assignments_changed (MetaMonitorManager *manager,
+@@ -328,7 +478,8 @@ is_assignments_changed (MetaMonitorManager *manager,
                          MetaCrtcInfo      **crtc_infos,
                          unsigned int        n_crtc_infos,
                          MetaOutputInfo    **output_infos,
@@ -2648,16 +2657,16 @@ index 5c16189..a973a67 100644
  {
    MetaMonitorManagerXrandr *manager_xrandr =
      META_MONITOR_MANAGER_XRANDR (manager);
-@@ -339,7 +481,7 @@ is_assignments_changed (MetaMonitorManager *manager,
+@@ -339,7 +490,7 @@ is_assignments_changed (MetaMonitorManager *manager,
      {
        MetaCrtc *crtc = l->data;
  
 -      if (is_crtc_assignment_changed (crtc, crtc_infos, n_crtc_infos))
-+      if (is_crtc_assignment_changed (manager, crtc, crtc_infos, n_crtc_infos))
++      if (is_crtc_assignment_changed (manager, crtc, crtc_infos, n_crtc_infos, weak_change))
          return TRUE;
      }
  
-@@ -355,6 +497,32 @@ is_assignments_changed (MetaMonitorManager *manager,
+@@ -355,6 +506,32 @@ is_assignments_changed (MetaMonitorManager *manager,
          return TRUE;
      }
  
@@ -2690,7 +2699,7 @@ index 5c16189..a973a67 100644
    return FALSE;
  }
  
-@@ -368,27 +536,47 @@ apply_crtc_assignments (MetaMonitorManager *manager,
+@@ -368,27 +545,47 @@ apply_crtc_assignments (MetaMonitorManager *manager,
  {
    MetaMonitorManagerXrandr *manager_xrandr = META_MONITOR_MANAGER_XRANDR (manager);
    MetaGpu *gpu = meta_monitor_manager_xrandr_get_gpu (manager_xrandr);
@@ -2743,7 +2752,7 @@ index 5c16189..a973a67 100644
      }
  
    /* Second disable all newly disabled CRTCs, or CRTCs that in the previous
-@@ -422,8 +610,12 @@ apply_crtc_assignments (MetaMonitorManager *manager,
+@@ -422,8 +619,12 @@ apply_crtc_assignments (MetaMonitorManager *manager,
                                    0, 0, XCB_NONE,
                                    XCB_RANDR_ROTATION_ROTATE_0,
                                    NULL, 0);
@@ -2756,7 +2765,7 @@ index 5c16189..a973a67 100644
          }
      }
  
-@@ -449,21 +641,17 @@ apply_crtc_assignments (MetaMonitorManager *manager,
+@@ -449,21 +650,17 @@ apply_crtc_assignments (MetaMonitorManager *manager,
                                0, 0, XCB_NONE,
                                XCB_RANDR_ROTATION_ROTATE_0,
                                NULL, 0);
@@ -2785,7 +2794,7 @@ index 5c16189..a973a67 100644
  
    for (i = 0; i < n_crtcs; i++)
      {
-@@ -476,12 +664,21 @@ apply_crtc_assignments (MetaMonitorManager *manager,
+@@ -476,12 +673,21 @@ apply_crtc_assignments (MetaMonitorManager *manager,
            g_autofree xcb_randr_output_t *output_ids = NULL;
            unsigned int j, n_output_ids;
            xcb_randr_rotation_t rotation;
@@ -2807,7 +2816,7 @@ index 5c16189..a973a67 100644
            for (j = 0; j < n_output_ids; j++)
              {
                MetaOutput *output;
-@@ -494,6 +691,17 @@ apply_crtc_assignments (MetaMonitorManager *manager,
+@@ -494,6 +700,17 @@ apply_crtc_assignments (MetaMonitorManager *manager,
                output_ids[j] = output->winsys_id;
              }
  
@@ -2825,7 +2834,7 @@ index 5c16189..a973a67 100644
            rotation = meta_monitor_transform_to_xrandr (crtc_info->transform);
            if (!xrandr_set_crtc_config (manager_xrandr,
                                         crtc,
-@@ -519,6 +727,17 @@ apply_crtc_assignments (MetaMonitorManager *manager,
+@@ -519,6 +736,17 @@ apply_crtc_assignments (MetaMonitorManager *manager,
                                  &crtc_info->layout,
                                  mode,
                                  crtc_info->transform);
@@ -2843,7 +2852,7 @@ index 5c16189..a973a67 100644
          }
      }
  
-@@ -549,6 +768,9 @@ apply_crtc_assignments (MetaMonitorManager *manager,
+@@ -549,6 +777,9 @@ apply_crtc_assignments (MetaMonitorManager *manager,
        output->is_primary = FALSE;
      }
  
@@ -2853,7 +2862,7 @@ index 5c16189..a973a67 100644
    XUngrabServer (manager_xrandr->xdisplay);
    XFlush (manager_xrandr->xdisplay);
  }
-@@ -574,14 +796,64 @@ meta_monitor_manager_xrandr_ensure_initial_config (MetaMonitorManager *manager)
+@@ -574,14 +805,78 @@ meta_monitor_manager_xrandr_ensure_initial_config (MetaMonitorManager *manager)
  }
  
  static void
@@ -2885,7 +2894,9 @@ index 5c16189..a973a67 100644
 +      MetaCrtc *crtc = meta_output_get_assigned_crtc (output);
 +      graphene_rect_t *crtc_layout;
 +      float scale = 1.0f;
-+
+ 
+-  g_clear_pointer (&manager_xrandr->supported_scales, g_free);
+-  meta_monitor_manager_rebuild_derived (manager, config);
 +      if (!crtc || !crtc->config)
 +        continue;
 +
@@ -2896,9 +2907,7 @@ index 5c16189..a973a67 100644
 +           * increase the available screen area we can use. */
 +          scale = crtc->scale > 1.0f ? crtc->scale : 1.0f;
 +        }
- 
--  g_clear_pointer (&manager_xrandr->supported_scales, g_free);
--  meta_monitor_manager_rebuild_derived (manager, config);
++
 +      /* When computing the screen size from the crtc rects we don't have to
 +       * use inverted values when monitors are rotated, because this is already
 +       * taken in account in the crtc rectangles */
@@ -2919,10 +2928,24 @@ index 5c16189..a973a67 100644
 +  meta_monitor_manager_xrandr_update_screen_size (manager_xrandr,
 +                                                  screen_width, screen_height,
 +                                                  average_scale);
++}
++
++static void
++maybe_update_ui_scaling_factor (MetaMonitorManager *manager,
++                                MetaMonitorsConfig *config)
++{
++  if (config->layout_mode == META_LOGICAL_MONITOR_LAYOUT_MODE_GLOBAL_UI_LOGICAL ||
++      manager->layout_mode == META_LOGICAL_MONITOR_LAYOUT_MODE_GLOBAL_UI_LOGICAL)
++    {
++      MetaBackend *backend = meta_monitor_manager_get_backend (manager);
++      MetaSettings *settings = meta_backend_get_settings (backend);
++
++      meta_settings_update_ui_scaling_factor (settings);
++    }
  }
  
  static gboolean
-@@ -595,7 +867,7 @@ meta_monitor_manager_xrandr_apply_monitors_config (MetaMonitorManager      *mana
+@@ -595,7 +890,7 @@ meta_monitor_manager_xrandr_apply_monitors_config (MetaMonitorManager      *mana
  
    if (!config)
      {
@@ -2931,35 +2954,51 @@ index 5c16189..a973a67 100644
        return TRUE;
      }
  
-@@ -620,16 +892,26 @@ meta_monitor_manager_xrandr_apply_monitors_config (MetaMonitorManager      *mana
-                                   (MetaOutputInfo **) output_infos->pdata,
-                                   output_infos->len))
-         {
-+          MetaLogicalMonitorLayoutMode layout_mode =
-+            meta_monitor_manager_get_default_layout_mode (manager);
+@@ -606,6 +901,8 @@ meta_monitor_manager_xrandr_apply_monitors_config (MetaMonitorManager      *mana
+ 
+   if (method != META_MONITORS_CONFIG_METHOD_VERIFY)
+     {
++      gboolean weak_change = FALSE;
 +
+       /*
+        * If the assignment has not changed, we won't get any notification about
+        * any new configuration from the X server; but we still need to update
+@@ -613,12 +910,16 @@ meta_monitor_manager_xrandr_apply_monitors_config (MetaMonitorManager      *mana
+        * have changed locally, such as the logical monitors scale. This means we
+        * must check that our new assignment actually changes anything, otherwise
+        * just update the logical state.
++       * If we record a weak change it means that only UI scaling needs to be
++       * updated and so that we don't have to reconfigure the CRTCs, but still
++       * need to update the logical state.
+        */
+       if (is_assignments_changed (manager,
+                                   (MetaCrtcInfo **) crtc_infos->pdata,
+                                   crtc_infos->len,
+                                   (MetaOutputInfo **) output_infos->pdata,
+-                                  output_infos->len))
++                                  output_infos->len,
++                                  &weak_change))
+         {
            apply_crtc_assignments (manager,
                                    TRUE,
-                                   (MetaCrtcInfo **) crtc_infos->pdata,
+@@ -626,10 +927,15 @@ meta_monitor_manager_xrandr_apply_monitors_config (MetaMonitorManager      *mana
                                    crtc_infos->len,
                                    (MetaOutputInfo **) output_infos->pdata,
                                    output_infos->len);
 +
-+          if (layout_mode == META_LOGICAL_MONITOR_LAYOUT_MODE_GLOBAL_UI_LOGICAL)
-+            {
-+              MetaBackend *backend = meta_monitor_manager_get_backend (manager);
-+              MetaSettings *settings = meta_backend_get_settings (backend);
-+              meta_settings_update_ui_scaling_factor (settings);
-+            }
++          maybe_update_ui_scaling_factor (manager, config);
          }
        else
          {
 -          meta_monitor_manager_xrandr_rebuild_derived (manager, config);
++          if (weak_change)
++            maybe_update_ui_scaling_factor (manager, config);
++
 +          meta_monitor_manager_rebuild_derived (manager, config);
          }
      }
  
-@@ -759,7 +1041,8 @@ meta_monitor_manager_xrandr_tiled_monitor_added (MetaMonitorManager *manager,
+@@ -759,7 +1065,8 @@ meta_monitor_manager_xrandr_tiled_monitor_added (MetaMonitorManager *manager,
    GList *l;
    int i;
  
@@ -2969,7 +3008,7 @@ index 5c16189..a973a67 100644
      return;
  
    product = meta_monitor_get_product (monitor);
-@@ -808,7 +1091,8 @@ meta_monitor_manager_xrandr_tiled_monitor_removed (MetaMonitorManager *manager,
+@@ -808,7 +1115,8 @@ meta_monitor_manager_xrandr_tiled_monitor_removed (MetaMonitorManager *manager,
  
    int monitor_count;
  
@@ -2979,7 +3018,7 @@ index 5c16189..a973a67 100644
      return;
  
    monitor_xrandr_data = meta_monitor_xrandr_data_from_monitor (monitor);
-@@ -826,10 +1110,12 @@ meta_monitor_manager_xrandr_tiled_monitor_removed (MetaMonitorManager *manager,
+@@ -826,10 +1134,12 @@ meta_monitor_manager_xrandr_tiled_monitor_removed (MetaMonitorManager *manager,
  static void
  meta_monitor_manager_xrandr_init_monitors (MetaMonitorManagerXrandr *manager_xrandr)
  {
@@ -2993,7 +3032,7 @@ index 5c16189..a973a67 100644
      return;
  
    /* delete any tiled monitors setup, as mutter will want to recreate
-@@ -860,83 +1146,26 @@ meta_monitor_manager_xrandr_is_transform_handled (MetaMonitorManager  *manager,
+@@ -860,83 +1170,26 @@ meta_monitor_manager_xrandr_is_transform_handled (MetaMonitorManager  *manager,
    return TRUE;
  }
  
@@ -3001,19 +3040,19 @@ index 5c16189..a973a67 100644
 -meta_monitor_manager_xrandr_calculate_monitor_mode_scale (MetaMonitorManager *manager,
 -                                                          MetaMonitor        *monitor,
 -                                                          MetaMonitorMode    *monitor_mode)
--{
--  return meta_monitor_calculate_mode_scale (monitor, monitor_mode);
--}
--
--static void
--add_supported_scale (GArray *supported_scales,
--                     float   scale)
 +static MetaMonitorScalesConstraint
 +get_scale_constraints (MetaMonitorManager *manager)
  {
--  unsigned int i;
+-  return meta_monitor_calculate_mode_scale (monitor, monitor_mode);
+-}
 +  MetaMonitorScalesConstraint constraints = 0;
  
+-static void
+-add_supported_scale (GArray *supported_scales,
+-                     float   scale)
+-{
+-  unsigned int i;
+-
 -  for (i = 0; i < supported_scales->len; i++)
 -    {
 -      float supported_scale = g_array_index (supported_scales, float, i);
@@ -3091,7 +3130,7 @@ index 5c16189..a973a67 100644
  }
  
  static float *
-@@ -946,20 +1175,38 @@ meta_monitor_manager_xrandr_calculate_supported_scales (MetaMonitorManager
+@@ -946,20 +1199,38 @@ meta_monitor_manager_xrandr_calculate_supported_scales (MetaMonitorManager
                                                          MetaMonitorMode              *monitor_mode,
                                                          int                          *n_supported_scales)
  {
@@ -3139,7 +3178,7 @@ index 5c16189..a973a67 100644
  }
  
  static gboolean
-@@ -977,9 +1224,41 @@ meta_monitor_manager_xrandr_get_max_screen_size (MetaMonitorManager *manager,
+@@ -977,9 +1248,41 @@ meta_monitor_manager_xrandr_get_max_screen_size (MetaMonitorManager *manager,
    return TRUE;
  }
  
@@ -3181,7 +3220,7 @@ index 5c16189..a973a67 100644
    return META_LOGICAL_MONITOR_LAYOUT_MODE_PHYSICAL;
  }
  
-@@ -991,6 +1270,7 @@ meta_monitor_manager_xrandr_constructed (GObject *object)
+@@ -991,6 +1294,7 @@ meta_monitor_manager_xrandr_constructed (GObject *object)
    MetaMonitorManager *manager = META_MONITOR_MANAGER (manager_xrandr);
    MetaBackend *backend = meta_monitor_manager_get_backend (manager);
    MetaBackendX11 *backend_x11 = META_BACKEND_X11 (backend);
@@ -3189,7 +3228,7 @@ index 5c16189..a973a67 100644
  
    manager_xrandr->xdisplay = meta_backend_x11_get_xdisplay (backend_x11);
  
-@@ -1011,19 +1291,23 @@ meta_monitor_manager_xrandr_constructed (GObject *object)
+@@ -1011,19 +1315,23 @@ meta_monitor_manager_xrandr_constructed (GObject *object)
  		      | RRCrtcChangeNotifyMask
  		      | RROutputPropertyNotifyMask);
  
@@ -3221,7 +3260,7 @@ index 5c16189..a973a67 100644
    G_OBJECT_CLASS (meta_monitor_manager_xrandr_parent_class)->constructed (object);
  }
  
-@@ -1033,7 +1317,6 @@ meta_monitor_manager_xrandr_finalize (GObject *object)
+@@ -1033,7 +1341,6 @@ meta_monitor_manager_xrandr_finalize (GObject *object)
    MetaMonitorManagerXrandr *manager_xrandr = META_MONITOR_MANAGER_XRANDR (object);
  
    g_hash_table_destroy (manager_xrandr->tiled_monitor_atoms);
@@ -3229,7 +3268,7 @@ index 5c16189..a973a67 100644
  
    G_OBJECT_CLASS (meta_monitor_manager_xrandr_parent_class)->finalize (object);
  }
-@@ -1056,6 +1339,7 @@ meta_monitor_manager_xrandr_class_init (MetaMonitorManagerXrandrClass *klass)
+@@ -1056,6 +1363,7 @@ meta_monitor_manager_xrandr_class_init (MetaMonitorManagerXrandrClass *klass)
    manager_class->read_current_state = meta_monitor_manager_xrandr_read_current_state;
    manager_class->ensure_initial_config = meta_monitor_manager_xrandr_ensure_initial_config;
    manager_class->apply_monitors_config = meta_monitor_manager_xrandr_apply_monitors_config;
@@ -3237,7 +3276,7 @@ index 5c16189..a973a67 100644
    manager_class->set_power_save_mode = meta_monitor_manager_xrandr_set_power_save_mode;
    manager_class->change_backlight = meta_monitor_manager_xrandr_change_backlight;
    manager_class->get_crtc_gamma = meta_monitor_manager_xrandr_get_crtc_gamma;
-@@ -1117,7 +1401,7 @@ meta_monitor_manager_xrandr_handle_xevent (MetaMonitorManagerXrandr *manager_xra
+@@ -1117,7 +1425,7 @@ meta_monitor_manager_xrandr_handle_xevent (MetaMonitorManagerXrandr *manager_xra
            config = NULL;
          }
  
