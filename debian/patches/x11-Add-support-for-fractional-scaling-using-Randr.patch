@@ -18,11 +18,11 @@ Forwarded: No, forwarding is in progress and planned though
  src/backends/meta-monitor-config-store.c       |  17 +
  src/backends/meta-monitor-manager-dummy.c      |  24 +-
  src/backends/meta-monitor-manager-private.h    |  34 +-
- src/backends/meta-monitor-manager.c            | 462 +++++++++++++++++++--
+ src/backends/meta-monitor-manager.c            | 505 +++++++++++++++++++++--
  src/backends/meta-monitor.c                    |  60 ++-
  src/backends/meta-monitor.h                    |   6 +-
- src/backends/meta-settings-private.h           |  10 +
- src/backends/meta-settings.c                   | 103 ++++-
+ src/backends/meta-settings-private.h           |  13 +
+ src/backends/meta-settings.c                   | 148 ++++++-
  src/backends/native/meta-monitor-manager-kms.c |  44 +-
  src/backends/x11/meta-crtc-xrandr.c            |  92 ++++-
  src/backends/x11/meta-crtc-xrandr.h            |  14 +-
@@ -37,7 +37,7 @@ Forwarded: No, forwarding is in progress and planned though
  src/core/window.c                              |  19 +
  src/org.gnome.Mutter.DisplayConfig.xml         |   5 +
  src/tests/meta-monitor-manager-test.c          |  13 +-
- 29 files changed, 1656 insertions(+), 270 deletions(-)
+ 29 files changed, 1747 insertions(+), 270 deletions(-)
  create mode 100644 data/org.gnome.mutter.x11.gschema.xml.in
 
 diff --git a/data/meson.build b/data/meson.build
@@ -799,7 +799,7 @@ index a0a28b6..b49060d 100644
                     meta_monitor_manager_get_capabilities (MetaMonitorManager *manager);
  
 diff --git a/src/backends/meta-monitor-manager.c b/src/backends/meta-monitor-manager.c
-index 3505573..2926f1c 100644
+index 3505573..98ea9de 100644
 --- a/src/backends/meta-monitor-manager.c
 +++ b/src/backends/meta-monitor-manager.c
 @@ -111,8 +111,18 @@ static gboolean
@@ -858,12 +858,12 @@ index 3505573..2926f1c 100644
 +  for (l = config->logical_monitor_configs; l; l = l->next)
 +    {
 +      MetaLogicalMonitorConfig *monitor_config = l->data;
- 
--  return logical_monitor_config->scale;
++
 +      if (is_global_scale_matching_in_config (config, monitor_config->scale))
 +        return monitor_config->scale;
 +    }
-+
+ 
+-  return logical_monitor_config->scale;
 +  return 1.0f;
  }
  
@@ -921,18 +921,18 @@ index 3505573..2926f1c 100644
 +                                                                     scale))
 +        return scale;
 +    }
-+
+ 
+-  if (!monitor)
+-    return 1.0;
 +  for (l = manager->monitors; l; l = l->next)
 +    {
 +      MetaMonitor *other_monitor = l->data;
 +      float monitor_scale;
  
--  if (!monitor)
--    return 1.0;
+-  return calculate_monitor_scale (manager, monitor);
 +      if (other_monitor == monitor || !meta_monitor_is_active (other_monitor))
 +        continue;
- 
--  return calculate_monitor_scale (manager, monitor);
++
 +      monitor_scale = calculate_monitor_scale (manager, other_monitor);
 +      if (meta_monitor_manager_is_scale_supported_by_other_monitors (manager,
 +                                                                     other_monitor,
@@ -1102,7 +1102,7 @@ index 3505573..2926f1c 100644
        if (meta_monitor_manager_is_config_complete (manager, config))
          {
            if (!meta_monitor_manager_apply_monitors_config (manager,
-@@ -719,6 +882,52 @@ orientation_changed (MetaOrientationManager *orientation_manager,
+@@ -719,6 +882,66 @@ orientation_changed (MetaOrientationManager *orientation_manager,
    g_object_unref (config);
  }
  
@@ -1140,6 +1140,20 @@ index 3505573..2926f1c 100644
 +              g_warning ("The removed configuration doesn't match the "
 +                         "previously applied one, reverting may not work");
 +            }
++          else
++            {
++              g_autoptr(MetaMonitorsConfig) previous_config = NULL;
++
++              /* The previous config we applied was just a temporary one that
++               * GNOME control center passed us while toggling the fractional
++               * scaling. So, in such case, once the configuration with the
++               * correct layout has been applied, we need to ignore the
++               * temporary one. */
++              previous_config =
++                meta_monitor_config_manager_pop_previous (manager->config_manager);
++
++              g_assert_true (applied_config == previous_config);
++            }
 +        }
 +    }
 +  else
@@ -1155,7 +1169,7 @@ index 3505573..2926f1c 100644
  static void
  experimental_features_changed (MetaSettings           *settings,
                                 MetaExperimentalFeature old_experimental_features,
-@@ -726,6 +935,8 @@ experimental_features_changed (MetaSettings           *settings,
+@@ -726,6 +949,8 @@ experimental_features_changed (MetaSettings           *settings,
  {
    gboolean was_stage_views_scaled;
    gboolean is_stage_views_scaled;
@@ -1164,7 +1178,7 @@ index 3505573..2926f1c 100644
    gboolean should_reconfigure = FALSE;
  
    was_stage_views_scaled =
-@@ -735,10 +946,23 @@ experimental_features_changed (MetaSettings           *settings,
+@@ -735,10 +960,23 @@ experimental_features_changed (MetaSettings           *settings,
      meta_settings_is_experimental_feature_enabled (
        settings,
        META_EXPERIMENTAL_FEATURE_SCALE_MONITOR_FRAMEBUFFER);
@@ -1188,7 +1202,50 @@ index 3505573..2926f1c 100644
    if (should_reconfigure)
      meta_monitor_manager_on_hotplug (manager);
  
-@@ -1265,6 +1489,41 @@ request_persistent_confirmation (MetaMonitorManager *manager)
+@@ -1196,6 +1434,33 @@ meta_monitor_manager_handle_get_resources (MetaDBusDisplayConfig *skeleton,
+   return TRUE;
+ }
+ 
++static void
++restore_previous_experimental_config (MetaMonitorManager *manager,
++                                      MetaMonitorsConfig *previous_config)
++{
++  MetaBackend *backend = manager->backend;
++  MetaSettings *settings = meta_backend_get_settings (backend);
++  gboolean was_fractional;
++
++  if (!META_IS_MONITOR_MANAGER_XRANDR (manager))
++    return;
++
++  was_fractional =
++    previous_config->layout_mode != META_LOGICAL_MONITOR_LAYOUT_MODE_PHYSICAL;
++
++  if (meta_settings_is_experimental_feature_enabled (settings,
++        META_EXPERIMENTAL_FEATURE_X11_RANDR_FRACTIONAL_SCALING) == was_fractional)
++    return;
++
++  g_signal_handler_block (settings,
++                          manager->experimental_features_changed_handler_id);
++
++  meta_settings_enable_x11_fractional_scaling (settings, was_fractional);
++
++  g_signal_handler_unblock (settings,
++                            manager->experimental_features_changed_handler_id);
++}
++
+ static void
+ restore_previous_config (MetaMonitorManager *manager)
+ {
+@@ -1209,6 +1474,8 @@ restore_previous_config (MetaMonitorManager *manager)
+     {
+       MetaMonitorsConfigMethod method;
+ 
++      restore_previous_experimental_config (manager, previous_config);
++
+       method = META_MONITORS_CONFIG_METHOD_TEMPORARY;
+       if (meta_monitor_manager_apply_monitors_config (manager,
+                                                       previous_config,
+@@ -1265,6 +1532,41 @@ request_persistent_confirmation (MetaMonitorManager *manager)
    g_signal_emit (manager, signals[CONFIRM_DISPLAY_CHANGE], 0);
  }
  
@@ -1230,7 +1287,7 @@ index 3505573..2926f1c 100644
  #define META_DISPLAY_CONFIG_MODE_FLAGS_PREFERRED (1 << 0)
  #define META_DISPLAY_CONFIG_MODE_FLAGS_CURRENT (1 << 1)
  
-@@ -1292,6 +1551,7 @@ meta_monitor_manager_handle_get_current_state (MetaDBusDisplayConfig *skeleton,
+@@ -1292,6 +1594,7 @@ meta_monitor_manager_handle_get_current_state (MetaDBusDisplayConfig *skeleton,
    MetaMonitorManagerCapability capabilities;
    int ui_scaling_factor;
    int max_screen_width, max_screen_height;
@@ -1238,7 +1295,7 @@ index 3505573..2926f1c 100644
  
    g_variant_builder_init (&monitors_builder,
                            G_VARIANT_TYPE (MONITORS_FORMAT));
-@@ -1338,6 +1598,7 @@ meta_monitor_manager_handle_get_current_state (MetaDBusDisplayConfig *skeleton,
+@@ -1338,6 +1641,7 @@ meta_monitor_manager_handle_get_current_state (MetaDBusDisplayConfig *skeleton,
  
            preferred_scale =
              meta_monitor_manager_calculate_monitor_mode_scale (manager,
@@ -1246,7 +1303,7 @@ index 3505573..2926f1c 100644
                                                                 monitor,
                                                                 monitor_mode);
  
-@@ -1445,6 +1706,14 @@ meta_monitor_manager_handle_get_current_state (MetaDBusDisplayConfig *skeleton,
+@@ -1445,6 +1749,14 @@ meta_monitor_manager_handle_get_current_state (MetaDBusDisplayConfig *skeleton,
      }
  
    g_variant_builder_init (&properties_builder, G_VARIANT_TYPE ("a{sv}"));
@@ -1261,7 +1318,7 @@ index 3505573..2926f1c 100644
    capabilities = meta_monitor_manager_get_capabilities (manager);
  
    g_variant_builder_add (&properties_builder, "{sv}",
-@@ -1463,6 +1732,14 @@ meta_monitor_manager_handle_get_current_state (MetaDBusDisplayConfig *skeleton,
+@@ -1463,6 +1775,14 @@ meta_monitor_manager_handle_get_current_state (MetaDBusDisplayConfig *skeleton,
                               "global-scale-required",
                               g_variant_new_boolean (TRUE));
      }
@@ -1276,7 +1333,7 @@ index 3505573..2926f1c 100644
  
    ui_scaling_factor = meta_settings_get_ui_scaling_factor (settings);
    g_variant_builder_add (&properties_builder, "{sv}",
-@@ -1507,12 +1784,14 @@ meta_monitor_manager_handle_get_current_state (MetaDBusDisplayConfig *skeleton,
+@@ -1507,12 +1827,14 @@ meta_monitor_manager_handle_get_current_state (MetaDBusDisplayConfig *skeleton,
  #undef LOGICAL_MONITOR_FORMAT
  #undef LOGICAL_MONITORS_FORMAT
  
@@ -1297,7 +1354,7 @@ index 3505573..2926f1c 100644
  {
    g_autofree float *supported_scales = NULL;
    int n_supported_scales;
-@@ -1526,8 +1805,66 @@ meta_monitor_manager_is_scale_supported (MetaMonitorManager          *manager,
+@@ -1526,8 +1848,66 @@ meta_monitor_manager_is_scale_supported (MetaMonitorManager          *manager,
                                                       &n_supported_scales);
    for (i = 0; i < n_supported_scales; i++)
      {
@@ -1366,7 +1423,7 @@ index 3505573..2926f1c 100644
      }
  
    return FALSE;
-@@ -1571,11 +1908,11 @@ meta_monitor_manager_is_config_applicable (MetaMonitorManager *manager,
+@@ -1571,11 +1951,11 @@ meta_monitor_manager_is_config_applicable (MetaMonitorManager *manager,
                return FALSE;
              }
  
@@ -1383,7 +1440,7 @@ index 3505573..2926f1c 100644
              {
                g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
                             "Scale not supported by backend");
-@@ -1796,6 +2133,7 @@ derive_logical_monitor_size (MetaMonitorConfig           *monitor_config,
+@@ -1796,6 +2176,7 @@ derive_logical_monitor_size (MetaMonitorConfig           *monitor_config,
    switch (layout_mode)
      {
      case META_LOGICAL_MONITOR_LAYOUT_MODE_LOGICAL:
@@ -1391,7 +1448,7 @@ index 3505573..2926f1c 100644
        width = roundf (width / scale);
        height = roundf (height / scale);
        break;
-@@ -1895,9 +2233,11 @@ create_logical_monitor_config_from_variant (MetaMonitorManager          *manager
+@@ -1895,9 +2276,11 @@ create_logical_monitor_config_from_variant (MetaMonitorManager          *manager
      .monitor_configs = monitor_configs
    };
  
@@ -1404,7 +1461,7 @@ index 3505573..2926f1c 100644
                                             error))
      {
        meta_logical_monitor_config_free (logical_monitor_config);
-@@ -1918,6 +2258,7 @@ is_valid_layout_mode (MetaLogicalMonitorLayoutMode layout_mode)
+@@ -1918,6 +2301,7 @@ is_valid_layout_mode (MetaLogicalMonitorLayoutMode layout_mode)
      {
      case META_LOGICAL_MONITOR_LAYOUT_MODE_LOGICAL:
      case META_LOGICAL_MONITOR_LAYOUT_MODE_PHYSICAL:
@@ -1412,7 +1469,7 @@ index 3505573..2926f1c 100644
        return TRUE;
      }
  
-@@ -1940,6 +2281,7 @@ meta_monitor_manager_handle_apply_monitors_config (MetaDBusDisplayConfig *skelet
+@@ -1940,6 +2324,7 @@ meta_monitor_manager_handle_apply_monitors_config (MetaDBusDisplayConfig *skelet
    MetaMonitorsConfig *config;
    GList *logical_monitor_configs = NULL;
    GError *error = NULL;
@@ -1420,7 +1477,7 @@ index 3505573..2926f1c 100644
  
    if (serial != manager->serial)
      {
-@@ -2011,10 +2353,42 @@ meta_monitor_manager_handle_apply_monitors_config (MetaDBusDisplayConfig *skelet
+@@ -2011,10 +2396,42 @@ meta_monitor_manager_handle_apply_monitors_config (MetaDBusDisplayConfig *skelet
            return TRUE;
          }
  
@@ -1463,7 +1520,7 @@ index 3505573..2926f1c 100644
    config = meta_monitors_config_new (manager,
                                       logical_monitor_configs,
                                       layout_mode,
-@@ -2452,12 +2826,6 @@ meta_monitor_manager_get_laptop_panel (MetaMonitorManager *manager)
+@@ -2452,12 +2869,6 @@ meta_monitor_manager_get_laptop_panel (MetaMonitorManager *manager)
    return find_monitor (manager, meta_monitor_is_laptop_panel);
  }
  
@@ -1476,7 +1533,7 @@ index 3505573..2926f1c 100644
  MetaMonitor *
  meta_monitor_manager_get_monitor_from_connector (MetaMonitorManager *manager,
                                                   const char         *connector)
-@@ -2633,6 +3001,10 @@ rebuild_monitors (MetaMonitorManager *manager)
+@@ -2633,6 +3044,10 @@ rebuild_monitors (MetaMonitorManager *manager)
  {
    GList *gpus;
    GList *l;
@@ -1487,7 +1544,7 @@ index 3505573..2926f1c 100644
  
    if (manager->monitors)
      {
-@@ -2650,7 +3022,7 @@ rebuild_monitors (MetaMonitorManager *manager)
+@@ -2650,7 +3065,7 @@ rebuild_monitors (MetaMonitorManager *manager)
          {
            MetaOutput *output = k->data;
  
@@ -1496,7 +1553,7 @@ index 3505573..2926f1c 100644
              {
                if (is_main_tiled_monitor_output (output))
                  {
-@@ -2856,7 +3228,7 @@ meta_monitor_manager_update_logical_state_derived (MetaMonitorManager *manager,
+@@ -2856,7 +3271,7 @@ meta_monitor_manager_update_logical_state_derived (MetaMonitorManager *manager,
    else
      manager->current_switch_config = META_MONITOR_SWITCH_CONFIG_UNKNOWN;
  
@@ -1505,7 +1562,7 @@ index 3505573..2926f1c 100644
  
    meta_monitor_manager_rebuild_logical_monitors_derived (manager, config);
  }
-@@ -2865,10 +3237,14 @@ void
+@@ -2865,10 +3280,14 @@ void
  meta_monitor_manager_rebuild_derived (MetaMonitorManager *manager,
                                        MetaMonitorsConfig *config)
  {
@@ -1669,7 +1726,7 @@ index eb6b99f..7b68a57 100644
  META_EXPORT_TEST
  float * meta_monitor_calculate_supported_scales (MetaMonitor                 *monitor,
 diff --git a/src/backends/meta-settings-private.h b/src/backends/meta-settings-private.h
-index 7d610d5..4a60d39 100644
+index 7d610d5..a7241ce 100644
 --- a/src/backends/meta-settings-private.h
 +++ b/src/backends/meta-settings-private.h
 @@ -35,8 +35,16 @@ typedef enum _MetaExperimentalFeature
@@ -1689,15 +1746,18 @@ index 7d610d5..4a60d39 100644
  #define META_TYPE_SETTINGS (meta_settings_get_type ())
  G_DECLARE_FINAL_TYPE (MetaSettings, meta_settings,
                        META, SETTINGS, GObject)
-@@ -69,4 +77,6 @@ void meta_settings_get_xwayland_grab_patterns (MetaSettings  *settings,
+@@ -69,4 +77,9 @@ void meta_settings_get_xwayland_grab_patterns (MetaSettings  *settings,
  
  gboolean meta_settings_are_xwayland_grabs_allowed (MetaSettings *settings);
  
 +MetaX11ScaleMode meta_settings_get_x11_scale_mode (MetaSettings *settings);
 +
++void meta_settings_enable_x11_fractional_scaling (MetaSettings *settings,
++                                                  gboolean      enabled);
++
  #endif /* META_SETTINGS_PRIVATE_H */
 diff --git a/src/backends/meta-settings.c b/src/backends/meta-settings.c
-index 1cc000e..a9402ed 100644
+index 1cc000e..cd9b3df 100644
 --- a/src/backends/meta-settings.c
 +++ b/src/backends/meta-settings.c
 @@ -40,6 +40,7 @@ enum
@@ -1771,7 +1831,7 @@ index 1cc000e..a9402ed 100644
  }
  
  static gboolean
-@@ -232,6 +261,31 @@ meta_settings_override_experimental_features (MetaSettings *settings)
+@@ -232,6 +261,76 @@ meta_settings_override_experimental_features (MetaSettings *settings)
    settings->experimental_features_overridden = TRUE;
  }
  
@@ -1800,10 +1860,55 @@ index 1cc000e..a9402ed 100644
 +  return FALSE;
 +}
 +
++void meta_settings_enable_x11_fractional_scaling (MetaSettings *settings,
++                                                  gboolean      enable)
++{
++  g_auto(GStrv) existing_features = NULL;
++  gboolean have_fractional_scaling = FALSE;
++  g_autoptr(GVariantBuilder) builder = NULL;
++  MetaExperimentalFeature old_experimental_features;
++
++  if (enable == meta_settings_is_experimental_feature_enabled (settings,
++        META_EXPERIMENTAL_FEATURE_X11_RANDR_FRACTIONAL_SCALING))
++    return;
++
++  /* Change the internal value now, as we don't want to wait for gsettings */
++  old_experimental_features = settings->experimental_features;
++  settings->experimental_features |=
++    META_EXPERIMENTAL_FEATURE_X11_RANDR_FRACTIONAL_SCALING;
++
++  update_x11_scale_mode (settings);
++
++  g_signal_emit (settings, signals[EXPERIMENTAL_FEATURES_CHANGED], 0,
++                   (unsigned int) old_experimental_features);
++
++  /* Add or remove the fractional scaling feature from mutter */
++  existing_features = g_settings_get_strv (settings->mutter_settings,
++                                           "experimental-features");
++  builder = g_variant_builder_new (G_VARIANT_TYPE ("as"));
++  for (int i = 0; existing_features[i] != NULL; i++)
++    {
++      if (g_strcmp0 (existing_features[i], "x11-randr-fractional-scaling") == 0)
++        {
++          if (enable)
++            have_fractional_scaling = TRUE;
++          else
++            continue;
++        }
++
++      g_variant_builder_add (builder, "s", existing_features[i]);
++    }
++  if (enable && !have_fractional_scaling)
++    g_variant_builder_add (builder, "s", "x11-randr-fractional-scaling");
++
++  g_settings_set_value (settings->mutter_settings, "experimental-features",
++                        g_variant_builder_end (builder));
++}
++
  void
  meta_settings_enable_experimental_feature (MetaSettings           *settings,
                                             MetaExperimentalFeature feature)
-@@ -239,6 +293,9 @@ meta_settings_enable_experimental_feature (MetaSettings           *settings,
+@@ -239,6 +338,9 @@ meta_settings_enable_experimental_feature (MetaSettings           *settings,
    g_assert (settings->experimental_features_overridden);
  
    settings->experimental_features |= feature;
@@ -1813,7 +1918,7 @@ index 1cc000e..a9402ed 100644
  }
  
  static gboolean
-@@ -270,6 +327,8 @@ experimental_features_handler (GVariant *features_variant,
+@@ -270,6 +372,8 @@ experimental_features_handler (GVariant *features_variant,
          feature = META_EXPERIMENTAL_FEATURE_RT_SCHEDULER;
        else if (g_str_equal (feature_str, "autostart-xwayland"))
          feature = META_EXPERIMENTAL_FEATURE_AUTOSTART_XWAYLAND;
@@ -1822,7 +1927,7 @@ index 1cc000e..a9402ed 100644
  
        if (feature)
          g_message ("Enabling experimental feature '%s'", feature_str);
-@@ -282,6 +341,7 @@ experimental_features_handler (GVariant *features_variant,
+@@ -282,6 +386,7 @@ experimental_features_handler (GVariant *features_variant,
    if (features != settings->experimental_features)
      {
        settings->experimental_features = features;
@@ -1830,7 +1935,7 @@ index 1cc000e..a9402ed 100644
        *result = GINT_TO_POINTER (TRUE);
      }
    else
-@@ -403,6 +463,18 @@ wayland_settings_changed (GSettings    *wayland_settings,
+@@ -403,6 +508,18 @@ wayland_settings_changed (GSettings    *wayland_settings,
      }
  }
  
@@ -1849,7 +1954,7 @@ index 1cc000e..a9402ed 100644
  void
  meta_settings_get_xwayland_grab_patterns (MetaSettings  *settings,
                                            GPtrArray    **whitelist_patterns,
-@@ -418,6 +490,12 @@ meta_settings_are_xwayland_grabs_allowed (MetaSettings *settings)
+@@ -418,6 +535,12 @@ meta_settings_are_xwayland_grabs_allowed (MetaSettings *settings)
    return (settings->xwayland_allow_grabs);
  }
  
@@ -1862,7 +1967,7 @@ index 1cc000e..a9402ed 100644
  MetaSettings *
  meta_settings_new (MetaBackend *backend)
  {
-@@ -437,6 +515,7 @@ meta_settings_dispose (GObject *object)
+@@ -437,6 +560,7 @@ meta_settings_dispose (GObject *object)
    g_clear_object (&settings->mutter_settings);
    g_clear_object (&settings->interface_settings);
    g_clear_object (&settings->wayland_settings);
@@ -1870,7 +1975,7 @@ index 1cc000e..a9402ed 100644
    g_clear_pointer (&settings->xwayland_grab_whitelist_patterns,
                     g_ptr_array_unref);
    g_clear_pointer (&settings->xwayland_grab_blacklist_patterns,
-@@ -460,6 +539,10 @@ meta_settings_init (MetaSettings *settings)
+@@ -460,6 +584,10 @@ meta_settings_init (MetaSettings *settings)
    g_signal_connect (settings->wayland_settings, "changed",
                      G_CALLBACK (wayland_settings_changed),
                      settings);
@@ -1881,7 +1986,7 @@ index 1cc000e..a9402ed 100644
  
    /* Chain up inter-dependent settings. */
    g_signal_connect (settings, "global-scaling-factor-changed",
-@@ -525,6 +608,14 @@ meta_settings_class_init (MetaSettingsClass *klass)
+@@ -525,6 +653,14 @@ meta_settings_class_init (MetaSettingsClass *klass)
                    NULL, NULL, NULL,
                    G_TYPE_NONE, 0);
  
