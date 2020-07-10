@@ -4,3 +4,6 @@ meson-add-back-default_driver-option.patch
 x11-Add-support-for-fractional-scaling-using-Randr.patch
 debian/synaptics-support.patch
 debian/tests-Tag-closed-transient-no-input-tests-as-flaky.patch
+
+# Backported
+x11-look-up-reason-for-selection-clear-events-from-xfixes.patch
