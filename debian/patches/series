@@ -22,3 +22,6 @@ compositor-sync-ring-Allow-the-gpu_fence-to-be-moved.patch
 wayland-xdg-shell-Dismiss-instead-of-destroy-invalid-popu.patch
 backend-native-Don-t-warn-on-EACCES-if-headless.patch
 screen-cast-stream-src-Do-not-try-to-create-a-0-sized-tex.patch
+
+# Pop!_OS patches
+pop-cosmic-keyboard-shortcuts.patch

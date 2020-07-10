@@ -1,0 +1,53 @@
+Index: mutter/data/50-mutter-navigation.xml
+===================================================================
+--- mutter.orig/data/50-mutter-navigation.xml
++++ mutter/data/50-mutter-navigation.xml
+@@ -21,18 +21,18 @@
+                       description="Move window to last workspace" />
+ 
+ 	<KeyListEntry name="move-to-workspace-left"
+-	              description="Move window one workspace to the left" />
++	              description="Move window one workspace to the left"
++	              hidden="true" />
+ 
+ 	<KeyListEntry name="move-to-workspace-right"
+-	              description="Move window one workspace to the right" />
++	              description="Move window one workspace to the right"
++	              hidden="true" />
+ 
+         <KeyListEntry name="move-to-workspace-up"
+-                      description="Move window one workspace up"
+-                      hidden="true" />
++                      description="Move window one workspace up" />
+ 
+         <KeyListEntry name="move-to-workspace-down"
+-                      description="Move window one workspace down"
+-                      hidden="true" />
++                      description="Move window one workspace down" />
+ 
+ 	<KeyListEntry name="move-to-monitor-left"
+ 	              description="Move window one monitor to the left" />
+@@ -128,17 +128,17 @@
+ 	              description="Switch to last workspace" />
+ 
+ 	<KeyListEntry name="switch-to-workspace-left"
+-	              description="Move to workspace on the left" />
++	              description="Move to workspace on the left"
++	              hidden="true" />
+ 
+ 	<KeyListEntry name="switch-to-workspace-right"
+-	              description="Move to workspace on the right" />
++	              description="Move to workspace on the right"
++	              hidden="true" />
+ 
+         <KeyListEntry name="switch-to-workspace-up"
+-                      description="Move to workspace above"
+-                      hidden="true" />
++                      description="Move to workspace above" />
+ 
+         <KeyListEntry name="switch-to-workspace-down"
+-                      description="Move to workspace below"
+-                      hidden="true" />
++                      description="Move to workspace below" />
+ 
+ </KeyListEntries>
