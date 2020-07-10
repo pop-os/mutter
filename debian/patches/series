@@ -20,3 +20,6 @@ debian/meson-Do-not-mark-CI-test-tools-as-required.patch
 debian/tests-skip-monitor-width-size-check-as-it-may-lead-to-une.patch
 ubuntu/x11-Add-support-for-fractional-scaling-using-Randr.patch
 ubuntu/wayland-data-device-Allow-any-drag-timestamp-as-drag-star.patch
+
+# Pop!_OS patches
+pop-cosmic-keyboard-shortcuts.patch
