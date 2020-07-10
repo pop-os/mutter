@@ -15,3 +15,6 @@ backends-Move-MetaKeyboardA11yFlags-to-a-public-header.patch
 clutter-frame-clock-Avoid-rapidly-toggling-dynamic-max-re.patch
 backends-x11-Return-zero-Hz-instead-of-nan-Hz-for-incompl.patch
 Revert-data-udev-Don-t-disable-KMS-modifiers-on-newer-i91.patch
+
+# Pop!_OS patches
+pop-cosmic-keyboard-shortcuts.patch
