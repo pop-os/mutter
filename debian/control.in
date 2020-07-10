@@ -26,7 +26,7 @@ Build-Depends: debhelper-compat (= 13),
                libegl1-mesa-dev (>= 17),
                libfribidi-dev (>= 1.0.0),
                libgbm-dev (>= 17.3) [linux-any],
-               libgdk-pixbuf-2.0-dev | libgdk-pixbuf2.0-dev,
+               libgdk-pixbuf2.0-dev,
                libgirepository1.0-dev (>= 0.9.12),
                libgl1-mesa-dev (>= 7.1~rc3-1~),
                libgles2-mesa-dev (>= 7.1~rc3-1~) | libgles2-dev,
@@ -84,7 +84,7 @@ Vcs-Git: https://salsa.debian.org/gnome-team/mutter.git -b ubuntu/impish
 Vcs-Browser: https://salsa.debian.org/gnome-team/mutter/tree/ubuntu/impish
 
 Package: mutter
-Architecture: any
+Architecture: linux-any
 Depends: adwaita-icon-theme,
          gnome-settings-daemon-common,
          gsettings-desktop-schemas (>= 40~alpha),
@@ -109,7 +109,7 @@ Description: Example window manager using GNOME's window manager library
  standalone window manager, but is primarily intended for debugging.
 
 Package: mutter-8-tests
-Architecture: any
+Architecture: linux-any
 Depends: at-spi2-core,
          dbus,
          dmz-cursor-theme,
@@ -135,7 +135,7 @@ Description: Tests for GNOME's window manager library
 
 Package: gir1.2-mutter-8
 Section: introspection
-Architecture: any
+Architecture: linux-any
 Multi-Arch: same
 Depends: libmutter-8-0 (= ${binary:Version}),
          ${gir:Depends},
@@ -156,7 +156,7 @@ Description: GObject introspection data for Mutter
 
 Package: libmutter-8-0
 Section: libs
-Architecture: any
+Architecture: linux-any
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
 Depends: adwaita-icon-theme,
@@ -182,7 +182,7 @@ Description: window manager library from the Mutter window manager
 
 Package: libmutter-8-dev
 Section: libdevel
-Architecture: any
+Architecture: linux-any
 Multi-Arch: same
 Depends: gir1.2-mutter-8 (= ${binary:Version}),
          gsettings-desktop-schemas-dev (>= 40~alpha),
