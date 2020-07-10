@@ -238,6 +238,7 @@ libmutter-6.so.0 libmutter-6-0 #MINVER#
  meta_monitor_config_manager_assign@Base 3.28.2
  meta_monitor_config_manager_clear_history@Base 3.28.2
  meta_monitor_config_manager_create_fallback@Base 3.28.2
+ meta_monitor_config_manager_create_for_layout@Base 3.36.3-0ubuntu0.20.04.2
  meta_monitor_config_manager_create_for_orientation@Base 3.28.2
  meta_monitor_config_manager_create_for_rotate_monitor@Base 3.28.2
  meta_monitor_config_manager_create_for_switch_config@Base 3.28.2
