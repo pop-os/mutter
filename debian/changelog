@@ -1,3 +1,21 @@
+mutter (3.36.3-0ubuntu0.20.04.2) UNRELEASED; urgency=medium
+
+  * debian/control:
+    - Revert BD on adwaita-icon-theme 3.36.1-2ubuntu3. It was just temporary fix
+  * d/p/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+    - Use pre-computed CRTC layout size for computing screen size (LP: #1874567,
+      LP: #1873403)
+    - Decouple the output mode from layout mode capabilities (LP: #1876894,
+      LP: #1886996)
+    - Ensure we notify CRTC changes on integer scaling changes (LP: #1876894)
+    - Apply proper layout monitor config when using fractional scaling
+      (LP: #1884754)
+    - Restore the fractional settings when reverting to fractional layout
+      (LP: #1886996)
+  * debian/libmutter-6-0.symbols: Add new private symbol
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Sat, 11 Jul 2020 00:27:26 +0200
+
 mutter (3.36.3-0ubuntu0.20.04.1) focal; urgency=medium
 
   * New upstream release (LP: #1881971)
