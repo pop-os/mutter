@@ -13,7 +13,7 @@ Forwarded: No, forwarding is in progress and planned though
  data/org.gnome.mutter.x11.gschema.xml.in       |  30 ++
  src/backends/meta-crtc.h                       |   1 +
  src/backends/meta-monitor-config-manager.c     | 180 +++++++-
- src/backends/meta-monitor-config-manager.h     |   6 +
+ src/backends/meta-monitor-config-manager.h     |   5 +
  src/backends/meta-monitor-config-migration.c   |  15 +-
  src/backends/meta-monitor-config-store.c       |  17 +
  src/backends/meta-monitor-manager-dummy.c      |  24 +-
@@ -31,13 +31,13 @@ Forwarded: No, forwarding is in progress and planned though
  src/backends/x11/meta-monitor-manager-xrandr.c | 564 +++++++++++++++++++------
  src/backends/x11/meta-monitor-manager-xrandr.h |   4 +-
  src/backends/x11/meta-output-xrandr.c          |   5 +-
- src/compositor/meta-compositor-x11.c           |  98 +++-
+ src/compositor/meta-compositor-x11.c           |  98 ++++-
  src/core/boxes-private.h                       |   4 +
  src/core/boxes.c                               |  21 +
  src/core/window.c                              |  19 +
  src/org.gnome.Mutter.DisplayConfig.xml         |   5 +
  src/tests/meta-monitor-manager-test.c          |  13 +-
- 29 files changed, 1772 insertions(+), 271 deletions(-)
+ 29 files changed, 1771 insertions(+), 271 deletions(-)
  create mode 100644 data/org.gnome.mutter.x11.gschema.xml.in
 
 diff --git a/data/meson.build b/data/meson.build
@@ -501,14 +501,13 @@ index 6a7c807..d8646fa 100644
        expected_mode_width = roundf (expected_mode_width *
                                      logical_monitor_config->scale);
 diff --git a/src/backends/meta-monitor-config-manager.h b/src/backends/meta-monitor-config-manager.h
-index 3875e04..6941cb7 100644
+index 3875e04..c337a34 100644
 --- a/src/backends/meta-monitor-config-manager.h
 +++ b/src/backends/meta-monitor-config-manager.h
-@@ -110,6 +110,11 @@ MetaMonitorsConfig * meta_monitor_config_manager_create_for_orientation (MetaMon
+@@ -110,6 +110,10 @@ MetaMonitorsConfig * meta_monitor_config_manager_create_for_orientation (MetaMon
  META_EXPORT_TEST
  MetaMonitorsConfig * meta_monitor_config_manager_create_for_rotate_monitor (MetaMonitorConfigManager *config_manager);
  
-+META_EXPORT_TEST
 +MetaMonitorsConfig * meta_monitor_config_manager_create_for_layout (MetaMonitorConfigManager     *config_manager,
 +                                                                    MetaMonitorsConfig           *config,
 +                                                                    MetaLogicalMonitorLayoutMode  layout_mode);
@@ -516,7 +515,7 @@ index 3875e04..6941cb7 100644
  META_EXPORT_TEST
  MetaMonitorsConfig * meta_monitor_config_manager_create_for_switch_config (MetaMonitorConfigManager    *config_manager,
                                                                             MetaMonitorSwitchConfigType  config_type);
-@@ -191,6 +196,7 @@ META_EXPORT_TEST
+@@ -191,6 +195,7 @@ META_EXPORT_TEST
  gboolean meta_verify_logical_monitor_config (MetaLogicalMonitorConfig    *logical_monitor_config,
                                               MetaLogicalMonitorLayoutMode layout_mode,
                                               MetaMonitorManager          *monitor_manager,
