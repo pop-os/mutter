@@ -1,4 +1,4 @@
-mutter (3.36.4-1ubuntu1) UNRELEASED; urgency=medium
+mutter (3.36.4-1ubuntu1) groovy; urgency=medium
 
   * Merge with debian, including new upstream stable release, remaining changes:
     - debian/control:
@@ -11,7 +11,7 @@ mutter (3.36.4-1ubuntu1) UNRELEASED; urgency=medium
   * debian/libmutter-6-0.symbols:
     - Remove ubuntu-only private symbol
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 17 Jul 2020 21:20:49 +0200
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Mon, 20 Jul 2020 15:45:20 +0200
 
 mutter (3.36.4-1) unstable; urgency=medium
 
