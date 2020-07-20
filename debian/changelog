@@ -1,3 +1,18 @@
+mutter (3.36.4-1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge with debian, including new upstream stable release, remaining changes:
+    - debian/control:
+      + Update VCS flags to point to ubuntu salsa branch
+    - debian/gbp.conf: update branch to point to ubuntu/master
+    - debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+      + X11: Add support for fractional scaling using Randr
+  * debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+    - Don't export patch-only private symbol
+  * debian/libmutter-6-0.symbols:
+    - Remove ubuntu-only private symbol
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 17 Jul 2020 21:20:49 +0200
+
 mutter (3.36.4-1) unstable; urgency=medium
 
   * New upstream stable release (LP: #1887998)
