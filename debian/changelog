@@ -1,4 +1,4 @@
-mutter (3.36.4-0ubuntu0.20.04.1) UNRELEASED; urgency=medium
+mutter (3.36.4-0ubuntu0.20.04.1) focal; urgency=medium
 
   * New upstream stable release (LP: #1887998)
     - Fix crash on area screenshots with fractional scaling
@@ -25,7 +25,7 @@ mutter (3.36.4-0ubuntu0.20.04.1) UNRELEASED; urgency=medium
   * debian/libmutter-6-0.symbols:
     - Remove ubuntu-only private symbol
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Mon, 20 Jul 2020 16:04:20 +0200
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Mon, 20 Jul 2020 16:16:36 +0200
 
 mutter (3.36.3-0ubuntu0.20.04.2) focal; urgency=medium
 
