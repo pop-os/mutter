@@ -1,3 +1,9 @@
+mutter (3.36.4-0ubuntu0.20.04.1) UNRELEASED; urgency=medium
+
+  * New upstream release
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Mon, 20 Jul 2020 16:04:20 +0200
+
 mutter (3.36.3-0ubuntu0.20.04.2) focal; urgency=medium
 
   * debian/control:
