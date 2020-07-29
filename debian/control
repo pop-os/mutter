@@ -83,7 +83,7 @@ Vcs-Git: https://salsa.debian.org/gnome-team/mutter.git -b ubuntu/focal
 Vcs-Browser: https://salsa.debian.org/gnome-team/mutter/tree/ubuntu/focal
 
 Package: mutter
-Architecture: amd64
+Architecture: any
 Depends: gnome-settings-daemon-common,
          gsettings-desktop-schemas (>= 3.33.0),
          mutter-common (>= ${source:Version}),
@@ -108,7 +108,7 @@ Description: Example window manager using GNOME's window manager library
 
 Package: gir1.2-mutter-6
 Section: introspection
-Architecture: amd64
+Architecture: any
 Multi-Arch: same
 Depends: libmutter-6-0 (= ${binary:Version}),
          ${gir:Depends},
@@ -129,7 +129,7 @@ Description: GObject introspection data for Mutter
 
 Package: libmutter-6-0
 Section: libs
-Architecture: amd64
+Architecture: any
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
 Depends: gsettings-desktop-schemas (>= 3.33.0),
@@ -155,7 +155,7 @@ Description: window manager library from the Mutter window manager
 
 Package: libmutter-6-dev
 Section: libdevel
-Architecture: amd64
+Architecture: any
 Multi-Arch: same
 Depends: gir1.2-mutter-6 (= ${binary:Version}),
          gsettings-desktop-schemas-dev (>= 3.33.0),
