@@ -1,3 +1,9 @@
+mutter (3.36.4-0ubuntu0.20.04.1pop3) focal; urgency=medium
+
+  * Remove patch causing NVIDIA text scaling issues
+
+ -- Michael Aaron Murphy <michael@system76.com>  Thu, 30 Jul 2020 13:29:24 -0600
+
 mutter (3.36.4-0ubuntu0.20.04.1pop1) focal; urgency=medium
 
   * Upstream update 
