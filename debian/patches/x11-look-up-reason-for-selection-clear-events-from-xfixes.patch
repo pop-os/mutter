@@ -1,0 +1,49 @@
+From 2f1f47d25708cf444e4d35045486fa2841ce0d69 Mon Sep 17 00:00:00 2001
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Fri, 3 Jul 2020 13:47:38 +0200
+Subject: [PATCH] x11: Look up reason for selection clear events from XFixes
+
+If the event originates from a XSetSelectionOwner request, the event
+will contain a XFixesSetSelectionOwnerNotify subtype. The other
+subtypes (meant for the selection window being destroyed, and the
+client closing) are the situations where we mean to replace the
+selection.
+
+Fixes: https://gitlab.gnome.org/GNOME/mutter/-/issues/1268
+
+https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1350
+---
+ src/x11/meta-x11-selection.c | 9 +--------
+ 1 file changed, 1 insertion(+), 8 deletions(-)
+
+diff --git a/src/x11/meta-x11-selection.c b/src/x11/meta-x11-selection.c
+index e55a1995d5..8f068dedc9 100644
+--- a/src/x11/meta-x11-selection.c
++++ b/src/x11/meta-x11-selection.c
+@@ -32,13 +32,6 @@
+ #define UTF8_STRING_MIMETYPE "text/plain;charset=utf-8"
+ #define STRING_MIMETYPE "text/plain"
+ 
+-/* Set an arbitrary (although generous) threshold to determine whether a
+- * XFixesSelectionNotify corresponds to a XSetSelectionOwner from another
+- * client. The selection timestamp is not updated if the owner client is
+- * closed.
+- */
+-#define SELECTION_CLEARED_BY_CLIENT(e) (e->timestamp - e->selection_timestamp < 50)
+-
+ static gboolean
+ atom_to_selection_type (Display           *xdisplay,
+                         Atom               selection,
+@@ -342,7 +335,7 @@ meta_x11_selection_handle_xfixes_selection_notify (MetaX11Display *x11_display,
+ 
+   if (event->owner == None && x11_display->selection.owners[selection_type])
+     {
+-      if (SELECTION_CLEARED_BY_CLIENT (event))
++      if (event->subtype == XFixesSetSelectionOwnerNotify)
+         {
+           MetaSelectionSource *source;
+ 
+-- 
+GitLab
+
+

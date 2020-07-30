@@ -1,55 +1,8 @@
-mutter (3.36.4-0ubuntu0.20.04.1pop1) focal; urgency=medium
+mutter (3.36.3-0ubuntu0.20.04.1pop1) focal; urgency=medium
 
-  * Upstream update 
+  * Add X11 copy/paste fix
 
- -- Michael Aaron Murphy <michael@system76.com>  Wed, 29 Jul 2020 06:26:00 -0600
-
-mutter (3.36.4-0ubuntu0.20.04.1) focal; urgency=medium
-
-  * New upstream stable release (LP: #1887998)
-    - Fix crash on area screenshots with fractional scaling
-    - Do not paint textures of fully obscured windows
-    - Turn off CRTCs as well when enabling DPMS
-    - Improve selection support
-    - Use a more appropriate combine function on opaque areas
-    - Fix remote desktop being broken without screencast session
-    - Fix popovers disappearing on wayland and HiDPI
-    - Fixed crashes (LP: #1870867, LP: #1857947)
-    - Plugged memory leaks
-  * d/p/screen-cast-Let-the-reason-for-recording-determine-what-t.patch,
-    d/p/screen-cast-src-Add-flag-to-maybe_record.patch,
-    d/p/screen-cast-src-Fix-signedness-of-timestamp-field.patch,
-    d/p/screen-cast-src-Make-record-functions-return-an-error-whe.patch,
-    d/p/screen-cast-src-Make-the-two-record-vfuncs-more-similarly.patch,
-    d/p/screen-cast-src-Record-follow-up-frame-after-timeout.patch,
-    d/p/screen-cast-src-Remove-follow-up-timeout-source-on-disabl.patch,
-    d/p/screen-cast-src-Use-G_USEC_PER_SEC-instead-of-1000000.patch,
-    d/p/screen-cast-window-stream-src-Fix-indentation.patch:
-    - Import more fixes for screencasting and remote desktop
-  * d/p/x11-Add-support-for-fractional-scaling-using-Randr.patch:
-    - Don't export patch-only private symbol
-  * debian/libmutter-6-0.symbols:
-    - Remove ubuntu-only private symbol
-
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Mon, 20 Jul 2020 16:16:36 +0200
-
-mutter (3.36.3-0ubuntu0.20.04.2) focal; urgency=medium
-
-  * debian/control:
-    - Revert BD on adwaita-icon-theme 3.36.1-2ubuntu3. It was just temporary fix
-  * d/p/x11-Add-support-for-fractional-scaling-using-Randr.patch:
-    - Use pre-computed CRTC layout size for computing screen size (LP: #1874567,
-      LP: #1873403)
-    - Decouple the output mode from layout mode capabilities (LP: #1876894,
-      LP: #1886996)
-    - Ensure we notify CRTC changes on integer scaling changes (LP: #1876894)
-    - Apply proper layout monitor config when using fractional scaling
-      (LP: #1884754)
-    - Restore the fractional settings when reverting to fractional layout
-      (LP: #1886996)
-  * debian/libmutter-6-0.symbols: Add new private symbol
-
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Sat, 11 Jul 2020 00:55:24 +0200
+ -- Michael Aaron Murphy <michael@system76.com>  Fri, 10 Jul 2020 11:42:07 -0600
 
 mutter (3.36.3-0ubuntu0.20.04.1) focal; urgency=medium
 
