@@ -1,3 +1,15 @@
+mutter (3.36.4-0ubuntu0.20.04.2pop1) focal; urgency=medium
+
+  * Upstream update to xrandr-scaling
+
+ -- Michael Aaron Murphy <michael@system76.com>  Tue, 11 Aug 2020 20:08:13 -0600
+
+mutter (3.36.4-0ubuntu0.20.04.2) focal; urgency=medium
+
+  * xrandr-scaling: Never try to set invalid screen sizes (LP: #1889090)
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Mon, 27 Jul 2020 17:04:41 +0200
+
 mutter (3.36.4-0ubuntu0.20.04.1pop3) focal; urgency=medium
 
   * Remove patch causing NVIDIA text scaling issues

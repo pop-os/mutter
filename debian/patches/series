@@ -10,6 +10,6 @@ screen-cast-src-Remove-follow-up-timeout-source-on-disabl.patch
 theme-use-gtk_render_icon_suface-to-paint-button-icon.patch
 theme-load-icons-as-Gtk-does-with-fallback-and-RTL-suppor.patch
 meson-add-back-default_driver-option.patch
-# x11-Add-support-for-fractional-scaling-using-Randr.patch
+x11-Add-support-for-fractional-scaling-using-Randr.patch
 debian/synaptics-support.patch
 debian/tests-Tag-closed-transient-no-input-tests-as-flaky.patch
