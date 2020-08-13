@@ -1,5 +1,6 @@
-mutter (3.36.5-1) UNRELEASED; urgency=medium
+mutter (3.36.5-1) unstable; urgency=medium
 
+  * Team upload
   * New upstream release
     - Screencast fixes and improvements
     - Fix glitches when subsurfaces extend outside the toplevel
@@ -8,7 +9,7 @@ mutter (3.36.5-1) UNRELEASED; urgency=medium
     - Plug memory leaks
   * Drop patches that were applied upstream
 
- -- Simon McVittie <smcv@debian.org>  Thu, 13 Aug 2020 10:15:24 +0100
+ -- Simon McVittie <smcv@debian.org>  Thu, 13 Aug 2020 10:19:59 +0100
 
 mutter (3.36.4-1) unstable; urgency=medium
 
