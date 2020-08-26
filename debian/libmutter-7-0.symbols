@@ -1,5 +1,5 @@
-libmutter-6.so.0 libmutter-6-0 #MINVER#
-* Build-Depends-Package: libmutter-6-dev
+libmutter-7.so.0 libmutter-7-0 #MINVER#
+* Build-Depends-Package: libmutter-7-dev
  (arch=linux-any)meta_activate_session@Base 3.28.2
  meta_add_clutter_debug_flags@Base 3.35.90
  meta_add_verbose_topic@Base 3.28.2
@@ -698,8 +698,8 @@ libmutter-6.so.0 libmutter-6-0 #MINVER#
  meta_x11_error_trap_push@Base 3.29.4
  meta_x11_init_gdk_display@Base 3.29.4
  (arch=linux-any)meta_xwayland_override_display_number@Base 3.31.90
-libmutter-clutter-6.so.0 libmutter-6-0 #MINVER#
-* Build-Depends-Package: libmutter-6-dev
+libmutter-clutter-7.so.0 libmutter-7-0 #MINVER#
+* Build-Depends-Package: libmutter-7-dev
  _clutter_backend_translate_event@Base 3.33.92
  _clutter_event_get_platform_data@Base 3.33.92
  _clutter_event_process_filters@Base 3.33.92
@@ -2111,8 +2111,8 @@ libmutter-clutter-6.so.0 libmutter-6-0 #MINVER#
  clutter_zoom_action_new@Base 3.29.4
  clutter_zoom_action_set_zoom_axis@Base 3.29.4
  clutter_zoom_axis_get_type@Base 3.29.4
-libmutter-cogl-6.so.0 libmutter-6-0 #MINVER#
-* Build-Depends-Package: libmutter-6-dev
+libmutter-cogl-7.so.0 libmutter-7-0 #MINVER#
+* Build-Depends-Package: libmutter-7-dev
  _cogl_atlas_add_reorganize_callback@Base 3.29.4
  _cogl_atlas_new@Base 3.29.4
  _cogl_atlas_reserve_space@Base 3.29.4
@@ -2692,8 +2692,8 @@ libmutter-cogl-6.so.0 libmutter-6-0 #MINVER#
  unit_test_check_pipeline_pruning@Base 3.33.4
  unit_test_check_point_size_shader@Base 3.33.4
  unit_test_check_uniform_ancestry@Base 3.33.4
-libmutter-cogl-pango-6.so.0 libmutter-6-0 #MINVER#
-* Build-Depends-Package: libmutter-6-dev
+libmutter-cogl-pango-7.so.0 libmutter-7-0 #MINVER#
+* Build-Depends-Package: libmutter-7-dev
  cogl_pango_ensure_glyph_cache_for_layout@Base 3.29.4
  cogl_pango_font_map_clear_glyph_cache@Base 3.29.4
  cogl_pango_font_map_create_context@Base 3.29.4
@@ -2709,8 +2709,8 @@ libmutter-cogl-pango-6.so.0 libmutter-6-0 #MINVER#
  cogl_pango_renderer_get_type@Base 3.29.4
  cogl_pango_show_layout@Base 3.29.4
  cogl_pango_show_layout_line@Base 3.29.4
-libmutter-cogl-path-6.so.0 libmutter-6-0 #MINVER#
-* Build-Depends-Package: libmutter-6-dev
+libmutter-cogl-path-7.so.0 libmutter-7-0 #MINVER#
+* Build-Depends-Package: libmutter-7-dev
  cogl2_path_arc@Base 3.29.4
  cogl2_path_close@Base 3.29.4
  cogl2_path_curve_to@Base 3.29.4
