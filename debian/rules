@@ -19,9 +19,7 @@ export MUTTER_SONAME
 ifeq ($(DEB_HOST_ARCH_OS),linux)
 CONFFLAGS = \
 	-Degl_device=true \
-	-Dwayland=true \
-	-Dwayland_eglstream=true \
-	-Dnative_backend=true
+	-Dwayland_eglstream=true
 else
 CONFFLAGS += \
 	-Dudev=false \
@@ -53,10 +51,6 @@ endif
 
 override_dh_auto_configure:
 	dh_auto_configure -- \
-		-Dstartup_notification=true \
-		-Degl=true \
-		-Dgles2=true \
-		-Dgles2_libname=libGLESv2.so.2 \
 		-Dinstalled_tests=false \
 		-Dprofiler=false \
 		$(CONFFLAGS)
