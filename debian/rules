@@ -66,11 +66,6 @@ TEST_COMMAND_BASE=env \
 TEST_COMMAND=$(TEST_COMMAND_BASE) --no-suite flaky
 TEST_COMMAND_FLAKY=$(TEST_COMMAND_BASE) --suite flaky
 
-ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
-  NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
-  TEST_COMMAND += --num-processes $(NUMJOBS)
-endif
-
 # Ignore test failures on hurd, kfreebsd and s390x. Although the test results
 # indicate there may be a serious issue, the port maintainers may
 # prefer we do the build anyway. I plan to file a bug for this later.
