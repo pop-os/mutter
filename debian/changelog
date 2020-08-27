@@ -1,4 +1,4 @@
-mutter (3.37.91-1ubuntu1) UNRELEASED; urgency=medium
+mutter (3.37.91-1ubuntu1) groovy; urgency=medium
 
   * Merge with debian, including new upstream stable release, remaining changes:
     - debian/gbp.conf: update upstream branch to point to ubuntu/master
@@ -7,7 +7,7 @@ mutter (3.37.91-1ubuntu1) UNRELEASED; urgency=medium
   * d/p/x11-Add-support-for-fractional-scaling-using-Randr.patch:
     - Refresh as per upstream changes
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Thu, 27 Aug 2020 19:35:43 +0200
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 28 Aug 2020 01:10:32 +0200
 
 mutter (3.37.91-1) experimental; urgency=medium
 
