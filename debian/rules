@@ -65,14 +65,14 @@ TEST_COMMAND_BASE=env \
 TEST_COMMAND=$(TEST_COMMAND_BASE) --no-suite flaky
 TEST_COMMAND_FLAKY=$(TEST_COMMAND_BASE) --suite flaky
 
-# Ignore test failures on hurd, kfreebsd and s390x. Although the test results
+# Ignore test failures on hurd and kfreebsd. Although the test results
 # indicate there may be a serious issue, the port maintainers may
 # prefer we do the build anyway. I plan to file a bug for this later.
 # Don't run the tests on mips since they either time out or fail too much,
 # blocking migration to testing
 override_dh_auto_test:
 	glib-compile-schemas $(BUILDDIR)/data
-ifneq (,$(filter hurd-i386 kfreebsd-i386 kfreebsd-amd64 riscv64 s390x,$(DEB_HOST_ARCH)))
+ifneq (,$(filter hurd-i386 kfreebsd-i386 kfreebsd-amd64 riscv64,$(DEB_HOST_ARCH)))
 	-$(TEST_COMMAND)
 	-$(TEST_COMMAND_FLAKY)
 else ifeq (,$(filter mips mips64el mipsel,$(DEB_HOST_ARCH)))
