@@ -93,10 +93,12 @@ _cogl_onscreen_init_from_template (CoglOnscreen *onscreen,
 CoglOnscreen *
 _cogl_onscreen_new (void)
 {
-  CoglOnscreen *onscreen = g_new0 (CoglOnscreen, 1);
+  g_autofree CoglOnscreen *onscreen_ptr = g_new0 (CoglOnscreen, 1);
+  CoglOnscreen *onscreen;
 
   _COGL_GET_CONTEXT (ctx, NULL);
 
+  onscreen = g_steal_pointer (&onscreen_ptr);
   _cogl_framebuffer_init (COGL_FRAMEBUFFER (onscreen),
                           ctx,
                           COGL_FRAMEBUFFER_TYPE_ONSCREEN,
@@ -291,15 +293,14 @@ _cogl_onscreen_queue_event (CoglOnscreen *onscreen,
 void
 cogl_onscreen_swap_buffers_with_damage (CoglOnscreen *onscreen,
                                         const int *rectangles,
-                                        int n_rectangles)
+                                        int n_rectangles,
+                                        CoglFrameInfo *info)
 {
   CoglFramebuffer *framebuffer = COGL_FRAMEBUFFER (onscreen);
   const CoglWinsysVtable *winsys;
-  CoglFrameInfo *info;
 
   g_return_if_fail  (framebuffer->type == COGL_FRAMEBUFFER_TYPE_ONSCREEN);
 
-  info = _cogl_frame_info_new ();
   info->frame_counter = onscreen->frame_counter;
   g_queue_push_tail (&onscreen->pending_frame_infos, info);
 
@@ -308,7 +309,8 @@ cogl_onscreen_swap_buffers_with_damage (CoglOnscreen *onscreen,
 
   winsys = _cogl_framebuffer_get_winsys (framebuffer);
   winsys->onscreen_swap_buffers_with_damage (onscreen,
-                                             rectangles, n_rectangles);
+                                             rectangles, n_rectangles,
+                                             info);
   cogl_framebuffer_discard_buffers (framebuffer,
                                     COGL_BUFFER_BIT_COLOR |
                                     COGL_BUFFER_BIT_DEPTH |
@@ -332,23 +334,23 @@ cogl_onscreen_swap_buffers_with_damage (CoglOnscreen *onscreen,
 }
 
 void
-cogl_onscreen_swap_buffers (CoglOnscreen *onscreen)
+cogl_onscreen_swap_buffers (CoglOnscreen  *onscreen,
+                            CoglFrameInfo *info)
 {
-  cogl_onscreen_swap_buffers_with_damage (onscreen, NULL, 0);
+  cogl_onscreen_swap_buffers_with_damage (onscreen, NULL, 0, info);
 }
 
 void
 cogl_onscreen_swap_region (CoglOnscreen *onscreen,
                            const int *rectangles,
-                           int n_rectangles)
+                           int n_rectangles,
+                           CoglFrameInfo *info)
 {
   CoglFramebuffer *framebuffer = COGL_FRAMEBUFFER (onscreen);
   const CoglWinsysVtable *winsys;
-  CoglFrameInfo *info;
 
   g_return_if_fail  (framebuffer->type == COGL_FRAMEBUFFER_TYPE_ONSCREEN);
 
-  info = _cogl_frame_info_new ();
   info->frame_counter = onscreen->frame_counter;
   g_queue_push_tail (&onscreen->pending_frame_infos, info);
 
@@ -363,7 +365,8 @@ cogl_onscreen_swap_region (CoglOnscreen *onscreen,
 
   winsys->onscreen_swap_region (COGL_ONSCREEN (framebuffer),
                                 rectangles,
-                                n_rectangles);
+                                n_rectangles,
+                                info);
 
   cogl_framebuffer_discard_buffers (framebuffer,
                                     COGL_BUFFER_BIT_COLOR |
@@ -401,6 +404,26 @@ cogl_onscreen_get_buffer_age (CoglOnscreen *onscreen)
     return 0;
 
   return winsys->onscreen_get_buffer_age (onscreen);
+}
+
+void
+cogl_onscreen_direct_scanout (CoglOnscreen  *onscreen,
+                              CoglScanout   *scanout,
+                              CoglFrameInfo *info)
+{
+  CoglFramebuffer *framebuffer = COGL_FRAMEBUFFER (onscreen);
+  const CoglWinsysVtable *winsys;
+
+  g_return_if_fail (framebuffer->type == COGL_FRAMEBUFFER_TYPE_ONSCREEN);
+  g_return_if_fail (_cogl_winsys_has_feature (COGL_WINSYS_FEATURE_SYNC_AND_COMPLETE_EVENT));
+
+  info->frame_counter = onscreen->frame_counter;
+  g_queue_push_tail (&onscreen->pending_frame_infos, info);
+
+  winsys = _cogl_framebuffer_get_winsys (framebuffer);
+  winsys->onscreen_direct_scanout (onscreen, scanout, info);
+
+  onscreen->frame_counter++;
 }
 
 #ifdef COGL_HAS_X11_SUPPORT
