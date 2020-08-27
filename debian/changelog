@@ -1,4 +1,4 @@
-mutter (3.37.91-1) UNRELEASED; urgency=medium
+mutter (3.37.91-1) experimental; urgency=medium
 
   * New upstream release
     - Support unredirecting fullscreen wayland surfaces
@@ -38,7 +38,7 @@ mutter (3.37.91-1) UNRELEASED; urgency=medium
   * debian/watch: Scan for all versions, not just the stable-branch
   * debian/*.install: Use dh variable substitution in install files
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Thu, 27 Aug 2020 17:01:39 +0200
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Thu, 27 Aug 2020 16:39:49 +0100
 
 mutter (3.36.5-1) unstable; urgency=medium
 
