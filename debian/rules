@@ -65,6 +65,7 @@ TEST_COMMAND_BASE=env \
 TEST_COMMAND=$(TEST_COMMAND_BASE) --no-suite flaky
 TEST_COMMAND_FLAKY=$(TEST_COMMAND_BASE) --suite flaky
 
+# Run all the tests, without ignoring any failure in amd64.
 # Ignore test failures on hurd and kfreebsd. Although the test results
 # indicate there may be a serious issue, the port maintainers may
 # prefer we do the build anyway. I plan to file a bug for this later.
@@ -72,7 +73,9 @@ TEST_COMMAND_FLAKY=$(TEST_COMMAND_BASE) --suite flaky
 # too much, blocking migration to testing
 override_dh_auto_test:
 	glib-compile-schemas $(BUILDDIR)/data
-ifneq (,$(filter hurd-i386 kfreebsd-i386 kfreebsd-amd64,$(DEB_HOST_ARCH)))
+ifeq ($(DEB_HOST_ARCH),amd64)
+	$(TEST_COMMAND_BASE)
+else ifneq (,$(filter hurd-i386 kfreebsd-i386 kfreebsd-amd64,$(DEB_HOST_ARCH)))
 	-$(TEST_COMMAND)
 	-$(TEST_COMMAND_FLAKY)
 else ifeq (,$(filter mips mips64el mipsel riscv64,$(DEB_HOST_ARCH)))
