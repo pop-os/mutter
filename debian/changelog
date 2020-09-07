@@ -14,8 +14,13 @@ mutter (3.37.92-1) UNRELEASED; urgency=medium
     - Improve mapping input devices to the most relevant output
     - Only enable auto-rotation in touch mode
     - Fix various crashes
+  * d/control.in: Update libgbm build-dependency
+  * d/copyright: Update
+  * d/control.in, d/rules: Enable Pipewire on Debian (but not Ubuntu).
+    Now that we have Pipewire 0.3 in experimental, we can enable
+    screencasting and remote desktop support.
 
- -- Simon McVittie <smcv@debian.org>  Mon, 07 Sep 2020 09:04:01 +0100
+ -- Simon McVittie <smcv@debian.org>  Mon, 07 Sep 2020 09:36:35 +0100
 
 mutter (3.37.91-1) experimental; urgency=medium
 
