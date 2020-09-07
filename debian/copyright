@@ -27,6 +27,7 @@ Copyright:
    1995-2000  GTK+ Team
    2002  Garrett LeSage
    2002  Gaute Lindkvist
+   2020  Georges Basile Stavracas Neto
    2001-2008  Havoc Pennington
    2001-2008  Havoc Pennington, Red Hat, Inc., and others
    2016  Hyungwon Hwang
@@ -91,7 +92,7 @@ Copyright:
    2002-2020  the mutter authors
    2003  Åsmund Skjæveland.
    (unspecified) Croatiann team
-License: GPL-2+ and LGPL-2+ and LGPL-2.1+ and Expat and NTP-BSD-variant and SGI-B-2.0
+License: GPL-2+ and GPL-3+ and LGPL-2+ and LGPL-2.1+ and Expat and NTP-BSD-variant and SGI-B-2.0
 
 Files:
  cogl/cogl/cogl-point-in-poly.c
@@ -131,6 +132,21 @@ Comment:
  On Debian systems, the complete text of the GNU General
  Public License version 2 can be found in
  /usr/share/common-licenses/GPL-2.
+
+License: GPL-3+
+ This program is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation; either version 3 of the License, or
+ (at your option) any later version.
+ .
+ This package is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+Comment:
+ On Debian systems, the complete text of the GNU General
+ Public License version 3 can be found in
+ /usr/share/common-licenses/GPL-3.
 
 License: LGPL-2+
  This library is free software; you can redistribute it and/or
