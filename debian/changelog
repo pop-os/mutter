@@ -1,5 +1,6 @@
-mutter (3.37.92-1) UNRELEASED; urgency=medium
+mutter (3.37.92-1) experimental; urgency=medium
 
+  * Team upload
   * New upstream release
     - Fix stale cursor positions in remote desktop sessions
     - xwayland: Add a setting to disable selected X extensions
@@ -19,8 +20,9 @@ mutter (3.37.92-1) UNRELEASED; urgency=medium
   * d/control.in, d/rules: Enable Pipewire on Debian (but not Ubuntu).
     Now that we have Pipewire 0.3 in experimental, we can enable
     screencasting and remote desktop support.
+  * debian/libmutter-7-0.symbols: Update
 
- -- Simon McVittie <smcv@debian.org>  Mon, 07 Sep 2020 09:36:35 +0100
+ -- Simon McVittie <smcv@debian.org>  Tue, 08 Sep 2020 15:50:11 +0100
 
 mutter (3.37.91-1) experimental; urgency=medium
 
