@@ -1,3 +1,21 @@
+mutter (3.38.0-1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge with debian, including new upstream stable release, remaining changes:
+    - debian/gbp.conf: update upstream branch to point to ubuntu/master
+    - debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+      + X11: Add support for fractional scaling using Randr
+  * d/p/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+    - Refresh as per upstream changes
+    - Don't update UI scale factor on xrandr-manager creation.
+      This would trigger settings initializations that are supposed to happen
+      after the clutter-x11 backend has been initialized, leading to saving
+      too early the cached font-dpi scaling, and then making clutter backend
+      to set a new (wrong) one. (LP: #1892440)
+  * d/p/clutter-backend-x11-Don-t-set-the-font-dpi-computed-on-X1.patch:
+    - Don't set the font-dpi on clutter-backend-x11 (LP: #1892440)
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 16 Sep 2020 13:53:54 +0200
+
 mutter (3.38.0-1) experimental; urgency=medium
 
   * New upstream release:
