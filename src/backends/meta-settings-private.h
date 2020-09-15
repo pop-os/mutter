@@ -35,7 +35,14 @@ typedef enum _MetaExperimentalFeature
   META_EXPERIMENTAL_FEATURE_KMS_MODIFIERS  = (1 << 1),
   META_EXPERIMENTAL_FEATURE_RT_SCHEDULER = (1 << 2),
   META_EXPERIMENTAL_FEATURE_AUTOSTART_XWAYLAND  = (1 << 3),
+  META_EXPERIMENTAL_FEATURE_DMA_BUF_SCREEN_SHARING = (1 << 4),
 } MetaExperimentalFeature;
+
+typedef enum _MetaXwaylandExtension
+{
+  META_XWAYLAND_EXTENSION_SECURITY = (1 << 0),
+  META_XWAYLAND_EXTENSION_XTEST = (1 << 1),
+} MetaXwaylandExtension;
 
 #define META_TYPE_SETTINGS (meta_settings_get_type ())
 G_DECLARE_FINAL_TYPE (MetaSettings, meta_settings,
@@ -68,5 +75,7 @@ void meta_settings_get_xwayland_grab_patterns (MetaSettings  *settings,
                                                GPtrArray    **deny_list_patterns);
 
 gboolean meta_settings_are_xwayland_grabs_allowed (MetaSettings *settings);
+
+int meta_settings_get_xwayland_disable_extensions (MetaSettings *settings);
 
 #endif /* META_SETTINGS_PRIVATE_H */

@@ -68,6 +68,9 @@ struct _MetaSettings
   gboolean xwayland_allow_grabs;
   GPtrArray *xwayland_grab_allow_list_patterns;
   GPtrArray *xwayland_grab_deny_list_patterns;
+
+  /* A bitmask of MetaXwaylandExtension enum */
+  int xwayland_disable_extensions;
 };
 
 G_DEFINE_TYPE (MetaSettings, meta_settings, G_TYPE_OBJECT)
@@ -270,6 +273,8 @@ experimental_features_handler (GVariant *features_variant,
         feature = META_EXPERIMENTAL_FEATURE_RT_SCHEDULER;
       else if (g_str_equal (feature_str, "autostart-xwayland"))
         feature = META_EXPERIMENTAL_FEATURE_AUTOSTART_XWAYLAND;
+      else if (g_str_equal (feature_str, "dma-buf-screen-sharing"))
+        feature = META_EXPERIMENTAL_FEATURE_DMA_BUF_SCREEN_SHARING;
 
       if (feature)
         g_message ("Enabling experimental feature '%s'", feature_str);
@@ -388,6 +393,14 @@ update_xwayland_allow_grabs (MetaSettings *settings)
 }
 
 static void
+update_xwayland_disable_extensions (MetaSettings *settings)
+{
+  settings->xwayland_disable_extensions =
+    g_settings_get_flags (settings->wayland_settings,
+                          "xwayland-disable-extension");
+}
+
+static void
 wayland_settings_changed (GSettings    *wayland_settings,
                           gchar        *key,
                           MetaSettings *settings)
@@ -400,6 +413,10 @@ wayland_settings_changed (GSettings    *wayland_settings,
   else if (g_str_equal (key, "xwayland-grab-access-rules"))
     {
       update_xwayland_grab_access_rules (settings);
+    }
+  else if (g_str_equal (key, "xwayland-disable-extension"))
+    {
+      update_xwayland_disable_extensions (settings);
     }
 }
 
@@ -416,6 +433,12 @@ gboolean
 meta_settings_are_xwayland_grabs_allowed (MetaSettings *settings)
 {
   return (settings->xwayland_allow_grabs);
+}
+
+int
+meta_settings_get_xwayland_disable_extensions (MetaSettings *settings)
+{
+  return (settings->xwayland_disable_extensions);
 }
 
 MetaSettings *
@@ -471,6 +494,7 @@ meta_settings_init (MetaSettings *settings)
   update_experimental_features (settings);
   update_xwayland_grab_access_rules (settings);
   update_xwayland_allow_grabs (settings);
+  update_xwayland_disable_extensions (settings);
 }
 
 static void
