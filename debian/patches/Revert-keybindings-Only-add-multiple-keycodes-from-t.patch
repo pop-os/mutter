@@ -1,0 +1,29 @@
+From 94d1cb7815056065c6fe157f084355225c593525 Mon Sep 17 00:00:00 2001
+From: Ian Douglas Scott <idscott@system76.com>
+Date: Wed, 16 Sep 2020 15:10:37 -0700
+Subject: [PATCH] Revert "keybindings: Only add multiple keycodes from the same
+ level"
+
+This reverts commit 44269e6a1dadb643af3a748c2bcca04ac1ab72eb.
+---
+ src/core/keybindings.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/src/core/keybindings.c b/src/core/keybindings.c
+index 957c77a8f..51a48007b 100644
+--- a/src/core/keybindings.c
++++ b/src/core/keybindings.c
+@@ -359,9 +359,7 @@ add_keysym_keycodes_from_layout (int                           keysym,
+ {
+   xkb_level_index_t layout_level;
+ 
+-  for (layout_level = 0;
+-       layout_level < layout->n_levels && keycodes->len == 0;
+-       layout_level++)
++  for (layout_level = 0; layout_level < layout->n_levels; layout_level++)
+     {
+       FindKeysymData search_data = (FindKeysymData) {
+         .keycodes = keycodes,
+-- 
+2.25.1
+
