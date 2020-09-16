@@ -1,4 +1,4 @@
-mutter (3.38.0-1ubuntu1) UNRELEASED; urgency=medium
+mutter (3.38.0-1ubuntu1) groovy; urgency=medium
 
   * Merge with debian, including new upstream stable release, remaining changes:
     - debian/gbp.conf: update upstream branch to point to ubuntu/master
@@ -14,7 +14,7 @@ mutter (3.38.0-1ubuntu1) UNRELEASED; urgency=medium
   * d/p/clutter-backend-x11-Don-t-set-the-font-dpi-computed-on-X1.patch:
     - Don't set the font-dpi on clutter-backend-x11 (LP: #1892440)
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 16 Sep 2020 13:53:54 +0200
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 16 Sep 2020 14:06:53 +0200
 
 mutter (3.38.0-1) experimental; urgency=medium
 
