@@ -4,3 +4,4 @@ meson-add-back-default_driver-option.patch
 x11-Add-support-for-fractional-scaling-using-Randr.patch
 debian/synaptics-support.patch
 debian/tests-Tag-unstable-tests-as-flaky.patch
+clutter-backend-x11-Don-t-set-the-font-dpi-computed-on-X1.patch
