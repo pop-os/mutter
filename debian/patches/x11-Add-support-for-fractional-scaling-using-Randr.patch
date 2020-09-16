@@ -29,16 +29,16 @@ Forwarded: No, forwarding is in progress and planned though
  src/backends/x11/meta-crtc-xrandr.h            |  14 +-
  src/backends/x11/meta-gpu-xrandr.c             | 112 ++++-
  src/backends/x11/meta-gpu-xrandr.h             |   4 +
- src/backends/x11/meta-monitor-manager-xrandr.c | 592 +++++++++++++++++++------
+ src/backends/x11/meta-monitor-manager-xrandr.c | 588 +++++++++++++++++++------
  src/backends/x11/meta-monitor-manager-xrandr.h |   4 +-
  src/backends/x11/meta-output-xrandr.c          |   3 +-
- src/compositor/meta-compositor-x11.c           |  98 +++-
+ src/compositor/meta-compositor-x11.c           |  98 ++++-
  src/core/boxes-private.h                       |   4 +
  src/core/boxes.c                               |  21 +
  src/core/window.c                              |  19 +
  src/org.gnome.Mutter.DisplayConfig.xml         |   5 +
  src/tests/meta-monitor-manager-test.c          |  13 +-
- 30 files changed, 1843 insertions(+), 271 deletions(-)
+ 30 files changed, 1839 insertions(+), 271 deletions(-)
  create mode 100644 data/org.gnome.mutter.x11.gschema.xml.in
 
 diff --git a/data/meson.build b/data/meson.build
@@ -2514,7 +2514,7 @@ index 2086f86..a1f3b48 100644
                                            int           *max_width,
                                            int           *max_height);
 diff --git a/src/backends/x11/meta-monitor-manager-xrandr.c b/src/backends/x11/meta-monitor-manager-xrandr.c
-index 946a221..4db5796 100644
+index 946a221..9e048e4 100644
 --- a/src/backends/x11/meta-monitor-manager-xrandr.c
 +++ b/src/backends/x11/meta-monitor-manager-xrandr.c
 @@ -35,6 +35,7 @@
@@ -3016,12 +3016,12 @@ index 946a221..4db5796 100644
 +      const MetaCrtcConfig *crtc_config;
 +      const graphene_rect_t *crtc_layout;
 +      float scale = 1.0f;
++
++      if (!crtc)
++        continue;
  
 -  g_clear_pointer (&manager_xrandr->supported_scales, g_free);
 -  meta_monitor_manager_rebuild_derived (manager, config);
-+      if (!crtc)
-+        continue;
-+
 +      crtc_config = meta_crtc_get_config (crtc);
 +
 +      if (!crtc_config)
@@ -3181,19 +3181,16 @@ index 946a221..4db5796 100644
 +get_scale_constraints (MetaMonitorManager *manager)
  {
 -  unsigned int i;
--
++  MetaMonitorScalesConstraint constraints = 0;
+ 
 -  for (i = 0; i < supported_scales->len; i++)
 -    {
 -      float supported_scale = g_array_index (supported_scales, float, i);
-+  MetaMonitorScalesConstraint constraints = 0;
- 
+-
 -      if (scale == supported_scale)
 -        return;
 -    }
-+  if (meta_monitor_manager_get_capabilities (manager) &
-+      META_MONITOR_MANAGER_CAPABILITY_GLOBAL_SCALE_REQUIRED)
-+    constraints |= META_MONITOR_SCALES_CONSTRAINT_NO_FRAC;
- 
+-
 -  g_array_append_val (supported_scales, scale);
 -}
 -
@@ -3202,7 +3199,10 @@ index 946a221..4db5796 100644
 -                gconstpointer b)
 -{
 -  float f = *(float *) a - *(float *) b;
--
++  if (meta_monitor_manager_get_capabilities (manager) &
++      META_MONITOR_MANAGER_CAPABILITY_GLOBAL_SCALE_REQUIRED)
++    constraints |= META_MONITOR_SCALES_CONSTRAINT_NO_FRAC;
+ 
 -  if (f < 0)
 -    return -1;
 -  if (f > 0)
@@ -3358,7 +3358,7 @@ index 946a221..4db5796 100644
  
    manager_xrandr->xdisplay = meta_backend_x11_get_xdisplay (backend_x11);
  
-@@ -1022,19 +1350,23 @@ meta_monitor_manager_xrandr_constructed (GObject *object)
+@@ -1022,19 +1350,19 @@ meta_monitor_manager_xrandr_constructed (GObject *object)
  		      | RRCrtcChangeNotifyMask
  		      | RROutputPropertyNotifyMask);
  
@@ -3380,17 +3380,13 @@ index 946a221..4db5796 100644
        meta_monitor_manager_xrandr_init_monitors (manager_xrandr);
      }
  
-+  if (meta_monitor_manager_get_capabilities (manager) &
-+      META_MONITOR_MANAGER_CAPABILITY_NATIVE_OUTPUT_SCALING)
-+    meta_settings_update_ui_scaling_factor (settings);
-+
 +  g_signal_connect_object (settings, "x11-scale-mode-changed",
 +                           G_CALLBACK (scale_mode_changed), manager_xrandr, 0);
 +
    G_OBJECT_CLASS (meta_monitor_manager_xrandr_parent_class)->constructed (object);
  }
  
-@@ -1044,7 +1376,6 @@ meta_monitor_manager_xrandr_finalize (GObject *object)
+@@ -1044,7 +1372,6 @@ meta_monitor_manager_xrandr_finalize (GObject *object)
    MetaMonitorManagerXrandr *manager_xrandr = META_MONITOR_MANAGER_XRANDR (object);
  
    g_hash_table_destroy (manager_xrandr->tiled_monitor_atoms);
@@ -3398,7 +3394,7 @@ index 946a221..4db5796 100644
  
    G_OBJECT_CLASS (meta_monitor_manager_xrandr_parent_class)->finalize (object);
  }
-@@ -1067,6 +1398,7 @@ meta_monitor_manager_xrandr_class_init (MetaMonitorManagerXrandrClass *klass)
+@@ -1067,6 +1394,7 @@ meta_monitor_manager_xrandr_class_init (MetaMonitorManagerXrandrClass *klass)
    manager_class->read_current_state = meta_monitor_manager_xrandr_read_current_state;
    manager_class->ensure_initial_config = meta_monitor_manager_xrandr_ensure_initial_config;
    manager_class->apply_monitors_config = meta_monitor_manager_xrandr_apply_monitors_config;
@@ -3406,7 +3402,7 @@ index 946a221..4db5796 100644
    manager_class->set_power_save_mode = meta_monitor_manager_xrandr_set_power_save_mode;
    manager_class->change_backlight = meta_monitor_manager_xrandr_change_backlight;
    manager_class->get_crtc_gamma = meta_monitor_manager_xrandr_get_crtc_gamma;
-@@ -1128,7 +1460,7 @@ meta_monitor_manager_xrandr_handle_xevent (MetaMonitorManagerXrandr *manager_xra
+@@ -1128,7 +1456,7 @@ meta_monitor_manager_xrandr_handle_xevent (MetaMonitorManagerXrandr *manager_xra
            config = NULL;
          }
  
