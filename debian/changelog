@@ -1,3 +1,52 @@
+mutter (3.36.6-1) unstable; urgency=medium
+
+  * Team upload
+  * New upstream release
+  * Update symbols file
+  * d/control.in, d/rules: Enable Pipewire on Debian (but not Ubuntu).
+    Now that we have Pipewire 0.3, we can enable screencasting and remote
+    desktop support again.
+
+ -- Simon McVittie <smcv@debian.org>  Thu, 10 Sep 2020 12:46:31 +0100
+
+mutter (3.36.5-1) unstable; urgency=medium
+
+  * Team upload
+  * New upstream release
+    - Screencast fixes and improvements
+    - Fix glitches when subsurfaces extend outside the toplevel
+    - Improve background display in overview workspace switcher
+    - Fix wine copy & paste
+    - Plug memory leaks
+  * Drop patches that were applied upstream
+
+ -- Simon McVittie <smcv@debian.org>  Thu, 13 Aug 2020 10:19:59 +0100
+
+mutter (3.36.4-1) unstable; urgency=medium
+
+  * New upstream stable release (LP: #1887998)
+    - Fix crash on area screenshots with fractional scaling
+    - Do not paint textures of fully obscured windows
+    - Turn off CRTCs as well when enabling DPMS
+    - Improve selection support
+    - Use a more appropriate combine function on opaque areas
+    - Fix remote desktop being broken without screencast session
+    - Fix popovers disappearing on wayland and HiDPI
+    - Fixed crashes (LP: #1870867, LP: #1857947)
+    - Plugged memory leaks
+  * d/p/screen-cast-Let-the-reason-for-recording-determine-what-t.patch,
+    d/p/screen-cast-src-Add-flag-to-maybe_record.patch,
+    d/p/screen-cast-src-Fix-signedness-of-timestamp-field.patch,
+    d/p/screen-cast-src-Make-record-functions-return-an-error-whe.patch,
+    d/p/screen-cast-src-Make-the-two-record-vfuncs-more-similarly.patch,
+    d/p/screen-cast-src-Record-follow-up-frame-after-timeout.patch,
+    d/p/screen-cast-src-Remove-follow-up-timeout-source-on-disabl.patch,
+    d/p/screen-cast-src-Use-G_USEC_PER_SEC-instead-of-1000000.patch,
+    d/p/screen-cast-window-stream-src-Fix-indentation.patch:
+    - Import more fixes for screencasting and remote desktop
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 17 Jul 2020 21:12:56 +0200
+
 mutter (3.36.4-0ubuntu0.20.04.2) focal; urgency=medium
 
   * xrandr-scaling: Never try to set invalid screen sizes (LP: #1889090)
@@ -33,6 +82,18 @@ mutter (3.36.4-0ubuntu0.20.04.1) focal; urgency=medium
 
  -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Mon, 20 Jul 2020 16:16:36 +0200
 
+mutter (3.36.3-1) unstable; urgency=medium
+
+  * New upstream release (LP: #1881971)
+   - Broadcast clipboard/primary offers
+   - Fix monitor screen cast on X11
+   - Implement touch-mode detecation for the X11 backend (LP: #1880596)
+   - Drop external keyboard detection from touch-mode heuristics
+   - Fix leaked DMA buffers in screencasts
+   - Fixed crashes
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 03 Jun 2020 23:33:29 +0200
+
 mutter (3.36.3-0ubuntu0.20.04.2) focal; urgency=medium
 
   * debian/control:
@@ -65,6 +126,41 @@ mutter (3.36.3-0ubuntu0.20.04.1) focal; urgency=medium
     - Dropped (merged upstream)
 
  -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 05 Jun 2020 19:29:32 +0200
+
+mutter (3.36.2+12+gb425f1153-1) experimental; urgency=medium
+
+  * Team upload
+  * New upstream snapshot from the gnome-3-36 branch
+  * d/p/backend-x11-Reintroduce-XInitThreads.patch:
+    Drop patch, applied upstream
+
+ -- Simon McVittie <smcv@debian.org>  Sat, 30 May 2020 15:12:09 +0100
+
+mutter (3.36.2-3) unstable; urgency=medium
+
+  [ Simon McVittie ]
+  * d/rules, d/with-temp-xdg-runtime-dir: Create temporary XDG_RUNTIME_DIR
+    debhelper 13.1 creates a temporary XDG_RUNTIME_DIR so we don't have to.
+    Unfortunately, its absolute path is sufficiently long that the path to
+    Mutter's Wayland display socket no longer fits in the 108 bytes allowed
+    by struct sockaddr_un, causing FTBFS when the tests fail. Until this is
+    fixed, we'll have to create our own XDG_RUNTIME_DIR with a shorter
+    absolute path.
+    Wrapping with-temp-xdg-runtime-dir around dh_auto_test doesn't work,
+    because dh_auto_test will reset XDG_RUNTIME_DIR, so use
+    meson test --wrapper to wrap with-temp-xdg-runtime-dir around the
+    individual tests.
+    (Works around: #961655)
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 27 May 2020 13:54:19 +0200
+
+mutter (3.36.2-2) unstable; urgency=medium
+
+  [ Daniel van Vugt ]
+  * d/p/backend-x11-Reintroduce-XInitThreads.patch:
+    Fix a very common crash when running in X11 (LP: #1877075)
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 26 May 2020 21:41:05 +0200
 
 mutter (3.36.2-1ubuntu1~20.04.2) focal; urgency=medium
 
