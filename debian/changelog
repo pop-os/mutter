@@ -1,3 +1,25 @@
+mutter (3.36.6-1ubuntu0.20.04.1) UNRELEASED; urgency=medium
+
+  * Merge with debian, containing new stable release (LP: #1896332)
+  * debian/patches:
+    - Refresh patches and drop applied ones
+    - Don't set the font-dpi on clutter-backend-x11 (LP: #1892440)
+    - Cherry-pick upstream night-switch fixes for 3.36 branch
+    - Cherry-pick upstream fixes for handling X11 devices removal
+      (LP: #1558886)
+  * xrandr-scaling: Don't update UI scale factor on xrandr-manager creation
+    (LP: #1892440)
+  * debian/control: Revert pipewire version bumping
+  * Remaining changes with debian:
+    - debian/control:
+      + Update VCS flags to point to ubuntu salsa branch
+    - debian/gbp.conf: update branch to point to ubuntu/master
+    - debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+      + X11: Add support for fractional scaling using Randr
+
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Sat, 19 Sep 2020 16:28:48 +0200
+
 mutter (3.36.6-1) unstable; urgency=medium
 
   * Team upload
