@@ -1,3 +1,12 @@
+mutter (3.38.0-2) UNRELEASED; urgency=medium
+
+  * d/rules: Ignore test failures in flaky tests on all architectures.
+    Upstream presumably marked them as flaky for a reason, and they do
+    fail on amd64 when under load.
+  * Revert "debian/watch: Watch unstable versions"
+
+ -- Simon McVittie <smcv@debian.org>  Fri, 25 Sep 2020 10:52:40 +0100
+
 mutter (3.38.0-1) experimental; urgency=medium
 
   * New upstream release:
