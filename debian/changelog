@@ -14,8 +14,11 @@ mutter (3.38.1-1) UNRELEASED; urgency=medium
     - Fix using correct refresh rate under X11 (LP: #1898645)
     - Misc. bug fixes and cleanups
     - Plugged memory leaks
+  * debian/patches: Refresh as per upstream changes
+  * debian/mutter-common.install: Include mutter udev rules
+  * debian/control: Add udev build-dependency
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Sat, 10 Oct 2020 21:54:03 +0200
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Sun, 11 Oct 2020 01:33:57 +0200
 
 mutter (3.38.0-2) unstable; urgency=medium
 
