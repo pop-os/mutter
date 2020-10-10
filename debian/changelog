@@ -1,3 +1,36 @@
+mutter (3.38.1-1) unstable; urgency=medium
+
+  * New upstream release:
+    - Fix Night Light updates after DPMS (LP: #1894596)
+    - Fix button scrolling on X11
+    - Always use correct font-dpi setting on X11
+    - Improve handling of scanout failures
+    - Fix middle/right button mixup in scroll button assignment
+    - Fix resizing of attached modal dialogs on wayland
+    - Enable KMS modifiers on devices that need them
+    - Fix IM handling on X11
+    - Fix glitches in "undefined" screencast areas
+    - Fix visual glitches on background with fractional scaling (LP: #1898080)
+    - Fix using correct refresh rate under X11 (LP: #1898645)
+    - Misc. bug fixes and cleanups
+    - Plugged memory leaks
+  * debian/patches: Refresh as per upstream changes
+  * debian/mutter-common.install: Include mutter udev rules
+  * debian/control: Add udev build-dependency
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Sun, 11 Oct 2020 01:43:05 +0200
+
+mutter (3.38.0-2) unstable; urgency=medium
+
+  * Team upload
+  * Release to unstable (starts transition: #969321)
+  * d/rules: Ignore test failures in flaky tests on all architectures.
+    Upstream presumably marked them as flaky for a reason, and they do
+    fail on amd64 when under load.
+  * Revert "debian/watch: Watch unstable versions"
+
+ -- Simon McVittie <smcv@debian.org>  Fri, 25 Sep 2020 10:53:27 +0100
+
 mutter (3.38.0-1ubuntu1) groovy; urgency=medium
 
   * Merge with debian, including new upstream stable release, remaining changes:
@@ -113,6 +146,17 @@ mutter (3.37.91-1) experimental; urgency=medium
   * debian/*.install: Use dh variable substitution in install files
 
  -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Thu, 27 Aug 2020 16:39:49 +0100
+
+mutter (3.36.6-1) unstable; urgency=medium
+
+  * Team upload
+  * New upstream release
+  * Update symbols file
+  * d/control.in, d/rules: Enable Pipewire on Debian (but not Ubuntu).
+    Now that we have Pipewire 0.3, we can enable screencasting and remote
+    desktop support again.
+
+ -- Simon McVittie <smcv@debian.org>  Thu, 10 Sep 2020 12:46:31 +0100
 
 mutter (3.36.5-1) unstable; urgency=medium
 
