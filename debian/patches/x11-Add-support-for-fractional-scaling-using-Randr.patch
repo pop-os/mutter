@@ -42,7 +42,7 @@ Forwarded: No, forwarding is in progress and planned though
  create mode 100644 data/org.gnome.mutter.x11.gschema.xml.in
 
 diff --git a/data/meson.build b/data/meson.build
-index 3ac94cf..730258b 100644
+index bf5c409..f1d7866 100644
 --- a/data/meson.build
 +++ b/data/meson.build
 @@ -55,6 +55,13 @@ configure_file(
