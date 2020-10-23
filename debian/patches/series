@@ -6,3 +6,4 @@ debian/tests-Tag-unstable-tests-as-flaky.patch
 x11-Add-support-for-fractional-scaling-using-Randr.patch
 Revert-wayland-Drop-Xwayland-abstract-socket.patch
 wayland-start-Xwayland-on-connection-to-either-public-X11.patch
+window-Don-t-override-tile-monitor.patch
