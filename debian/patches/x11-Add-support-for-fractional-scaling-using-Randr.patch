@@ -3643,7 +3643,7 @@ index 37d04bb..93a2b6b 100644
  void
  meta_rectangle_clamp_to_fit_into_region (const GList         *spanning_rects,
 diff --git a/src/core/window.c b/src/core/window.c
-index 681805c..c632d8f 100644
+index 71295c5..1fb3a17 100644
 --- a/src/core/window.c
 +++ b/src/core/window.c
 @@ -227,6 +227,7 @@ enum
