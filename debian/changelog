@@ -1,11 +1,11 @@
-mutter (3.38.1-2ubuntu1) UNRELEASED; urgency=medium
+mutter (3.38.1-2ubuntu1) groovy; urgency=medium
 
   * Merge with debian, including various upstream fixes. Remaining changes:
     - debian/gbp.conf: update upstream branch to point to ubuntu/master
     - debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
       + X11: Add support for fractional scaling using Randr
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 23 Oct 2020 12:41:57 +0200
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 23 Oct 2020 12:43:24 +0200
 
 mutter (3.38.1-2) unstable; urgency=medium
 
