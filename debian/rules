@@ -29,7 +29,7 @@ CONFFLAGS += \
 	-Dwayland=false \
 	-Dcore_tests=false \
 	-Dnative_backend=false \
-	-Dremote_desktop=false
+	-Dremote_desktop=true
 endif
 
 ifeq ($(DEB_HOST_ARCH),$(findstring $(DEB_HOST_ARCH),armel armhf))
@@ -38,15 +38,6 @@ CONFFLAGS += \
 else
 CONFFLAGS += \
 	-Ddefault_driver=gl
-endif
-
-# pipewire is not in Ubuntu main yet
-ifeq ($(DEB_HOST_ARCH_OS),linux)
-ifeq ($(shell dpkg-vendor --query vendor),Ubuntu)
-	CONFFLAGS += -Dremote_desktop=false
-else
-	CONFFLAGS += -Dremote_desktop=true
-endif
 endif
 
 override_dh_auto_configure:
