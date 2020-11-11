@@ -3435,7 +3435,7 @@ index 3a85cb7..ef0a88a 100644
        output_info->height_mm = xrandr_output->mm_height;
      }
  
--  if (!meta_monitor_manager_xrandr_has_randr15 (monitor_manager_xrandr))
+-  if (meta_monitor_manager_xrandr_has_randr15 (monitor_manager_xrandr))
 +  if ((meta_monitor_manager_get_capabilities (monitor_manager) &
 +        META_MONITOR_MANAGER_CAPABILITY_TILING))
      output_info_init_tile_info (output_info, xdisplay, output_id);
@@ -3458,7 +3458,7 @@ index fcd292a..039ca5f 100644
  
    MetaWindow *unredirected_window;
 +  gboolean randr_scale_disabled;
- };
+ 
  
  G_DEFINE_TYPE (MetaCompositorX11, meta_compositor_x11, META_TYPE_COMPOSITOR)
 @@ -234,20 +236,91 @@ shape_cow_for_window (MetaCompositorX11 *compositor_x11,
