@@ -31,6 +31,7 @@ clutter-event-Do-not-filter-out-DEVICE_ADDED-REMOVED-even.patch
 backends-x11-Emit-CLUTTER_DEVICE_ADDED-events-for-initial.patch
 window-wayland-Warn-when-attempted-to-resend-uninitialize.patch
 wayland-xdg-shell-Imitate-undefined-behavior-Qt-relies-up.patch
+backend-Don-t-pull-generated-headers-indirectly.patch
 theme-use-gtk_render_icon_suface-to-paint-button-icon.patch
 theme-load-icons-as-Gtk-does-with-fallback-and-RTL-suppor.patch
 meson-add-back-default_driver-option.patch
