@@ -1,3 +1,13 @@
+mutter (3.36.6-1ubuntu0.20.04.3) UNRELEASED; urgency=medium
+
+  [ Gunnar Hjalmarsson ]
+  * d/p/Fixes-for-devices-not-picking-config-in-X11-session.patch:
+    - Cherry picked upstream commits which make configuration be picked
+      up reliably in X sessions also by external devices such as
+      keyboards and mouses (LP: #1899206, LP: #1899509)
+
+ -- Gunnar Hjalmarsson <gunnarhj@ubuntu.com>  Thu, 12 Nov 2020 13:07:00 +0100
+
 mutter (3.36.6-1ubuntu0.20.04.2) focal; urgency=medium
 
   * xrandr-scaling: Never try to set invalid screen sizes (again!)

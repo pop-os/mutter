@@ -13,3 +13,4 @@ clutter-event-Add-device-added-removed-events.patch
 clutter-seat-Handle-device-events-and-emit-signals.patch
 seat-x11-Translate-device-enabled-disabled-into-clutter-e.patch
 seat-native-Process-device-added-removed-events-as-Clutte.patch
+Fixes-for-devices-not-picking-config-in-X11-session.patch
