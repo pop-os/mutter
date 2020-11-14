@@ -1,5 +1,5 @@
 Description: Fixes for devices not picking config in X11 session
-Bug-Ubuntu: https://launchpad.net/bugs/1899206, https://launchpad.net/bugs/1899509
+Bug-Ubuntu: https://launchpad.net/bugs/1899206
 Origin:
  * https://gitlab.gnome.org/GNOME/mutter/-/commit/41434d54
  * https://gitlab.gnome.org/GNOME/mutter/-/commit/1f16a134
