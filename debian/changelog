@@ -20,7 +20,7 @@ mutter (3.38.1-4) experimental; urgency=medium
   * d/p/clutter-frame-clock-Schedule-a-frame-at-least-once-per-se.patch:
     Add proposed patch to ensure frame clock does not stop (Closes: #974172)
 
- -- Simon McVittie <smcv@debian.org>  Wed, 25 Nov 2020 10:18:18 +0000
+ -- Simon McVittie <smcv@debian.org>  Wed, 25 Nov 2020 10:23:36 +0000
 
 mutter (3.38.1-3) experimental; urgency=medium
 
