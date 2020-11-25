@@ -47,6 +47,7 @@ core-window-Move-size-hints-to-dedicated-function.patch
 window-Fix-size-hints-with-CSD.patch
 backends-native-Wait-to-have-an-stage-before-emitting-CLU.patch
 surface-actor-wayland-Optimize-get_current_primary_view-f.patch
+gschema-wayland-Do-not-disable-the-X-Security-extension.patch
 theme-use-gtk_render_icon_suface-to-paint-button-icon.patch
 theme-load-icons-as-Gtk-does-with-fallback-and-RTL-suppor.patch
 meson-add-back-default_driver-option.patch
