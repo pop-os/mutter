@@ -1,0 +1,69 @@
+From: Simon McVittie <smcv@debian.org>
+Date: Thu, 26 Nov 2020 11:54:48 +0000
+Subject: backends/native: Don't crash if keymap is misconfigured
+
+xkb recently gained support for user-specified keymaps, which means we
+can no longer assume that the configuration data is necessarily fully
+complete or correct; and the configuration language is quite a labyrinth,
+so it's easy to get wrong. If setting the keymap fails, leave it in
+whatever state it previously had, since that seems preferable to crashing
+with a NULL pointer dereference.
+
+Signed-off-by: Simon McVittie <smcv@debian.org>
+
+(cherry picked from commit 60f647df8ec5a74bddffcc3a20577a7efcef105c)
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1609>
+
+Bug: https://gitlab.gnome.org/GNOME/mutter/-/issues/1555
+Origin: upstream, 3.38.2, commit:4bb5ff39ae046c8aa578fa90016b7ad7f913df9d
+---
+ src/backends/native/meta-backend-native.c | 8 ++++++++
+ src/backends/native/meta-keymap-native.c  | 2 ++
+ src/backends/native/meta-seat-native.c    | 1 +
+ 3 files changed, 11 insertions(+)
+
+diff --git a/src/backends/native/meta-backend-native.c b/src/backends/native/meta-backend-native.c
+index ed795cc..1c890ce 100644
+--- a/src/backends/native/meta-backend-native.c
++++ b/src/backends/native/meta-backend-native.c
+@@ -485,6 +485,14 @@ meta_backend_native_set_keymap (MetaBackend *backend,
+   keymap = xkb_keymap_new_from_names (context, &names, XKB_KEYMAP_COMPILE_NO_FLAGS);
+   xkb_context_unref (context);
+ 
++  if (keymap == NULL)
++    {
++      g_warning ("Unable to load configured keymap: rules=%s, model=%s, layout=%s, variant=%s, options=%s",
++                 DEFAULT_XKB_RULES_FILE, DEFAULT_XKB_MODEL, layouts,
++                 variants, options);
++      return;
++    }
++
+   seat = clutter_backend_get_default_seat (clutter_backend);
+   meta_seat_native_set_keyboard_map (META_SEAT_NATIVE (seat), keymap);
+ 
+diff --git a/src/backends/native/meta-keymap-native.c b/src/backends/native/meta-keymap-native.c
+index f55cd05..3b0da0d 100644
+--- a/src/backends/native/meta-keymap-native.c
++++ b/src/backends/native/meta-keymap-native.c
+@@ -122,6 +122,8 @@ void
+ meta_keymap_native_set_keyboard_map (MetaKeymapNative  *keymap,
+                                      struct xkb_keymap *xkb_keymap)
+ {
++  g_return_if_fail (xkb_keymap != NULL);
++
+   if (keymap->keymap)
+     xkb_keymap_unref (keymap->keymap);
+   keymap->keymap = xkb_keymap_ref (xkb_keymap);
+diff --git a/src/backends/native/meta-seat-native.c b/src/backends/native/meta-seat-native.c
+index 9e3bd19..5fb0e8e 100644
+--- a/src/backends/native/meta-seat-native.c
++++ b/src/backends/native/meta-seat-native.c
+@@ -3161,6 +3161,7 @@ meta_seat_native_set_keyboard_map (MetaSeatNative    *seat,
+   ClutterKeymap *keymap;
+ 
+   g_return_if_fail (META_IS_SEAT_NATIVE (seat));
++  g_return_if_fail (xkb_keymap != NULL);
+ 
+   keymap = clutter_seat_get_keymap (CLUTTER_SEAT (seat));
+   meta_keymap_native_set_keyboard_map (META_KEYMAP_NATIVE (keymap),

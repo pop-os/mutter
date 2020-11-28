@@ -49,6 +49,11 @@ backends-native-Wait-to-have-an-stage-before-emitting-CLU.patch
 surface-actor-wayland-Optimize-get_current_primary_view-f.patch
 gschema-wayland-Do-not-disable-the-X-Security-extension.patch
 clutter-frame-clock-Schedule-a-frame-at-least-once-per-se.patch
+screen-cast-Fix-segfault-when-drawing-cursor.patch
+monitor-config-manager-Handle-multiple-builtin-panels-gra.patch
+backends-native-Don-t-crash-if-keymap-is-misconfigured.patch
+seat-native-Fix-has_touchscreen-becoming-FALSE-when-a-non.patch
+barrier-Complain-loudly-if-bogus-barriers-are-created.patch
 theme-use-gtk_render_icon_suface-to-paint-button-icon.patch
 theme-load-icons-as-Gtk-does-with-fallback-and-RTL-suppor.patch
 meson-add-back-default_driver-option.patch
