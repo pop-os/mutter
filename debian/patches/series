@@ -13,3 +13,5 @@ clutter-event-Add-device-added-removed-events.patch
 clutter-seat-Handle-device-events-and-emit-signals.patch
 seat-x11-Translate-device-enabled-disabled-into-clutter-e.patch
 seat-native-Process-device-added-removed-events-as-Clutte.patch
+0001-clutter-event-Do-not-filter-out-DEVICE_ADDED-REMOVED.patch
+0002-backends-x11-Emit-CLUTTER_DEVICE_ADDED-events-for-in.patch
