@@ -4,3 +4,4 @@ meson-add-back-default_driver-option.patch
 debian/synaptics-support.patch
 debian/tests-Tag-unstable-tests-as-flaky.patch
 x11-Add-support-for-fractional-scaling-using-Randr.patch
+cogl-winsys-glx-Add-a-heuristically-calculated-presentation-time.diff
