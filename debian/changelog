@@ -1,6 +1,6 @@
-mutter (3.36.7-0.20.04.1) UNRELEASED; urgency=medium
+mutter (3.36.7+git20201123-0.20.04.1) UNRELEASED; urgency=medium
 
-  * New upstream release (LP: #1903230):
+  * New upstream release and git snapshot (LP: #1903230)
     - Fix Night Light updates after DPMS
     - Fix IM handling on X11 (LP: #1899206, thanks to Gunnar Hjalmarsson for
       the initial cherry-pick)
@@ -10,7 +10,7 @@ mutter (3.36.7-0.20.04.1) UNRELEASED; urgency=medium
     - Plugged Memory leaks
     - Misc. bug fixes and cleanups
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 15 Dec 2020 03:42:31 +0100
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 15 Dec 2020 03:46:36 +0100
 
 mutter (3.36.6-1ubuntu0.20.04.2) focal; urgency=medium
 
