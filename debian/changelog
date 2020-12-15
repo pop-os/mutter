@@ -1,9 +1,9 @@
-mutter (3.38.2-1ubuntu1~20.10.1) UNRELEASED; urgency=medium
+mutter (3.38.2-1ubuntu1~20.10.1) groovy; urgency=medium
 
   * No-change backport to groovy
   * debian: Prepare gbp.conf and control references to groovy branching
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 15 Dec 2020 02:48:37 +0100
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 15 Dec 2020 02:50:32 +0100
 
 mutter (3.38.2-1ubuntu1) hirsute; urgency=medium
 
