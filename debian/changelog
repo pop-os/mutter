@@ -1,12 +1,16 @@
-mutter (3.36.6-1ubuntu0.20.04.3) UNRELEASED; urgency=medium
+mutter (3.36.7-0.20.04.1) UNRELEASED; urgency=medium
 
-  [ Gunnar Hjalmarsson ]
-  * d/p/Fixes-for-devices-not-picking-config-in-X11-session.patch:
-    - Cherry picked upstream commits which make configuration be picked
-      up reliably in X sessions also by external devices such as
-      keyboards and mouses (LP: #1899206)
+  * New upstream release (LP: #1903230):
+    - Fix Night Light updates after DPMS
+    - Fix IM handling on X11 (LP: #1899206, thanks to Gunnar Hjalmarsson for
+      the initial cherry-pick)
+    - Fix resizing of attached modal dialogs on wayland
+    - Fix jumps when resizing windows using discrete steps
+    - Fixed crashes
+    - Plugged Memory leaks
+    - Misc. bug fixes and cleanups
 
- -- Gunnar Hjalmarsson <gunnarhj@ubuntu.com>  Thu, 12 Nov 2020 13:07:00 +0100
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 15 Dec 2020 03:42:31 +0100
 
 mutter (3.36.6-1ubuntu0.20.04.2) focal; urgency=medium
 
