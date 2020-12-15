@@ -4,4 +4,3 @@ meson-add-back-default_driver-option.patch
 debian/synaptics-support.patch
 debian/tests-Tag-unstable-tests-as-flaky.patch
 x11-Add-support-for-fractional-scaling-using-Randr.patch
-

@@ -32,13 +32,13 @@ Forwarded: No, forwarding is in progress and planned though
  src/backends/x11/meta-monitor-manager-xrandr.c | 588 +++++++++++++++++++------
  src/backends/x11/meta-monitor-manager-xrandr.h |   4 +-
  src/backends/x11/meta-output-xrandr.c          |   3 +-
- src/compositor/meta-compositor-x11.c           |  98 ++++-
+ src/compositor/meta-compositor-x11.c           |  99 ++++-
  src/core/boxes-private.h                       |   4 +
  src/core/boxes.c                               |  21 +
  src/core/window.c                              |  19 +
  src/org.gnome.Mutter.DisplayConfig.xml         |   5 +
  src/tests/meta-monitor-manager-test.c          |  13 +-
- 30 files changed, 1839 insertions(+), 271 deletions(-)
+ 30 files changed, 1840 insertions(+), 271 deletions(-)
  create mode 100644 data/org.gnome.mutter.x11.gschema.xml.in
 
 diff --git a/data/meson.build b/data/meson.build
@@ -174,7 +174,7 @@ index 50db1a5..6f2b974 100644
  void meta_crtc_unset_config (MetaCrtc *crtc);
  
 diff --git a/src/backends/meta-monitor-config-manager.c b/src/backends/meta-monitor-config-manager.c
-index b317aca..9e0103f 100644
+index 1ef92c2..eeb2258 100644
 --- a/src/backends/meta-monitor-config-manager.c
 +++ b/src/backends/meta-monitor-config-manager.c
 @@ -217,6 +217,18 @@ assign_monitor_crtc (MetaMonitor         *monitor,
@@ -509,7 +509,7 @@ index b317aca..9e0103f 100644
                                                   NULL,
                                                   layout_mode);
        logical_monitor_configs = g_list_append (logical_monitor_configs,
-@@ -1245,6 +1409,7 @@ create_for_switch_config_builtin (MetaMonitorConfigManager *config_manager)
+@@ -1248,6 +1412,7 @@ create_for_switch_config_builtin (MetaMonitorConfigManager *config_manager)
    MetaLogicalMonitorConfig *primary_logical_monitor_config;
    MetaMonitor *monitor;
    MetaMonitorsConfig *monitors_config;
@@ -517,7 +517,7 @@ index b317aca..9e0103f 100644
  
    monitor = meta_monitor_manager_get_laptop_panel (monitor_manager);
    if (!monitor)
-@@ -1252,10 +1417,16 @@ create_for_switch_config_builtin (MetaMonitorConfigManager *config_manager)
+@@ -1255,10 +1420,16 @@ create_for_switch_config_builtin (MetaMonitorConfigManager *config_manager)
  
    layout_mode = meta_monitor_manager_get_default_layout_mode (monitor_manager);
  
@@ -534,7 +534,7 @@ index b317aca..9e0103f 100644
                                               NULL,
                                               layout_mode);
    primary_logical_monitor_config->is_primary = TRUE;
-@@ -1661,6 +1832,7 @@ gboolean
+@@ -1664,6 +1835,7 @@ gboolean
  meta_verify_logical_monitor_config (MetaLogicalMonitorConfig    *logical_monitor_config,
                                      MetaLogicalMonitorLayoutMode layout_mode,
                                      MetaMonitorManager          *monitor_manager,
@@ -542,7 +542,7 @@ index b317aca..9e0103f 100644
                                      GError                     **error)
  {
    GList *l;
-@@ -1697,6 +1869,10 @@ meta_verify_logical_monitor_config (MetaLogicalMonitorConfig    *logical_monitor
+@@ -1700,6 +1872,10 @@ meta_verify_logical_monitor_config (MetaLogicalMonitorConfig    *logical_monitor
  
    switch (layout_mode)
      {
@@ -3428,21 +3428,21 @@ index d55b3d2..515f938 100644
 +
  #endif /* META_MONITOR_MANAGER_XRANDR_H */
 diff --git a/src/backends/x11/meta-output-xrandr.c b/src/backends/x11/meta-output-xrandr.c
-index 3a85cb7..ef0a88a 100644
+index b7d18a0..ef0a88a 100644
 --- a/src/backends/x11/meta-output-xrandr.c
 +++ b/src/backends/x11/meta-output-xrandr.c
 @@ -848,7 +848,8 @@ meta_output_xrandr_new (MetaGpuXrandr *gpu_xrandr,
        output_info->height_mm = xrandr_output->mm_height;
      }
  
--  if (!meta_monitor_manager_xrandr_has_randr15 (monitor_manager_xrandr))
+-  if (meta_monitor_manager_xrandr_has_randr15 (monitor_manager_xrandr))
 +  if ((meta_monitor_manager_get_capabilities (monitor_manager) &
 +        META_MONITOR_MANAGER_CAPABILITY_TILING))
      output_info_init_tile_info (output_info, xdisplay, output_id);
    output_info_init_modes (output_info, gpu, xrandr_output);
    output_info_init_crtcs (output_info, gpu, xrandr_output);
 diff --git a/src/compositor/meta-compositor-x11.c b/src/compositor/meta-compositor-x11.c
-index fcd292a..039ca5f 100644
+index e7da103..32b05b4 100644
 --- a/src/compositor/meta-compositor-x11.c
 +++ b/src/compositor/meta-compositor-x11.c
 @@ -31,6 +31,7 @@
@@ -3453,15 +3453,16 @@ index fcd292a..039ca5f 100644
  #include "x11/meta-x11-display-private.h"
  
  struct _MetaCompositorX11
-@@ -45,6 +46,7 @@ struct _MetaCompositorX11
-   gboolean have_x11_sync_object;
- 
-   MetaWindow *unredirected_window;
+@@ -49,6 +50,8 @@ struct _MetaCompositorX11
+   gboolean xserver_uses_monotonic_clock;
+   int64_t xserver_time_query_time_us;
+   int64_t xserver_time_offset_us;
++
 +  gboolean randr_scale_disabled;
  };
  
  G_DEFINE_TYPE (MetaCompositorX11, meta_compositor_x11, META_TYPE_COMPOSITOR)
-@@ -234,20 +236,91 @@ shape_cow_for_window (MetaCompositorX11 *compositor_x11,
+@@ -266,20 +269,91 @@ shape_cow_for_window (MetaCompositorX11 *compositor_x11,
      }
  }
  
@@ -3554,7 +3555,7 @@ index fcd292a..039ca5f 100644
        window_actor = meta_window_actor_from_window (prev_unredirected_window);
        window_actor_x11 = META_WINDOW_ACTOR_X11 (window_actor);
        meta_window_actor_x11_set_unredirected (window_actor_x11, FALSE);
-@@ -261,6 +334,17 @@ set_unredirected_window (MetaCompositorX11 *compositor_x11,
+@@ -293,6 +367,17 @@ set_unredirected_window (MetaCompositorX11 *compositor_x11,
        MetaWindowActor *window_actor;
        MetaWindowActorX11 *window_actor_x11;
  
@@ -3572,7 +3573,7 @@ index fcd292a..039ca5f 100644
        window_actor = meta_window_actor_from_window (window);
        window_actor_x11 = META_WINDOW_ACTOR_X11 (window_actor);
        meta_window_actor_x11_set_unredirected (window_actor_x11, TRUE);
-@@ -272,21 +356,11 @@ maybe_unredirect_top_window (MetaCompositorX11 *compositor_x11)
+@@ -304,21 +389,11 @@ maybe_unredirect_top_window (MetaCompositorX11 *compositor_x11)
  {
    MetaCompositor *compositor = META_COMPOSITOR (compositor_x11);
    MetaWindow *window_to_unredirect = NULL;
@@ -3643,7 +3644,7 @@ index 37d04bb..93a2b6b 100644
  void
  meta_rectangle_clamp_to_fit_into_region (const GList         *spanning_rects,
 diff --git a/src/core/window.c b/src/core/window.c
-index 71295c5..1fb3a17 100644
+index 2e37e9d..e89a74b 100644
 --- a/src/core/window.c
 +++ b/src/core/window.c
 @@ -227,6 +227,7 @@ enum
