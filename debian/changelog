@@ -1,3 +1,13 @@
+mutter (3.38.2-1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge with debian, containing new upstream release (LP: #1908158):
+    - Apply input device settings on hotplug / reconnect and resume
+      (LP: #1899206)
+  * d/p/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+    - Refreshed as per upstream changes
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 15 Dec 2020 01:13:32 +0100
+
 mutter (3.38.2-1) unstable; urgency=medium
 
   * Team upload
