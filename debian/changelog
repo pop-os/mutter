@@ -9,6 +9,8 @@ mutter (3.36.7+git20201123-0.20.04.1) UNRELEASED; urgency=medium
     - Fixed crashes
     - Plugged Memory leaks
     - Misc. bug fixes and cleanups
+  * debian/libmutter-6-0.symbols: Update to match upstream changes.
+    No symbol is a public one
 
  -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 15 Dec 2020 03:46:36 +0100
 
