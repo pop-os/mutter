@@ -951,18 +951,41 @@ meta_window_wayland_finish_move_resize (MetaWindow              *window,
 
       rect.x += dx;
       rect.y += dy;
-
-      if (rect.x != window->rect.x || rect.y != window->rect.y)
-        flags |= META_MOVE_RESIZE_MOVE_ACTION;
     }
   else
     {
       if (acked_configuration)
         {
+          int offset_x;
+          int offset_y;
+
           rect.x = acked_configuration->x;
           rect.y = acked_configuration->y;
+
+          offset_x = acked_configuration->width - new_geom.width;
+          offset_y = acked_configuration->height - new_geom.height;
+          switch (acked_configuration->gravity)
+            {
+            case META_GRAVITY_SOUTH:
+            case META_GRAVITY_SOUTH_WEST:
+              rect.y += offset_y;
+              break;
+            case META_GRAVITY_EAST:
+            case META_GRAVITY_NORTH_EAST:
+              rect.x += offset_x;
+              break;
+            case META_GRAVITY_SOUTH_EAST:
+              rect.x += offset_x;
+              rect.y += offset_y;
+              break;
+            default:
+              break;
+            }
         }
     }
+
+  if (rect.x != window->rect.x || rect.y != window->rect.y)
+    flags |= META_MOVE_RESIZE_MOVE_ACTION;
 
   if (wl_window->has_pending_state_change && acked_configuration)
     {
