@@ -1,3 +1,16 @@
+mutter (3.38.3-2ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge with debian, containing new upstream release (LP: #1915025)
+    - Disable CRTCs when system becomes headless (LP: #1905825)
+    - Fixed crash during windows unmanagement (LP: #1870822)
+    - Do not handle ungrabbed events when unmanaging (LP: #1880405)
+    - Downgrade assert to warning when adding window (LP: #1911921)
+  * d/p/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+    - Refreshed
+  * debian/rules: Enable remote desktop for all linux builds (LP: #1730612)
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 09 Feb 2021 04:57:45 +0100
+
 mutter (3.38.3-2) unstable; urgency=medium
 
   * Team upload
