@@ -1,4 +1,4 @@
-mutter (3.38.3-2ubuntu1) UNRELEASED; urgency=medium
+mutter (3.38.3-2ubuntu1) hirsute; urgency=medium
 
   * Merge with debian, containing new upstream release (LP: #1915025)
     - Disable CRTCs when system becomes headless (LP: #1905825)
@@ -9,7 +9,7 @@ mutter (3.38.3-2ubuntu1) UNRELEASED; urgency=medium
     - Refreshed
   * debian/rules: Enable remote desktop for all linux builds (LP: #1730612)
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 09 Feb 2021 04:57:45 +0100
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 09 Feb 2021 04:59:11 +0100
 
 mutter (3.38.3-2) unstable; urgency=medium
 
