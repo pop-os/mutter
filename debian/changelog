@@ -1,4 +1,4 @@
-mutter (3.38.3-2ubuntu0.20.10.1) UNRELEASED; urgency=medium
+mutter (3.38.3-2ubuntu0.20.10.1) groovy; urgency=medium
 
   * Merge with debian, containing new upstream release (LP: #1915025)
     - Disable CRTCs when system becomes headless (LP: #1905825)
@@ -8,7 +8,7 @@ mutter (3.38.3-2ubuntu0.20.10.1) UNRELEASED; urgency=medium
   * d/p/x11-Add-support-for-fractional-scaling-using-Randr.patch:
     - Refreshed
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Mon, 08 Feb 2021 15:47:22 +0100
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 09 Feb 2021 05:04:34 +0100
 
 mutter (3.38.3-2) unstable; urgency=medium
 
