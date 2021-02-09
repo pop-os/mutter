@@ -1,0 +1,125 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Thu, 22 Oct 2020 11:18:34 +0200
+Subject: clutter: Limit number of touch slots available to a virtual touch
+ device
+
+It's not worth letting these devices have an "unlimited" range of touch
+slots. Limiting it to 32 is more than enough to map it with real touch
+devices nowadays.
+
+https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1486
+---
+ clutter/clutter/clutter-virtual-input-device.c | 12 +++++++++++
+ clutter/clutter/clutter-virtual-input-device.h |  2 ++
+ src/backends/meta-remote-desktop-session.c     | 28 ++++++++++++++++++++++++--
+ 3 files changed, 40 insertions(+), 2 deletions(-)
+
+diff --git a/clutter/clutter/clutter-virtual-input-device.c b/clutter/clutter/clutter-virtual-input-device.c
+index 522a659..ff733a4 100644
+--- a/clutter/clutter/clutter-virtual-input-device.c
++++ b/clutter/clutter/clutter-virtual-input-device.c
+@@ -151,6 +151,10 @@ clutter_virtual_input_device_notify_touch_down (ClutterVirtualInputDevice *virtu
+   ClutterVirtualInputDeviceClass *klass =
+     CLUTTER_VIRTUAL_INPUT_DEVICE_GET_CLASS (virtual_device);
+ 
++  g_return_if_fail (CLUTTER_IS_VIRTUAL_INPUT_DEVICE (virtual_device));
++  g_return_if_fail (slot >= 0 &&
++                    slot < CLUTTER_VIRTUAL_INPUT_DEVICE_MAX_TOUCH_SLOTS);
++
+   klass->notify_touch_down (virtual_device, time_us,
+                             slot, x, y);
+ }
+@@ -165,6 +169,10 @@ clutter_virtual_input_device_notify_touch_motion (ClutterVirtualInputDevice *vir
+   ClutterVirtualInputDeviceClass *klass =
+     CLUTTER_VIRTUAL_INPUT_DEVICE_GET_CLASS (virtual_device);
+ 
++  g_return_if_fail (CLUTTER_IS_VIRTUAL_INPUT_DEVICE (virtual_device));
++  g_return_if_fail (slot >= 0 &&
++                    slot < CLUTTER_VIRTUAL_INPUT_DEVICE_MAX_TOUCH_SLOTS);
++
+   klass->notify_touch_motion (virtual_device, time_us,
+                               slot, x, y);
+ }
+@@ -177,6 +185,10 @@ clutter_virtual_input_device_notify_touch_up (ClutterVirtualInputDevice *virtual
+   ClutterVirtualInputDeviceClass *klass =
+     CLUTTER_VIRTUAL_INPUT_DEVICE_GET_CLASS (virtual_device);
+ 
++  g_return_if_fail (CLUTTER_IS_VIRTUAL_INPUT_DEVICE (virtual_device));
++  g_return_if_fail (slot >= 0 &&
++                    slot < CLUTTER_VIRTUAL_INPUT_DEVICE_MAX_TOUCH_SLOTS);
++
+   klass->notify_touch_up (virtual_device, time_us,
+                           slot);
+ }
+diff --git a/clutter/clutter/clutter-virtual-input-device.h b/clutter/clutter/clutter-virtual-input-device.h
+index b829c04..fb357af 100644
+--- a/clutter/clutter/clutter-virtual-input-device.h
++++ b/clutter/clutter/clutter-virtual-input-device.h
+@@ -31,6 +31,8 @@
+ 
+ #define CLUTTER_TYPE_VIRTUAL_INPUT_DEVICE (clutter_virtual_input_device_get_type ())
+ 
++#define CLUTTER_VIRTUAL_INPUT_DEVICE_MAX_TOUCH_SLOTS 32u
++
+ CLUTTER_EXPORT
+ G_DECLARE_DERIVABLE_TYPE (ClutterVirtualInputDevice,
+                           clutter_virtual_input_device,
+diff --git a/src/backends/meta-remote-desktop-session.c b/src/backends/meta-remote-desktop-session.c
+index 28191a1..27bd58b 100644
+--- a/src/backends/meta-remote-desktop-session.c
++++ b/src/backends/meta-remote-desktop-session.c
+@@ -629,6 +629,14 @@ handle_notify_touch_down (MetaDBusRemoteDesktopSession *skeleton,
+   if (!meta_remote_desktop_session_check_can_notify (session, invocation))
+     return TRUE;
+ 
++  if (slot > CLUTTER_VIRTUAL_INPUT_DEVICE_MAX_TOUCH_SLOTS)
++    {
++      g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
++                                             G_DBUS_ERROR_FAILED,
++                                             "Touch slot out of range");
++      return TRUE;
++    }
++
+   if (!session->screen_cast_session)
+     {
+       g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
+@@ -676,6 +684,14 @@ handle_notify_touch_motion (MetaDBusRemoteDesktopSession *skeleton,
+     return TRUE;
+ 
+ 
++  if (slot > CLUTTER_VIRTUAL_INPUT_DEVICE_MAX_TOUCH_SLOTS)
++    {
++      g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
++                                             G_DBUS_ERROR_FAILED,
++                                             "Touch slot out of range");
++      return TRUE;
++    }
++
+   if (!session->screen_cast_session)
+     {
+       g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
+@@ -709,14 +725,22 @@ handle_notify_touch_motion (MetaDBusRemoteDesktopSession *skeleton,
+ 
+ static gboolean
+ handle_notify_touch_up (MetaDBusRemoteDesktopSession *skeleton,
+-                          GDBusMethodInvocation        *invocation,
+-                          unsigned int                  slot)
++                        GDBusMethodInvocation        *invocation,
++                        unsigned int                  slot)
+ {
+   MetaRemoteDesktopSession *session = META_REMOTE_DESKTOP_SESSION (skeleton);
+ 
+   if (!meta_remote_desktop_session_check_can_notify (session, invocation))
+     return TRUE;
+ 
++  if (slot > CLUTTER_VIRTUAL_INPUT_DEVICE_MAX_TOUCH_SLOTS)
++    {
++      g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
++                                             G_DBUS_ERROR_FAILED,
++                                             "Touch slot out of range");
++      return TRUE;
++    }
++
+   clutter_virtual_input_device_notify_touch_up (session->virtual_touchscreen,
+                                                        CLUTTER_CURRENT_TIME,
+                                                        slot);

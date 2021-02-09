@@ -1,0 +1,301 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Thu, 19 Nov 2020 01:00:42 +0100
+Subject: backends: Forward event axes as array of ClutterInputAxes elements
+
+Instead of encoding arrays in ways that we need the ClutterInputDevice
+to decode them, use ClutterInputAxes as the array index.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ clutter/clutter/clutter-event.c        | 28 +++++----------------------
+ src/backends/native/meta-seat-impl.c   | 30 +++++++++++------------------
+ src/backends/x11/meta-seat-x11.c       |  9 ++++-----
+ src/wayland/meta-wayland-tablet-tool.c | 35 ++++++----------------------------
+ 4 files changed, 26 insertions(+), 76 deletions(-)
+
+diff --git a/clutter/clutter/clutter-event.c b/clutter/clutter/clutter-event.c
+index cc87412..dba5d25 100644
+--- a/clutter/clutter/clutter-event.c
++++ b/clutter/clutter/clutter-event.c
+@@ -1302,9 +1302,7 @@ clutter_event_copy (const ClutterEvent *event)
+ {
+   ClutterEvent *new_event;
+   ClutterEventPrivate *new_real_event;
+-  ClutterInputDevice *device;
+   ClutterEventPrivate *real_event = (ClutterEventPrivate *) event;
+-  gint n_axes = 0;
+ 
+   g_return_val_if_fail (event != NULL, NULL);
+ 
+@@ -1324,29 +1322,25 @@ clutter_event_copy (const ClutterEvent *event)
+   new_real_event->locked_state = real_event->locked_state;
+   new_real_event->tool = real_event->tool;
+ 
+-  device = clutter_event_get_device (event);
+-  if (device != NULL)
+-    n_axes = clutter_input_device_get_n_axes (device);
+-
+   switch (event->type)
+     {
+     case CLUTTER_BUTTON_PRESS:
+     case CLUTTER_BUTTON_RELEASE:
+       if (event->button.axes != NULL)
+         new_event->button.axes = g_memdup (event->button.axes,
+-                                           sizeof (gdouble) * n_axes);
++                                           sizeof (gdouble) * CLUTTER_INPUT_AXIS_LAST);
+       break;
+ 
+     case CLUTTER_SCROLL:
+       if (event->scroll.axes != NULL)
+         new_event->scroll.axes = g_memdup (event->scroll.axes,
+-                                           sizeof (gdouble) * n_axes);
++                                           sizeof (gdouble) * CLUTTER_INPUT_AXIS_LAST);
+       break;
+ 
+     case CLUTTER_MOTION:
+       if (event->motion.axes != NULL)
+         new_event->motion.axes = g_memdup (event->motion.axes,
+-                                           sizeof (gdouble) * n_axes);
++                                           sizeof (gdouble) * CLUTTER_INPUT_AXIS_LAST);
+       break;
+ 
+     case CLUTTER_TOUCH_BEGIN:
+@@ -1355,7 +1349,7 @@ clutter_event_copy (const ClutterEvent *event)
+     case CLUTTER_TOUCH_CANCEL:
+       if (event->touch.axes != NULL)
+         new_event->touch.axes = g_memdup (event->touch.axes,
+-                                          sizeof (gdouble) * n_axes);
++                                          sizeof (gdouble) * CLUTTER_INPUT_AXIS_LAST);
+       break;
+ 
+     case CLUTTER_DEVICE_ADDED:
+@@ -1624,7 +1618,6 @@ clutter_event_get_axes (const ClutterEvent *event,
+                         guint              *n_axes)
+ {
+   gdouble *retval = NULL;
+-  guint len = 0;
+ 
+   switch (event->type)
+     {
+@@ -1675,19 +1668,8 @@ clutter_event_get_axes (const ClutterEvent *event,
+       break;
+     }
+ 
+-  if (retval != NULL)
+-    {
+-      ClutterInputDevice *device;
+-
+-      device = clutter_event_get_device (event);
+-      if (device != NULL)
+-        len = clutter_input_device_get_n_axes (device);
+-      else
+-        retval = NULL;
+-    }
+-
+   if (n_axes)
+-    *n_axes = len;
++    *n_axes = CLUTTER_INPUT_AXIS_LAST;
+ 
+   return retval;
+ }
+diff --git a/src/backends/native/meta-seat-impl.c b/src/backends/native/meta-seat-impl.c
+index 0eea398..819e3b8 100644
+--- a/src/backends/native/meta-seat-impl.c
++++ b/src/backends/native/meta-seat-impl.c
+@@ -1695,63 +1695,57 @@ static double *
+ translate_tablet_axes (struct libinput_event_tablet_tool *tablet_event,
+                        ClutterInputDeviceTool            *tool)
+ {
+-  GArray *axes = g_array_new (FALSE, FALSE, sizeof (double));
++  double *axes = g_new0 (double, CLUTTER_INPUT_AXIS_LAST);
+   struct libinput_tablet_tool *libinput_tool;
+   double value;
+ 
+   libinput_tool = libinput_event_tablet_tool_get_tool (tablet_event);
+ 
+   value = libinput_event_tablet_tool_get_x (tablet_event);
+-  g_array_append_val (axes, value);
++  axes[CLUTTER_INPUT_AXIS_X] = value;
+   value = libinput_event_tablet_tool_get_y (tablet_event);
+-  g_array_append_val (axes, value);
++  axes[CLUTTER_INPUT_AXIS_Y] = value;
+ 
+   if (libinput_tablet_tool_has_distance (libinput_tool))
+     {
+       value = libinput_event_tablet_tool_get_distance (tablet_event);
+-      g_array_append_val (axes, value);
++      axes[CLUTTER_INPUT_AXIS_DISTANCE] = value;
+     }
+ 
+   if (libinput_tablet_tool_has_pressure (libinput_tool))
+     {
+       value = libinput_event_tablet_tool_get_pressure (tablet_event);
+       value = meta_input_device_tool_native_translate_pressure (tool, value);
+-      g_array_append_val (axes, value);
++      axes[CLUTTER_INPUT_AXIS_PRESSURE] = value;
+     }
+ 
+   if (libinput_tablet_tool_has_tilt (libinput_tool))
+     {
+       value = libinput_event_tablet_tool_get_tilt_x (tablet_event);
+-      g_array_append_val (axes, value);
++      axes[CLUTTER_INPUT_AXIS_XTILT] = value;
+       value = libinput_event_tablet_tool_get_tilt_y (tablet_event);
+-      g_array_append_val (axes, value);
++      axes[CLUTTER_INPUT_AXIS_YTILT] = value;
+     }
+ 
+   if (libinput_tablet_tool_has_rotation (libinput_tool))
+     {
+       value = libinput_event_tablet_tool_get_rotation (tablet_event);
+-      g_array_append_val (axes, value);
++      axes[CLUTTER_INPUT_AXIS_ROTATION] = value;
+     }
+ 
+   if (libinput_tablet_tool_has_slider (libinput_tool))
+     {
+       value = libinput_event_tablet_tool_get_slider_position (tablet_event);
+-      g_array_append_val (axes, value);
++      axes[CLUTTER_INPUT_AXIS_SLIDER] = value;
+     }
+ 
+   if (libinput_tablet_tool_has_wheel (libinput_tool))
+     {
+       value = libinput_event_tablet_tool_get_wheel_delta (tablet_event);
+-      g_array_append_val (axes, value);
++      axes[CLUTTER_INPUT_AXIS_WHEEL] = value;
+     }
+ 
+-  if (axes->len == 0)
+-    {
+-      g_array_free (axes, TRUE);
+-      return NULL;
+-    }
+-  else
+-    return (double *) g_array_free (axes, FALSE);
++  return axes;
+ }
+ 
+ static void
+@@ -1834,8 +1828,6 @@ process_tablet_axis (MetaSeatImpl          *seat_impl,
+ 
+   axes = translate_tablet_axes (tablet_event,
+                                 evdev_device->last_tool);
+-  if (!axes)
+-    return;
+ 
+   meta_viewport_info_get_extents (seat_impl->viewports,
+                                   &stage_width, &stage_height);
+diff --git a/src/backends/x11/meta-seat-x11.c b/src/backends/x11/meta-seat-x11.c
+index aabcfe3..02c283e 100644
+--- a/src/backends/x11/meta-seat-x11.c
++++ b/src/backends/x11/meta-seat-x11.c
+@@ -1143,12 +1143,11 @@ translate_axes (ClutterInputDevice *device,
+                 double              y,
+                 XIValuatorState    *valuators)
+ {
+-  uint32_t n_axes = clutter_input_device_get_n_axes (device);
+   uint32_t i;
+   double *retval;
+   double *values;
+ 
+-  retval = g_new0 (double, n_axes);
++  retval = g_new0 (double, CLUTTER_INPUT_AXIS_LAST);
+   values = valuators->values;
+ 
+   for (i = 0; i < valuators->mask_len * 8; i++)
+@@ -1165,15 +1164,15 @@ translate_axes (ClutterInputDevice *device,
+       switch (axis)
+         {
+         case CLUTTER_INPUT_AXIS_X:
+-          retval[i] = x;
++          retval[axis] = x;
+           break;
+ 
+         case CLUTTER_INPUT_AXIS_Y:
+-          retval[i] = y;
++          retval[axis] = y;
+           break;
+ 
+         default:
+-          _clutter_input_device_translate_axis (device, i, val, &retval[i]);
++          _clutter_input_device_translate_axis (device, i, val, &retval[axis]);
+           break;
+         }
+     }
+diff --git a/src/wayland/meta-wayland-tablet-tool.c b/src/wayland/meta-wayland-tablet-tool.c
+index 7e54601..08cb401 100644
+--- a/src/wayland/meta-wayland-tablet-tool.c
++++ b/src/wayland/meta-wayland-tablet-tool.c
+@@ -710,15 +710,10 @@ broadcast_axis (MetaWaylandTabletTool *tool,
+                 ClutterInputAxis       axis)
+ {
+   struct wl_resource *resource;
+-  ClutterInputDevice *source;
+   uint32_t value;
+-  gdouble val;
+-
+-  source = clutter_event_get_source_device (event);
+-
+-  if (!clutter_input_device_get_axis_value (source, event->motion.axes, axis, &val))
+-    return;
++  double val;
+ 
++  val = event->motion.axes[axis];
+   value = val * TABLET_AXIS_MAX;
+ 
+   wl_resource_for_each (resource, &tool->focus_resource_list)
+@@ -745,16 +740,10 @@ broadcast_tilt (MetaWaylandTabletTool *tool,
+                 const ClutterEvent    *event)
+ {
+   struct wl_resource *resource;
+-  ClutterInputDevice *source;
+   gdouble xtilt, ytilt;
+ 
+-  source = clutter_event_get_source_device (event);
+-
+-  if (!clutter_input_device_get_axis_value (source, event->motion.axes,
+-                                            CLUTTER_INPUT_AXIS_XTILT, &xtilt) ||
+-      !clutter_input_device_get_axis_value (source, event->motion.axes,
+-                                            CLUTTER_INPUT_AXIS_YTILT, &ytilt))
+-    return;
++  xtilt = event->motion.axes[CLUTTER_INPUT_AXIS_FLAG_XTILT];
++  ytilt = event->motion.axes[CLUTTER_INPUT_AXIS_FLAG_YTILT];
+ 
+   wl_resource_for_each (resource, &tool->focus_resource_list)
+     {
+@@ -769,15 +758,9 @@ broadcast_rotation (MetaWaylandTabletTool *tool,
+                     const ClutterEvent    *event)
+ {
+   struct wl_resource *resource;
+-  ClutterInputDevice *source;
+   gdouble rotation;
+ 
+-  source = clutter_event_get_source_device (event);
+-
+-  if (!clutter_input_device_get_axis_value (source, event->motion.axes,
+-                                            CLUTTER_INPUT_AXIS_ROTATION,
+-                                            &rotation))
+-    return;
++  rotation = event->motion.axes[CLUTTER_INPUT_AXIS_FLAG_ROTATION];
+ 
+   wl_resource_for_each (resource, &tool->focus_resource_list)
+     {
+@@ -791,16 +774,10 @@ broadcast_wheel (MetaWaylandTabletTool *tool,
+                  const ClutterEvent    *event)
+ {
+   struct wl_resource *resource;
+-  ClutterInputDevice *source;
+   gdouble angle;
+   gint32 clicks = 0;
+ 
+-  source = clutter_event_get_source_device (event);
+-
+-  if (!clutter_input_device_get_axis_value (source, event->motion.axes,
+-                                            CLUTTER_INPUT_AXIS_WHEEL,
+-                                            &angle))
+-    return;
++  angle = event->motion.axes[CLUTTER_INPUT_AXIS_FLAG_WHEEL];
+ 
+   /* FIXME: Perform proper angle-to-clicks accumulation elsewhere */
+   if (angle > 0.01)

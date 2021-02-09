@@ -1,0 +1,176 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Tue, 8 Dec 2020 13:40:34 +0100
+Subject: clutter: Drop infrastructure to copy/free platform event data
+
+This is now unused, all information belongs to ClutterEvents.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1623>
+---
+ clutter/clutter/clutter-backend-private.h |  5 -----
+ clutter/clutter/clutter-backend.c         | 25 -------------------------
+ clutter/clutter/clutter-event.c           |  6 ------
+ clutter/clutter/clutter-seat.h            |  7 -------
+ src/backends/native/meta-seat-native.c    | 15 ---------------
+ src/backends/x11/meta-seat-x11.c          | 15 ---------------
+ 6 files changed, 73 deletions(-)
+
+diff --git a/clutter/clutter/clutter-backend-private.h b/clutter/clutter/clutter-backend-private.h
+index e2db9e9..76fab8a 100644
+--- a/clutter/clutter/clutter-backend-private.h
++++ b/clutter/clutter/clutter-backend-private.h
+@@ -117,11 +117,6 @@ gboolean                _clutter_backend_post_parse                     (Clutter
+                                                                          GError                **error);
+ 
+ void                    _clutter_backend_init_events                    (ClutterBackend         *backend);
+-void                    _clutter_backend_copy_event_data                (ClutterBackend         *backend,
+-                                                                         const ClutterEvent     *src,
+-                                                                         ClutterEvent           *dest);
+-void                    _clutter_backend_free_event_data                (ClutterBackend         *backend,
+-                                                                         ClutterEvent           *event);
+ CLUTTER_EXPORT
+ gboolean                _clutter_backend_translate_event                (ClutterBackend         *backend,
+                                                                          gpointer                native,
+diff --git a/clutter/clutter/clutter-backend.c b/clutter/clutter/clutter-backend.c
+index 049bbed..256c43a 100644
+--- a/clutter/clutter/clutter-backend.c
++++ b/clutter/clutter/clutter-backend.c
+@@ -678,31 +678,6 @@ _clutter_backend_get_units_per_em (ClutterBackend       *backend,
+   return backend->units_per_em;
+ }
+ 
+-void
+-_clutter_backend_copy_event_data (ClutterBackend     *backend,
+-                                  const ClutterEvent *src,
+-                                  ClutterEvent       *dest)
+-{
+-  ClutterSeatClass *seat_class;
+-  ClutterSeat *seat;
+-
+-  seat = clutter_backend_get_default_seat (backend);
+-  seat_class = CLUTTER_SEAT_GET_CLASS (seat);
+-  seat_class->copy_event_data (seat, src, dest);
+-}
+-
+-void
+-_clutter_backend_free_event_data (ClutterBackend *backend,
+-                                  ClutterEvent   *event)
+-{
+-  ClutterSeatClass *seat_class;
+-  ClutterSeat *seat;
+-
+-  seat = clutter_backend_get_default_seat (backend);
+-  seat_class = CLUTTER_SEAT_GET_CLASS (seat);
+-  seat_class->free_event_data (seat, event);
+-}
+-
+ /**
+  * clutter_get_default_backend:
+  *
+diff --git a/clutter/clutter/clutter-event.c b/clutter/clutter/clutter-event.c
+index 5f29507..ba54613 100644
+--- a/clutter/clutter/clutter-event.c
++++ b/clutter/clutter/clutter-event.c
+@@ -1353,10 +1353,6 @@ clutter_event_copy (const ClutterEvent *event)
+       break;
+     }
+ 
+-  _clutter_backend_copy_event_data (clutter_get_default_backend (),
+-                                    event,
+-                                    new_event);
+-
+   return new_event;
+ }
+ 
+@@ -1373,8 +1369,6 @@ clutter_event_free (ClutterEvent *event)
+     {
+       ClutterEventPrivate *real_event = (ClutterEventPrivate *) event;
+ 
+-      _clutter_backend_free_event_data (clutter_get_default_backend (), event);
+-
+       g_clear_object (&real_event->device);
+       g_clear_object (&real_event->source_device);
+ 
+diff --git a/clutter/clutter/clutter-seat.h b/clutter/clutter/clutter-seat.h
+index df037ff..31d3ce8 100644
+--- a/clutter/clutter/clutter-seat.h
++++ b/clutter/clutter/clutter-seat.h
+@@ -101,13 +101,6 @@ struct _ClutterSeatClass
+                             graphene_point_t     *coords,
+                             ClutterModifierType  *modifiers);
+ 
+-  /* Event platform data */
+-  void (* copy_event_data) (ClutterSeat        *seat,
+-                            const ClutterEvent *src,
+-                            ClutterEvent       *dest);
+-  void (* free_event_data) (ClutterSeat        *seat,
+-                            ClutterEvent       *event);
+-
+   /* Virtual devices */
+   ClutterVirtualInputDevice * (* create_virtual_device) (ClutterSeat            *seat,
+                                                          ClutterInputDeviceType  device_type);
+diff --git a/src/backends/native/meta-seat-native.c b/src/backends/native/meta-seat-native.c
+index d691c52..150fe90 100644
+--- a/src/backends/native/meta-seat-native.c
++++ b/src/backends/native/meta-seat-native.c
+@@ -288,19 +288,6 @@ meta_seat_native_get_keymap (ClutterSeat *seat)
+   return CLUTTER_KEYMAP (seat_native->keymap);
+ }
+ 
+-static void
+-meta_seat_native_copy_event_data (ClutterSeat        *seat,
+-                                  const ClutterEvent *src,
+-                                  ClutterEvent       *dest)
+-{
+-}
+-
+-static void
+-meta_seat_native_free_event_data (ClutterSeat  *seat,
+-                                  ClutterEvent *event)
+-{
+-}
+-
+ static guint
+ bump_virtual_touch_slot_base (MetaSeatNative *seat_native)
+ {
+@@ -419,8 +406,6 @@ meta_seat_native_class_init (MetaSeatNativeClass *klass)
+   seat_class->peek_devices = meta_seat_native_peek_devices;
+   seat_class->bell_notify = meta_seat_native_bell_notify;
+   seat_class->get_keymap = meta_seat_native_get_keymap;
+-  seat_class->copy_event_data = meta_seat_native_copy_event_data;
+-  seat_class->free_event_data = meta_seat_native_free_event_data;
+   seat_class->create_virtual_device = meta_seat_native_create_virtual_device;
+   seat_class->get_supported_virtual_device_types = meta_seat_native_get_supported_virtual_device_types;
+   seat_class->compress_motion = meta_seat_native_compress_motion;
+diff --git a/src/backends/x11/meta-seat-x11.c b/src/backends/x11/meta-seat-x11.c
+index c015264..2381ddf 100644
+--- a/src/backends/x11/meta-seat-x11.c
++++ b/src/backends/x11/meta-seat-x11.c
+@@ -1447,19 +1447,6 @@ meta_seat_x11_get_keymap (ClutterSeat *seat)
+   return CLUTTER_KEYMAP (META_SEAT_X11 (seat)->keymap);
+ }
+ 
+-static void
+-meta_seat_x11_copy_event_data (ClutterSeat        *seat,
+-                               const ClutterEvent *src,
+-                               ClutterEvent       *dest)
+-{
+-}
+-
+-static void
+-meta_seat_x11_free_event_data (ClutterSeat  *seat,
+-                               ClutterEvent *event)
+-{
+-}
+-
+ static ClutterVirtualInputDevice *
+ meta_seat_x11_create_virtual_device (ClutterSeat            *seat,
+                                      ClutterInputDeviceType  device_type)
+@@ -1642,8 +1629,6 @@ meta_seat_x11_class_init (MetaSeatX11Class *klass)
+   seat_class->peek_devices = meta_seat_x11_peek_devices;
+   seat_class->bell_notify = meta_seat_x11_bell_notify;
+   seat_class->get_keymap = meta_seat_x11_get_keymap;
+-  seat_class->copy_event_data = meta_seat_x11_copy_event_data;
+-  seat_class->free_event_data = meta_seat_x11_free_event_data;
+   seat_class->create_virtual_device = meta_seat_x11_create_virtual_device;
+   seat_class->get_supported_virtual_device_types = meta_seat_x11_get_supported_virtual_device_types;
+   seat_class->warp_pointer = meta_seat_x11_warp_pointer;

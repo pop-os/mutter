@@ -1,0 +1,99 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Wed, 6 May 2020 13:44:36 +0200
+Subject: backends: Use slot from cancel events
+
+As it does seem from a read to libinput code, TOUCH_CANCEL events
+actually do contain slot information, and are emitted per-slot.
+This means we can avoid iterating over the slots ourselves, they
+are still expected to be sent altogether.
+
+https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1486
+---
+ src/backends/native/meta-input-device-native.c | 21 ---------------------
+ src/backends/native/meta-input-device-native.h |  3 ---
+ src/backends/native/meta-seat-native.c         | 20 +++++++++++++++++++-
+ 3 files changed, 19 insertions(+), 25 deletions(-)
+
+diff --git a/src/backends/native/meta-input-device-native.c b/src/backends/native/meta-input-device-native.c
+index 39a5a30..25360e6 100644
+--- a/src/backends/native/meta-input-device-native.c
++++ b/src/backends/native/meta-input-device-native.c
+@@ -1517,24 +1517,3 @@ meta_input_device_native_translate_coordinates (ClutterInputDevice *device,
+   *x = CLAMP (x_d, MIN (min_x, max_x), MAX (min_x, max_x)) * stage_width;
+   *y = CLAMP (y_d, MIN (min_y, max_y), MAX (min_y, max_y)) * stage_height;
+ }
+-
+-void
+-meta_input_device_native_release_touch_slots (MetaInputDeviceNative *device_evdev,
+-                                              uint64_t               time_us)
+-{
+-  GHashTableIter iter;
+-  MetaTouchState *touch_state;
+-
+-  g_hash_table_iter_init (&iter, device_evdev->touches);
+-  while (g_hash_table_iter_next (&iter, NULL, (gpointer *) &touch_state))
+-    {
+-      meta_seat_native_notify_touch_event (touch_state->seat,
+-                                           CLUTTER_INPUT_DEVICE (device_evdev),
+-                                           CLUTTER_TOUCH_CANCEL,
+-                                           time_us,
+-                                           touch_state->seat_slot,
+-                                           touch_state->coords.x,
+-                                           touch_state->coords.y);
+-      g_hash_table_iter_remove (&iter);
+-    }
+-}
+diff --git a/src/backends/native/meta-input-device-native.h b/src/backends/native/meta-input-device-native.h
+index 59cff51..87449fe 100644
+--- a/src/backends/native/meta-input-device-native.h
++++ b/src/backends/native/meta-input-device-native.h
+@@ -134,9 +134,6 @@ MetaTouchState *          meta_input_device_native_lookup_touch_state (MetaInput
+ void                      meta_input_device_native_release_touch_state (MetaInputDeviceNative *device,
+                                                                         MetaTouchState        *touch_state);
+ 
+-void                      meta_input_device_native_release_touch_slots (MetaInputDeviceNative *device_evdev,
+-                                                                        uint64_t               time_us);
+-
+ void                      meta_input_device_native_a11y_maybe_notify_toggle_keys  (MetaInputDeviceNative *device_evdev);
+ 
+ struct libinput_device * meta_input_device_native_get_libinput_device (ClutterInputDevice *device);
+diff --git a/src/backends/native/meta-seat-native.c b/src/backends/native/meta-seat-native.c
+index 5c62805..ca719d4 100644
+--- a/src/backends/native/meta-seat-native.c
++++ b/src/backends/native/meta-seat-native.c
+@@ -2091,16 +2091,34 @@ process_device_event (MetaSeatNative        *seat,
+       }
+     case LIBINPUT_EVENT_TOUCH_CANCEL:
+       {
++        int device_slot;
++        MetaTouchState *touch_state;
+         uint64_t time_us;
++        MetaSeatNative *seat;
+         struct libinput_event_touch *touch_event =
+           libinput_event_get_touch_event (event);
+ 
+         device = libinput_device_get_user_data (libinput_device);
+         device_evdev = META_INPUT_DEVICE_NATIVE (device);
++        seat = meta_input_device_native_get_seat (device_evdev);
+         time_us = libinput_event_touch_get_time_usec (touch_event);
+ 
+-        meta_input_device_native_release_touch_slots (device_evdev, time_us);
++        device_slot = libinput_event_touch_get_slot (touch_event);
++        touch_state =
++          meta_input_device_native_lookup_touch_state (device_evdev,
++                                                       device_slot);
++        if (!touch_state)
++          break;
++
++        meta_seat_native_notify_touch_event (touch_state->seat,
++                                             device,
++                                             CLUTTER_TOUCH_CANCEL,
++                                             time_us,
++                                             touch_state->seat_slot,
++                                             touch_state->coords.x,
++                                             touch_state->coords.y);
+ 
++        meta_input_device_native_release_touch_state (device_evdev, touch_state);
+         break;
+       }
+     case LIBINPUT_EVENT_GESTURE_PINCH_BEGIN:

@@ -1,0 +1,157 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Thu, 19 Nov 2020 12:04:46 +0100
+Subject: clutter: Drop ClutterInputDevice private tool maintenance API
+
+This is just used in the native backend (with the X11 going its own
+way). Just keep a HT of tools there, and drop this API.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ clutter/clutter/clutter-input-device-private.h | 12 --------
+ clutter/clutter/clutter-input-device.c         | 40 --------------------------
+ src/backends/native/meta-seat-impl.c           | 22 +++++++++-----
+ src/backends/native/meta-seat-impl.h           |  1 +
+ 4 files changed, 16 insertions(+), 59 deletions(-)
+
+diff --git a/clutter/clutter/clutter-input-device-private.h b/clutter/clutter/clutter-input-device-private.h
+index cb8fd86..fc9f174 100644
+--- a/clutter/clutter/clutter-input-device-private.h
++++ b/clutter/clutter/clutter-input-device-private.h
+@@ -92,8 +92,6 @@ struct _ClutterInputDevice
+   char *product_id;
+   char *node_path;
+ 
+-  GPtrArray *tools;
+-
+   int n_rings;
+   int n_strips;
+   int n_mode_groups;
+@@ -116,16 +114,6 @@ CLUTTER_EXPORT
+ void _clutter_input_device_remove_event_sequence (ClutterInputDevice *device,
+                                                   ClutterEvent       *event);
+ 
+-CLUTTER_EXPORT
+-void clutter_input_device_add_tool (ClutterInputDevice     *device,
+-                                    ClutterInputDeviceTool *tool);
+-
+-CLUTTER_EXPORT
+-ClutterInputDeviceTool *
+-   clutter_input_device_lookup_tool (ClutterInputDevice         *device,
+-                                     guint64                     serial,
+-                                     ClutterInputDeviceToolType  type);
+-
+ CLUTTER_EXPORT
+ gboolean clutter_input_device_keycode_to_evdev (ClutterInputDevice *device,
+                                                 guint               hardware_keycode,
+diff --git a/clutter/clutter/clutter-input-device.c b/clutter/clutter/clutter-input-device.c
+index 47888c9..4631a45 100644
+--- a/clutter/clutter/clutter-input-device.c
++++ b/clutter/clutter/clutter-input-device.c
+@@ -1172,46 +1172,6 @@ clutter_input_device_get_product_id (ClutterInputDevice *device)
+   return device->product_id;
+ }
+ 
+-void
+-clutter_input_device_add_tool (ClutterInputDevice     *device,
+-                               ClutterInputDeviceTool *tool)
+-{
+-  g_return_if_fail (CLUTTER_IS_INPUT_DEVICE (device));
+-  g_return_if_fail (clutter_input_device_get_device_mode (device) != CLUTTER_INPUT_MODE_LOGICAL);
+-  g_return_if_fail (CLUTTER_IS_INPUT_DEVICE_TOOL (tool));
+-
+-  if (!device->tools)
+-    device->tools = g_ptr_array_new_with_free_func ((GDestroyNotify) g_object_unref);
+-
+-  g_ptr_array_add (device->tools, tool);
+-}
+-
+-ClutterInputDeviceTool *
+-clutter_input_device_lookup_tool (ClutterInputDevice         *device,
+-                                  guint64                     serial,
+-                                  ClutterInputDeviceToolType  type)
+-{
+-  ClutterInputDeviceTool *tool;
+-  guint i;
+-
+-  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), NULL);
+-  g_return_val_if_fail (clutter_input_device_get_device_mode (device) != CLUTTER_INPUT_MODE_LOGICAL, NULL);
+-
+-  if (!device->tools)
+-    return NULL;
+-
+-  for (i = 0; i < device->tools->len; i++)
+-    {
+-      tool = g_ptr_array_index (device->tools, i);
+-
+-      if (serial == clutter_input_device_tool_get_serial (tool) &&
+-          type == clutter_input_device_tool_get_tool_type (tool))
+-        return tool;
+-    }
+-
+-  return NULL;
+-}
+-
+ gint
+ clutter_input_device_get_n_rings (ClutterInputDevice *device)
+ {
+diff --git a/src/backends/native/meta-seat-impl.c b/src/backends/native/meta-seat-impl.c
+index 56f4d36..32f56b1 100644
+--- a/src/backends/native/meta-seat-impl.c
++++ b/src/backends/native/meta-seat-impl.c
+@@ -1661,22 +1661,29 @@ input_device_update_tool (MetaSeatImpl                *seat_impl,
+ {
+   MetaInputDeviceNative *evdev_device = META_INPUT_DEVICE_NATIVE (input_device);
+   ClutterInputDeviceTool *tool = NULL;
+-  ClutterInputDeviceToolType tool_type;
+   MetaInputSettings *input_settings;
+-  uint64_t tool_serial;
+ 
+   if (libinput_tool)
+     {
+-      tool_serial = libinput_tablet_tool_get_serial (libinput_tool);
+-      tool_type = translate_tool_type (libinput_tool);
+-      tool = clutter_input_device_lookup_tool (input_device,
+-                                               tool_serial, tool_type);
++      if (!seat_impl->tools)
++        {
++          seat_impl->tools =
++            g_hash_table_new_full (NULL, NULL, NULL,
++                                   (GDestroyNotify) g_object_unref);
++        }
++
++      tool = g_hash_table_lookup (seat_impl->tools, libinput_tool);
+ 
+       if (!tool)
+         {
++          ClutterInputDeviceToolType tool_type;
++          uint64_t tool_serial;
++
++          tool_serial = libinput_tablet_tool_get_serial (libinput_tool);
++          tool_type = translate_tool_type (libinput_tool);
+           tool = meta_input_device_tool_native_new (libinput_tool,
+                                                     tool_serial, tool_type);
+-          clutter_input_device_add_tool (input_device, tool);
++          g_hash_table_insert (seat_impl->tools, libinput_tool, tool);
+         }
+     }
+ 
+@@ -2663,6 +2670,7 @@ meta_seat_impl_finalize (GObject *object)
+       g_object_unref (device);
+     }
+   g_slist_free (seat_impl->devices);
++  g_clear_pointer (&seat_impl->tools, g_hash_table_unref);
+ 
+   if (seat_impl->touch_states)
+     g_hash_table_destroy (seat_impl->touch_states);
+diff --git a/src/backends/native/meta-seat-impl.h b/src/backends/native/meta-seat-impl.h
+index 30b52ff..680cee2 100644
+--- a/src/backends/native/meta-seat-impl.h
++++ b/src/backends/native/meta-seat-impl.h
+@@ -62,6 +62,7 @@ struct _MetaSeatImpl
+   GRWLock state_lock;
+ 
+   GSList *devices;
++  GHashTable *tools;
+ 
+   ClutterInputDevice *core_pointer;
+   ClutterInputDevice *core_keyboard;

@@ -1,0 +1,111 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Fri, 5 Jun 2020 19:15:36 +0200
+Subject: clutter: Drop clutter_input_device_set_time()
+
+An input device does not have time on itself, events do. This was made
+unused so drop it.
+
+https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1486
+---
+ clutter/clutter/clutter-input-device-private.h |  4 ----
+ clutter/clutter/clutter-input-device.c         | 22 +---------------------
+ clutter/clutter/clutter-stage.c                |  2 --
+ 3 files changed, 1 insertion(+), 27 deletions(-)
+
+diff --git a/clutter/clutter/clutter-input-device-private.h b/clutter/clutter/clutter-input-device-private.h
+index 71e6ea3..b3ff2dd 100644
+--- a/clutter/clutter/clutter-input-device-private.h
++++ b/clutter/clutter/clutter-input-device-private.h
+@@ -123,7 +123,6 @@ struct _ClutterInputDevice
+   /* the current state */
+   float current_x;
+   float current_y;
+-  uint32_t current_time;
+   int current_button_number;
+   ClutterModifierType current_state;
+ 
+@@ -183,9 +182,6 @@ CLUTTER_EXPORT
+ void _clutter_input_device_set_state (ClutterInputDevice  *device,
+                                       ClutterModifierType  state);
+ CLUTTER_EXPORT
+-void _clutter_input_device_set_time (ClutterInputDevice *device,
+-                                     guint32             time_);
+-CLUTTER_EXPORT
+ ClutterActor * clutter_input_device_update (ClutterInputDevice   *device,
+                                             ClutterEventSequence *sequence,
+                                             ClutterStage         *stage,
+diff --git a/clutter/clutter/clutter-input-device.c b/clutter/clutter/clutter-input-device.c
+index fe109fb..ee26a64 100644
+--- a/clutter/clutter/clutter-input-device.c
++++ b/clutter/clutter/clutter-input-device.c
+@@ -511,7 +511,7 @@ clutter_input_device_init (ClutterInputDevice *self)
+ 
+   self->click_count = 0;
+ 
+-  self->current_time = self->previous_time = CLUTTER_CURRENT_TIME;
++  self->previous_time = CLUTTER_CURRENT_TIME;
+   self->current_x = self->previous_x = -1;
+   self->current_y = self->previous_y = -1;
+   self->current_button_number = self->previous_button_number = -1;
+@@ -610,23 +610,6 @@ clutter_input_device_get_modifier_state (ClutterInputDevice *device)
+   return device->current_state;
+ }
+ 
+-/*< private >
+- * clutter_input_device_set_time:
+- * @device: a #ClutterInputDevice
+- * @time_: the time
+- *
+- * Stores the last known event time of the device
+- */
+-void
+-_clutter_input_device_set_time (ClutterInputDevice *device,
+-                                guint32             time_)
+-{
+-  g_return_if_fail (CLUTTER_IS_INPUT_DEVICE (device));
+-
+-  if (device->current_time != time_)
+-    device->current_time = time_;
+-}
+-
+ static void
+ _clutter_input_device_free_touch_info (gpointer data)
+ {
+@@ -1162,19 +1145,16 @@ clutter_input_device_update_from_event (ClutterInputDevice *device,
+   ClutterModifierType event_state;
+   ClutterEventSequence *sequence;
+   gfloat event_x, event_y;
+-  guint32 event_time;
+ 
+   g_return_if_fail (CLUTTER_IS_INPUT_DEVICE (device));
+   g_return_if_fail (event != NULL);
+ 
+   event_state = clutter_event_get_state (event);
+-  event_time = clutter_event_get_time (event);
+   sequence = clutter_event_get_event_sequence (event);
+   clutter_event_get_coords (event, &event_x, &event_y);
+ 
+   _clutter_input_device_set_coords (device, sequence, event_x, event_y);
+   _clutter_input_device_set_state (device, event_state);
+-  _clutter_input_device_set_time (device, event_time);
+ }
+ 
+ /*< private >
+diff --git a/clutter/clutter/clutter-stage.c b/clutter/clutter/clutter-stage.c
+index a566849..1349635 100644
+--- a/clutter/clutter/clutter-stage.c
++++ b/clutter/clutter/clutter-stage.c
+@@ -1034,13 +1034,11 @@ _clutter_stage_queue_event (ClutterStage *stage,
+       event->type != CLUTTER_PROXIMITY_OUT)
+     {
+       ClutterEventSequence *sequence = clutter_event_get_event_sequence (event);
+-      guint32 event_time = clutter_event_get_time (event);
+       gfloat event_x, event_y;
+ 
+       clutter_event_get_coords (event, &event_x, &event_y);
+ 
+       _clutter_input_device_set_coords (device, sequence, event_x, event_y);
+-      _clutter_input_device_set_time (device, event_time);
+     }
+ 
+   if (first_event)

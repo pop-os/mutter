@@ -1,0 +1,384 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Tue, 8 Dec 2020 12:28:01 +0100
+Subject: clutter: Move evdev evcode data to Clutter button/key events
+
+We have this as platform-dependent data in the native backend, and
+a bunch of fallback code done in place in the evcode users. Stop
+making this platform-dependent data, and move it to the relevant
+ClutterEvents.
+
+The fallback code for the X11 backend case is about the same, but
+now it is done directly by the X11 backend.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1623>
+---
+ clutter/clutter/clutter-event.c         | 13 ++++++++++++
+ clutter/clutter/clutter-event.h         |  5 ++++-
+ src/backends/native/meta-event-native.c | 32 ------------------------------
+ src/backends/native/meta-event-native.h |  3 ---
+ src/backends/native/meta-seat-impl.c    |  4 ++--
+ src/backends/x11/meta-seat-x11.c        | 35 +++++++++++++++++++++++++++++++++
+ src/wayland/meta-wayland-keyboard.c     | 24 +---------------------
+ src/wayland/meta-wayland-pointer.c      | 31 +----------------------------
+ src/wayland/meta-wayland-tablet-tool.c  | 25 ++---------------------
+ 9 files changed, 58 insertions(+), 114 deletions(-)
+
+diff --git a/clutter/clutter/clutter-event.c b/clutter/clutter/clutter-event.c
+index 0e5dc35..793884f 100644
+--- a/clutter/clutter/clutter-event.c
++++ b/clutter/clutter/clutter-event.c
+@@ -2121,3 +2121,16 @@ clutter_event_get_pad_event_details (const ClutterEvent *event,
+ 
+   return TRUE;
+ }
++
++uint32_t
++clutter_event_get_event_code (const ClutterEvent *event)
++{
++  if (event->type == CLUTTER_KEY_PRESS ||
++      event->type == CLUTTER_KEY_RELEASE)
++    return event->key.evdev_code;
++  else if (event->type == CLUTTER_BUTTON_PRESS ||
++           event->type == CLUTTER_BUTTON_RELEASE)
++    return event->button.evdev_code;
++
++  return 0;
++}
+diff --git a/clutter/clutter/clutter-event.h b/clutter/clutter/clutter-event.h
+index 195d8d1..5ff8ae8 100644
+--- a/clutter/clutter/clutter-event.h
++++ b/clutter/clutter/clutter-event.h
+@@ -173,6 +173,7 @@ struct _ClutterKeyEvent
+   guint keyval;
+   guint16 hardware_keycode;
+   gunichar unicode_value;
++  uint32_t evdev_code;
+   ClutterInputDevice *device;
+ };
+ 
+@@ -216,6 +217,7 @@ struct _ClutterButtonEvent
+   guint click_count;
+   gdouble *axes; /* Future use */
+   ClutterInputDevice *device;
++  uint32_t evdev_code;
+ };
+ 
+ /**
+@@ -783,7 +785,8 @@ gboolean                 clutter_event_get_pad_event_details         (const Clut
+                                                                       guint                  *number,
+                                                                       guint                  *mode,
+                                                                       gdouble                *value);
+-
++CLUTTER_EXPORT
++uint32_t                 clutter_event_get_event_code                (const ClutterEvent     *event);
+ 
+ G_END_DECLS
+ 
+diff --git a/src/backends/native/meta-event-native.c b/src/backends/native/meta-event-native.c
+index 8a1d8f3..b7e7194 100644
+--- a/src/backends/native/meta-event-native.c
++++ b/src/backends/native/meta-event-native.c
+@@ -28,8 +28,6 @@ typedef struct _MetaEventNative MetaEventNative;
+ 
+ struct _MetaEventNative
+ {
+-  uint32_t evcode;
+-
+   uint64_t time_usec;
+ 
+   gboolean has_relative_motion;
+@@ -75,16 +73,6 @@ meta_event_native_ensure_platform_data (ClutterEvent *event)
+   return event_evdev;
+ }
+ 
+-void
+-meta_event_native_set_event_code (ClutterEvent *event,
+-                                  uint32_t      evcode)
+-{
+-  MetaEventNative *event_evdev;
+-
+-  event_evdev = meta_event_native_ensure_platform_data (event);
+-  event_evdev->evcode = evcode;
+-}
+-
+ void
+ meta_event_native_set_time_usec (ClutterEvent *event,
+                                  uint64_t      time_usec)
+@@ -112,26 +100,6 @@ meta_event_native_set_relative_motion (ClutterEvent *event,
+   event_evdev->has_relative_motion = TRUE;
+ }
+ 
+-/**
+- * meta_event_native_get_event_code:
+- * @event: a #ClutterEvent
+- *
+- * Returns the event code of the original event. See linux/input.h for more
+- * information.
+- *
+- * Returns: The event code.
+- **/
+-uint32_t
+-meta_event_native_get_event_code (const ClutterEvent *event)
+-{
+-  MetaEventNative *event_evdev = _clutter_event_get_platform_data (event);
+-
+-  if (event_evdev)
+-    return event_evdev->evcode;
+-
+-  return 0;
+-}
+-
+ /**
+  * meta_event_native_get_time_usec:
+  * @event: a #ClutterEvent
+diff --git a/src/backends/native/meta-event-native.h b/src/backends/native/meta-event-native.h
+index 18405cd..fc54653 100644
+--- a/src/backends/native/meta-event-native.h
++++ b/src/backends/native/meta-event-native.h
+@@ -28,9 +28,6 @@ typedef struct _MetaEventNative MetaEventNative;
+ MetaEventNative * meta_event_native_copy (MetaEventNative *event_evdev);
+ void              meta_event_native_free (MetaEventNative *event_evdev);
+ 
+-uint32_t          meta_event_native_get_event_code (const ClutterEvent *event);
+-void              meta_event_native_set_event_code (ClutterEvent *event,
+-                                                    uint32_t      evcode);
+ uint64_t          meta_event_native_get_time_usec  (const ClutterEvent *event);
+ void              meta_event_native_set_time_usec  (ClutterEvent *event,
+                                                     uint64_t      time_usec);
+diff --git a/src/backends/native/meta-seat-impl.c b/src/backends/native/meta-seat-impl.c
+index 8751cff..033a9e3 100644
+--- a/src/backends/native/meta-seat-impl.c
++++ b/src/backends/native/meta-seat-impl.c
+@@ -397,7 +397,7 @@ meta_seat_impl_notify_key_in_impl (MetaSeatImpl       *seat_impl,
+                                          seat_impl->xkb,
+                                          seat_impl->button_state,
+                                          us2ms (time_us), key, state);
+-  meta_event_native_set_event_code (event, key);
++  event->key.evdev_code = key;
+ 
+   keycode = meta_xkb_evdev_to_keycode (key);
+ 
+@@ -712,7 +712,7 @@ meta_seat_impl_notify_button_in_impl (MetaSeatImpl       *seat_impl,
+         button = mapped_button;
+     }
+ 
+-  meta_event_native_set_event_code (event, button);
++  event->button.evdev_code = button;
+ 
+   if (clutter_input_device_get_device_type (input_device) == CLUTTER_TABLET_DEVICE)
+     {
+diff --git a/src/backends/x11/meta-seat-x11.c b/src/backends/x11/meta-seat-x11.c
+index bab8201..8251049 100644
+--- a/src/backends/x11/meta-seat-x11.c
++++ b/src/backends/x11/meta-seat-x11.c
+@@ -18,6 +18,7 @@
+  */
+ #include "config.h"
+ 
++#include <linux/input-event-codes.h>
+ #include <X11/extensions/XInput2.h>
+ #include <X11/extensions/XKB.h>
+ 
+@@ -1717,6 +1718,35 @@ get_source_device_checked (MetaSeatX11   *seat,
+   return source_device;
+ }
+ 
++static uint32_t
++evdev_button_code (uint32_t x_button)
++{
++  uint32_t button;
++
++  switch (x_button)
++    {
++    case 1:
++      button = BTN_LEFT;
++      break;
++
++      /* The evdev input right and middle button numbers are swapped
++         relative to how Clutter numbers them */
++    case 2:
++      button = BTN_MIDDLE;
++      break;
++
++    case 3:
++      button = BTN_RIGHT;
++      break;
++
++    default:
++      button = x_button + (BTN_LEFT - 1) + 4;
++      break;
++    }
++
++  return button;
++}
++
+ gboolean
+ meta_seat_x11_translate_event (MetaSeatX11  *seat,
+                                XEvent       *xevent,
+@@ -1820,6 +1850,10 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
+         meta_input_device_x11_translate_state (event, &xev->mods, &xev->buttons, &xev->group);
+         event->key.hardware_keycode = xev->detail;
+ 
++        /* clutter-xkb-utils.c adds a fixed offset of 8 to go into XKB's
++         * range, so we do the reverse here. */
++        event->key.evdev_code = event->key.hardware_keycode - 8;
++
+           /* keyval is the key ignoring all modifiers ('1' vs. '!') */
+         event->key.keyval =
+           meta_keymap_x11_translate_key_state (keymap_x11,
+@@ -2000,6 +2034,7 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
+             event->button.time = xev->time;
+             translate_coords (stage_x11, xev->event_x, xev->event_y, &event->button.x, &event->button.y);
+             event->button.button = xev->detail;
++            event->button.evdev_code = evdev_button_code (xev->detail);
+             meta_input_device_x11_translate_state (event,
+                                                    &xev->mods,
+                                                    &xev->buttons,
+diff --git a/src/wayland/meta-wayland-keyboard.c b/src/wayland/meta-wayland-keyboard.c
+index 0824007..e1e7714 100644
+--- a/src/wayland/meta-wayland-keyboard.c
++++ b/src/wayland/meta-wayland-keyboard.c
+@@ -58,11 +58,6 @@
+ #include "core/meta-anonymous-file.h"
+ #include "wayland/meta-wayland-private.h"
+ 
+-#ifdef HAVE_NATIVE_BACKEND
+-#include "backends/native/meta-backend-native.h"
+-#include "backends/native/meta-event-native.h"
+-#endif
+-
+ #define GSD_KEYBOARD_SCHEMA "org.gnome.settings-daemon.peripherals.keyboard"
+ 
+ G_DEFINE_TYPE (MetaWaylandKeyboard, meta_wayland_keyboard,
+@@ -70,7 +65,6 @@ G_DEFINE_TYPE (MetaWaylandKeyboard, meta_wayland_keyboard,
+ 
+ static void meta_wayland_keyboard_update_xkb_state (MetaWaylandKeyboard *keyboard);
+ static void notify_modifiers (MetaWaylandKeyboard *keyboard);
+-static guint evdev_code (const ClutterKeyEvent *event);
+ 
+ static void
+ unbind_resource (struct wl_resource *resource)
+@@ -491,21 +485,13 @@ default_grab_key (MetaWaylandKeyboardGrab *grab,
+   MetaWaylandKeyboard *keyboard = grab->keyboard;
+   gboolean is_press = event->type == CLUTTER_KEY_PRESS;
+   guint32 code = 0;
+-#ifdef HAVE_NATIVE_BACKEND
+-  MetaBackend *backend = meta_get_backend ();
+-#endif
+ 
+   /* Ignore autorepeat events, as autorepeat in Wayland is done on the client
+    * side. */
+   if (event->key.flags & CLUTTER_EVENT_FLAG_REPEATED)
+     return FALSE;
+ 
+-#ifdef HAVE_NATIVE_BACKEND
+-  if (META_IS_BACKEND_NATIVE (backend))
+-    code = meta_event_native_get_event_code (event);
+-  if (code == 0)
+-#endif
+-    code = evdev_code (&event->key);
++  code = clutter_event_get_event_code (event);
+ 
+   return meta_wayland_keyboard_broadcast_key (keyboard, event->key.time,
+                                               code, is_press);
+@@ -572,14 +558,6 @@ meta_wayland_keyboard_disable (MetaWaylandKeyboard *keyboard)
+   g_clear_object (&keyboard->settings);
+ }
+ 
+-static guint
+-evdev_code (const ClutterKeyEvent *event)
+-{
+-  /* clutter-xkb-utils.c adds a fixed offset of 8 to go into XKB's
+-   * range, so we do the reverse here. */
+-  return event->hardware_keycode - 8;
+-}
+-
+ void
+ meta_wayland_keyboard_update (MetaWaylandKeyboard *keyboard,
+                               const ClutterKeyEvent *event)
+diff --git a/src/wayland/meta-wayland-pointer.c b/src/wayland/meta-wayland-pointer.c
+index df7d6a4..b22f401 100644
+--- a/src/wayland/meta-wayland-pointer.c
++++ b/src/wayland/meta-wayland-pointer.c
+@@ -377,36 +377,7 @@ meta_wayland_pointer_send_button (MetaWaylandPointer *pointer,
+       uint32_t button;
+       uint32_t serial;
+ 
+-#ifdef HAVE_NATIVE_BACKEND
+-      MetaBackend *backend = meta_get_backend ();
+-      if (META_IS_BACKEND_NATIVE (backend))
+-        button = meta_event_native_get_event_code (event);
+-      else
+-#endif
+-        {
+-          button = clutter_event_get_button (event);
+-          switch (button)
+-            {
+-            case 1:
+-              button = BTN_LEFT;
+-              break;
+-
+-              /* The evdev input right and middle button numbers are swapped
+-                 relative to how Clutter numbers them */
+-            case 2:
+-              button = BTN_MIDDLE;
+-              break;
+-
+-            case 3:
+-              button = BTN_RIGHT;
+-              break;
+-
+-            default:
+-              button = button + (BTN_LEFT - 1) + 4;
+-              break;
+-            }
+-        }
+-
++      button = clutter_event_get_event_code (event);
+       time = clutter_event_get_time (event);
+       serial = meta_wayland_input_device_next_serial (input_device);
+ 
+diff --git a/src/wayland/meta-wayland-tablet-tool.c b/src/wayland/meta-wayland-tablet-tool.c
+index 08cb401..e372a62 100644
+--- a/src/wayland/meta-wayland-tablet-tool.c
++++ b/src/wayland/meta-wayland-tablet-tool.c
+@@ -36,13 +36,6 @@
+ #include "backends/meta-input-settings-private.h"
+ #include "backends/meta-logical-monitor.h"
+ 
+-#ifdef HAVE_NATIVE_BACKEND
+-#include <linux/input-event-codes.h>
+-
+-#include "backends/native/meta-backend-native.h"
+-#include "backends/native/meta-event-native.h"
+-#endif
+-
+ #include "tablet-unstable-v2-server-protocol.h"
+ 
+ #define TABLET_AXIS_MAX 65535
+@@ -676,23 +669,9 @@ broadcast_button (MetaWaylandTabletTool *tool,
+                   const ClutterEvent    *event)
+ {
+   struct wl_resource *resource;
+-  guint32 button;
+-
+-#ifdef HAVE_NATIVE_BACKEND
+-  MetaBackend *backend = meta_get_backend ();
+-  if (META_IS_BACKEND_NATIVE (backend))
+-    {
+-      button = meta_event_native_get_event_code (event);
+-    }
+-  else
+-#endif
+-    {
+-      /* We can't do much better here, there's several
+-       * different BTN_ ranges to cover.
+-       */
+-      button = event->button.button;
+-    }
++  uint32_t button;
+ 
++  button = clutter_event_get_event_code (event);
+   tool->button_serial = wl_display_next_serial (tool->seat->manager->wl_display);
+ 
+   wl_resource_for_each (resource, &tool->focus_resource_list)

@@ -1,0 +1,169 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Fri, 5 Jun 2020 19:12:14 +0200
+Subject: clutter: Pass timestamp to clutter_input_device_set_actor()
+
+This function emits crossing events, so needs a (most times truthful)
+timestamp. Make it explicit instead of fetching it from the device.
+
+https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1486
+---
+ clutter/clutter/clutter-input-device-private.h |  8 ++------
+ clutter/clutter/clutter-input-device.c         | 18 +++++++++++-------
+ clutter/clutter/clutter-main.c                 |  9 ++++++---
+ clutter/clutter/clutter-stage.c                |  3 ++-
+ src/wayland/meta-wayland-pointer.c             |  3 ++-
+ 5 files changed, 23 insertions(+), 18 deletions(-)
+
+diff --git a/clutter/clutter/clutter-input-device-private.h b/clutter/clutter/clutter-input-device-private.h
+index 8011a90..71e6ea3 100644
+--- a/clutter/clutter/clutter-input-device-private.h
++++ b/clutter/clutter/clutter-input-device-private.h
+@@ -185,16 +185,12 @@ void _clutter_input_device_set_state (ClutterInputDevice  *device,
+ CLUTTER_EXPORT
+ void _clutter_input_device_set_time (ClutterInputDevice *device,
+                                      guint32             time_);
+-void _clutter_input_device_set_actor (ClutterInputDevice   *device,
+-                                      ClutterEventSequence *sequence,
+-                                      ClutterStage         *stage,
+-                                      ClutterActor         *actor,
+-                                      gboolean              emit_crossing);
+ CLUTTER_EXPORT
+ ClutterActor * clutter_input_device_update (ClutterInputDevice   *device,
+                                             ClutterEventSequence *sequence,
+                                             ClutterStage         *stage,
+-                                            gboolean              emit_crossing);
++                                            gboolean              emit_crossing,
++                                            uint32_t              time_ms);
+ CLUTTER_EXPORT
+ void _clutter_input_device_add_event_sequence (ClutterInputDevice *device,
+                                                ClutterEvent       *event);
+diff --git a/clutter/clutter/clutter-input-device.c b/clutter/clutter/clutter-input-device.c
+index fe46adf..fe109fb 100644
+--- a/clutter/clutter/clutter-input-device.c
++++ b/clutter/clutter/clutter-input-device.c
+@@ -735,12 +735,13 @@ on_cursor_actor_reactive_changed (ClutterActor       *actor,
+  *   - set to %TRUE the :has-pointer property of the new pointer
+  *     actor
+  */
+-void
++static void
+ _clutter_input_device_set_actor (ClutterInputDevice   *device,
+                                  ClutterEventSequence *sequence,
+                                  ClutterStage         *stage,
+                                  ClutterActor         *actor,
+-                                 gboolean              emit_crossing)
++                                 gboolean              emit_crossing,
++                                 uint32_t              time_ms)
+ {
+   ClutterActor *old_actor = clutter_input_device_get_actor (device, sequence);
+ 
+@@ -756,7 +757,7 @@ _clutter_input_device_set_actor (ClutterInputDevice   *device,
+           ClutterEvent *event;
+ 
+           event = clutter_event_new (CLUTTER_LEAVE);
+-          event->crossing.time = device->current_time;
++          event->crossing.time = time_ms;
+           event->crossing.flags = 0;
+           event->crossing.stage = stage;
+           event->crossing.source = old_actor;
+@@ -793,7 +794,7 @@ _clutter_input_device_set_actor (ClutterInputDevice   *device,
+           ClutterEvent *event;
+ 
+           event = clutter_event_new (CLUTTER_ENTER);
+-          event->crossing.time = device->current_time;
++          event->crossing.time = time_ms;
+           event->crossing.flags = 0;
+           event->crossing.stage = stage;
+           event->crossing.x = device->current_x;
+@@ -960,7 +961,8 @@ ClutterActor *
+ clutter_input_device_update (ClutterInputDevice   *device,
+                              ClutterEventSequence *sequence,
+                              ClutterStage         *stage,
+-                             gboolean              emit_crossing)
++                             gboolean              emit_crossing,
++                             uint32_t              time_ms)
+ {
+   ClutterActor *new_cursor_actor;
+   ClutterActor *old_cursor_actor;
+@@ -998,7 +1000,8 @@ clutter_input_device_update (ClutterInputDevice   *device,
+   _clutter_input_device_set_actor (device, sequence,
+                                    stage,
+                                    new_cursor_actor,
+-                                   emit_crossing);
++                                   emit_crossing,
++                                   time_ms);
+ 
+   return new_cursor_actor;
+ }
+@@ -1603,7 +1606,8 @@ _clutter_input_device_remove_event_sequence (ClutterInputDevice *device,
+ 
+       g_hash_table_replace (device->inv_touch_sequence_actors,
+                             info->actor, sequences);
+-      _clutter_input_device_set_actor (device, sequence, stage, NULL, TRUE);
++      _clutter_input_device_set_actor (device, sequence, stage, NULL, TRUE,
++                                       clutter_event_get_time (event));
+     }
+ 
+   g_hash_table_remove (device->touch_sequences_info, sequence);
+diff --git a/clutter/clutter/clutter-main.c b/clutter/clutter/clutter-main.c
+index 6162db2..0a21d1f 100644
+--- a/clutter/clutter/clutter-main.c
++++ b/clutter/clutter/clutter-main.c
+@@ -1625,7 +1625,8 @@ _clutter_process_event_details (ClutterActor        *stage,
+             emit_crossing_event (event, device);
+ 
+             actor = clutter_input_device_update (device, NULL,
+-                                                 CLUTTER_STAGE (stage), FALSE);
++                                                 CLUTTER_STAGE (stage), FALSE,
++                                                 clutter_event_get_time (event));
+             if (actor != stage)
+               {
+                 ClutterEvent *crossing;
+@@ -1776,7 +1777,8 @@ _clutter_process_event_details (ClutterActor        *stage,
+ 
+               actor = clutter_input_device_update (device, NULL,
+                                                    CLUTTER_STAGE (stage),
+-                                                   TRUE);
++                                                   TRUE,
++                                                   clutter_event_get_time (event));
+               if (actor == NULL)
+                 break;
+ 
+@@ -1886,7 +1888,8 @@ _clutter_process_event_details (ClutterActor        *stage,
+ 
+               actor = clutter_input_device_update (device, sequence,
+                                                    CLUTTER_STAGE (stage),
+-                                                   TRUE);
++                                                   TRUE,
++                                                   clutter_event_get_time (event));
+               if (actor == NULL)
+                 break;
+ 
+diff --git a/clutter/clutter/clutter-stage.c b/clutter/clutter/clutter-stage.c
+index 602e4fc..a566849 100644
+--- a/clutter/clutter/clutter-stage.c
++++ b/clutter/clutter/clutter-stage.c
+@@ -1363,7 +1363,8 @@ clutter_stage_update_devices (ClutterStage *stage,
+   for (l = devices; l; l = l->next)
+     {
+       ClutterInputDevice *device = l->data;
+-      clutter_input_device_update (device, NULL, stage, TRUE);
++      clutter_input_device_update (device, NULL, stage, TRUE,
++                                   CLUTTER_CURRENT_TIME);
+     }
+ }
+ 
+diff --git a/src/wayland/meta-wayland-pointer.c b/src/wayland/meta-wayland-pointer.c
+index 198b23d..eb46ecc 100644
+--- a/src/wayland/meta-wayland-pointer.c
++++ b/src/wayland/meta-wayland-pointer.c
+@@ -1047,7 +1047,8 @@ meta_wayland_pointer_repick (MetaWaylandPointer *pointer)
+   MetaBackend *backend = meta_get_backend ();
+   ClutterStage *stage = CLUTTER_STAGE (meta_backend_get_stage (backend));
+ 
+-  clutter_input_device_update (pointer->device, NULL, stage, FALSE);
++  clutter_input_device_update (pointer->device, NULL, stage, FALSE,
++                               CLUTTER_CURRENT_TIME);
+   repick_for_event (pointer, NULL);
+ }
+ 

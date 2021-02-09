@@ -1,0 +1,27 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Tue, 22 Dec 2020 17:21:58 +0100
+Subject: wayland: Don't explicitly repick on wl_surface destructor
+
+As the crash at https://gitlab.gnome.org/GNOME/mutter/-/issues/1584
+shows, this is already handled indirectly via the surface actor destruction
+paths (especifically, through changes in its reactiveness). We don't
+need repeating the operation here.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1654>
+---
+ src/wayland/meta-wayland-surface.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/src/wayland/meta-wayland-surface.c b/src/wayland/meta-wayland-surface.c
+index d1894a8..4c614fc 100644
+--- a/src/wayland/meta-wayland-surface.c
++++ b/src/wayland/meta-wayland-surface.c
+@@ -1368,8 +1368,6 @@ wl_surface_destructor (struct wl_resource *resource)
+   g_hash_table_destroy (surface->shortcut_inhibited_seats);
+ 
+   g_object_unref (surface);
+-
+-  meta_wayland_compositor_repick (compositor);
+ }
+ 
+ MetaWaylandSurface *

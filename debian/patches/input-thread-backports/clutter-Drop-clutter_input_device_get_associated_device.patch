@@ -1,0 +1,318 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Wed, 18 Nov 2020 17:51:48 +0100
+Subject: clutter: Drop clutter_input_device_get_associated_device()
+
+And the private setter. One may ask the seat for the pointer/keyboard
+instead of asking the device for its counterpart.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ clutter/clutter/clutter-input-device-private.h |  6 --
+ clutter/clutter/clutter-input-device.c         | 70 ----------------------
+ clutter/clutter/clutter-input-device.h         |  3 -
+ src/backends/native/meta-seat-impl.c           | 10 +---
+ src/backends/x11/meta-seat-x11.c               | 80 +-------------------------
+ 5 files changed, 4 insertions(+), 165 deletions(-)
+
+diff --git a/clutter/clutter/clutter-input-device-private.h b/clutter/clutter/clutter-input-device-private.h
+index 6fe519b..3c54137 100644
+--- a/clutter/clutter/clutter-input-device-private.h
++++ b/clutter/clutter/clutter-input-device-private.h
+@@ -85,9 +85,6 @@ struct _ClutterInputDevice
+ 
+   ClutterBackend *backend;
+ 
+-  /* the associated device */
+-  ClutterInputDevice *associated;
+-
+   /* the actor underneath the pointer */
+   ClutterActor *cursor_actor;
+   GHashTable   *inv_touch_sequence_actors;
+@@ -136,9 +133,6 @@ struct _ClutterInputDevice
+   ClutterPtrA11yData *ptr_a11y_data;
+ };
+ 
+-CLUTTER_EXPORT
+-void _clutter_input_device_set_associated_device (ClutterInputDevice *device,
+-                                                  ClutterInputDevice *associated);
+ CLUTTER_EXPORT
+ void clutter_input_device_update_from_tool (ClutterInputDevice     *device,
+                                             ClutterInputDeviceTool *tool);
+diff --git a/clutter/clutter/clutter-input-device.c b/clutter/clutter/clutter-input-device.c
+index 41a941a..b8b10fd 100644
+--- a/clutter/clutter/clutter-input-device.c
++++ b/clutter/clutter/clutter-input-device.c
+@@ -94,13 +94,6 @@ clutter_input_device_dispose (GObject *gobject)
+   g_clear_pointer (&device->product_id, g_free);
+   g_clear_pointer (&device->node_path, g_free);
+ 
+-  if (device->associated != NULL)
+-    {
+-      _clutter_input_device_set_associated_device (device->associated, NULL);
+-      g_object_unref (device->associated);
+-      device->associated = NULL;
+-    }
+-
+   if (device->accessibility_virtual_device)
+     g_clear_object (&device->accessibility_virtual_device);
+ 
+@@ -1073,69 +1066,6 @@ _clutter_input_device_remove_event_sequence (ClutterInputDevice *device,
+     }
+ }
+ 
+-/*< internal >
+- * clutter_input_device_set_associated_device:
+- * @device: a #ClutterInputDevice
+- * @associated: (allow-none): a #ClutterInputDevice, or %NULL
+- *
+- * Sets the associated device for @device.
+- *
+- * This function keeps a reference on the associated device.
+- */
+-void
+-_clutter_input_device_set_associated_device (ClutterInputDevice *device,
+-                                             ClutterInputDevice *associated)
+-{
+-  if (device->associated == associated)
+-    return;
+-
+-  if (device->associated != NULL)
+-    g_object_unref (device->associated);
+-
+-  device->associated = associated;
+-  if (device->associated != NULL)
+-    g_object_ref (device->associated);
+-
+-  CLUTTER_NOTE (MISC, "Associating device '%s' to device '%s'",
+-                clutter_input_device_get_device_name (device),
+-                device->associated != NULL
+-                  ? clutter_input_device_get_device_name (device->associated)
+-                  : "(none)");
+-
+-  if (device->device_mode != CLUTTER_INPUT_MODE_LOGICAL)
+-    {
+-      if (device->associated != NULL)
+-        device->device_mode = CLUTTER_INPUT_MODE_PHYSICAL;
+-      else
+-        device->device_mode = CLUTTER_INPUT_MODE_FLOATING;
+-
+-      g_object_notify_by_pspec (G_OBJECT (device), obj_props[PROP_DEVICE_MODE]);
+-    }
+-}
+-
+-/**
+- * clutter_input_device_get_associated_device:
+- * @device: a #ClutterInputDevice
+- *
+- * Retrieves a pointer to the #ClutterInputDevice that has been
+- * associated to @device.
+- *
+- * If the #ClutterInputDevice:device-mode property of @device is
+- * set to %CLUTTER_INPUT_MODE_LOGICAL, this function will return
+- * %NULL.
+- *
+- * Return value: (transfer none): a #ClutterInputDevice, or %NULL
+- *
+- * Since: 1.6
+- */
+-ClutterInputDevice *
+-clutter_input_device_get_associated_device (ClutterInputDevice *device)
+-{
+-  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), NULL);
+-
+-  return device->associated;
+-}
+-
+ /**
+  * clutter_input_device_keycode_to_evdev:
+  * @device: A #ClutterInputDevice
+diff --git a/clutter/clutter/clutter-input-device.h b/clutter/clutter/clutter-input-device.h
+index 42948f5..8ae53f8 100644
+--- a/clutter/clutter/clutter-input-device.h
++++ b/clutter/clutter/clutter-input-device.h
+@@ -104,9 +104,6 @@ gboolean                clutter_input_device_get_axis_value     (ClutterInputDev
+                                                                  ClutterInputAxis     axis,
+                                                                  gdouble             *value);
+ 
+-CLUTTER_EXPORT
+-ClutterInputDevice *    clutter_input_device_get_associated_device (ClutterInputDevice *device);
+-
+ CLUTTER_EXPORT
+ void                    clutter_input_device_grab               (ClutterInputDevice  *device,
+                                                                  ClutterActor        *actor);
+diff --git a/src/backends/native/meta-seat-impl.c b/src/backends/native/meta-seat-impl.c
+index 386aee5..0eea398 100644
+--- a/src/backends/native/meta-seat-impl.c
++++ b/src/backends/native/meta-seat-impl.c
+@@ -1510,7 +1510,7 @@ evdev_add_device (MetaSeatImpl           *seat_impl,
+                   struct libinput_device *libinput_device)
+ {
+   ClutterInputDeviceType type;
+-  ClutterInputDevice *device, *master = NULL;
++  ClutterInputDevice *device;
+   gboolean is_touchscreen, is_tablet_switch;
+ 
+   device = meta_input_device_native_new (seat_impl, libinput_device);
+@@ -1521,14 +1521,6 @@ evdev_add_device (MetaSeatImpl           *seat_impl,
+    * ClutterInputDevice API */
+   type = meta_input_device_native_determine_type (libinput_device);
+ 
+-  if (type == CLUTTER_KEYBOARD_DEVICE)
+-    master = seat_impl->core_keyboard;
+-  else if (type == CLUTTER_POINTER_DEVICE)
+-    master = seat_impl->core_pointer;
+-
+-  if (master)
+-    _clutter_input_device_set_associated_device (device, master);
+-
+   is_touchscreen = type == CLUTTER_TOUCHSCREEN_DEVICE;
+   is_tablet_switch =
+     device_is_tablet_switch (META_INPUT_DEVICE_NATIVE (device));
+diff --git a/src/backends/x11/meta-seat-x11.c b/src/backends/x11/meta-seat-x11.c
+index e282568..aabcfe3 100644
+--- a/src/backends/x11/meta-seat-x11.c
++++ b/src/backends/x11/meta-seat-x11.c
+@@ -623,8 +623,7 @@ update_touch_mode (MetaSeatX11 *seat_x11)
+ static ClutterInputDevice *
+ add_device (MetaSeatX11    *seat_x11,
+             ClutterBackend *backend,
+-            XIDeviceInfo   *info,
+-            gboolean        in_construction)
++            XIDeviceInfo   *info)
+ {
+   ClutterInputDevice *device;
+ 
+@@ -660,21 +659,6 @@ add_device (MetaSeatX11    *seat_x11,
+   if (clutter_input_device_get_device_type (device) == CLUTTER_PAD_DEVICE)
+     pad_passive_button_grab (device);
+ 
+-  /* relationships between devices and signal emissions are not
+-   * necessary while we're constructing the device manager instance
+-   */
+-  if (!in_construction)
+-    {
+-      if (info->use == XISlavePointer || info->use == XISlaveKeyboard)
+-        {
+-          ClutterInputDevice *logical;
+-
+-          logical = g_hash_table_lookup (seat_x11->devices_by_id,
+-                                         GINT_TO_POINTER (info->attachment));
+-          _clutter_input_device_set_associated_device (device, logical);
+-        }
+-    }
+-
+   return device;
+ }
+ 
+@@ -749,21 +733,6 @@ meta_seat_x11_handle_event_post (ClutterSeat        *seat,
+   return TRUE;
+ }
+ 
+-static void
+-relate_logical_devices (gpointer key,
+-                        gpointer value,
+-                        gpointer data)
+-{
+-  MetaSeatX11 *seat_x11 = data;
+-  ClutterInputDevice *device, *relative;
+-
+-  device = g_hash_table_lookup (seat_x11->devices_by_id, key);
+-  relative = g_hash_table_lookup (seat_x11->devices_by_id, value);
+-
+-  _clutter_input_device_set_associated_device (device, relative);
+-  _clutter_input_device_set_associated_device (relative, device);
+-}
+-
+ static uint
+ device_get_tool_serial (ClutterInputDevice *device)
+ {
+@@ -822,7 +791,7 @@ translate_hierarchy_event (ClutterBackend   *backend,
+             {
+               ClutterInputDevice *device;
+ 
+-              device = add_device (seat_x11, backend, &info[0], FALSE);
++              device = add_device (seat_x11, backend, &info[0]);
+ 
+               event->any.type = CLUTTER_DEVICE_ADDED;
+               event->any.time = ev->time;
+@@ -856,40 +825,10 @@ translate_hierarchy_event (ClutterBackend   *backend,
+       else if ((ev->info[i].flags & XISlaveAttached) ||
+                (ev->info[i].flags & XISlaveDetached))
+         {
+-          ClutterInputDevice *logical, *physical;
+-          XIDeviceInfo *info;
+-          int n_devices;
+-
+           g_debug ("Hierarchy event: physical device %s",
+                    (ev->info[i].flags & XISlaveAttached)
+                    ? "attached"
+                    : "detached");
+-
+-          physical = g_hash_table_lookup (seat_x11->devices_by_id,
+-                                          GINT_TO_POINTER (ev->info[i].deviceid));
+-          logical = clutter_input_device_get_associated_device (physical);
+-
+-          /* detach the physical device in both cases */
+-          if (logical != NULL)
+-            _clutter_input_device_set_associated_device (physical, NULL);
+-
+-          /* and attach the physical device to the new logical device if needed */
+-          if (ev->info[i].flags & XISlaveAttached)
+-            {
+-              clutter_x11_trap_x_errors ();
+-              info = XIQueryDevice (clutter_x11_get_default_display (),
+-                                    ev->info[i].deviceid,
+-                                    &n_devices);
+-              clutter_x11_untrap_x_errors ();
+-              if (info != NULL)
+-                {
+-                  logical = g_hash_table_lookup (seat_x11->devices_by_id,
+-                                                 GINT_TO_POINTER (info->attachment));
+-                  if (logical != NULL)
+-                    _clutter_input_device_set_associated_device (physical, logical);
+-                  XIFreeDeviceInfo (info);
+-                }
+-            }
+         }
+     }
+ 
+@@ -1397,7 +1336,6 @@ meta_seat_x11_constructed (GObject *object)
+ {
+   MetaSeatX11 *seat_x11 = META_SEAT_X11 (object);
+   ClutterBackend *backend = clutter_get_default_backend ();
+-  GHashTable *logical_devices;
+   XIDeviceInfo *info;
+   XIEventMask event_mask;
+   unsigned char mask[XIMaskLen(XI_LASTEVENT)] = { 0, };
+@@ -1405,7 +1343,6 @@ meta_seat_x11_constructed (GObject *object)
+   Display *xdisplay;
+ 
+   xdisplay = clutter_x11_get_default_display ();
+-  logical_devices = g_hash_table_new (NULL, NULL);
+ 
+   info = XIQueryDevice (clutter_x11_get_default_display (),
+                         XIAllDevices, &n_devices);
+@@ -1417,22 +1354,11 @@ meta_seat_x11_constructed (GObject *object)
+       if (!xi_device->enabled)
+         continue;
+ 
+-      add_device (seat_x11, backend, xi_device, TRUE);
+-
+-      if (xi_device->use == XIMasterPointer ||
+-          xi_device->use == XIMasterKeyboard)
+-        {
+-          g_hash_table_insert (logical_devices,
+-                               GINT_TO_POINTER (xi_device->deviceid),
+-                               GINT_TO_POINTER (xi_device->attachment));
+-        }
++      add_device (seat_x11, backend, xi_device);
+     }
+ 
+   XIFreeDeviceInfo (info);
+ 
+-  g_hash_table_foreach (logical_devices, relate_logical_devices, seat_x11);
+-  g_hash_table_destroy (logical_devices);
+-
+   XISetMask (mask, XI_HierarchyChanged);
+   XISetMask (mask, XI_DeviceChanged);
+   XISetMask (mask, XI_PropertyEvent);

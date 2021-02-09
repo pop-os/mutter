@@ -1,0 +1,116 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Mon, 13 Jul 2020 12:28:46 +0200
+Subject: backends: Move away from meta_cursor_renderer_get_position()
+
+We are moving onto relying fully on the seat cursor position. As
+this focuses (thus far?) on mouse pointers only, use the cursor
+tracker as a convenient shortcut.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ src/backends/meta-screen-cast-area-stream-src.c    |  6 ++++--
+ src/backends/meta-screen-cast-monitor-stream-src.c |  6 ++++--
+ src/backends/meta-screen-cast-window-stream-src.c  | 10 +++++++---
+ 3 files changed, 15 insertions(+), 7 deletions(-)
+
+diff --git a/src/backends/meta-screen-cast-area-stream-src.c b/src/backends/meta-screen-cast-area-stream-src.c
+index 2402085..a20504e 100644
+--- a/src/backends/meta-screen-cast-area-stream-src.c
++++ b/src/backends/meta-screen-cast-area-stream-src.c
+@@ -142,9 +142,11 @@ is_cursor_in_stream (MetaScreenCastAreaStreamSrc *area_src)
+     }
+   else
+     {
++      MetaCursorTracker *cursor_tracker =
++        meta_backend_get_cursor_tracker (backend);
+       graphene_point_t cursor_position;
+ 
+-      cursor_position = meta_cursor_renderer_get_position (cursor_renderer);
++      meta_cursor_tracker_get_pointer (cursor_tracker, &cursor_position, NULL);
+       return graphene_rect_contains_point (&area_rect, &cursor_position);
+     }
+ }
+@@ -545,7 +547,7 @@ meta_screen_cast_area_stream_src_set_cursor_metadata (MetaScreenCastStreamSrc *s
+   area = meta_screen_cast_area_stream_get_area (area_stream);
+   scale = meta_screen_cast_area_stream_get_scale (area_stream);
+ 
+-  cursor_position = meta_cursor_renderer_get_position (cursor_renderer);
++  meta_cursor_tracker_get_pointer (cursor_tracker, &cursor_position, NULL);
+   cursor_position.x -= area->x;
+   cursor_position.y -= area->y;
+   cursor_position.x *= scale;
+diff --git a/src/backends/meta-screen-cast-monitor-stream-src.c b/src/backends/meta-screen-cast-monitor-stream-src.c
+index ccc9cdf..bd805b6 100644
+--- a/src/backends/meta-screen-cast-monitor-stream-src.c
++++ b/src/backends/meta-screen-cast-monitor-stream-src.c
+@@ -189,9 +189,11 @@ is_cursor_in_stream (MetaScreenCastMonitorStreamSrc *monitor_src)
+     }
+   else
+     {
++      MetaCursorTracker *cursor_tracker =
++        meta_backend_get_cursor_tracker (backend);
+       graphene_point_t cursor_position;
+ 
+-      cursor_position = meta_cursor_renderer_get_position (cursor_renderer);
++      meta_cursor_tracker_get_pointer (cursor_tracker, &cursor_position, NULL);
+       return graphene_rect_contains_point (&logical_monitor_rect,
+                                            &cursor_position);
+     }
+@@ -702,7 +704,7 @@ meta_screen_cast_monitor_stream_src_set_cursor_metadata (MetaScreenCastStreamSrc
+   else
+     view_scale = 1.0;
+ 
+-  cursor_position = meta_cursor_renderer_get_position (cursor_renderer);
++  meta_cursor_tracker_get_pointer (cursor_tracker, &cursor_position, NULL);
+   cursor_position.x -= logical_monitor_rect.origin.x;
+   cursor_position.y -= logical_monitor_rect.origin.y;
+   cursor_position.x *= view_scale;
+diff --git a/src/backends/meta-screen-cast-window-stream-src.c b/src/backends/meta-screen-cast-window-stream-src.c
+index ec9f873..e881d80 100644
+--- a/src/backends/meta-screen-cast-window-stream-src.c
++++ b/src/backends/meta-screen-cast-window-stream-src.c
+@@ -110,6 +110,8 @@ maybe_draw_cursor_sprite (MetaScreenCastWindowStreamSrc *window_src,
+   MetaBackend *backend = get_backend (window_src);
+   MetaCursorRenderer *cursor_renderer =
+     meta_backend_get_cursor_renderer (backend);
++  MetaCursorTracker *cursor_tracker =
++    meta_backend_get_cursor_tracker (backend);
+   MetaCursorSprite *cursor_sprite;
+   CoglTexture *cursor_texture;
+   MetaScreenCastWindow *screen_cast_window;
+@@ -133,7 +135,7 @@ maybe_draw_cursor_sprite (MetaScreenCastWindowStreamSrc *window_src,
+     return;
+ 
+   screen_cast_window = window_src->screen_cast_window;
+-  cursor_position = meta_cursor_renderer_get_position (cursor_renderer);
++  meta_cursor_tracker_get_pointer (cursor_tracker, &cursor_position, NULL);
+   if (!meta_screen_cast_window_transform_cursor_position (screen_cast_window,
+                                                           cursor_sprite,
+                                                           &cursor_position,
+@@ -189,6 +191,8 @@ maybe_blit_cursor_sprite (MetaScreenCastWindowStreamSrc *window_src,
+     clutter_backend_get_cogl_context (clutter_get_default_backend ());
+   MetaCursorRenderer *cursor_renderer =
+     meta_backend_get_cursor_renderer (backend);
++  MetaCursorTracker *cursor_tracker =
++    meta_backend_get_cursor_tracker (backend);
+   MetaScreenCastWindow *screen_cast_window;
+   MetaCursorSprite *cursor_sprite;
+   graphene_point_t relative_cursor_position;
+@@ -209,7 +213,7 @@ maybe_blit_cursor_sprite (MetaScreenCastWindowStreamSrc *window_src,
+     return;
+ 
+   screen_cast_window = window_src->screen_cast_window;
+-  cursor_position = meta_cursor_renderer_get_position (cursor_renderer);
++  meta_cursor_tracker_get_pointer (cursor_tracker, &cursor_position, NULL);
+   if (!meta_screen_cast_window_transform_cursor_position (screen_cast_window,
+                                                           cursor_sprite,
+                                                           &cursor_position,
+@@ -524,7 +528,7 @@ meta_screen_cast_window_stream_src_set_cursor_metadata (MetaScreenCastStreamSrc
+   int x, y;
+ 
+   cursor_sprite = meta_cursor_renderer_get_cursor (cursor_renderer);
+-  cursor_position = meta_cursor_renderer_get_position (cursor_renderer);
++  meta_cursor_tracker_get_pointer (cursor_tracker, &cursor_position, NULL);
+ 
+   if (!meta_cursor_tracker_get_pointer_visible (cursor_tracker) ||
+       !meta_screen_cast_window_transform_cursor_position (screen_cast_window,

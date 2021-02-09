@@ -1,0 +1,54 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Fri, 5 Jun 2020 16:05:20 +0200
+Subject: clutter: Do not depend on device stage on ClutterInputMethod
+
+Look it up through other means.
+
+https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1486
+---
+ clutter/clutter/clutter-input-method.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/clutter/clutter/clutter-input-method.c b/clutter/clutter/clutter-input-method.c
+index 438edfe..b24df2e 100644
+--- a/clutter/clutter/clutter-input-method.c
++++ b/clutter/clutter/clutter-input-method.c
+@@ -286,14 +286,14 @@ clutter_input_method_put_im_event (ClutterInputMethod *im,
+ {
+   ClutterInputDevice *keyboard;
+   ClutterSeat *seat;
++  ClutterStageManager *stage_manager;
+   ClutterStage *stage;
+   ClutterEvent *event;
+ 
+   seat = clutter_backend_get_default_seat (clutter_get_default_backend ());
+   keyboard = clutter_seat_get_keyboard (seat);
+-  stage = _clutter_input_device_get_stage (keyboard);
+-  if (stage == NULL)
+-    return;
++  stage_manager = clutter_stage_manager_get_default ();
++  stage = clutter_stage_manager_get_default_stage (stage_manager);
+ 
+   event = clutter_event_new (event_type);
+   event->im.text = g_strdup (text);
+@@ -474,6 +474,7 @@ clutter_input_method_forward_key (ClutterInputMethod *im,
+   ClutterInputMethodPrivate *priv;
+   ClutterInputDevice *keyboard;
+   ClutterSeat *seat;
++  ClutterStageManager *stage_manager;
+   ClutterStage *stage;
+   ClutterEvent *event;
+ 
+@@ -484,10 +485,9 @@ clutter_input_method_forward_key (ClutterInputMethod *im,
+     return;
+ 
+   seat = clutter_backend_get_default_seat (clutter_get_default_backend ());
++  stage_manager = clutter_stage_manager_get_default ();
++  stage = clutter_stage_manager_get_default_stage (stage_manager);
+   keyboard = clutter_seat_get_keyboard (seat);
+-  stage = _clutter_input_device_get_stage (keyboard);
+-  if (stage == NULL)
+-    return;
+ 
+   event = clutter_event_new (press ? CLUTTER_KEY_PRESS : CLUTTER_KEY_RELEASE);
+   event->key.time = time_;

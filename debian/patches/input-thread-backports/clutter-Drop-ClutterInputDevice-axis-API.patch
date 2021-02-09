@@ -1,0 +1,714 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Thu, 19 Nov 2020 01:15:42 +0100
+Subject: clutter: Drop ClutterInputDevice axis API
+
+Most of this comes from X11 peculiarities that were open coded in
+the Clutter ABI. We don't need this except in X11, so move this axis
+handling there.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ clutter/clutter/clutter-input-device-private.h |  29 ---
+ clutter/clutter/clutter-input-device.c         | 254 -------------------------
+ src/backends/x11/meta-input-device-x11.c       | 134 +++++++++++++
+ src/backends/x11/meta-input-device-x11.h       |  15 ++
+ src/backends/x11/meta-seat-x11.c               |  13 +-
+ src/tests/clutter/interactive/test-devices.c   |  50 +----
+ 6 files changed, 158 insertions(+), 337 deletions(-)
+
+diff --git a/clutter/clutter/clutter-input-device-private.h b/clutter/clutter/clutter-input-device-private.h
+index baf02c0..caed7cb 100644
+--- a/clutter/clutter/clutter-input-device-private.h
++++ b/clutter/clutter/clutter-input-device-private.h
+@@ -32,19 +32,6 @@
+ 
+ G_BEGIN_DECLS
+ 
+-typedef struct _ClutterAxisInfo
+-{
+-  ClutterInputAxis axis;
+-
+-  double min_axis;
+-  double max_axis;
+-
+-  double min_value;
+-  double max_value;
+-
+-  double resolution;
+-} ClutterAxisInfo;
+-
+ typedef struct _ClutterScrollInfo
+ {
+   guint axis_id;
+@@ -111,8 +98,6 @@ struct _ClutterInputDevice
+   uint32_t previous_time;
+   int previous_button_number;
+ 
+-  GArray *axes;
+-
+   GArray *scroll_info;
+ 
+   char *vendor_id;
+@@ -142,20 +127,6 @@ ClutterActor * clutter_input_device_update (ClutterInputDevice   *device,
+ CLUTTER_EXPORT
+ void _clutter_input_device_remove_event_sequence (ClutterInputDevice *device,
+                                                   ClutterEvent       *event);
+-CLUTTER_EXPORT
+-gboolean _clutter_input_device_translate_axis (ClutterInputDevice *device,
+-                                               guint               index_,
+-                                               gdouble             value,
+-                                               gdouble            *axis_value);
+-CLUTTER_EXPORT
+-guint _clutter_input_device_add_axis (ClutterInputDevice *device,
+-                                      ClutterInputAxis    axis,
+-                                      gdouble             minimum,
+-                                      gdouble             maximum,
+-                                      gdouble             resolution);
+-
+-CLUTTER_EXPORT
+-void _clutter_input_device_reset_axes (ClutterInputDevice *device);
+ 
+ CLUTTER_EXPORT
+ void _clutter_input_device_add_scroll_info (ClutterInputDevice     *device,
+diff --git a/clutter/clutter/clutter-input-device.c b/clutter/clutter/clutter-input-device.c
+index 64c125e..4a7b4c8 100644
+--- a/clutter/clutter/clutter-input-device.c
++++ b/clutter/clutter/clutter-input-device.c
+@@ -61,8 +61,6 @@ enum
+ 
+   PROP_HAS_CURSOR,
+ 
+-  PROP_N_AXES,
+-
+   PROP_VENDOR_ID,
+   PROP_PRODUCT_ID,
+ 
+@@ -97,7 +95,6 @@ clutter_input_device_dispose (GObject *gobject)
+   if (device->accessibility_virtual_device)
+     g_clear_object (&device->accessibility_virtual_device);
+ 
+-  g_clear_pointer (&device->axes, g_array_unref);
+   g_clear_pointer (&device->scroll_info, g_array_unref);
+   g_clear_pointer (&device->touch_sequence_actors, g_hash_table_unref);
+ 
+@@ -236,10 +233,6 @@ clutter_input_device_get_property (GObject    *gobject,
+       g_value_set_boolean (value, self->has_cursor);
+       break;
+ 
+-    case PROP_N_AXES:
+-      g_value_set_uint (value, clutter_input_device_get_n_axes (self));
+-      break;
+-
+     case PROP_VENDOR_ID:
+       g_value_set_string (value, self->vendor_id);
+       break;
+@@ -347,21 +340,6 @@ clutter_input_device_class_init (ClutterInputDeviceClass *klass)
+                           FALSE,
+                           CLUTTER_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY);
+ 
+-  /**
+-   * ClutterInputDevice:n-axes:
+-   *
+-   * The number of axes of the device.
+-   *
+-   * Since: 1.6
+-   */
+-  obj_props[PROP_N_AXES] =
+-    g_param_spec_uint ("n-axes",
+-                       P_("Number of Axes"),
+-                       P_("The number of axes on the device"),
+-                       0, G_MAXUINT,
+-                       0,
+-                       CLUTTER_PARAM_READABLE);
+-
+   /**
+    * ClutterInputDevice:backend:
+    *
+@@ -800,236 +778,6 @@ clutter_input_device_get_device_mode (ClutterInputDevice *device)
+   return device->device_mode;
+ }
+ 
+-/*< private >
+- * clutter_input_device_reset_axes:
+- * @device: a #ClutterInputDevice
+- *
+- * Resets the axes on @device
+- */
+-void
+-_clutter_input_device_reset_axes (ClutterInputDevice *device)
+-{
+-  if (device->axes != NULL)
+-    {
+-      g_array_free (device->axes, TRUE);
+-      device->axes = NULL;
+-
+-      g_object_notify_by_pspec (G_OBJECT (device), obj_props[PROP_N_AXES]);
+-    }
+-}
+-
+-/*< private >
+- * clutter_input_device_add_axis:
+- * @device: a #ClutterInputDevice
+- * @axis: the axis type
+- * @minimum: the minimum axis value
+- * @maximum: the maximum axis value
+- * @resolution: the axis resolution
+- *
+- * Adds an axis of type @axis on @device.
+- */
+-guint
+-_clutter_input_device_add_axis (ClutterInputDevice *device,
+-                                ClutterInputAxis    axis,
+-                                gdouble             minimum,
+-                                gdouble             maximum,
+-                                gdouble             resolution)
+-{
+-  ClutterAxisInfo info;
+-  guint pos;
+-
+-  if (device->axes == NULL)
+-    device->axes = g_array_new (FALSE, TRUE, sizeof (ClutterAxisInfo));
+-
+-  info.axis = axis;
+-  info.min_value = minimum;
+-  info.max_value = maximum;
+-  info.resolution = resolution;
+-
+-  switch (axis)
+-    {
+-    case CLUTTER_INPUT_AXIS_X:
+-    case CLUTTER_INPUT_AXIS_Y:
+-      info.min_axis = 0;
+-      info.max_axis = 0;
+-      break;
+-
+-    case CLUTTER_INPUT_AXIS_XTILT:
+-    case CLUTTER_INPUT_AXIS_YTILT:
+-      info.min_axis = -1;
+-      info.max_axis = 1;
+-      break;
+-
+-    default:
+-      info.min_axis = 0;
+-      info.max_axis = 1;
+-      break;
+-    }
+-
+-  device->axes = g_array_append_val (device->axes, info);
+-  pos = device->axes->len - 1;
+-
+-  g_object_notify_by_pspec (G_OBJECT (device), obj_props[PROP_N_AXES]);
+-
+-  return pos;
+-}
+-
+-/*< private >
+- * clutter_input_translate_axis:
+- * @device: a #ClutterInputDevice
+- * @index_: the index of the axis
+- * @gint: the absolute value of the axis
+- * @axis_value: (out): the translated value of the axis
+- *
+- * Performs a conversion from the absolute value of the axis
+- * to a relative value.
+- *
+- * The axis at @index_ must not be %CLUTTER_INPUT_AXIS_X or
+- * %CLUTTER_INPUT_AXIS_Y.
+- *
+- * Return value: %TRUE if the conversion was successful
+- */
+-gboolean
+-_clutter_input_device_translate_axis (ClutterInputDevice *device,
+-                                      guint               index_,
+-                                      gdouble             value,
+-                                      gdouble            *axis_value)
+-{
+-  ClutterAxisInfo *info;
+-  gdouble width;
+-  gdouble real_value;
+-
+-  if (device->axes == NULL || index_ >= device->axes->len)
+-    return FALSE;
+-
+-  info = &g_array_index (device->axes, ClutterAxisInfo, index_);
+-
+-  if (info->axis == CLUTTER_INPUT_AXIS_X ||
+-      info->axis == CLUTTER_INPUT_AXIS_Y)
+-    return FALSE;
+-
+-  if (fabs (info->max_value - info->min_value) < 0.0000001)
+-    return FALSE;
+-
+-  width = info->max_value - info->min_value;
+-  real_value = (info->max_axis * (value - info->min_value)
+-             + info->min_axis * (info->max_value - value))
+-             / width;
+-
+-  if (axis_value)
+-    *axis_value = real_value;
+-
+-  return TRUE;
+-}
+-
+-/**
+- * clutter_input_device_get_axis:
+- * @device: a #ClutterInputDevice
+- * @index_: the index of the axis
+- *
+- * Retrieves the type of axis on @device at the given index.
+- *
+- * Return value: the axis type
+- *
+- * Since: 1.6
+- */
+-ClutterInputAxis
+-clutter_input_device_get_axis (ClutterInputDevice *device,
+-                               guint               index_)
+-{
+-  ClutterAxisInfo *info;
+-
+-  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device),
+-                        CLUTTER_INPUT_AXIS_IGNORE);
+-
+-  if (device->axes == NULL)
+-    return CLUTTER_INPUT_AXIS_IGNORE;
+-
+-  if (index_ >= device->axes->len)
+-    return CLUTTER_INPUT_AXIS_IGNORE;
+-
+-  info = &g_array_index (device->axes, ClutterAxisInfo, index_);
+-
+-  return info->axis;
+-}
+-
+-/**
+- * clutter_input_device_get_axis_value:
+- * @device: a #ClutterInputDevice
+- * @axes: (array): an array of axes values, typically
+- *   coming from clutter_event_get_axes()
+- * @axis: the axis to extract
+- * @value: (out): return location for the axis value
+- *
+- * Extracts the value of the given @axis of a #ClutterInputDevice from
+- * an array of axis values.
+- *
+- * An example of typical usage for this function is:
+- *
+- * |[
+- *   ClutterInputDevice *device = clutter_event_get_device (event);
+- *   gdouble *axes = clutter_event_get_axes (event, NULL);
+- *   gdouble pressure_value = 0;
+- *
+- *   clutter_input_device_get_axis_value (device, axes,
+- *                                        CLUTTER_INPUT_AXIS_PRESSURE,
+- *                                        &pressure_value);
+- * ]|
+- *
+- * Return value: %TRUE if the value was set, and %FALSE otherwise
+- *
+- * Since: 1.6
+- */
+-gboolean
+-clutter_input_device_get_axis_value (ClutterInputDevice *device,
+-                                     gdouble            *axes,
+-                                     ClutterInputAxis    axis,
+-                                     gdouble            *value)
+-{
+-  gint i;
+-
+-  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), FALSE);
+-  g_return_val_if_fail (device->axes != NULL, FALSE);
+-
+-  for (i = 0; i < device->axes->len; i++)
+-    {
+-      ClutterAxisInfo *info;
+-
+-      info = &g_array_index (device->axes, ClutterAxisInfo, i);
+-
+-      if (info->axis == axis)
+-        {
+-          if (value)
+-            *value = axes[i];
+-
+-          return TRUE;
+-        }
+-    }
+-
+-  return FALSE;
+-}
+-
+-/**
+- * clutter_input_device_get_n_axes:
+- * @device: a #ClutterInputDevice
+- *
+- * Retrieves the number of axes available on @device.
+- *
+- * Return value: the number of axes on the device
+- *
+- * Since: 1.6
+- */
+-guint
+-clutter_input_device_get_n_axes (ClutterInputDevice *device)
+-{
+-  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), 0);
+-
+-  if (device->axes != NULL)
+-    return device->axes->len;
+-
+-  return 0;
+-}
+-
+ /*< private >
+  * clutter_input_device_remove_sequence:
+  * @device: a #ClutterInputDevice
+@@ -1109,7 +857,6 @@ _clutter_input_device_add_scroll_info (ClutterInputDevice     *device,
+   ClutterScrollInfo info;
+ 
+   g_return_if_fail (CLUTTER_IS_INPUT_DEVICE (device));
+-  g_return_if_fail (index_ < clutter_input_device_get_n_axes (device));
+ 
+   info.axis_id = index_;
+   info.direction = direction;
+@@ -1136,7 +883,6 @@ _clutter_input_device_get_scroll_delta (ClutterInputDevice     *device,
+   guint i;
+ 
+   g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), FALSE);
+-  g_return_val_if_fail (index_ < clutter_input_device_get_n_axes (device), FALSE);
+ 
+   if (device->scroll_info == NULL)
+     return FALSE;
+diff --git a/src/backends/x11/meta-input-device-x11.c b/src/backends/x11/meta-input-device-x11.c
+index 7d51807..4fdd3b6 100644
+--- a/src/backends/x11/meta-input-device-x11.c
++++ b/src/backends/x11/meta-input-device-x11.c
+@@ -37,11 +37,26 @@ struct _MetaInputDeviceX11
+   float current_x;
+   float current_y;
+ 
++  GArray *axes;
++
+ #ifdef HAVE_LIBWACOM
+   GArray *group_modes;
+ #endif
+ };
+ 
++typedef struct _MetaX11AxisInfo
++{
++  ClutterInputAxis axis;
++
++  double min_axis;
++  double max_axis;
++
++  double min_value;
++  double max_value;
++
++  double resolution;
++} MetaX11AxisInfo;
++
+ struct _MetaInputDeviceX11Class
+ {
+   ClutterInputDeviceClass device_class;
+@@ -133,6 +148,8 @@ meta_input_device_x11_finalize (GObject *object)
+ {
+   MetaInputDeviceX11 *device_xi2 = META_INPUT_DEVICE_X11 (object);
+ 
++  g_clear_pointer (&device_xi2->axes, g_array_unref);
++
+ #ifdef HAVE_LIBWACOM
+   if (device_xi2->group_modes)
+     g_array_unref (device_xi2->group_modes);
+@@ -460,6 +477,123 @@ meta_input_device_x11_get_device_id (ClutterInputDevice *device)
+   return device_xi2->device_id;
+ }
+ 
++void
++meta_input_device_x11_reset_axes (ClutterInputDevice *device)
++{
++  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (device);
++
++  g_clear_pointer (&device_x11->axes, g_array_unref);
++}
++
++int
++meta_input_device_x11_add_axis (ClutterInputDevice *device,
++                                ClutterInputAxis    axis,
++                                double              minimum,
++                                double              maximum,
++                                double              resolution)
++{
++  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (device);
++  MetaX11AxisInfo info;
++  guint pos;
++
++  if (device_x11->axes == NULL)
++    device_x11->axes = g_array_new (FALSE, TRUE, sizeof (MetaX11AxisInfo));
++
++  info.axis = axis;
++  info.min_value = minimum;
++  info.max_value = maximum;
++  info.resolution = resolution;
++
++  switch (axis)
++    {
++    case CLUTTER_INPUT_AXIS_X:
++    case CLUTTER_INPUT_AXIS_Y:
++      info.min_axis = 0;
++      info.max_axis = 0;
++      break;
++
++    case CLUTTER_INPUT_AXIS_XTILT:
++    case CLUTTER_INPUT_AXIS_YTILT:
++      info.min_axis = -1;
++      info.max_axis = 1;
++      break;
++
++    default:
++      info.min_axis = 0;
++      info.max_axis = 1;
++      break;
++    }
++
++  g_array_append_val (device_x11->axes, info);
++  pos = device_x11->axes->len - 1;
++
++  return pos;
++}
++
++gboolean
++meta_input_device_x11_get_axis (ClutterInputDevice *device,
++                                int                 idx,
++                                ClutterInputAxis   *use)
++{
++  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (device);
++  MetaX11AxisInfo *info;
++
++  if (device_x11->axes == NULL)
++    return FALSE;
++
++  if (idx < 0 || idx >= device_x11->axes->len)
++    return FALSE;
++
++  info = &g_array_index (device_x11->axes, MetaX11AxisInfo, idx);
++
++  if (use)
++    *use = info->axis;
++
++  return TRUE;
++}
++
++gboolean
++meta_input_device_x11_translate_axis (ClutterInputDevice *device,
++                                      int                 idx,
++                                      double              value,
++                                      double             *axis_value)
++{
++  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (device);
++  MetaX11AxisInfo *info;
++  double width;
++  double real_value;
++
++  if (device_x11->axes == NULL || idx < 0 || idx >= device_x11->axes->len)
++    return FALSE;
++
++  info = &g_array_index (device_x11->axes, MetaX11AxisInfo, idx);
++
++  if (info->axis == CLUTTER_INPUT_AXIS_X ||
++      info->axis == CLUTTER_INPUT_AXIS_Y)
++    return FALSE;
++
++  if (fabs (info->max_value - info->min_value) < 0.0000001)
++    return FALSE;
++
++  width = info->max_value - info->min_value;
++  real_value = (info->max_axis * (value - info->min_value)
++             + info->min_axis * (info->max_value - value))
++             / width;
++
++  if (axis_value)
++    *axis_value = real_value;
++
++  return TRUE;
++}
++
++int
++meta_input_device_x11_get_n_axes (ClutterInputDevice *device)
++{
++  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (device);
++
++  return device_x11->axes->len;
++}
++
+ #ifdef HAVE_LIBWACOM
+ uint32_t
+ meta_input_device_x11_get_pad_group_mode (ClutterInputDevice *device,
+diff --git a/src/backends/x11/meta-input-device-x11.h b/src/backends/x11/meta-input-device-x11.h
+index f74c4a2..19f1efc 100644
+--- a/src/backends/x11/meta-input-device-x11.h
++++ b/src/backends/x11/meta-input-device-x11.h
+@@ -71,6 +71,21 @@ gboolean meta_input_device_x11_get_pointer_location (ClutterInputDevice *device,
+                                                      float              *y);
+ int meta_input_device_x11_get_device_id (ClutterInputDevice *device);
+ 
++int meta_input_device_x11_get_n_axes (ClutterInputDevice *device);
++void meta_input_device_x11_reset_axes (ClutterInputDevice *device);
++int meta_input_device_x11_add_axis (ClutterInputDevice *device,
++                                    ClutterInputAxis    axis,
++                                    double              minimum,
++                                    double              maximum,
++                                    double              resolution);
++gboolean meta_input_device_x11_get_axis (ClutterInputDevice *device,
++                                         int                 idx,
++                                         ClutterInputAxis   *use);
++gboolean meta_input_device_x11_translate_axis (ClutterInputDevice *device,
++                                               int                 idx,
++                                               double              value,
++                                               double             *axis_value);
++
+ G_END_DECLS
+ 
+ #endif /* META_INPUT_DEVICE_X11_H */
+diff --git a/src/backends/x11/meta-seat-x11.c b/src/backends/x11/meta-seat-x11.c
+index c0e05d1..1a9b473 100644
+--- a/src/backends/x11/meta-seat-x11.c
++++ b/src/backends/x11/meta-seat-x11.c
+@@ -148,7 +148,7 @@ translate_valuator_class (Display             *xdisplay,
+         }
+     }
+ 
+-  _clutter_input_device_add_axis (device, axis,
++  meta_input_device_x11_add_axis (device, axis,
+                                   class->min,
+                                   class->max,
+                                   class->resolution);
+@@ -955,7 +955,7 @@ translate_pad_axis (ClutterInputDevice *device,
+       if (val <= 0)
+         continue;
+ 
+-      _clutter_input_device_translate_axis (device, i, val, value);
++      meta_input_device_x11_translate_axis (device, i, val, value);
+ 
+       if (i == PAD_AXIS_RING1 || i == PAD_AXIS_RING2)
+         {
+@@ -1154,8 +1154,9 @@ translate_axes (ClutterInputDevice *device,
+ 
+       if (!XIMaskIsSet (valuators->mask, i))
+         continue;
++      if (!meta_input_device_x11_get_axis (device, i, &axis))
++        continue;
+ 
+-      axis = clutter_input_device_get_axis (device, i);
+       val = *values++;
+ 
+       switch (axis)
+@@ -1169,7 +1170,7 @@ translate_axes (ClutterInputDevice *device,
+           break;
+ 
+         default:
+-          _clutter_input_device_translate_axis (device, i, val, &retval[axis]);
++          meta_input_device_x11_translate_axis (device, i, val, &retval[axis]);
+           break;
+         }
+     }
+@@ -1187,7 +1188,7 @@ scroll_valuators_changed (ClutterInputDevice *device,
+   uint32_t n_axes, n_val, i;
+   double *values;
+ 
+-  n_axes = clutter_input_device_get_n_axes (device);
++  n_axes = meta_input_device_x11_get_n_axes (device);
+   values = valuators->values;
+ 
+   *dx_p = *dy_p = 0.0;
+@@ -1793,7 +1794,7 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
+                                              GINT_TO_POINTER (xev->sourceid));
+         if (device)
+           {
+-            _clutter_input_device_reset_axes (device);
++            meta_input_device_x11_reset_axes (device);
+             translate_device_classes (clutter_x11_get_default_display (),
+                                       device,
+                                       xev->classes,
+diff --git a/src/tests/clutter/interactive/test-devices.c b/src/tests/clutter/interactive/test-devices.c
+index e5b894b..b8d1f0f 100644
+--- a/src/tests/clutter/interactive/test-devices.c
++++ b/src/tests/clutter/interactive/test-devices.c
+@@ -49,34 +49,6 @@ device_type_name (ClutterInputDevice *device)
+     }
+ }
+ 
+-static const gchar *
+-axis_type_name (ClutterInputAxis axis)
+-{
+-  switch (axis)
+-    {
+-    case CLUTTER_INPUT_AXIS_X:
+-      return "Absolute X";
+-
+-    case CLUTTER_INPUT_AXIS_Y:
+-      return "Absolute Y";
+-
+-    case CLUTTER_INPUT_AXIS_PRESSURE:
+-      return "Pressure";
+-
+-    case CLUTTER_INPUT_AXIS_XTILT:
+-      return "X Tilt";
+-
+-    case CLUTTER_INPUT_AXIS_YTILT:
+-      return "Y Tilt";
+-
+-    case CLUTTER_INPUT_AXIS_WHEEL:
+-      return "Wheel";
+-
+-    default:
+-      return "Unknown";
+-    }
+-}
+-
+ static gboolean
+ stage_button_event_cb (ClutterActor   *actor,
+                        ClutterEvent   *event,
+@@ -85,21 +57,18 @@ stage_button_event_cb (ClutterActor   *actor,
+   ClutterInputDevice *device;
+   ClutterInputDevice *source_device;
+   ClutterActor *hand = NULL;
+-  gdouble *axes;
+-  guint n_axes, i;
+ 
+   device = clutter_event_get_device (event);
+   source_device = clutter_event_get_source_device (event);
+ 
+   hand = g_hash_table_lookup (app->devices, device);
+ 
+-  g_print ("Device: '%s' (type: %s, source: '%s', axes: %d)\n",
++  g_print ("Device: '%s' (type: %s, source: '%s')\n",
+            clutter_input_device_get_device_name (device),
+            device_type_name (device),
+            source_device != device
+              ? clutter_input_device_get_device_name (source_device)
+-             : "<same>",
+-           clutter_input_device_get_n_axes (device));
++             : "<same>");
+ 
+   if (hand != NULL)
+     {
+@@ -109,21 +78,6 @@ stage_button_event_cb (ClutterActor   *actor,
+       clutter_actor_set_position (hand, event_x, event_y);
+     }
+ 
+-  axes = clutter_event_get_axes (event, &n_axes);
+-  for (i = 0; i < n_axes; i++)
+-    {
+-      ClutterInputAxis axis;
+-
+-      axis = clutter_input_device_get_axis (device, i);
+-      if (axis == CLUTTER_INPUT_AXIS_IGNORE)
+-        continue;
+-
+-      g_print ("\tAxis[%2d][%s].value: %.2f\n",
+-               i,
+-               axis_type_name (axis),
+-               axes[i]);
+-    }
+-
+   return FALSE;
+ }
+ 

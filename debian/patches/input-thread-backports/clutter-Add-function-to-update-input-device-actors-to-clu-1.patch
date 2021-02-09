@@ -1,0 +1,40 @@
+From: =?utf-8?q?Jonas_Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Thu, 15 Oct 2020 16:46:08 +0200
+Subject: clutter: Add function to update input device actors to clutter-main
+
+We're moving keeping track of input devices and their associated actors
+out of ClutterInputDevice, this commit basically adds replacements for
+clutter_input_device_update() and clutter_input_device_set_actor() to
+clutter-main and shuffles the internals of those functions around a bit
+for clarity.
+
+clutter_stage_update_device() is made available in clutter-mutter.h
+because we need to update the actor of input devices not only from
+ClutterStage (when repicking after relayout), but also from
+MetaWaylandPointer (inside meta_wayland_pointer_repick()).
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1633>
+---
+ clutter/clutter/clutter-mutter.h | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/clutter/clutter/clutter-mutter.h b/clutter/clutter/clutter-mutter.h
+index 6e1f439..63b3fbf 100644
+--- a/clutter/clutter/clutter-mutter.h
++++ b/clutter/clutter/clutter-mutter.h
+@@ -75,6 +75,15 @@ CLUTTER_EXPORT
+ gboolean clutter_seat_handle_event_post (ClutterSeat        *seat,
+                                          const ClutterEvent *event);
+ 
++CLUTTER_EXPORT
++void clutter_stage_update_device (ClutterStage         *stage,
++                                  ClutterInputDevice   *device,
++                                  ClutterEventSequence *sequence,
++                                  graphene_point_t      point,
++                                  uint32_t              time,
++                                  ClutterActor         *new_actor,
++                                  gboolean              emit_crossing);
++
+ CLUTTER_EXPORT
+ void clutter_stage_get_device_coords (ClutterStage         *stage,
+                                       ClutterInputDevice   *device,

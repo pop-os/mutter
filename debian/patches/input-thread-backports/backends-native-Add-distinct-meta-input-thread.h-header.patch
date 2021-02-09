@@ -1,0 +1,332 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Fri, 20 Nov 2020 23:53:46 +0100
+Subject: backends/native: Add distinct meta-input-thread.h header
+
+Make it impossible to add individual includes of input thread objects.
+This must go through meta-input-thread.h now, which should be enough
+to make anyone think it twice.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ src/backends/native/meta-backend-native-types.h    |  2 ++
+ src/backends/native/meta-backend-native.c          |  3 +-
+ src/backends/native/meta-event-native.c            |  2 +-
+ src/backends/native/meta-input-device-native.c     |  4 +--
+ src/backends/native/meta-input-device-native.h     |  4 +++
+ .../native/meta-input-device-tool-native.c         |  2 +-
+ .../native/meta-input-device-tool-native.h         |  4 +++
+ src/backends/native/meta-input-settings-native.c   |  3 +-
+ src/backends/native/meta-input-settings-native.h   |  4 +++
+ src/backends/native/meta-input-thread.h            | 33 ++++++++++++++++++++++
+ src/backends/native/meta-keymap-native.c           |  2 +-
+ src/backends/native/meta-keymap-native.h           |  4 +++
+ src/backends/native/meta-launcher.c                |  2 +-
+ src/backends/native/meta-seat-impl.c               |  7 +----
+ src/backends/native/meta-seat-impl.h               |  4 +++
+ src/backends/native/meta-seat-native.c             |  3 +-
+ src/backends/native/meta-seat-native.h             |  4 +--
+ .../native/meta-virtual-input-device-native.c      |  3 +-
+ 18 files changed, 67 insertions(+), 23 deletions(-)
+ create mode 100644 src/backends/native/meta-input-thread.h
+
+diff --git a/src/backends/native/meta-backend-native-types.h b/src/backends/native/meta-backend-native-types.h
+index bfc5067..ba73b4a 100644
+--- a/src/backends/native/meta-backend-native-types.h
++++ b/src/backends/native/meta-backend-native-types.h
+@@ -23,5 +23,7 @@
+ 
+ typedef struct _MetaBackendNative MetaBackendNative;
+ typedef struct _MetaSeatNative MetaSeatNative;
++typedef struct _MetaSeatImpl MetaSeatImpl;
++typedef struct _MetaKeymapNative MetaKeymapNative;
+ 
+ #endif /* META_BACKEND_NATIVE_TYPES_H */
+diff --git a/src/backends/native/meta-backend-native.c b/src/backends/native/meta-backend-native.c
+index 74c4357..7206cb6 100644
+--- a/src/backends/native/meta-backend-native.c
++++ b/src/backends/native/meta-backend-native.c
+@@ -36,6 +36,7 @@
+ 
+ #include "backends/native/meta-backend-native.h"
+ #include "backends/native/meta-backend-native-private.h"
++#include "backends/native/meta-input-thread.h"
+ 
+ #include <sched.h>
+ #include <stdlib.h>
+@@ -50,8 +51,6 @@
+ #include "backends/meta-stage-private.h"
+ #include "backends/native/meta-clutter-backend-native.h"
+ #include "backends/native/meta-event-native.h"
+-#include "backends/native/meta-input-device-native.h"
+-#include "backends/native/meta-input-settings-native.h"
+ #include "backends/native/meta-kms.h"
+ #include "backends/native/meta-kms-device.h"
+ #include "backends/native/meta-launcher.h"
+diff --git a/src/backends/native/meta-event-native.c b/src/backends/native/meta-event-native.c
+index 61603d1..8a1d8f3 100644
+--- a/src/backends/native/meta-event-native.c
++++ b/src/backends/native/meta-event-native.c
+@@ -21,7 +21,7 @@
+ #include "config.h"
+ 
+ #include "backends/native/meta-event-native.h"
+-#include "backends/native/meta-input-device-native.h"
++#include "backends/native/meta-input-thread.h"
+ #include "clutter/clutter-mutter.h"
+ 
+ typedef struct _MetaEventNative MetaEventNative;
+diff --git a/src/backends/native/meta-input-device-native.c b/src/backends/native/meta-input-device-native.c
+index 9aab8e0..2878675 100644
+--- a/src/backends/native/meta-input-device-native.c
++++ b/src/backends/native/meta-input-device-native.c
+@@ -25,9 +25,7 @@
+ #include <cairo-gobject.h>
+ 
+ #include "backends/meta-backend-private.h"
+-#include "backends/native/meta-input-device-tool-native.h"
+-#include "backends/native/meta-input-device-native.h"
+-#include "backends/native/meta-seat-impl.h"
++#include "backends/native/meta-input-thread.h"
+ #include "clutter/clutter-mutter.h"
+ 
+ G_DEFINE_TYPE (MetaInputDeviceNative,
+diff --git a/src/backends/native/meta-input-device-native.h b/src/backends/native/meta-input-device-native.h
+index db28d05..2000888 100644
+--- a/src/backends/native/meta-input-device-native.h
++++ b/src/backends/native/meta-input-device-native.h
+@@ -26,6 +26,10 @@
+ #ifndef META_INPUT_DEVICE_NATIVE_H
+ #define META_INPUT_DEVICE_NATIVE_H
+ 
++#ifndef META_INPUT_THREAD_H_INSIDE
++#error "This header cannot be included directly. Use "backends/native/meta-input-thread.h""
++#endif /* META_INPUT_THREAD_H_INSIDE */
++
+ #include <glib-object.h>
+ 
+ #include "backends/meta-input-device-private.h"
+diff --git a/src/backends/native/meta-input-device-tool-native.c b/src/backends/native/meta-input-device-tool-native.c
+index ad6a3bd..e6ec0c7 100644
+--- a/src/backends/native/meta-input-device-tool-native.c
++++ b/src/backends/native/meta-input-device-tool-native.c
+@@ -19,7 +19,7 @@
+ 
+ #include "config.h"
+ 
+-#include "backends/native/meta-input-device-tool-native.h"
++#include "backends/native/meta-input-thread.h"
+ 
+ G_DEFINE_TYPE (MetaInputDeviceToolNative, meta_input_device_tool_native,
+                CLUTTER_TYPE_INPUT_DEVICE_TOOL)
+diff --git a/src/backends/native/meta-input-device-tool-native.h b/src/backends/native/meta-input-device-tool-native.h
+index 3eff626..fa12358 100644
+--- a/src/backends/native/meta-input-device-tool-native.h
++++ b/src/backends/native/meta-input-device-tool-native.h
+@@ -20,6 +20,10 @@
+ #ifndef META_INPUT_DEVICE_NATIVE_TOOL_H
+ #define META_INPUT_DEVICE_NATIVE_TOOL_H
+ 
++#ifndef META_INPUT_THREAD_H_INSIDE
++#error "This header cannot be included directly. Use "backends/native/meta-input-thread.h""
++#endif /* META_INPUT_THREAD_H_INSIDE */
++
+ #include <libinput.h>
+ 
+ #include "clutter/clutter.h"
+diff --git a/src/backends/native/meta-input-settings-native.c b/src/backends/native/meta-input-settings-native.c
+index 3296e41..39cd5f6 100644
+--- a/src/backends/native/meta-input-settings-native.c
++++ b/src/backends/native/meta-input-settings-native.c
+@@ -27,8 +27,7 @@
+ #include <libinput.h>
+ 
+ #include "backends/native/meta-backend-native.h"
+-#include "backends/native/meta-input-device-native.h"
+-#include "backends/native/meta-input-device-tool-native.h"
++#include "backends/native/meta-input-thread.h"
+ #include "backends/native/meta-input-settings-native.h"
+ 
+ G_DEFINE_TYPE (MetaInputSettingsNative, meta_input_settings_native, META_TYPE_INPUT_SETTINGS)
+diff --git a/src/backends/native/meta-input-settings-native.h b/src/backends/native/meta-input-settings-native.h
+index 43926fd..cddd5b1 100644
+--- a/src/backends/native/meta-input-settings-native.h
++++ b/src/backends/native/meta-input-settings-native.h
+@@ -22,6 +22,10 @@
+ #ifndef META_INPUT_SETTINGS_NATIVE_H
+ #define META_INPUT_SETTINGS_NATIVE_H
+ 
++#ifndef META_INPUT_THREAD_H_INSIDE
++#error "This header cannot be included directly. Use "backends/native/meta-input-thread.h""
++#endif /* META_INPUT_THREAD_H_INSIDE */
++
+ #include "backends/meta-input-settings-private.h"
+ 
+ #define META_TYPE_INPUT_SETTINGS_NATIVE             (meta_input_settings_native_get_type ())
+diff --git a/src/backends/native/meta-input-thread.h b/src/backends/native/meta-input-thread.h
+new file mode 100644
+index 0000000..196adc2
+--- /dev/null
++++ b/src/backends/native/meta-input-thread.h
+@@ -0,0 +1,33 @@
++/*
++ * Copyright (C) 2020 Red Hat Inc.
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library. If not, see <http://www.gnu.org/licenses/>.
++ *
++ * Author: Carlos Garnacho <carlosg@gnome.org>
++ */
++
++#ifndef META_INPUT_THREAD_H
++#define META_INPUT_THREAD_H
++
++#define META_INPUT_THREAD_H_INSIDE
++
++#include "src/backends/native/meta-input-device-native.h"
++#include "src/backends/native/meta-input-device-tool-native.h"
++#include "src/backends/native/meta-input-settings-native.h"
++#include "src/backends/native/meta-keymap-native.h"
++#include "src/backends/native/meta-seat-impl.h"
++
++#undef META_INPUT_THREAD_H_INSIDE
++
++#endif /* META_INPUT_THREAD_H */
+diff --git a/src/backends/native/meta-keymap-native.c b/src/backends/native/meta-keymap-native.c
+index 036eb6b..d3348e8 100644
+--- a/src/backends/native/meta-keymap-native.c
++++ b/src/backends/native/meta-keymap-native.c
+@@ -22,7 +22,7 @@
+ #include "config.h"
+ 
+ #include "backends/meta-keymap-utils.h"
+-#include "backends/native/meta-keymap-native.h"
++#include "backends/native/meta-input-thread.h"
+ #include "backends/native/meta-seat-native.h"
+ 
+ static const char *option_xkb_layout = "us";
+diff --git a/src/backends/native/meta-keymap-native.h b/src/backends/native/meta-keymap-native.h
+index 49da077..6a6b12d 100644
+--- a/src/backends/native/meta-keymap-native.h
++++ b/src/backends/native/meta-keymap-native.h
+@@ -21,6 +21,10 @@
+ #ifndef META_KEYMAP_NATIVE_H
+ #define META_KEYMAP_NATIVE_H
+ 
++#ifndef META_INPUT_THREAD_H_INSIDE
++#error "This header cannot be included directly. Use "backends/native/meta-input-thread.h""
++#endif /* META_INPUT_THREAD_H_INSIDE */
++
+ #include "backends/native/meta-xkb-utils.h"
+ #include "clutter/clutter.h"
+ 
+diff --git a/src/backends/native/meta-launcher.c b/src/backends/native/meta-launcher.c
+index c794563..190d0fa 100644
+--- a/src/backends/native/meta-launcher.c
++++ b/src/backends/native/meta-launcher.c
+@@ -39,8 +39,8 @@
+ #include "backends/native/meta-backend-native.h"
+ #include "backends/native/meta-clutter-backend-native.h"
+ #include "backends/native/meta-cursor-renderer-native.h"
++#include "backends/native/meta-input-thread.h"
+ #include "backends/native/meta-renderer-native.h"
+-#include "backends/native/meta-seat-native.h"
+ #include "clutter/clutter.h"
+ 
+ #include "meta-dbus-login1.h"
+diff --git a/src/backends/native/meta-seat-impl.c b/src/backends/native/meta-seat-impl.c
+index 2075ddd..f5e45e5 100644
+--- a/src/backends/native/meta-seat-impl.c
++++ b/src/backends/native/meta-seat-impl.c
+@@ -27,8 +27,6 @@
+ 
+ #include "config.h"
+ 
+-#include "backends/native/meta-seat-impl.h"
+-
+ #include <errno.h>
+ #include <fcntl.h>
+ #include <libinput.h>
+@@ -38,10 +36,7 @@
+ #include "backends/meta-cursor-tracker-private.h"
+ #include "backends/native/meta-barrier-native.h"
+ #include "backends/native/meta-event-native.h"
+-#include "backends/native/meta-input-device-native.h"
+-#include "backends/native/meta-input-device-tool-native.h"
+-#include "backends/native/meta-input-settings-native.h"
+-#include "backends/native/meta-keymap-native.h"
++#include "backends/native/meta-input-thread.h"
+ #include "backends/native/meta-virtual-input-device-native.h"
+ #include "clutter/clutter-mutter.h"
+ #include "core/bell.h"
+diff --git a/src/backends/native/meta-seat-impl.h b/src/backends/native/meta-seat-impl.h
+index ac5b7e4..ab0ef75 100644
+--- a/src/backends/native/meta-seat-impl.h
++++ b/src/backends/native/meta-seat-impl.h
+@@ -23,6 +23,10 @@
+ #ifndef META_SEAT_IMPL_H
+ #define META_SEAT_IMPL_H
+ 
++#ifndef META_INPUT_THREAD_H_INSIDE
++#error "This header cannot be included directly. Use "backends/native/meta-input-thread.h""
++#endif /* META_INPUT_THREAD_H_INSIDE */
++
+ #include <gudev/gudev.h>
+ #include <libinput.h>
+ #include <linux/input-event-codes.h>
+diff --git a/src/backends/native/meta-seat-native.c b/src/backends/native/meta-seat-native.c
+index 432b0fc..73abb90 100644
+--- a/src/backends/native/meta-seat-native.c
++++ b/src/backends/native/meta-seat-native.c
+@@ -32,8 +32,7 @@
+ #include "backends/meta-keymap-utils.h"
+ #include "backends/native/meta-barrier-native.h"
+ #include "backends/native/meta-event-native.h"
+-#include "backends/native/meta-input-device-native.h"
+-#include "backends/native/meta-input-device-tool-native.h"
++#include "backends/native/meta-input-thread.h"
+ #include "backends/native/meta-keymap-native.h"
+ #include "backends/native/meta-virtual-input-device-native.h"
+ #include "clutter/clutter-mutter.h"
+diff --git a/src/backends/native/meta-seat-native.h b/src/backends/native/meta-seat-native.h
+index 4f7c30e..7f94828 100644
+--- a/src/backends/native/meta-seat-native.h
++++ b/src/backends/native/meta-seat-native.h
+@@ -27,12 +27,12 @@
+ #include <libinput.h>
+ #include <linux/input-event-codes.h>
+ 
++#include "backends/meta-input-settings-private.h"
+ #include "backends/meta-viewport-info.h"
++#include "backends/native/meta-backend-native-types.h"
+ #include "backends/native/meta-barrier-native.h"
+ #include "backends/native/meta-cursor-renderer-native.h"
+-#include "backends/native/meta-keymap-native.h"
+ #include "backends/native/meta-pointer-constraint-native.h"
+-#include "backends/native/meta-seat-impl.h"
+ #include "backends/native/meta-xkb-utils.h"
+ #include "clutter/clutter.h"
+ 
+diff --git a/src/backends/native/meta-virtual-input-device-native.c b/src/backends/native/meta-virtual-input-device-native.c
+index 7f4923d..a47d9ea 100644
+--- a/src/backends/native/meta-virtual-input-device-native.c
++++ b/src/backends/native/meta-virtual-input-device-native.c
+@@ -22,8 +22,7 @@
+ #include <glib-object.h>
+ #include <linux/input.h>
+ 
+-#include "backends/native/meta-input-device-native.h"
+-#include "backends/native/meta-keymap-native.h"
++#include "backends/native/meta-input-thread.h"
+ #include "backends/native/meta-seat-native.h"
+ #include "backends/native/meta-virtual-input-device-native.h"
+ #include "clutter/clutter-mutter.h"

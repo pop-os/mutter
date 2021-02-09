@@ -1,0 +1,121 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Fri, 10 Jul 2020 00:40:55 +0200
+Subject: backends: Remove x/y arguments from MetaCursorTracker::cursor-moved
+
+Make this signal a hint, the actual coordinates should be queried to the
+cursor tracker, the device, the seat... There's enough options.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ src/backends/meta-cursor-tracker.c                 | 13 +++----------
+ src/backends/meta-screen-cast-area-stream-src.c    |  2 --
+ src/backends/meta-screen-cast-monitor-stream-src.c |  2 --
+ src/backends/meta-screen-cast-window-stream-src.c  |  2 --
+ src/meson.build                                    |  8 --------
+ src/meta-marshal.list                              |  1 -
+ 6 files changed, 3 insertions(+), 25 deletions(-)
+ delete mode 100644 src/meta-marshal.list
+
+diff --git a/src/backends/meta-cursor-tracker.c b/src/backends/meta-cursor-tracker.c
+index f90fd76..3c6f6a0 100644
+--- a/src/backends/meta-cursor-tracker.c
++++ b/src/backends/meta-cursor-tracker.c
+@@ -37,7 +37,6 @@
+ #include "cogl/cogl.h"
+ #include "core/display-private.h"
+ #include "clutter/clutter.h"
+-#include "meta-marshal.h"
+ #include "meta/main.h"
+ #include "meta/util.h"
+ 
+@@ -301,14 +300,8 @@ meta_cursor_tracker_class_init (MetaCursorTrackerClass *klass)
+                                         G_TYPE_FROM_CLASS (klass),
+                                         G_SIGNAL_RUN_LAST,
+                                         0,
+-                                        NULL, NULL,
+-                                        meta_marshal_VOID__FLOAT_FLOAT,
+-                                        G_TYPE_NONE, 2,
+-                                        G_TYPE_FLOAT,
+-                                        G_TYPE_FLOAT);
+-  g_signal_set_va_marshaller (signals[CURSOR_MOVED],
+-                              G_TYPE_FROM_CLASS (klass),
+-                              meta_marshal_VOID__FLOAT_FLOATv);
++                                        NULL, NULL, NULL,
++                                        G_TYPE_NONE, 0);
+ 
+   signals[VISIBILITY_CHANGED] = g_signal_new ("visibility-changed",
+                                               G_TYPE_FROM_CLASS (klass),
+@@ -459,7 +452,7 @@ meta_cursor_tracker_update_position (MetaCursorTracker *tracker,
+   meta_cursor_renderer_set_position (cursor_renderer, new_x, new_y);
+ 
+   if (position_changed)
+-    g_signal_emit (tracker, signals[CURSOR_MOVED], 0, new_x, new_y);
++    g_signal_emit (tracker, signals[CURSOR_MOVED], 0);
+ }
+ 
+ void
+diff --git a/src/backends/meta-screen-cast-area-stream-src.c b/src/backends/meta-screen-cast-area-stream-src.c
+index 7cc70dc..2402085 100644
+--- a/src/backends/meta-screen-cast-area-stream-src.c
++++ b/src/backends/meta-screen-cast-area-stream-src.c
+@@ -181,8 +181,6 @@ sync_cursor_state (MetaScreenCastAreaStreamSrc *area_src)
+ 
+ static void
+ cursor_moved (MetaCursorTracker           *cursor_tracker,
+-              float                        x,
+-              float                        y,
+               MetaScreenCastAreaStreamSrc *area_src)
+ {
+   sync_cursor_state (area_src);
+diff --git a/src/backends/meta-screen-cast-monitor-stream-src.c b/src/backends/meta-screen-cast-monitor-stream-src.c
+index 5d395b6..ccc9cdf 100644
+--- a/src/backends/meta-screen-cast-monitor-stream-src.c
++++ b/src/backends/meta-screen-cast-monitor-stream-src.c
+@@ -237,8 +237,6 @@ sync_cursor_state (MetaScreenCastMonitorStreamSrc *monitor_src)
+ 
+ static void
+ cursor_moved (MetaCursorTracker              *cursor_tracker,
+-              float                           x,
+-              float                           y,
+               MetaScreenCastMonitorStreamSrc *monitor_src)
+ {
+   sync_cursor_state (monitor_src);
+diff --git a/src/backends/meta-screen-cast-window-stream-src.c b/src/backends/meta-screen-cast-window-stream-src.c
+index a00bf86..ec9f873 100644
+--- a/src/backends/meta-screen-cast-window-stream-src.c
++++ b/src/backends/meta-screen-cast-window-stream-src.c
+@@ -369,8 +369,6 @@ sync_cursor_state (MetaScreenCastWindowStreamSrc *window_src)
+ 
+ static void
+ cursor_moved (MetaCursorTracker             *cursor_tracker,
+-              float                          x,
+-              float                          y,
+               MetaScreenCastWindowStreamSrc *window_src)
+ {
+   sync_cursor_state (window_src);
+diff --git a/src/meson.build b/src/meson.build
+index d32efff..3114267 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -753,14 +753,6 @@ dbus_idle_monitor_built_sources = gnome.gdbus_codegen('meta-dbus-idle-monitor',
+   )
+ mutter_built_sources += dbus_idle_monitor_built_sources
+ 
+-mutter_marshal = gnome.genmarshal('meta-marshal',
+-    sources: ['meta-marshal.list'],
+-    prefix: 'meta_marshal',
+-    internal: true,
+-    valist_marshallers: true,
+-  )
+-mutter_built_sources += mutter_marshal
+-
+ if have_profiler
+   mutter_sources += [
+     'backends/meta-profiler.c',
+diff --git a/src/meta-marshal.list b/src/meta-marshal.list
+deleted file mode 100644
+index e26b60a..0000000
+--- a/src/meta-marshal.list
++++ /dev/null
+@@ -1 +0,0 @@
+-VOID:FLOAT,FLOAT

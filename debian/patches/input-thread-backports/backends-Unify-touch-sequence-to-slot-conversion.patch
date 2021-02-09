@@ -1,0 +1,185 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Tue, 8 Dec 2020 12:51:56 +0100
+Subject: backends: Unify touch sequence to slot conversion
+
+We had code in both backends that sort of independently associated
+sequences to slots. Make both transform slots to sequences the same
+way, so they may share the implementation convert those back to slots.
+
+This helper now lives in Clutter API.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1623>
+---
+ clutter/clutter/clutter-event.c         |  8 ++++++++
+ clutter/clutter/clutter-event.h         |  3 +++
+ src/backends/native/meta-event-native.c | 20 --------------------
+ src/backends/native/meta-event-native.h |  2 --
+ src/backends/native/meta-seat-impl.c    |  2 +-
+ src/backends/x11/meta-backend-x11.c     |  2 +-
+ src/backends/x11/meta-event-x11.c       |  8 --------
+ src/backends/x11/meta-event-x11.h       |  2 --
+ src/backends/x11/meta-seat-x11.c        |  6 ++++--
+ src/wayland/meta-wayland-touch.c        |  2 +-
+ 10 files changed, 18 insertions(+), 37 deletions(-)
+
+diff --git a/clutter/clutter/clutter-event.c b/clutter/clutter/clutter-event.c
+index 793884f..19ec29f 100644
+--- a/clutter/clutter/clutter-event.c
++++ b/clutter/clutter/clutter-event.c
+@@ -2134,3 +2134,11 @@ clutter_event_get_event_code (const ClutterEvent *event)
+ 
+   return 0;
+ }
++
++int32_t
++clutter_event_sequence_get_slot (const ClutterEventSequence *sequence)
++{
++  g_return_val_if_fail (sequence != NULL, -1);
++
++  return GPOINTER_TO_INT (sequence) - 1;
++}
+diff --git a/clutter/clutter/clutter-event.h b/clutter/clutter/clutter-event.h
+index 5ff8ae8..7c3d364 100644
+--- a/clutter/clutter/clutter-event.h
++++ b/clutter/clutter/clutter-event.h
+@@ -788,6 +788,9 @@ gboolean                 clutter_event_get_pad_event_details         (const Clut
+ CLUTTER_EXPORT
+ uint32_t                 clutter_event_get_event_code                (const ClutterEvent     *event);
+ 
++CLUTTER_EXPORT
++int32_t                  clutter_event_sequence_get_slot (const ClutterEventSequence *sequence);
++
+ G_END_DECLS
+ 
+ #endif /* __CLUTTER_EVENT_H__ */
+diff --git a/src/backends/native/meta-event-native.c b/src/backends/native/meta-event-native.c
+index b7e7194..8d59e62 100644
+--- a/src/backends/native/meta-event-native.c
++++ b/src/backends/native/meta-event-native.c
+@@ -154,23 +154,3 @@ meta_event_native_get_relative_motion (const ClutterEvent *event,
+   else
+     return FALSE;
+ }
+-
+-/**
+- * meta_event_native_sequence_get_slot:
+- * @sequence: a #ClutterEventSequence
+- *
+- * Retrieves the touch slot triggered by this @sequence
+- *
+- * Returns: the libinput touch slot.
+- *
+- * Since: 1.20
+- * Stability: unstable
+- **/
+-int32_t
+-meta_event_native_sequence_get_slot (const ClutterEventSequence *sequence)
+-{
+-  if (!sequence)
+-    return -1;
+-
+-  return GPOINTER_TO_INT (sequence) - 1;
+-}
+diff --git a/src/backends/native/meta-event-native.h b/src/backends/native/meta-event-native.h
+index fc54653..43cf7b9 100644
+--- a/src/backends/native/meta-event-native.h
++++ b/src/backends/native/meta-event-native.h
+@@ -42,6 +42,4 @@ gboolean          meta_event_native_get_relative_motion (const ClutterEvent *eve
+                                                          double             *dx_unaccel,
+                                                          double             *dy_unaccel);
+ 
+-int32_t           meta_event_native_sequence_get_slot (const ClutterEventSequence *sequence);
+-
+ #endif /* META_EVENT_NATIVE_H */
+diff --git a/src/backends/native/meta-seat-impl.c b/src/backends/native/meta-seat-impl.c
+index 033a9e3..bc68e0e 100644
+--- a/src/backends/native/meta-seat-impl.c
++++ b/src/backends/native/meta-seat-impl.c
+@@ -2890,7 +2890,7 @@ meta_seat_impl_query_state (MetaSeatImpl         *seat_impl,
+       MetaTouchState *touch_state;
+       int slot;
+ 
+-      slot = meta_event_native_sequence_get_slot (sequence);
++      slot = clutter_event_sequence_get_slot (sequence);
+       touch_state = meta_seat_impl_lookup_touch_state_in_impl (seat_impl, slot);
+       if (!touch_state)
+         goto out;
+diff --git a/src/backends/x11/meta-backend-x11.c b/src/backends/x11/meta-backend-x11.c
+index 5cace07..cde8803 100644
+--- a/src/backends/x11/meta-backend-x11.c
++++ b/src/backends/x11/meta-backend-x11.c
+@@ -691,7 +691,7 @@ meta_backend_x11_finish_touch_sequence (MetaBackend          *backend,
+ 
+   XIAllowTouchEvents (priv->xdisplay,
+                       META_VIRTUAL_CORE_POINTER_ID,
+-                      meta_x11_event_sequence_get_touch_detail (sequence),
++                      clutter_event_sequence_get_slot (sequence),
+                       DefaultRootWindow (priv->xdisplay), event_mode);
+ 
+   if (state == META_SEQUENCE_REJECTED)
+diff --git a/src/backends/x11/meta-event-x11.c b/src/backends/x11/meta-event-x11.c
+index 8217e3d..fa287ea 100644
+--- a/src/backends/x11/meta-event-x11.c
++++ b/src/backends/x11/meta-event-x11.c
+@@ -113,11 +113,3 @@ out:
+ 
+   return result;
+ }
+-
+-guint
+-meta_x11_event_sequence_get_touch_detail (const ClutterEventSequence *sequence)
+-{
+-  g_return_val_if_fail (sequence != NULL, 0);
+-
+-  return GPOINTER_TO_UINT (sequence);
+-}
+diff --git a/src/backends/x11/meta-event-x11.h b/src/backends/x11/meta-event-x11.h
+index 6e0b54e..ceb363a 100644
+--- a/src/backends/x11/meta-event-x11.h
++++ b/src/backends/x11/meta-event-x11.h
+@@ -28,8 +28,6 @@
+ 
+ #include "clutter/x11/clutter-x11.h"
+ 
+-guint meta_x11_event_sequence_get_touch_detail (const ClutterEventSequence *sequence);
+-
+ ClutterX11FilterReturn meta_x11_handle_event (XEvent *xevent);
+ 
+ #endif /* META_EVENT_X11_H */
+diff --git a/src/backends/x11/meta-seat-x11.c b/src/backends/x11/meta-seat-x11.c
+index 8251049..c015264 100644
+--- a/src/backends/x11/meta-seat-x11.c
++++ b/src/backends/x11/meta-seat-x11.c
+@@ -2221,7 +2221,8 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
+                                              GUINT_TO_POINTER (xev->detail));
+           }
+ 
+-        event->touch.sequence = GUINT_TO_POINTER (xev->detail);
++        /* "NULL" sequences are special cased in clutter */
++        event->touch.sequence = GINT_TO_POINTER (MAX (1, xev->detail + 1));
+ 
+         if (xev->flags & XITouchEmulatingPointer)
+           _clutter_event_set_pointer_emulated (event, TRUE);
+@@ -2250,7 +2251,8 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
+         event->touch.type = event->type = CLUTTER_TOUCH_UPDATE;
+         event->touch.stage = stage;
+         event->touch.time = xev->time;
+-        event->touch.sequence = GUINT_TO_POINTER (xev->detail);
++        /* "NULL" sequences are special cased in clutter */
++        event->touch.sequence = GINT_TO_POINTER (MAX (1, xev->detail + 1));
+         translate_coords (stage_x11, xev->event_x, xev->event_y, &event->touch.x, &event->touch.y);
+ 
+         clutter_event_set_source_device (event, source_device);
+diff --git a/src/wayland/meta-wayland-touch.c b/src/wayland/meta-wayland-touch.c
+index bf11fc5..147c384 100644
+--- a/src/wayland/meta-wayland-touch.c
++++ b/src/wayland/meta-wayland-touch.c
+@@ -188,7 +188,7 @@ touch_get_info (MetaWaylandTouch     *touch,
+   if (!touch_info && create)
+     {
+       touch_info = g_new0 (MetaWaylandTouchInfo, 1);
+-      touch_info->slot = meta_event_native_sequence_get_slot (sequence);
++      touch_info->slot = clutter_event_sequence_get_slot (sequence);
+       g_hash_table_insert (touch->touches, sequence, touch_info);
+     }
+ 

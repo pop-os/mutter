@@ -1,0 +1,253 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Tue, 17 Nov 2020 15:10:31 +0100
+Subject: clutter: Drop clutter_input_device_get_device_id()
+
+Move the GObject property to MetaInputDeviceX11, and throw away the
+rest. This is no longer public API.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1569>
+---
+ clutter/clutter/clutter-input-device-private.h |  2 -
+ clutter/clutter/clutter-input-device.c         | 54 ++---------------------
+ clutter/clutter/clutter-input-device.h         |  2 -
+ src/backends/x11/meta-input-device-x11.c       | 60 +++++++++++++++++++++++++-
+ 4 files changed, 61 insertions(+), 57 deletions(-)
+
+diff --git a/clutter/clutter/clutter-input-device-private.h b/clutter/clutter/clutter-input-device-private.h
+index cb2aeb6..9ceb22c 100644
+--- a/clutter/clutter/clutter-input-device-private.h
++++ b/clutter/clutter/clutter-input-device-private.h
+@@ -91,8 +91,6 @@ struct _ClutterInputDevice
+ {
+   GObject parent_instance;
+ 
+-  int id;
+-
+   ClutterInputDeviceType device_type;
+   ClutterInputMode device_mode;
+ 
+diff --git a/clutter/clutter/clutter-input-device.c b/clutter/clutter/clutter-input-device.c
+index 883f908..5261331 100644
+--- a/clutter/clutter/clutter-input-device.c
++++ b/clutter/clutter/clutter-input-device.c
+@@ -53,7 +53,6 @@ enum
+ 
+   PROP_BACKEND,
+ 
+-  PROP_ID,
+   PROP_NAME,
+ 
+   PROP_DEVICE_TYPE,
+@@ -162,10 +161,6 @@ clutter_input_device_set_property (GObject      *gobject,
+ 
+   switch (prop_id)
+     {
+-    case PROP_ID:
+-      self->id = g_value_get_int (value);
+-      break;
+-
+     case PROP_DEVICE_TYPE:
+       self->device_type = g_value_get_enum (value);
+       break;
+@@ -234,10 +229,6 @@ clutter_input_device_get_property (GObject    *gobject,
+ 
+   switch (prop_id)
+     {
+-    case PROP_ID:
+-      g_value_set_int (value, self->id);
+-      break;
+-
+     case PROP_DEVICE_TYPE:
+       g_value_set_enum (value, self->device_type);
+       break;
+@@ -305,22 +296,6 @@ clutter_input_device_class_init (ClutterInputDeviceClass *klass)
+ {
+   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
+ 
+-  /**
+-   * ClutterInputDevice:id:
+-   *
+-   * The unique identifier of the device
+-   *
+-   * Since: 1.2
+-   */
+-  obj_props[PROP_ID] =
+-    g_param_spec_int ("id",
+-                      P_("Id"),
+-                      P_("Unique identifier of the device"),
+-                      -1, G_MAXINT,
+-                      0,
+-                      CLUTTER_PARAM_READWRITE |
+-                      G_PARAM_CONSTRUCT_ONLY);
+-
+   /**
+    * ClutterInputDevice:name:
+    *
+@@ -506,7 +481,6 @@ clutter_input_device_class_init (ClutterInputDeviceClass *klass)
+ static void
+ clutter_input_device_init (ClutterInputDevice *self)
+ {
+-  self->id = -1;
+   self->device_type = CLUTTER_POINTER_DEVICE;
+ 
+   self->click_count = 0;
+@@ -814,24 +788,6 @@ clutter_input_device_get_device_type (ClutterInputDevice *device)
+   return device->device_type;
+ }
+ 
+-/**
+- * clutter_input_device_get_device_id:
+- * @device: a #ClutterInputDevice
+- *
+- * Retrieves the unique identifier of @device
+- *
+- * Return value: the identifier of the device
+- *
+- * Since: 1.0
+- */
+-gint
+-clutter_input_device_get_device_id (ClutterInputDevice *device)
+-{
+-  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), -1);
+-
+-  return device->id;
+-}
+-
+ /**
+  * clutter_input_device_set_enabled:
+  * @device: a #ClutterInputDevice
+@@ -970,8 +926,8 @@ clutter_input_device_update (ClutterInputDevice   *device,
+     return NULL;
+ 
+   CLUTTER_NOTE (EVENT,
+-                "Actor under cursor (device %d, at %.2f, %.2f): %s",
+-                clutter_input_device_get_device_id (device),
++                "Actor under cursor (device '%s', at %.2f, %.2f): %s",
++                clutter_input_device_get_device_name (device),
+                 point.x,
+                 point.y,
+                 _clutter_actor_get_debug_name (new_cursor_actor));
+@@ -1636,12 +1592,8 @@ _clutter_input_device_set_associated_device (ClutterInputDevice *device,
+   if (device->associated != NULL)
+     g_object_ref (device->associated);
+ 
+-  CLUTTER_NOTE (MISC, "Associating device %d '%s' to device %d '%s'",
+-                clutter_input_device_get_device_id (device),
++  CLUTTER_NOTE (MISC, "Associating device '%s' to device '%s'",
+                 clutter_input_device_get_device_name (device),
+-                device->associated != NULL
+-                  ? clutter_input_device_get_device_id (device->associated)
+-                  : -1,
+                 device->associated != NULL
+                   ? clutter_input_device_get_device_name (device->associated)
+                   : "(none)");
+diff --git a/clutter/clutter/clutter-input-device.h b/clutter/clutter/clutter-input-device.h
+index 536cf8c..51f6758 100644
+--- a/clutter/clutter/clutter-input-device.h
++++ b/clutter/clutter/clutter-input-device.h
+@@ -82,8 +82,6 @@ GType clutter_input_device_get_type (void) G_GNUC_CONST;
+ 
+ CLUTTER_EXPORT
+ ClutterInputDeviceType  clutter_input_device_get_device_type    (ClutterInputDevice  *device);
+-CLUTTER_EXPORT
+-gint                    clutter_input_device_get_device_id      (ClutterInputDevice  *device);
+ 
+ CLUTTER_EXPORT
+ gboolean                clutter_input_device_get_coords        (ClutterInputDevice   *device,
+diff --git a/src/backends/x11/meta-input-device-x11.c b/src/backends/x11/meta-input-device-x11.c
+index 45c730d..7d51807 100644
+--- a/src/backends/x11/meta-input-device-x11.c
++++ b/src/backends/x11/meta-input-device-x11.c
+@@ -49,6 +49,15 @@ struct _MetaInputDeviceX11Class
+ 
+ #define N_BUTTONS       5
+ 
++enum
++{
++  PROP_0,
++  PROP_ID,
++  N_PROPS
++};
++
++static GParamSpec *props[N_PROPS] = { 0 };
++
+ G_DEFINE_TYPE (MetaInputDeviceX11,
+                meta_input_device_x11,
+                META_TYPE_INPUT_DEVICE)
+@@ -58,8 +67,6 @@ meta_input_device_x11_constructed (GObject *object)
+ {
+   MetaInputDeviceX11 *device_xi2 = META_INPUT_DEVICE_X11 (object);
+ 
+-  g_object_get (object, "id", &device_xi2->device_id, NULL);
+-
+   if (G_OBJECT_CLASS (meta_input_device_x11_parent_class)->constructed)
+     G_OBJECT_CLASS (meta_input_device_x11_parent_class)->constructed (object);
+ 
+@@ -136,6 +143,42 @@ meta_input_device_x11_finalize (GObject *object)
+   G_OBJECT_CLASS (meta_input_device_x11_parent_class)->finalize (object);
+ }
+ 
++static void
++meta_input_device_x11_set_property (GObject      *object,
++                                    guint         prop_id,
++                                    const GValue *value,
++                                    GParamSpec   *pspec)
++{
++  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (object);
++
++  switch (prop_id)
++    {
++    case PROP_ID:
++      device_x11->device_id = g_value_get_int (value);
++      break;
++    default:
++      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
++    }
++}
++
++static void
++meta_input_device_x11_get_property (GObject    *object,
++                                    guint       prop_id,
++                                    GValue     *value,
++                                    GParamSpec *pspec)
++{
++  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (object);
++
++  switch (prop_id)
++    {
++    case PROP_ID:
++      g_value_set_int (value, device_x11->device_id);
++      break;
++    default:
++      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
++    }
++}
++
+ static int
+ meta_input_device_x11_get_group_n_modes (ClutterInputDevice *device,
+                                          int                 group)
+@@ -221,11 +264,24 @@ meta_input_device_x11_class_init (MetaInputDeviceX11Class *klass)
+ 
+   gobject_class->constructed = meta_input_device_x11_constructed;
+   gobject_class->finalize = meta_input_device_x11_finalize;
++  gobject_class->set_property = meta_input_device_x11_set_property;
++  gobject_class->get_property = meta_input_device_x11_get_property;
+ 
+   device_class->keycode_to_evdev = meta_input_device_x11_keycode_to_evdev;
+   device_class->is_grouped = meta_input_device_x11_is_grouped;
+   device_class->get_group_n_modes = meta_input_device_x11_get_group_n_modes;
+   device_class->is_mode_switch_button = meta_input_device_x11_is_mode_switch_button;
++
++  props[PROP_ID] =
++    g_param_spec_int ("id",
++                      P_("Id"),
++                      P_("Unique identifier of the device"),
++                      -1, G_MAXINT,
++                      0,
++                      CLUTTER_PARAM_READWRITE |
++                      G_PARAM_CONSTRUCT_ONLY);
++
++  g_object_class_install_properties (gobject_class, N_PROPS, props);
+ }
+ 
+ static void

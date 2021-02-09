@@ -1,0 +1,26 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Mon, 28 Dec 2020 17:00:46 +0100
+Subject: backends: Disconnect MetaInputMapper signal connection on device
+ dispose
+
+This signal may be left dangling when disconnecting a device, and be executed
+later on if the device is connected again, and mapped to other output. Make it
+sure the signal handler is disconnected when unplugging the device.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1657>
+---
+ src/backends/meta-input-mapper.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/backends/meta-input-mapper.c b/src/backends/meta-input-mapper.c
+index 756cd11..df21ff7 100644
+--- a/src/backends/meta-input-mapper.c
++++ b/src/backends/meta-input-mapper.c
+@@ -189,6 +189,7 @@ mapper_input_info_new (ClutterInputDevice *device,
+ static void
+ mapper_input_info_free (MetaMapperInputInfo *info)
+ {
++  g_signal_handlers_disconnect_by_func (info->settings, settings_output_changed_cb, info);
+   g_object_unref (info->settings);
+   g_free (info);
+ }

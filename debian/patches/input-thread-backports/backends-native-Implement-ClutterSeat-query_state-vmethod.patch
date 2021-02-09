@@ -1,0 +1,110 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Fri, 5 Jun 2020 22:41:03 +0200
+Subject: backends/native: Implement ClutterSeat::query_state() vmethod
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ src/backends/native/meta-seat-native.c | 49 ++++++++++++++++++++++++++++++++++
+ src/backends/native/meta-xkb-utils.c   | 12 +++++++++
+ src/backends/native/meta-xkb-utils.h   |  2 ++
+ 3 files changed, 63 insertions(+)
+
+diff --git a/src/backends/native/meta-seat-native.c b/src/backends/native/meta-seat-native.c
+index 406f855..67e6cb1 100644
+--- a/src/backends/native/meta-seat-native.c
++++ b/src/backends/native/meta-seat-native.c
+@@ -2811,6 +2811,54 @@ meta_seat_native_warp_pointer (ClutterSeat *seat,
+   meta_cursor_tracker_update_position (cursor_tracker, x, y);
+ }
+ 
++static gboolean
++meta_seat_native_query_state (ClutterSeat          *seat,
++                              ClutterInputDevice   *device,
++                              ClutterEventSequence *sequence,
++                              graphene_point_t     *coords,
++                              ClutterModifierType  *modifiers)
++{
++  MetaSeatNative *seat_native = META_SEAT_NATIVE (seat);
++
++  if (sequence)
++    {
++      MetaTouchState *touch_state;
++      int slot;
++
++      slot = meta_event_native_sequence_get_slot (sequence);
++      touch_state = meta_seat_native_lookup_touch_state (seat_native, slot);
++      if (!touch_state)
++        return FALSE;
++
++      if (coords)
++        {
++          coords->x = touch_state->coords.x;
++          coords->y = touch_state->coords.y;
++        }
++
++      if (modifiers)
++        *modifiers = meta_xkb_translate_modifiers (seat_native->xkb, 0);
++
++      return TRUE;
++    }
++  else
++    {
++      if (coords)
++        {
++          coords->x = device->current_x;
++          coords->y = device->current_y;
++        }
++
++      if (modifiers)
++        {
++          *modifiers = meta_xkb_translate_modifiers (seat_native->xkb,
++                                                     seat_native->button_state);
++        }
++
++      return TRUE;
++    }
++}
++
+ static void
+ meta_seat_native_class_init (MetaSeatNativeClass *klass)
+ {
+@@ -2836,6 +2884,7 @@ meta_seat_native_class_init (MetaSeatNativeClass *klass)
+   seat_class->compress_motion = meta_seat_native_compress_motion;
+   seat_class->warp_pointer = meta_seat_native_warp_pointer;
+   seat_class->handle_device_event = meta_seat_native_handle_device_event;
++  seat_class->query_state = meta_seat_native_query_state;
+ 
+   props[PROP_SEAT_ID] =
+     g_param_spec_string ("seat-id",
+diff --git a/src/backends/native/meta-xkb-utils.c b/src/backends/native/meta-xkb-utils.c
+index 6470e52..eb2a832 100644
+--- a/src/backends/native/meta-xkb-utils.c
++++ b/src/backends/native/meta-xkb-utils.c
+@@ -106,3 +106,15 @@ meta_xkb_translate_state (ClutterEvent     *event,
+                                  xkb_state_serialize_mods (state, XKB_STATE_MODS_LOCKED),
+                                  xkb_state_serialize_mods (state, XKB_STATE_MODS_EFFECTIVE) | button_state);
+ }
++
++ClutterModifierType
++meta_xkb_translate_modifiers (struct xkb_state    *state,
++                              ClutterModifierType  button_state)
++{
++  ClutterModifierType modifiers;
++
++  modifiers = xkb_state_serialize_mods (state, XKB_STATE_MODS_EFFECTIVE);
++  modifiers |= button_state;
++
++  return modifiers;
++}
+diff --git a/src/backends/native/meta-xkb-utils.h b/src/backends/native/meta-xkb-utils.h
+index 5121d08..f0fa507 100644
+--- a/src/backends/native/meta-xkb-utils.h
++++ b/src/backends/native/meta-xkb-utils.h
+@@ -35,5 +35,7 @@ ClutterEvent *    meta_key_event_new_from_evdev (ClutterInputDevice *device,
+ void               meta_xkb_translate_state     (ClutterEvent       *event,
+                                                  struct xkb_state   *xkb_state,
+                                                  uint32_t            button_state);
++ClutterModifierType meta_xkb_translate_modifiers (struct xkb_state    *state,
++                                                  ClutterModifierType  button_state);
+ 
+ #endif /* META_XKB_UTILS_H */

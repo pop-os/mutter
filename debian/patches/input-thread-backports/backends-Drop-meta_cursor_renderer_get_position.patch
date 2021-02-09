@@ -1,0 +1,47 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Mon, 13 Jul 2020 13:56:56 +0200
+Subject: backends: Drop meta_cursor_renderer_get_position()
+
+This is now unused.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ src/backends/meta-cursor-renderer.c | 12 ------------
+ src/backends/meta-cursor-renderer.h |  1 -
+ 2 files changed, 13 deletions(-)
+
+diff --git a/src/backends/meta-cursor-renderer.c b/src/backends/meta-cursor-renderer.c
+index 095cdbe..ba27eb8 100644
+--- a/src/backends/meta-cursor-renderer.c
++++ b/src/backends/meta-cursor-renderer.c
+@@ -456,18 +456,6 @@ meta_cursor_renderer_set_position (MetaCursorRenderer *renderer,
+   meta_cursor_renderer_update_cursor (renderer, priv->displayed_cursor);
+ }
+ 
+-graphene_point_t
+-meta_cursor_renderer_get_position (MetaCursorRenderer *renderer)
+-{
+-  MetaCursorRendererPrivate *priv =
+-    meta_cursor_renderer_get_instance_private (renderer);
+-
+-  return (graphene_point_t) {
+-    .x = priv->current_x,
+-    .y = priv->current_y
+-  };
+-}
+-
+ MetaCursorSprite *
+ meta_cursor_renderer_get_cursor (MetaCursorRenderer *renderer)
+ {
+diff --git a/src/backends/meta-cursor-renderer.h b/src/backends/meta-cursor-renderer.h
+index 3862102..2156d91 100644
+--- a/src/backends/meta-cursor-renderer.h
++++ b/src/backends/meta-cursor-renderer.h
+@@ -63,7 +63,6 @@ void meta_cursor_renderer_set_cursor (MetaCursorRenderer *renderer,
+ void meta_cursor_renderer_set_position (MetaCursorRenderer *renderer,
+                                         float               x,
+                                         float               y);
+-graphene_point_t meta_cursor_renderer_get_position (MetaCursorRenderer *renderer);
+ void meta_cursor_renderer_force_update (MetaCursorRenderer *renderer);
+ 
+ MetaCursorSprite * meta_cursor_renderer_get_cursor (MetaCursorRenderer *renderer);

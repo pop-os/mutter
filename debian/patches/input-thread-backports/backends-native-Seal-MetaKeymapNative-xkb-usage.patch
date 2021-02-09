@@ -1,0 +1,133 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Wed, 12 Aug 2020 11:16:39 +0200
+Subject: backends/native: Seal MetaKeymapNative xkb usage
+
+Don't let the vfuncs (meant to be called from the UI thread) deal with
+xkb state itself. Instead store the current state in struct fields, which
+is then fetched in vfuncs.
+
+This makes the keymap able to be used from the UI thread, while being
+maintained by the input thread. Same caveats apply than
+clutter_seat_query_state(), you are asking for the most up-to-date state,
+but it still may be changing under your feet.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ src/backends/native/meta-keymap-native.c | 45 +++++++++++++++++++-------------
+ src/backends/native/meta-keymap-native.h |  1 +
+ src/backends/native/meta-seat-impl.c     |  3 +++
+ 3 files changed, 31 insertions(+), 18 deletions(-)
+
+diff --git a/src/backends/native/meta-keymap-native.c b/src/backends/native/meta-keymap-native.c
+index d199035..ee56443 100644
+--- a/src/backends/native/meta-keymap-native.c
++++ b/src/backends/native/meta-keymap-native.c
+@@ -36,6 +36,8 @@ struct _MetaKeymapNative
+   ClutterKeymap parent_instance;
+ 
+   struct xkb_keymap *keymap;
++  gboolean num_lock;
++  gboolean caps_lock;
+ };
+ 
+ G_DEFINE_TYPE (MetaKeymapNative, meta_keymap_native,
+@@ -54,31 +56,17 @@ meta_keymap_native_finalize (GObject *object)
+ static gboolean
+ meta_keymap_native_get_num_lock_state (ClutterKeymap *keymap)
+ {
+-  struct xkb_state *xkb_state;
+-  ClutterSeat *seat;
+-
+-  seat = clutter_backend_get_default_seat (clutter_get_default_backend ());
+-  xkb_state = meta_seat_impl_get_xkb_state (META_SEAT_NATIVE (seat)->impl);
++  MetaKeymapNative *keymap_native = META_KEYMAP_NATIVE (keymap);
+ 
+-  return xkb_state_mod_name_is_active (xkb_state,
+-                                       XKB_MOD_NAME_NUM,
+-                                       XKB_STATE_MODS_LATCHED |
+-                                       XKB_STATE_MODS_LOCKED);
++  return keymap_native->num_lock;
+ }
+ 
+ static gboolean
+ meta_keymap_native_get_caps_lock_state (ClutterKeymap *keymap)
+ {
+-  struct xkb_state *xkb_state;
+-  ClutterSeat *seat;
+-
+-  seat = clutter_backend_get_default_seat (clutter_get_default_backend ());
+-  xkb_state = meta_seat_impl_get_xkb_state (META_SEAT_NATIVE (seat)->impl);
++  MetaKeymapNative *keymap_native = META_KEYMAP_NATIVE (keymap);
+ 
+-  return xkb_state_mod_name_is_active (xkb_state,
+-                                       XKB_MOD_NAME_CAPS,
+-                                       XKB_STATE_MODS_LATCHED |
+-                                       XKB_STATE_MODS_LOCKED);
++  return keymap_native->caps_lock;
+ }
+ 
+ static PangoDirection
+@@ -134,3 +122,24 @@ meta_keymap_native_get_keyboard_map (MetaKeymapNative *keymap)
+ {
+   return keymap->keymap;
+ }
++
++void
++meta_keymap_native_update (MetaKeymapNative *keymap)
++{
++  struct xkb_state *xkb_state;
++  ClutterSeat *seat;
++
++  seat = clutter_backend_get_default_seat (clutter_get_default_backend ());
++  xkb_state = meta_seat_impl_get_xkb_state (META_SEAT_NATIVE (seat)->impl);
++
++  keymap->num_lock =
++    xkb_state_mod_name_is_active (xkb_state,
++                                  XKB_MOD_NAME_NUM,
++                                  XKB_STATE_MODS_LATCHED |
++                                  XKB_STATE_MODS_LOCKED);
++  keymap->caps_lock =
++    xkb_state_mod_name_is_active (xkb_state,
++                                  XKB_MOD_NAME_CAPS,
++                                  XKB_STATE_MODS_LATCHED |
++                                  XKB_STATE_MODS_LOCKED);
++}
+diff --git a/src/backends/native/meta-keymap-native.h b/src/backends/native/meta-keymap-native.h
+index 2736498..8b276df 100644
+--- a/src/backends/native/meta-keymap-native.h
++++ b/src/backends/native/meta-keymap-native.h
+@@ -32,5 +32,6 @@ G_DECLARE_FINAL_TYPE (MetaKeymapNative, meta_keymap_native,
+ void                meta_keymap_native_set_keyboard_map (MetaKeymapNative  *keymap,
+                                                          struct xkb_keymap *xkb_keymap);
+ struct xkb_keymap * meta_keymap_native_get_keyboard_map (MetaKeymapNative *keymap);
++void                meta_keymap_native_update           (MetaKeymapNative *keymap);
+ 
+ #endif /* META_KEYMAP_NATIVE_H */
+diff --git a/src/backends/native/meta-seat-impl.c b/src/backends/native/meta-seat-impl.c
+index 3232223..d7cdd82 100644
+--- a/src/backends/native/meta-seat-impl.c
++++ b/src/backends/native/meta-seat-impl.c
+@@ -2855,6 +2855,7 @@ meta_seat_impl_update_xkb_state (MetaSeatImpl *seat_impl)
+     xkb_keymap_led_get_index (xkb_keymap, XKB_LED_NAME_SCROLL);
+ 
+   meta_seat_impl_sync_leds (seat_impl);
++  meta_keymap_native_update (seat_impl->keymap);
+ 
+   g_rw_lock_writer_unlock (&seat_impl->state_lock);
+ }
+@@ -2981,6 +2982,7 @@ meta_seat_impl_set_keyboard_layout_index (MetaSeatImpl       *seat_impl,
+   locked_mods = xkb_state_serialize_mods (state, XKB_STATE_MODS_LOCKED);
+ 
+   xkb_state_update_mask (state, depressed_mods, latched_mods, locked_mods, 0, 0, idx);
++  meta_keymap_native_update (seat_impl->keymap);
+ 
+   seat_impl->layout_idx = idx;
+ 
+@@ -3046,6 +3048,7 @@ meta_seat_impl_set_keyboard_numlock (MetaSeatImpl *seat_impl,
+                          group_mods);
+ 
+   meta_seat_impl_sync_leds (seat_impl);
++  meta_keymap_native_update (seat_impl->keymap);
+ 
+   g_rw_lock_writer_unlock (&seat_impl->state_lock);
+ }

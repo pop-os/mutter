@@ -1,0 +1,109 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Tue, 11 Aug 2020 17:19:21 +0200
+Subject: backends/native: Proxy touch-mode via MetaSeatImpl
+
+Handle this via a MetaSeatImpl signal, as the heuristics that apply
+here are based on libinput events. The MetaSeatNative just forwards
+the touch-mode changes now.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ src/backends/native/meta-seat-impl.c   | 10 +++++++++-
+ src/backends/native/meta-seat-native.c | 13 ++++++++++++-
+ src/backends/native/meta-seat-native.h |  4 ++++
+ 3 files changed, 25 insertions(+), 2 deletions(-)
+
+diff --git a/src/backends/native/meta-seat-impl.c b/src/backends/native/meta-seat-impl.c
+index a8ee3fc..43d5052 100644
+--- a/src/backends/native/meta-seat-impl.c
++++ b/src/backends/native/meta-seat-impl.c
+@@ -110,6 +110,7 @@ enum
+ {
+   KBD_A11Y_FLAGS_CHANGED,
+   KBD_A11Y_MODS_STATE_CHANGED,
++  TOUCH_MODE,
+   N_SIGNALS
+ };
+ 
+@@ -1467,7 +1468,7 @@ update_touch_mode (MetaSeatImpl *seat_impl)
+   if (seat_impl->touch_mode != touch_mode)
+     {
+       seat_impl->touch_mode = touch_mode;
+-      g_object_notify (G_OBJECT (seat_impl->seat_native), "touch-mode");
++      g_signal_emit (seat_impl, signals[TOUCH_MODE], 0, touch_mode);
+     }
+ }
+ 
+@@ -2723,6 +2724,13 @@ meta_seat_impl_class_init (MetaSeatImplClass *klass)
+                   0, NULL, NULL, NULL,
+                   G_TYPE_NONE, 2,
+                   G_TYPE_UINT, G_TYPE_UINT);
++  signals[TOUCH_MODE] =
++    g_signal_new ("touch-mode",
++                  G_TYPE_FROM_CLASS (object_class),
++                  G_SIGNAL_RUN_LAST,
++                  0, NULL, NULL,
++                  g_cclosure_marshal_VOID__BOOLEAN,
++                  G_TYPE_NONE, 1, G_TYPE_BOOLEAN);
+ 
+   g_object_class_install_properties (object_class, N_PROPS, props);
+ }
+diff --git a/src/backends/native/meta-seat-native.c b/src/backends/native/meta-seat-native.c
+index f8f155a..2995247 100644
+--- a/src/backends/native/meta-seat-native.c
++++ b/src/backends/native/meta-seat-native.c
+@@ -124,6 +124,15 @@ proxy_kbd_a11y_mods_state_changed (MetaSeatImpl   *seat_impl,
+                          new_locked_mods);
+ }
+ 
++static void
++proxy_touch_mode_changed (MetaSeatImpl   *seat_impl,
++                          gboolean        enabled,
++                          MetaSeatNative *seat_native)
++{
++  seat_native->touch_mode = enabled;
++  g_object_notify (G_OBJECT (seat_native), "touch-mode");
++}
++
+ static void
+ meta_seat_native_constructed (GObject *object)
+ {
+@@ -134,6 +143,8 @@ meta_seat_native_constructed (GObject *object)
+                     G_CALLBACK (proxy_kbd_a11y_flags_changed), seat);
+   g_signal_connect (seat->impl, "kbd-a11y-mods-state-changed",
+                     G_CALLBACK (proxy_kbd_a11y_mods_state_changed), seat);
++  g_signal_connect (seat->impl, "touch-mode",
++                    G_CALLBACK (proxy_touch_mode_changed), seat);
+ 
+   seat->core_pointer = meta_seat_impl_get_pointer (seat->impl);
+   seat->core_keyboard = meta_seat_impl_get_keyboard (seat->impl);
+@@ -175,7 +186,7 @@ meta_seat_native_get_property (GObject    *object,
+       g_value_set_string (value, seat_native->seat_id);
+       break;
+     case PROP_TOUCH_MODE:
+-      g_value_set_boolean (value, seat_native->impl->touch_mode);
++      g_value_set_boolean (value, seat_native->touch_mode);
+       break;
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+diff --git a/src/backends/native/meta-seat-native.h b/src/backends/native/meta-seat-native.h
+index 7a409e9..84eb8bb 100644
+--- a/src/backends/native/meta-seat-native.h
++++ b/src/backends/native/meta-seat-native.h
+@@ -58,6 +58,7 @@ struct _MetaSeatNative
+   GHashTable *tablet_cursors;
+ 
+   gboolean released;
++  gboolean touch_mode;
+ };
+ 
+ #define META_TYPE_SEAT_NATIVE meta_seat_native_get_type ()
+@@ -122,5 +123,8 @@ MetaCursorRenderer * meta_seat_native_maybe_ensure_cursor_renderer (MetaSeatNati
+ 
+ void meta_seat_native_set_viewports (MetaSeatNative   *seat,
+                                      MetaViewportInfo *viewports);
++void meta_seat_native_notify_kbd_a11y_change (MetaSeatNative        *seat,
++                                              MetaKeyboardA11yFlags  new_flags,
++                                              MetaKeyboardA11yFlags  what_changed);
+ 
+ #endif /* META_SEAT_NATIVE_H */

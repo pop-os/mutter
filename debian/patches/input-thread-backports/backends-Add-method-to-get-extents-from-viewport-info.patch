@@ -1,0 +1,58 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Fri, 31 Jul 2020 19:10:53 +0200
+Subject: backends: Add method to get extents from viewport info
+
+This way we know the stage extents without poking the stage.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ src/backends/meta-viewport-info.c | 25 +++++++++++++++++++++++++
+ src/backends/meta-viewport-info.h |  4 ++++
+ 2 files changed, 29 insertions(+)
+
+diff --git a/src/backends/meta-viewport-info.c b/src/backends/meta-viewport-info.c
+index 922475c..c8474f3 100644
+--- a/src/backends/meta-viewport-info.c
++++ b/src/backends/meta-viewport-info.c
+@@ -187,3 +187,28 @@ meta_viewport_info_get_num_views (MetaViewportInfo *info)
+ {
+   return info->views->len;
+ }
++
++void
++meta_viewport_info_get_extents (MetaViewportInfo *viewport_info,
++                                float            *width,
++                                float            *height)
++{
++  int min_x = G_MAXINT, min_y = G_MAXINT, max_x = G_MININT, max_y = G_MININT, i;
++
++  g_return_if_fail (viewport_info != NULL);
++
++  for (i = 0; i < viewport_info->views->len; i++)
++    {
++      ViewInfo *info = &g_array_index (viewport_info->views, ViewInfo, i);
++
++      min_x = MIN (min_x, info->rect.x);
++      max_x = MAX (max_x, info->rect.x + info->rect.width);
++      min_y = MIN (min_y, info->rect.y);
++      max_y = MAX (max_y, info->rect.y + info->rect.height);
++    }
++
++  if (width)
++    *width = (float) max_x - min_x;
++  if (height)
++    *height = (float) max_y - min_y;
++}
+diff --git a/src/backends/meta-viewport-info.h b/src/backends/meta-viewport-info.h
+index 0701c43..ea9b8af 100644
+--- a/src/backends/meta-viewport-info.h
++++ b/src/backends/meta-viewport-info.h
+@@ -51,4 +51,8 @@ int meta_viewport_info_get_neighbor (MetaViewportInfo     *info,
+ 
+ int meta_viewport_info_get_num_views (MetaViewportInfo *info);
+ 
++void meta_viewport_info_get_extents (MetaViewportInfo *info,
++                                     float            *width,
++                                     float            *height);
++
+ #endif /* META_VIEWPORT_INFO_H */

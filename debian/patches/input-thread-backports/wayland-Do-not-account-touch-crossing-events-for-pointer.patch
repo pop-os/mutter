@@ -1,0 +1,29 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Mon, 28 Dec 2020 18:38:51 +0100
+Subject: wayland: Do not account touch crossing events for pointer
+
+These events may be emitted for touchpoints (in which case they contain
+an event sequence). Ignore those as they are not relevant for pointer
+picking, and shouldn't influence its focus.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1657>
+---
+ src/wayland/meta-wayland-pointer.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/wayland/meta-wayland-pointer.c b/src/wayland/meta-wayland-pointer.c
+index 1d6bb75..28203c2 100644
+--- a/src/wayland/meta-wayland-pointer.c
++++ b/src/wayland/meta-wayland-pointer.c
+@@ -611,8 +611,9 @@ void
+ meta_wayland_pointer_update (MetaWaylandPointer *pointer,
+                              const ClutterEvent *event)
+ {
+-  if (event->type == CLUTTER_ENTER ||
+-      event->type == CLUTTER_LEAVE)
++  if ((event->type == CLUTTER_ENTER ||
++       event->type == CLUTTER_LEAVE) &&
++      !clutter_event_get_event_sequence (event))
+     repick_for_event (pointer, event);
+ 
+   if (event->type == CLUTTER_MOTION ||

@@ -1,0 +1,310 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Thu, 19 Nov 2020 00:47:04 +0100
+Subject: clutter: Make axes part of the device tool
+
+This info can be construct-only there, as opposed to devices.
+Move this info to tools, so we can drop it from devices.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ clutter/clutter/clutter-enums.h                    | 14 ++++
+ clutter/clutter/clutter-input-device-tool.c        | 27 ++++++++
+ clutter/clutter/clutter-input-device-tool.h        |  3 +
+ .../native/meta-input-device-tool-native.c         | 22 +++++++
+ src/backends/x11/meta-input-device-tool-x11.c      | 11 ++++
+ src/wayland/meta-wayland-tablet-tool.c             | 76 +++++-----------------
+ 6 files changed, 93 insertions(+), 60 deletions(-)
+
+diff --git a/clutter/clutter/clutter-enums.h b/clutter/clutter/clutter-enums.h
+index cd058b3..bcc848b 100644
+--- a/clutter/clutter/clutter-enums.h
++++ b/clutter/clutter/clutter-enums.h
+@@ -1050,6 +1050,20 @@ typedef enum
+   CLUTTER_INPUT_AXIS_LAST
+ } ClutterInputAxis;
+ 
++typedef enum
++{
++  CLUTTER_INPUT_AXIS_FLAG_NONE = 0,
++  CLUTTER_INPUT_AXIS_FLAG_X = 1 << CLUTTER_INPUT_AXIS_X,
++  CLUTTER_INPUT_AXIS_FLAG_Y = 1 << CLUTTER_INPUT_AXIS_Y,
++  CLUTTER_INPUT_AXIS_FLAG_PRESSURE = 1 << CLUTTER_INPUT_AXIS_PRESSURE,
++  CLUTTER_INPUT_AXIS_FLAG_XTILT = 1 << CLUTTER_INPUT_AXIS_XTILT,
++  CLUTTER_INPUT_AXIS_FLAG_YTILT = 1 << CLUTTER_INPUT_AXIS_YTILT,
++  CLUTTER_INPUT_AXIS_FLAG_WHEEL = 1 << CLUTTER_INPUT_AXIS_WHEEL,
++  CLUTTER_INPUT_AXIS_FLAG_DISTANCE = 1 << CLUTTER_INPUT_AXIS_DISTANCE,
++  CLUTTER_INPUT_AXIS_FLAG_ROTATION = 1 << CLUTTER_INPUT_AXIS_ROTATION,
++  CLUTTER_INPUT_AXIS_FLAG_SLIDER = 1 << CLUTTER_INPUT_AXIS_SLIDER,
++} ClutterInputAxisFlags;
++
+ /**
+  * ClutterSnapEdge:
+  * @CLUTTER_SNAP_EDGE_TOP: the top edge
+diff --git a/clutter/clutter/clutter-input-device-tool.c b/clutter/clutter/clutter-input-device-tool.c
+index 982d94c..2582a69 100644
+--- a/clutter/clutter/clutter-input-device-tool.c
++++ b/clutter/clutter/clutter-input-device-tool.c
+@@ -33,6 +33,7 @@ struct _ClutterInputDeviceToolPrivate
+   ClutterInputDeviceToolType type;
+   guint64 serial;
+   guint64 id;
++  ClutterInputAxisFlags axes;
+ };
+ 
+ enum
+@@ -41,6 +42,7 @@ enum
+   PROP_TYPE,
+   PROP_SERIAL,
+   PROP_ID,
++  PROP_AXES,
+   PROP_LAST
+ };
+ 
+@@ -70,6 +72,9 @@ clutter_input_device_tool_set_property (GObject      *object,
+     case PROP_ID:
+       priv->id = g_value_get_uint64 (value);
+       break;
++    case PROP_AXES:
++      priv->axes = g_value_get_flags (value);
++      break;
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+     }
+@@ -97,6 +102,9 @@ clutter_input_device_tool_get_property (GObject    *object,
+     case PROP_ID:
+       g_value_set_uint64 (value, priv->id);
+       break;
++    case PROP_AXES:
++      g_value_set_flags (value, priv->axes);
++      break;
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+     }
+@@ -129,6 +137,13 @@ clutter_input_device_tool_class_init (ClutterInputDeviceToolClass *klass)
+                          P_("Tool ID"),
+                          0, G_MAXUINT64, 0,
+                          CLUTTER_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY);
++  props[PROP_AXES] =
++    g_param_spec_flags ("axes",
++                        P_("Axes"),
++                        P_("Axes"),
++                        CLUTTER_TYPE_INPUT_AXIS_FLAGS,
++                        CLUTTER_INPUT_AXIS_FLAG_NONE,
++                        CLUTTER_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY);
+ 
+   g_object_class_install_properties (gobject_class, PROP_LAST, props);
+ }
+@@ -204,3 +219,15 @@ clutter_input_device_tool_get_id (ClutterInputDeviceTool *tool)
+ 
+   return priv->id;
+ }
++
++ClutterInputAxisFlags
++clutter_input_device_tool_get_axes (ClutterInputDeviceTool *tool)
++{
++  ClutterInputDeviceToolPrivate *priv;
++
++  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE_TOOL (tool), 0);
++
++  priv = clutter_input_device_tool_get_instance_private (tool);
++
++  return priv->axes;
++}
+diff --git a/clutter/clutter/clutter-input-device-tool.h b/clutter/clutter/clutter-input-device-tool.h
+index 36c8add..df5c820 100644
+--- a/clutter/clutter/clutter-input-device-tool.h
++++ b/clutter/clutter/clutter-input-device-tool.h
+@@ -64,6 +64,9 @@ ClutterInputDeviceToolType clutter_input_device_tool_get_tool_type (ClutterInput
+ CLUTTER_EXPORT
+ guint64                    clutter_input_device_tool_get_id        (ClutterInputDeviceTool *tool);
+ 
++CLUTTER_EXPORT
++ClutterInputAxisFlags      clutter_input_device_tool_get_axes      (ClutterInputDeviceTool *tool);
++
+ G_END_DECLS
+ 
+ #endif /* __CLUTTER_INPUT_DEVICE_TOOL_H__ */
+diff --git a/src/backends/native/meta-input-device-tool-native.c b/src/backends/native/meta-input-device-tool-native.c
+index 8b540af..dc47b81 100644
+--- a/src/backends/native/meta-input-device-tool-native.c
++++ b/src/backends/native/meta-input-device-tool-native.c
+@@ -49,6 +49,27 @@ meta_input_device_tool_native_init (MetaInputDeviceToolNative *tool)
+   tool->button_map = g_hash_table_new (NULL, NULL);
+ }
+ 
++static ClutterInputAxisFlags
++translate_axes (struct libinput_tablet_tool *tool)
++{
++  ClutterInputAxisFlags axes = 0;
++
++  if (libinput_tablet_tool_has_pressure (tool))
++    axes |= CLUTTER_INPUT_AXIS_FLAG_PRESSURE;
++  if (libinput_tablet_tool_has_distance (tool))
++    axes |= CLUTTER_INPUT_AXIS_FLAG_DISTANCE;
++  if (libinput_tablet_tool_has_rotation (tool))
++    axes |= CLUTTER_INPUT_AXIS_FLAG_ROTATION;
++  if (libinput_tablet_tool_has_slider (tool))
++    axes |= CLUTTER_INPUT_AXIS_FLAG_SLIDER;
++  if (libinput_tablet_tool_has_wheel (tool))
++    axes |= CLUTTER_INPUT_AXIS_FLAG_WHEEL;
++  if (libinput_tablet_tool_has_tilt (tool))
++    axes |= CLUTTER_INPUT_AXIS_FLAG_XTILT | CLUTTER_INPUT_AXIS_FLAG_YTILT;
++
++  return axes;
++}
++
+ ClutterInputDeviceTool *
+ meta_input_device_tool_native_new (struct libinput_tablet_tool *tool,
+                                    uint64_t                     serial,
+@@ -60,6 +81,7 @@ meta_input_device_tool_native_new (struct libinput_tablet_tool *tool,
+                              "type", type,
+                              "serial", serial,
+                              "id", libinput_tablet_tool_get_tool_id (tool),
++                             "axes", translate_axes (tool),
+                              NULL);
+ 
+   evdev_tool->tool = libinput_tablet_tool_ref (tool);
+diff --git a/src/backends/x11/meta-input-device-tool-x11.c b/src/backends/x11/meta-input-device-tool-x11.c
+index 0632fea..bec4d1f 100644
+--- a/src/backends/x11/meta-input-device-tool-x11.c
++++ b/src/backends/x11/meta-input-device-tool-x11.c
+@@ -38,8 +38,19 @@ ClutterInputDeviceTool *
+ meta_input_device_tool_x11_new (guint                      serial,
+                                 ClutterInputDeviceToolType type)
+ {
++  ClutterInputAxisFlags axes =
++    CLUTTER_INPUT_AXIS_FLAG_PRESSURE |
++    CLUTTER_INPUT_AXIS_FLAG_DISTANCE |
++    CLUTTER_INPUT_AXIS_FLAG_XTILT |
++    CLUTTER_INPUT_AXIS_FLAG_YTILT |
++    CLUTTER_INPUT_AXIS_FLAG_WHEEL |
++    CLUTTER_INPUT_AXIS_FLAG_DISTANCE |
++    CLUTTER_INPUT_AXIS_FLAG_ROTATION |
++    CLUTTER_INPUT_AXIS_FLAG_SLIDER;
++
+   return g_object_new (META_TYPE_INPUT_DEVICE_TOOL_X11,
+                        "type", type,
+                        "serial", serial,
++                       "axes", axes,
+                        NULL);
+ }
+diff --git a/src/wayland/meta-wayland-tablet-tool.c b/src/wayland/meta-wayland-tablet-tool.c
+index d37d349..7e54601 100644
+--- a/src/wayland/meta-wayland-tablet-tool.c
++++ b/src/wayland/meta-wayland-tablet-tool.c
+@@ -137,45 +137,6 @@ meta_wayland_tablet_tool_set_cursor_surface (MetaWaylandTabletTool *tool,
+   meta_wayland_tablet_tool_update_cursor_surface (tool);
+ }
+ 
+-static uint32_t
+-input_device_get_capabilities (ClutterInputDevice *device)
+-{
+-  ClutterInputAxis axis;
+-  guint32 capabilities = 0, i;
+-
+-  for (i = 0; i < clutter_input_device_get_n_axes (device); i++)
+-    {
+-      axis = clutter_input_device_get_axis (device, i);
+-
+-      switch (axis)
+-        {
+-        case CLUTTER_INPUT_AXIS_PRESSURE:
+-          capabilities |= 1 << ZWP_TABLET_TOOL_V2_CAPABILITY_PRESSURE;
+-          break;
+-        case CLUTTER_INPUT_AXIS_DISTANCE:
+-          capabilities |= 1 << ZWP_TABLET_TOOL_V2_CAPABILITY_DISTANCE;
+-          break;
+-        case CLUTTER_INPUT_AXIS_XTILT:
+-        case CLUTTER_INPUT_AXIS_YTILT:
+-          capabilities |= 1 << ZWP_TABLET_TOOL_V2_CAPABILITY_TILT;
+-          break;
+-        case CLUTTER_INPUT_AXIS_ROTATION:
+-          capabilities |= 1 << ZWP_TABLET_TOOL_V2_CAPABILITY_ROTATION;
+-          break;
+-        case CLUTTER_INPUT_AXIS_WHEEL:
+-          capabilities |= 1 << ZWP_TABLET_TOOL_V2_CAPABILITY_WHEEL;
+-          break;
+-        case CLUTTER_INPUT_AXIS_SLIDER:
+-          capabilities |= 1 << ZWP_TABLET_TOOL_V2_CAPABILITY_SLIDER;
+-          break;
+-        default:
+-          break;
+-        }
+-    }
+-
+-  return capabilities;
+-}
+-
+ static enum zwp_tablet_tool_v2_type
+ input_device_tool_get_type (ClutterInputDeviceTool *device_tool)
+ {
+@@ -210,26 +171,26 @@ static void
+ meta_wayland_tablet_tool_notify_capabilities (MetaWaylandTabletTool *tool,
+                                               struct wl_resource    *resource)
+ {
+-  uint32_t capabilities;
++  ClutterInputAxisFlags axes;
+ 
+-  capabilities = input_device_get_capabilities (tool->device);
++  axes = clutter_input_device_tool_get_axes (tool->device_tool);
+ 
+-  if (capabilities & (1 << ZWP_TABLET_TOOL_V2_CAPABILITY_PRESSURE))
++  if (axes & CLUTTER_INPUT_AXIS_FLAG_PRESSURE)
+     zwp_tablet_tool_v2_send_capability (resource,
+                                         ZWP_TABLET_TOOL_V2_CAPABILITY_PRESSURE);
+-  if (capabilities & (1 << ZWP_TABLET_TOOL_V2_CAPABILITY_DISTANCE))
++  if (axes & CLUTTER_INPUT_AXIS_FLAG_DISTANCE)
+     zwp_tablet_tool_v2_send_capability (resource,
+                                         ZWP_TABLET_TOOL_V2_CAPABILITY_DISTANCE);
+-  if (capabilities & (1 << ZWP_TABLET_TOOL_V2_CAPABILITY_TILT))
++  if (axes & (CLUTTER_INPUT_AXIS_FLAG_XTILT | CLUTTER_INPUT_AXIS_FLAG_YTILT))
+     zwp_tablet_tool_v2_send_capability (resource,
+                                         ZWP_TABLET_TOOL_V2_CAPABILITY_TILT);
+-  if (capabilities & (1 << ZWP_TABLET_TOOL_V2_CAPABILITY_ROTATION))
++  if (axes & CLUTTER_INPUT_AXIS_FLAG_ROTATION)
+     zwp_tablet_tool_v2_send_capability (resource,
+                                         ZWP_TABLET_TOOL_V2_CAPABILITY_ROTATION);
+-  if (capabilities & (1 << ZWP_TABLET_TOOL_V2_CAPABILITY_SLIDER))
++  if (axes & CLUTTER_INPUT_AXIS_FLAG_SLIDER)
+     zwp_tablet_tool_v2_send_capability (resource,
+                                         ZWP_TABLET_TOOL_V2_CAPABILITY_SLIDER);
+-  if (capabilities & (1 << ZWP_TABLET_TOOL_V2_CAPABILITY_WHEEL))
++  if (axes & CLUTTER_INPUT_AXIS_FLAG_WHEEL)
+     zwp_tablet_tool_v2_send_capability (resource,
+                                         ZWP_TABLET_TOOL_V2_CAPABILITY_WHEEL);
+ }
+@@ -861,26 +822,21 @@ static void
+ broadcast_axes (MetaWaylandTabletTool *tool,
+                 const ClutterEvent    *event)
+ {
+-  ClutterInputDevice *device;
+-  guint32 capabilities;
+-
+-  if (!event->motion.axes)
+-    return;
++  ClutterInputAxisFlags axes;
+ 
+-  device = clutter_event_get_source_device (event);
+-  capabilities = input_device_get_capabilities (device);
++  axes = clutter_input_device_tool_get_axes (tool->device_tool);
+ 
+-  if (capabilities & (1 << ZWP_TABLET_TOOL_V2_CAPABILITY_PRESSURE))
++  if (axes & CLUTTER_INPUT_AXIS_FLAG_PRESSURE)
+     broadcast_axis (tool, event, CLUTTER_INPUT_AXIS_PRESSURE);
+-  if (capabilities & (1 << ZWP_TABLET_TOOL_V2_CAPABILITY_DISTANCE))
++  if (axes & CLUTTER_INPUT_AXIS_FLAG_DISTANCE)
+     broadcast_axis (tool, event, CLUTTER_INPUT_AXIS_DISTANCE);
+-  if (capabilities & (1 << ZWP_TABLET_TOOL_V2_CAPABILITY_TILT))
++  if (axes & (CLUTTER_INPUT_AXIS_FLAG_XTILT | CLUTTER_INPUT_AXIS_FLAG_YTILT))
+     broadcast_tilt (tool, event);
+-  if (capabilities & (1 << ZWP_TABLET_TOOL_V2_CAPABILITY_ROTATION))
++  if (axes & CLUTTER_INPUT_AXIS_FLAG_ROTATION)
+     broadcast_rotation (tool, event);
+-  if (capabilities & (1 << ZWP_TABLET_TOOL_V2_CAPABILITY_SLIDER))
++  if (axes & CLUTTER_INPUT_AXIS_FLAG_SLIDER)
+     broadcast_axis (tool, event, CLUTTER_INPUT_AXIS_SLIDER);
+-  if (capabilities & (1 << ZWP_TABLET_TOOL_V2_CAPABILITY_WHEEL))
++  if (axes & CLUTTER_INPUT_AXIS_FLAG_WHEEL)
+     broadcast_wheel (tool, event);
+ }
+ 

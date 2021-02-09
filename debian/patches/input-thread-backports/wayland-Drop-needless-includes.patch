@@ -1,0 +1,43 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Wed, 23 Dec 2020 12:35:51 +0100
+Subject: wayland: Drop needless includes
+
+These includes are now unused, no need to make it look as if we still
+had layering breaks here.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1654>
+---
+ src/wayland/meta-wayland-pointer-constraints.c | 4 ----
+ src/wayland/meta-wayland-tablet-seat.c         | 4 ----
+ 2 files changed, 8 deletions(-)
+
+diff --git a/src/wayland/meta-wayland-pointer-constraints.c b/src/wayland/meta-wayland-pointer-constraints.c
+index 16e5c0c..965b95d 100644
+--- a/src/wayland/meta-wayland-pointer-constraints.c
++++ b/src/wayland/meta-wayland-pointer-constraints.c
+@@ -44,10 +44,6 @@
+ 
+ #include "pointer-constraints-unstable-v1-server-protocol.h"
+ 
+-#ifdef HAVE_NATIVE_BACKEND
+-#include "backends/native/meta-backend-native.h"
+-#endif
+-
+ static GQuark quark_pending_constraint_state = 0;
+ static GQuark quark_surface_pointer_constraints_data = 0;
+ 
+diff --git a/src/wayland/meta-wayland-tablet-seat.c b/src/wayland/meta-wayland-tablet-seat.c
+index f091d4b..846c30c 100644
+--- a/src/wayland/meta-wayland-tablet-seat.c
++++ b/src/wayland/meta-wayland-tablet-seat.c
+@@ -32,10 +32,6 @@
+ #include "wayland/meta-wayland-tablet-tool.h"
+ #include "wayland/meta-wayland-tablet.h"
+ 
+-#ifdef HAVE_NATIVE_BACKEND
+-#include "backends/native/meta-backend-native.h"
+-#endif
+-
+ #include "tablet-unstable-v2-server-protocol.h"
+ 
+ static void

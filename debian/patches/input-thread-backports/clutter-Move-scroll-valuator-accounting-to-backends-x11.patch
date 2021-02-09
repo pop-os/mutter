@@ -1,0 +1,380 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Thu, 19 Nov 2020 02:07:53 +0100
+Subject: clutter: Move scroll valuator accounting to backends/x11
+
+This is just used there. Another X11 detail that got open coded.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ clutter/clutter/clutter-input-device-private.h |  26 ------
+ clutter/clutter/clutter-input-device.c         |  95 ----------------------
+ src/backends/x11/meta-input-device-x11.c       | 107 +++++++++++++++++++++++++
+ src/backends/x11/meta-input-device-x11.h       |  11 +++
+ src/backends/x11/meta-seat-x11.c               |   8 +-
+ 5 files changed, 122 insertions(+), 125 deletions(-)
+
+diff --git a/clutter/clutter/clutter-input-device-private.h b/clutter/clutter/clutter-input-device-private.h
+index caed7cb..cb8fd86 100644
+--- a/clutter/clutter/clutter-input-device-private.h
++++ b/clutter/clutter/clutter-input-device-private.h
+@@ -32,16 +32,6 @@
+ 
+ G_BEGIN_DECLS
+ 
+-typedef struct _ClutterScrollInfo
+-{
+-  guint axis_id;
+-  ClutterScrollDirection direction;
+-  double increment;
+-
+-  double last_value;
+-  guint last_value_valid : 1;
+-} ClutterScrollInfo;
+-
+ typedef struct _ClutterPtrA11yData
+ {
+   int n_btn_pressed;
+@@ -98,8 +88,6 @@ struct _ClutterInputDevice
+   uint32_t previous_time;
+   int previous_button_number;
+ 
+-  GArray *scroll_info;
+-
+   char *vendor_id;
+   char *product_id;
+   char *node_path;
+@@ -128,20 +116,6 @@ CLUTTER_EXPORT
+ void _clutter_input_device_remove_event_sequence (ClutterInputDevice *device,
+                                                   ClutterEvent       *event);
+ 
+-CLUTTER_EXPORT
+-void _clutter_input_device_add_scroll_info (ClutterInputDevice     *device,
+-                                            guint                   index_,
+-                                            ClutterScrollDirection  direction,
+-                                            gdouble                 increment);
+-CLUTTER_EXPORT
+-gboolean _clutter_input_device_get_scroll_delta (ClutterInputDevice     *device,
+-                                                 guint                   index_,
+-                                                 gdouble                 value,
+-                                                 ClutterScrollDirection *direction_p,
+-                                                 gdouble                *delta_p);
+-CLUTTER_EXPORT
+-void _clutter_input_device_reset_scroll_info (ClutterInputDevice *device);
+-
+ CLUTTER_EXPORT
+ void clutter_input_device_add_tool (ClutterInputDevice     *device,
+                                     ClutterInputDeviceTool *tool);
+diff --git a/clutter/clutter/clutter-input-device.c b/clutter/clutter/clutter-input-device.c
+index 4a7b4c8..47888c9 100644
+--- a/clutter/clutter/clutter-input-device.c
++++ b/clutter/clutter/clutter-input-device.c
+@@ -95,7 +95,6 @@ clutter_input_device_dispose (GObject *gobject)
+   if (device->accessibility_virtual_device)
+     g_clear_object (&device->accessibility_virtual_device);
+ 
+-  g_clear_pointer (&device->scroll_info, g_array_unref);
+   g_clear_pointer (&device->touch_sequence_actors, g_hash_table_unref);
+ 
+   if (device->cursor_actor)
+@@ -848,100 +847,6 @@ clutter_input_device_keycode_to_evdev (ClutterInputDevice *device,
+                                            evdev_keycode);
+ }
+ 
+-void
+-_clutter_input_device_add_scroll_info (ClutterInputDevice     *device,
+-                                       guint                   index_,
+-                                       ClutterScrollDirection  direction,
+-                                       gdouble                 increment)
+-{
+-  ClutterScrollInfo info;
+-
+-  g_return_if_fail (CLUTTER_IS_INPUT_DEVICE (device));
+-
+-  info.axis_id = index_;
+-  info.direction = direction;
+-  info.increment = increment;
+-  info.last_value_valid = FALSE;
+-
+-  if (device->scroll_info == NULL)
+-    {
+-      device->scroll_info = g_array_new (FALSE,
+-                                         FALSE,
+-                                         sizeof (ClutterScrollInfo));
+-    }
+-
+-  g_array_append_val (device->scroll_info, info);
+-}
+-
+-gboolean
+-_clutter_input_device_get_scroll_delta (ClutterInputDevice     *device,
+-                                        guint                   index_,
+-                                        gdouble                 value,
+-                                        ClutterScrollDirection *direction_p,
+-                                        gdouble                *delta_p)
+-{
+-  guint i;
+-
+-  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), FALSE);
+-
+-  if (device->scroll_info == NULL)
+-    return FALSE;
+-
+-  for (i = 0; i < device->scroll_info->len; i++)
+-    {
+-      ClutterScrollInfo *info = &g_array_index (device->scroll_info,
+-                                                ClutterScrollInfo,
+-                                                i);
+-
+-      if (info->axis_id == index_)
+-        {
+-          if (direction_p != NULL)
+-            *direction_p = info->direction;
+-
+-          if (delta_p != NULL)
+-            *delta_p = 0.0;
+-
+-          if (info->last_value_valid)
+-            {
+-              if (delta_p != NULL)
+-                {
+-                  *delta_p = (value - info->last_value)
+-                           / info->increment;
+-                }
+-
+-              info->last_value = value;
+-            }
+-          else
+-            {
+-              info->last_value = value;
+-              info->last_value_valid = TRUE;
+-            }
+-
+-          return TRUE;
+-        }
+-    }
+-
+-  return FALSE;
+-}
+-
+-void
+-_clutter_input_device_reset_scroll_info (ClutterInputDevice *device)
+-{
+-  guint i;
+-
+-  if (device->scroll_info == NULL)
+-    return;
+-
+-  for (i = 0; i < device->scroll_info->len; i++)
+-    {
+-      ClutterScrollInfo *info = &g_array_index (device->scroll_info,
+-                                                ClutterScrollInfo,
+-                                                i);
+-
+-      info->last_value_valid = FALSE;
+-    }
+-}
+-
+ static void
+ on_grab_actor_destroy (ClutterActor       *actor,
+                        ClutterInputDevice *device)
+diff --git a/src/backends/x11/meta-input-device-x11.c b/src/backends/x11/meta-input-device-x11.c
+index 4fdd3b6..3d82cce 100644
+--- a/src/backends/x11/meta-input-device-x11.c
++++ b/src/backends/x11/meta-input-device-x11.c
+@@ -38,6 +38,7 @@ struct _MetaInputDeviceX11
+   float current_y;
+ 
+   GArray *axes;
++  GArray *scroll_info;
+ 
+ #ifdef HAVE_LIBWACOM
+   GArray *group_modes;
+@@ -57,6 +58,16 @@ typedef struct _MetaX11AxisInfo
+   double resolution;
+ } MetaX11AxisInfo;
+ 
++typedef struct _MetaX11ScrollInfo
++{
++  guint axis_id;
++  ClutterScrollDirection direction;
++  double increment;
++
++  double last_value;
++  guint last_value_valid : 1;
++} MetaX11ScrollInfo;
++
+ struct _MetaInputDeviceX11Class
+ {
+   ClutterInputDeviceClass device_class;
+@@ -149,6 +160,7 @@ meta_input_device_x11_finalize (GObject *object)
+   MetaInputDeviceX11 *device_xi2 = META_INPUT_DEVICE_X11 (object);
+ 
+   g_clear_pointer (&device_xi2->axes, g_array_unref);
++  g_clear_pointer (&device_xi2->scroll_info, g_array_unref);
+ 
+ #ifdef HAVE_LIBWACOM
+   if (device_xi2->group_modes)
+@@ -594,6 +606,101 @@ meta_input_device_x11_get_n_axes (ClutterInputDevice *device)
+   return device_x11->axes->len;
+ }
+ 
++void
++meta_input_device_x11_add_scroll_info (ClutterInputDevice     *device,
++                                       int                     idx,
++                                       ClutterScrollDirection  direction,
++                                       double                  increment)
++{
++  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (device);
++  MetaX11ScrollInfo info;
++
++  g_return_if_fail (CLUTTER_IS_INPUT_DEVICE (device));
++
++  info.axis_id = idx;
++  info.direction = direction;
++  info.increment = increment;
++  info.last_value_valid = FALSE;
++
++  if (device_x11->scroll_info == NULL)
++    {
++      device_x11->scroll_info = g_array_new (FALSE,
++                                             FALSE,
++                                             sizeof (MetaX11ScrollInfo));
++    }
++
++  g_array_append_val (device_x11->scroll_info, info);
++}
++
++gboolean
++meta_input_device_x11_get_scroll_delta (ClutterInputDevice     *device,
++                                        int                     idx,
++                                        double                  value,
++                                        ClutterScrollDirection *direction_p,
++                                        double                 *delta_p)
++{
++  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (device);
++  int i;
++
++  if (device_x11->scroll_info == NULL)
++    return FALSE;
++
++  for (i = 0; i < device_x11->scroll_info->len; i++)
++    {
++      MetaX11ScrollInfo *info = &g_array_index (device_x11->scroll_info,
++                                                MetaX11ScrollInfo,
++                                                i);
++
++      if (info->axis_id == idx)
++        {
++          if (direction_p != NULL)
++            *direction_p = info->direction;
++
++          if (delta_p != NULL)
++            *delta_p = 0.0;
++
++          if (info->last_value_valid)
++            {
++              if (delta_p != NULL)
++                {
++                  *delta_p = (value - info->last_value)
++                           / info->increment;
++                }
++
++              info->last_value = value;
++            }
++          else
++            {
++              info->last_value = value;
++              info->last_value_valid = TRUE;
++            }
++
++          return TRUE;
++        }
++    }
++
++  return FALSE;
++}
++
++void
++meta_input_device_x11_reset_scroll_info (ClutterInputDevice *device)
++{
++  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (device);
++  int i;
++
++  if (device_x11->scroll_info == NULL)
++    return;
++
++  for (i = 0; i < device_x11->scroll_info->len; i++)
++    {
++      MetaX11ScrollInfo *info = &g_array_index (device_x11->scroll_info,
++                                                MetaX11ScrollInfo,
++                                                i);
++
++      info->last_value_valid = FALSE;
++    }
++}
++
+ #ifdef HAVE_LIBWACOM
+ uint32_t
+ meta_input_device_x11_get_pad_group_mode (ClutterInputDevice *device,
+diff --git a/src/backends/x11/meta-input-device-x11.h b/src/backends/x11/meta-input-device-x11.h
+index 19f1efc..66e03f5 100644
+--- a/src/backends/x11/meta-input-device-x11.h
++++ b/src/backends/x11/meta-input-device-x11.h
+@@ -86,6 +86,17 @@ gboolean meta_input_device_x11_translate_axis (ClutterInputDevice *device,
+                                                double              value,
+                                                double             *axis_value);
+ 
++void meta_input_device_x11_add_scroll_info (ClutterInputDevice     *device,
++                                            int                     idx,
++                                            ClutterScrollDirection  direction,
++                                            double                  increment);
++gboolean meta_input_device_x11_get_scroll_delta (ClutterInputDevice     *device,
++                                                 int                     idx,
++                                                 gdouble                 value,
++                                                 ClutterScrollDirection *direction_p,
++                                                 double                 *delta_p);
++void meta_input_device_x11_reset_scroll_info (ClutterInputDevice *device);
++
+ G_END_DECLS
+ 
+ #endif /* META_INPUT_DEVICE_X11_H */
+diff --git a/src/backends/x11/meta-seat-x11.c b/src/backends/x11/meta-seat-x11.c
+index 1a9b473..32d724f 100644
+--- a/src/backends/x11/meta-seat-x11.c
++++ b/src/backends/x11/meta-seat-x11.c
+@@ -197,7 +197,7 @@ translate_device_classes (Display             *xdisplay,
+                      : "horizontal",
+                      scroll_info->increment);
+ 
+-            _clutter_input_device_add_scroll_info (device,
++            meta_input_device_x11_add_scroll_info (device,
+                                                    scroll_info->number,
+                                                    direction,
+                                                    scroll_info->increment);
+@@ -1203,7 +1203,7 @@ scroll_valuators_changed (ClutterInputDevice *device,
+       if (!XIMaskIsSet (valuators->mask, i))
+         continue;
+ 
+-      if (_clutter_input_device_get_scroll_delta (device, i,
++      if (meta_input_device_x11_get_scroll_delta (device, i,
+                                                   values[n_val],
+                                                   &direction,
+                                                   &delta))
+@@ -1802,7 +1802,7 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
+           }
+ 
+         if (source_device)
+-          _clutter_input_device_reset_scroll_info (source_device);
++          meta_input_device_x11_reset_scroll_info (source_device);
+       }
+       retval = FALSE;
+       break;
+@@ -2316,7 +2316,7 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
+             translate_coords (stage_x11, xev->event_x, xev->event_y, &event->crossing.x, &event->crossing.y);
+           }
+ 
+-        _clutter_input_device_reset_scroll_info (source_device);
++        meta_input_device_x11_reset_scroll_info (source_device);
+ 
+         clutter_event_set_device (event, device);
+         clutter_event_set_source_device (event, source_device);

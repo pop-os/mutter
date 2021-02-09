@@ -1,0 +1,153 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Tue, 22 Dec 2020 18:22:43 +0100
+Subject: compositor: Trigger repick after window effects here
+
+Just because of implementation details, this is only relevant to Wayland,
+and is done via ::effects-completed handlers there. Ideally, Clutter should
+notice by itself about effects starting, finishing, and affecting picking.
+Doing this in generic code seems slightly cleaner in the interim.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1654>
+---
+ src/compositor/meta-window-actor.c       | 16 ++++++++++++----
+ src/wayland/meta-wayland-shell-surface.c | 15 ---------------
+ src/wayland/meta-xwayland-surface.c      | 18 ------------------
+ 3 files changed, 12 insertions(+), 37 deletions(-)
+
+diff --git a/src/compositor/meta-window-actor.c b/src/compositor/meta-window-actor.c
+index ae450a1..c408ebd 100644
+--- a/src/compositor/meta-window-actor.c
++++ b/src/compositor/meta-window-actor.c
+@@ -665,16 +665,24 @@ meta_window_actor_after_effects (MetaWindowActor *self)
+ {
+   MetaWindowActorPrivate *priv =
+     meta_window_actor_get_instance_private (self);
++  ClutterStage *stage;
++  ClutterSeat *seat;
++
++  stage = CLUTTER_STAGE (clutter_actor_get_stage (CLUTTER_ACTOR (self)));
++  seat = clutter_backend_get_default_seat (clutter_get_default_backend ());
+ 
+   if (priv->needs_destroy)
+     {
+       clutter_actor_destroy (CLUTTER_ACTOR (self));
+-      return;
++    }
++  else
++    {
++      g_signal_emit (self, signals[EFFECTS_COMPLETED], 0);
++      meta_window_actor_sync_visibility (self);
++      meta_window_actor_sync_actor_geometry (self, FALSE);
+     }
+ 
+-  g_signal_emit (self, signals[EFFECTS_COMPLETED], 0);
+-  meta_window_actor_sync_visibility (self);
+-  meta_window_actor_sync_actor_geometry (self, FALSE);
++  clutter_stage_repick_device (stage, clutter_seat_get_pointer (seat));
+ }
+ 
+ void
+diff --git a/src/wayland/meta-wayland-shell-surface.c b/src/wayland/meta-wayland-shell-surface.c
+index 7bad43f..5e052e0 100644
+--- a/src/wayland/meta-wayland-shell-surface.c
++++ b/src/wayland/meta-wayland-shell-surface.c
+@@ -37,7 +37,6 @@ typedef struct _MetaWaylandShellSurfacePrivate
+   MetaWindow *window;
+ 
+   gulong unmanaging_handler_id;
+-  gulong effects_completed_handler_id;
+ } MetaWaylandShellSurfacePrivate;
+ 
+ G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE (MetaWaylandShellSurface,
+@@ -106,8 +105,6 @@ clear_window (MetaWaylandShellSurface *shell_surface)
+ 
+   g_clear_signal_handler (&priv->unmanaging_handler_id,
+                           priv->window);
+-  g_clear_signal_handler (&priv->effects_completed_handler_id,
+-                          meta_window_actor_from_window (priv->window));
+   priv->window = NULL;
+ 
+   surface_actor = meta_wayland_surface_get_actor (surface);
+@@ -124,13 +121,6 @@ window_unmanaging (MetaWindow              *window,
+   clear_window (shell_surface);
+ }
+ 
+-static void
+-window_actor_effects_completed (MetaWindowActor    *window_actor,
+-                                MetaWaylandSurface *surface)
+-{
+-  meta_wayland_compositor_repick (surface->compositor);
+-}
+-
+ void
+ meta_wayland_shell_surface_set_window (MetaWaylandShellSurface *shell_surface,
+                                        MetaWindow              *window)
+@@ -156,11 +146,6 @@ meta_wayland_shell_surface_set_window (MetaWaylandShellSurface *shell_surface,
+                       "unmanaging",
+                       G_CALLBACK (window_unmanaging),
+                       shell_surface);
+-  priv->effects_completed_handler_id =
+-    g_signal_connect (meta_window_actor_from_window (window),
+-                      "effects-completed",
+-                      G_CALLBACK (window_actor_effects_completed),
+-                      surface);
+ 
+   meta_window_update_monitor (window, META_WINDOW_UPDATE_MONITOR_FLAGS_NONE);
+ }
+diff --git a/src/wayland/meta-xwayland-surface.c b/src/wayland/meta-xwayland-surface.c
+index 11f5801..4697c9d 100644
+--- a/src/wayland/meta-xwayland-surface.c
++++ b/src/wayland/meta-xwayland-surface.c
+@@ -44,7 +44,6 @@ struct _MetaXwaylandSurface
+   MetaWindow *window;
+ 
+   gulong unmanaging_handler_id;
+-  gulong effects_completed_handler_id;
+ };
+ 
+ G_DEFINE_TYPE (MetaXwaylandSurface,
+@@ -58,7 +57,6 @@ clear_window (MetaXwaylandSurface *xwayland_surface)
+     META_WAYLAND_SURFACE_ROLE (xwayland_surface);
+   MetaWaylandSurface *surface =
+     meta_wayland_surface_role_get_surface (surface_role);
+-  MetaWindowActor *window_actor;
+   MetaSurfaceActor *surface_actor;
+ 
+   if (!xwayland_surface->window)
+@@ -67,10 +65,6 @@ clear_window (MetaXwaylandSurface *xwayland_surface)
+   g_clear_signal_handler (&xwayland_surface->unmanaging_handler_id,
+                           xwayland_surface->window);
+ 
+-  window_actor = meta_window_actor_from_window (xwayland_surface->window);
+-  g_clear_signal_handler (&xwayland_surface->effects_completed_handler_id,
+-                          window_actor);
+-
+   xwayland_surface->window->surface = NULL;
+   xwayland_surface->window = NULL;
+ 
+@@ -88,13 +82,6 @@ window_unmanaging (MetaWindow          *window,
+   clear_window (xwayland_surface);
+ }
+ 
+-static void
+-window_actor_effects_completed (MetaWindowActor    *window_actor,
+-                                MetaWaylandSurface *surface)
+-{
+-  meta_wayland_compositor_repick (surface->compositor);
+-}
+-
+ void
+ meta_xwayland_surface_associate_with_window (MetaXwaylandSurface *xwayland_surface,
+                                              MetaWindow          *window)
+@@ -131,11 +118,6 @@ meta_xwayland_surface_associate_with_window (MetaXwaylandSurface *xwayland_surfa
+                       "unmanaging",
+                       G_CALLBACK (window_unmanaging),
+                       xwayland_surface);
+-  xwayland_surface->effects_completed_handler_id =
+-    g_signal_connect (meta_window_actor_from_window (window),
+-                      "effects-completed",
+-                      G_CALLBACK (window_actor_effects_completed),
+-                      surface);
+ 
+   g_signal_emit (xwayland_surface, signals[WINDOW_ASSOCIATED], 0);
+ 

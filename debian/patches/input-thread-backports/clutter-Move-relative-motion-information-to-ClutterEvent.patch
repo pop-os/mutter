@@ -1,0 +1,440 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Tue, 8 Dec 2020 13:18:06 +0100
+Subject: clutter: Move relative motion information to ClutterEvent
+
+Instead of using native backend platform data specifically, store
+this info in ClutterMotionEvent. This includes time in usec since
+it's just used for motion events, in the future it could make sense
+to make these general to all events again, but it could make sense
+to make ClutterEvent structs private before.
+
+In order to express that a motion event has relative motion info,
+the CLUTTER_EVENT_FLAG_RELATIVE_MOTION event flag has been added
+for it.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1623>
+---
+ clutter/clutter/clutter-enums.h         |   3 +-
+ clutter/clutter/clutter-event.c         |  34 +++++++++++
+ clutter/clutter/clutter-event.h         |  16 +++++
+ src/backends/native/meta-event-native.c | 102 --------------------------------
+ src/backends/native/meta-seat-impl.c    |  26 ++++----
+ src/backends/native/meta-seat-native.c  |  23 +++----
+ src/wayland/meta-wayland-pointer.c      |  13 ++--
+ 7 files changed, 78 insertions(+), 139 deletions(-)
+
+diff --git a/clutter/clutter/clutter-enums.h b/clutter/clutter/clutter-enums.h
+index c03f47b..458d0fd 100644
+--- a/clutter/clutter/clutter-enums.h
++++ b/clutter/clutter/clutter-enums.h
+@@ -802,7 +802,8 @@ typedef enum /*< flags prefix=CLUTTER_EVENT >*/
+   CLUTTER_EVENT_NONE              = 0,
+   CLUTTER_EVENT_FLAG_SYNTHETIC    = 1 << 0,
+   CLUTTER_EVENT_FLAG_INPUT_METHOD = 1 << 1,
+-  CLUTTER_EVENT_FLAG_REPEATED     = 1 << 2
++  CLUTTER_EVENT_FLAG_REPEATED     = 1 << 2,
++  CLUTTER_EVENT_FLAG_RELATIVE_MOTION = 1 << 3,
+ } ClutterEventFlags;
+ 
+ /**
+diff --git a/clutter/clutter/clutter-event.c b/clutter/clutter/clutter-event.c
+index 19ec29f..5f29507 100644
+--- a/clutter/clutter/clutter-event.c
++++ b/clutter/clutter/clutter-event.c
+@@ -2142,3 +2142,37 @@ clutter_event_sequence_get_slot (const ClutterEventSequence *sequence)
+ 
+   return GPOINTER_TO_INT (sequence) - 1;
+ }
++
++int64_t
++clutter_event_get_time_us (const ClutterEvent *event)
++{
++  if (event->type == CLUTTER_MOTION)
++    return event->motion.time_us;
++
++  return 0;
++}
++
++gboolean
++clutter_event_get_relative_motion (const ClutterEvent *event,
++                                   double             *dx,
++                                   double             *dy,
++                                   double             *dx_unaccel,
++                                   double             *dy_unaccel)
++{
++  if (event->type == CLUTTER_MOTION &&
++      event->motion.flags & CLUTTER_EVENT_FLAG_RELATIVE_MOTION)
++    {
++      if (dx)
++        *dx = event->motion.dx;
++      if (dy)
++        *dy = event->motion.dy;
++      if (dx_unaccel)
++        *dx_unaccel = event->motion.dx_unaccel;
++      if (dy_unaccel)
++        *dy_unaccel = event->motion.dy_unaccel;
++
++      return TRUE;
++    }
++  else
++    return FALSE;
++}
+diff --git a/clutter/clutter/clutter-event.h b/clutter/clutter/clutter-event.h
+index 7c3d364..1974c4f 100644
+--- a/clutter/clutter/clutter-event.h
++++ b/clutter/clutter/clutter-event.h
+@@ -307,6 +307,12 @@ struct _ClutterMotionEvent
+   ClutterModifierType modifier_state;
+   gdouble *axes; /* Future use */
+   ClutterInputDevice *device;
++
++  int64_t time_us;
++  double dx;
++  double dy;
++  double dx_unaccel;
++  double dy_unaccel;
+ };
+ 
+ /**
+@@ -791,6 +797,16 @@ uint32_t                 clutter_event_get_event_code                (const Clut
+ CLUTTER_EXPORT
+ int32_t                  clutter_event_sequence_get_slot (const ClutterEventSequence *sequence);
+ 
++CLUTTER_EXPORT
++int64_t                  clutter_event_get_time_us (const ClutterEvent *event);
++CLUTTER_EXPORT
++gboolean                 clutter_event_get_relative_motion (const ClutterEvent *event,
++                                                            double             *dx,
++                                                            double             *dy,
++                                                            double             *dx_unaccel,
++                                                            double             *dy_unaccel);
++
++
+ G_END_DECLS
+ 
+ #endif /* __CLUTTER_EVENT_H__ */
+diff --git a/src/backends/native/meta-event-native.c b/src/backends/native/meta-event-native.c
+index 8d59e62..c273176 100644
+--- a/src/backends/native/meta-event-native.c
++++ b/src/backends/native/meta-event-native.c
+@@ -37,12 +37,6 @@ struct _MetaEventNative
+   double dy_unaccel;
+ };
+ 
+-static MetaEventNative *
+-meta_event_native_new (void)
+-{
+-  return g_slice_new0 (MetaEventNative);
+-}
+-
+ MetaEventNative *
+ meta_event_native_copy (MetaEventNative *event_evdev)
+ {
+@@ -58,99 +52,3 @@ meta_event_native_free (MetaEventNative *event_evdev)
+   if (event_evdev != NULL)
+     g_slice_free (MetaEventNative, event_evdev);
+ }
+-
+-static MetaEventNative *
+-meta_event_native_ensure_platform_data (ClutterEvent *event)
+-{
+-  MetaEventNative *event_evdev = _clutter_event_get_platform_data (event);
+-
+-  if (!event_evdev)
+-    {
+-      event_evdev = meta_event_native_new ();
+-      _clutter_event_set_platform_data (event, event_evdev);
+-    }
+-
+-  return event_evdev;
+-}
+-
+-void
+-meta_event_native_set_time_usec (ClutterEvent *event,
+-                                 uint64_t      time_usec)
+-{
+-  MetaEventNative *event_evdev;
+-
+-  event_evdev = meta_event_native_ensure_platform_data (event);
+-  event_evdev->time_usec = time_usec;
+-}
+-
+-void
+-meta_event_native_set_relative_motion (ClutterEvent *event,
+-                                       double        dx,
+-                                       double        dy,
+-                                       double        dx_unaccel,
+-                                       double        dy_unaccel)
+-{
+-  MetaEventNative *event_evdev;
+-
+-  event_evdev = meta_event_native_ensure_platform_data (event);
+-  event_evdev->dx = dx;
+-  event_evdev->dy = dy;
+-  event_evdev->dx_unaccel = dx_unaccel;
+-  event_evdev->dy_unaccel = dy_unaccel;
+-  event_evdev->has_relative_motion = TRUE;
+-}
+-
+-/**
+- * meta_event_native_get_time_usec:
+- * @event: a #ClutterEvent
+- *
+- * Returns the time in microsecond granularity, or 0 if unavailable.
+- *
+- * Returns: The time in microsecond granularity, or 0 if unavailable.
+- */
+-uint64_t
+-meta_event_native_get_time_usec (const ClutterEvent *event)
+-{
+-  MetaEventNative *event_evdev = _clutter_event_get_platform_data (event);
+-
+-  if (event_evdev)
+-    return event_evdev->time_usec;
+-
+-  return 0;
+-}
+-
+-/**
+- * meta_event_get_pointer_motion
+- * @event: a #ClutterEvent
+- *
+- * If available, the normal and unaccelerated motion deltas are written
+- * to the dx, dy, dx_unaccel and dy_unaccel and TRUE is returned.
+- *
+- * If unavailable, FALSE is returned.
+- *
+- * Returns: TRUE on success, otherwise FALSE.
+- **/
+-gboolean
+-meta_event_native_get_relative_motion (const ClutterEvent *event,
+-                                       double             *dx,
+-                                       double             *dy,
+-                                       double             *dx_unaccel,
+-                                       double             *dy_unaccel)
+-{
+-  MetaEventNative *event_evdev = _clutter_event_get_platform_data (event);
+-
+-  if (event_evdev && event_evdev->has_relative_motion)
+-    {
+-      if (dx)
+-        *dx = event_evdev->dx;
+-      if (dy)
+-        *dy = event_evdev->dy;
+-      if (dx_unaccel)
+-        *dx_unaccel = event_evdev->dx_unaccel;
+-      if (dy_unaccel)
+-        *dy_unaccel = event_evdev->dy_unaccel;
+-      return TRUE;
+-    }
+-  else
+-    return FALSE;
+-}
+diff --git a/src/backends/native/meta-seat-impl.c b/src/backends/native/meta-seat-impl.c
+index bc68e0e..21d5098 100644
+--- a/src/backends/native/meta-seat-impl.c
++++ b/src/backends/native/meta-seat-impl.c
+@@ -504,7 +504,7 @@ new_absolute_motion_event (MetaSeatImpl       *seat_impl,
+                                         &x, &y);
+     }
+ 
+-  meta_event_native_set_time_usec (event, time_us);
++  event->motion.time_us = time_us;
+   event->motion.time = us2ms (time_us);
+   meta_xkb_translate_state (event, seat_impl->xkb, seat_impl->button_state);
+   event->motion.x = x;
+@@ -577,9 +577,11 @@ meta_seat_impl_notify_relative_motion_in_impl (MetaSeatImpl       *seat_impl,
+   event = new_absolute_motion_event (seat_impl, input_device,
+                                      time_us, new_x, new_y, NULL);
+ 
+-  meta_event_native_set_relative_motion (event,
+-                                         dx, dy,
+-                                         dx_unaccel, dy_unaccel);
++  event->motion.flags |= CLUTTER_EVENT_FLAG_RELATIVE_MOTION;
++  event->motion.dx = dx;
++  event->motion.dy = dy;
++  event->motion.dx_unaccel = dx_unaccel;
++  event->motion.dy_unaccel = dy_unaccel;
+ 
+   queue_event (seat_impl, event);
+ }
+@@ -680,7 +682,6 @@ meta_seat_impl_notify_button_in_impl (MetaSeatImpl       *seat_impl,
+         seat_impl->button_state &= ~maskmap[button_nr - 1];
+     }
+ 
+-  meta_event_native_set_time_usec (event, time_us);
+   event->button.time = us2ms (time_us);
+   meta_xkb_translate_state (event, seat_impl->xkb, seat_impl->button_state);
+   event->button.button = button_nr;
+@@ -752,7 +753,6 @@ notify_scroll (ClutterInputDevice       *input_device,
+ 
+   event = clutter_event_new (CLUTTER_SCROLL);
+ 
+-  meta_event_native_set_time_usec (event, time_us);
+   event->scroll.time = us2ms (time_us);
+   meta_xkb_translate_state (event, seat_impl->xkb, seat_impl->button_state);
+ 
+@@ -794,7 +794,6 @@ notify_discrete_scroll (ClutterInputDevice     *input_device,
+ 
+   event = clutter_event_new (CLUTTER_SCROLL);
+ 
+-  meta_event_native_set_time_usec (event, time_us);
+   event->scroll.time = us2ms (time_us);
+   meta_xkb_translate_state (event, seat_impl->xkb, seat_impl->button_state);
+ 
+@@ -917,7 +916,6 @@ meta_seat_impl_notify_touch_event_in_impl (MetaSeatImpl       *seat_impl,
+ 
+   event = clutter_event_new (evtype);
+ 
+-  meta_event_native_set_time_usec (event, time_us);
+   event->touch.time = us2ms (time_us);
+   event->touch.x = x;
+   event->touch.y = y;
+@@ -1216,7 +1214,10 @@ notify_relative_tool_motion_in_impl (ClutterInputDevice *input_device,
+ 
+   event = new_absolute_motion_event (seat_impl, input_device, time_us,
+                                      x, y, axes);
+-  meta_event_native_set_relative_motion (event, dx, dy, 0, 0);
++
++  event->motion.flags |= CLUTTER_EVENT_FLAG_RELATIVE_MOTION;
++  event->motion.dx = dx;
++  event->motion.dy = dy;
+ 
+   queue_event (seat_impl, event);
+ }
+@@ -1242,7 +1243,6 @@ notify_pinch_gesture_event (ClutterInputDevice          *input_device,
+                                                &event->touchpad_pinch.x,
+                                                &event->touchpad_pinch.y);
+ 
+-  meta_event_native_set_time_usec (event, time_us);
+   event->touchpad_pinch.phase = phase;
+   event->touchpad_pinch.time = us2ms (time_us);
+   event->touchpad_pinch.dx = dx;
+@@ -1274,7 +1274,6 @@ notify_swipe_gesture_event (ClutterInputDevice          *input_device,
+ 
+   event = clutter_event_new (CLUTTER_TOUCHPAD_SWIPE);
+ 
+-  meta_event_native_set_time_usec (event, time_us);
+   event->touchpad_swipe.phase = phase;
+   event->touchpad_swipe.time = us2ms (time_us);
+ 
+@@ -1310,8 +1309,6 @@ notify_proximity (ClutterInputDevice *input_device,
+   else
+     event = clutter_event_new (CLUTTER_PROXIMITY_OUT);
+ 
+-  meta_event_native_set_time_usec (event, time_us);
+-
+   event->proximity.time = us2ms (time_us);
+   clutter_event_set_device_tool (event, device_native->last_tool);
+   clutter_event_set_device (event, seat_impl->core_pointer);
+@@ -1338,7 +1335,6 @@ notify_pad_button (ClutterInputDevice *input_device,
+   else
+     event = clutter_event_new (CLUTTER_PAD_BUTTON_RELEASE);
+ 
+-  meta_event_native_set_time_usec (event, time_us);
+   event->pad_button.button = button;
+   event->pad_button.group = mode_group;
+   event->pad_button.mode = mode;
+@@ -1370,7 +1366,6 @@ notify_pad_strip (ClutterInputDevice *input_device,
+     source = CLUTTER_INPUT_DEVICE_PAD_SOURCE_UNKNOWN;
+ 
+   event = clutter_event_new (CLUTTER_PAD_STRIP);
+-  meta_event_native_set_time_usec (event, time_us);
+   event->pad_strip.strip_source = source;
+   event->pad_strip.strip_number = strip_number;
+   event->pad_strip.value = value;
+@@ -1404,7 +1399,6 @@ notify_pad_ring (ClutterInputDevice *input_device,
+     source = CLUTTER_INPUT_DEVICE_PAD_SOURCE_UNKNOWN;
+ 
+   event = clutter_event_new (CLUTTER_PAD_RING);
+-  meta_event_native_set_time_usec (event, time_us);
+   event->pad_ring.ring_source = source;
+   event->pad_ring.ring_number = ring_number;
+   event->pad_ring.angle = angle;
+diff --git a/src/backends/native/meta-seat-native.c b/src/backends/native/meta-seat-native.c
+index 73abb90..f56be66 100644
+--- a/src/backends/native/meta-seat-native.c
++++ b/src/backends/native/meta-seat-native.c
+@@ -375,19 +375,20 @@ meta_seat_native_compress_motion (ClutterSeat        *seat,
+   double dst_dx = 0.0, dst_dy = 0.0;
+   double dst_dx_unaccel = 0.0, dst_dy_unaccel = 0.0;
+ 
+-  if (!meta_event_native_get_relative_motion (to_discard,
+-                                              &dx, &dy,
+-                                              &dx_unaccel, &dy_unaccel))
++  if (!clutter_event_get_relative_motion (to_discard,
++                                          &dx, &dy,
++                                          &dx_unaccel, &dy_unaccel))
+     return;
+ 
+-  meta_event_native_get_relative_motion (event,
+-                                         &dst_dx, &dst_dy,
+-                                         &dst_dx_unaccel, &dst_dy_unaccel);
+-  meta_event_native_set_relative_motion (event,
+-                                         dx + dst_dx,
+-                                         dy + dst_dy,
+-                                         dx_unaccel + dst_dx_unaccel,
+-                                         dy_unaccel + dst_dy_unaccel);
++  clutter_event_get_relative_motion (event,
++                                     &dst_dx, &dst_dy,
++                                     &dst_dx_unaccel, &dst_dy_unaccel);
++
++  event->motion.flags |= CLUTTER_EVENT_FLAG_RELATIVE_MOTION;
++  event->motion.dx = dx + dst_dx;
++  event->motion.dy = dy + dst_dy;
++  event->motion.dx_unaccel = dx_unaccel + dst_dx_unaccel;
++  event->motion.dy_unaccel = dy_unaccel + dst_dy_unaccel;
+ }
+ 
+ static void
+diff --git a/src/wayland/meta-wayland-pointer.c b/src/wayland/meta-wayland-pointer.c
+index b22f401..2a6bce4 100644
+--- a/src/wayland/meta-wayland-pointer.c
++++ b/src/wayland/meta-wayland-pointer.c
+@@ -66,7 +66,6 @@
+ 
+ #ifdef HAVE_NATIVE_BACKEND
+ #include "backends/native/meta-backend-native.h"
+-#include "backends/native/meta-event-native.h"
+ #endif
+ 
+ #include "relative-pointer-unstable-v1-server-protocol.h"
+@@ -286,7 +285,6 @@ void
+ meta_wayland_pointer_send_relative_motion (MetaWaylandPointer *pointer,
+                                            const ClutterEvent *event)
+ {
+-#ifdef HAVE_NATIVE_BACKEND
+   struct wl_resource *resource;
+   double dx, dy;
+   double dx_unaccel, dy_unaccel;
+@@ -295,18 +293,16 @@ meta_wayland_pointer_send_relative_motion (MetaWaylandPointer *pointer,
+   uint32_t time_us_lo;
+   wl_fixed_t dxf, dyf;
+   wl_fixed_t dx_unaccelf, dy_unaccelf;
+-  MetaBackend *backend = meta_get_backend ();
+ 
+   if (!pointer->focus_client)
+     return;
+ 
+-  if (!META_IS_BACKEND_NATIVE (backend) ||
+-      !meta_event_native_get_relative_motion (event,
+-                                              &dx, &dy,
+-                                              &dx_unaccel, &dy_unaccel))
++  if (!clutter_event_get_relative_motion (event,
++                                          &dx, &dy,
++                                          &dx_unaccel, &dy_unaccel))
+     return;
+ 
+-  time_us = meta_event_native_get_time_usec (event);
++  time_us = clutter_event_get_time_us (event);
+   if (time_us == 0)
+     time_us = clutter_event_get_time (event) * 1000ULL;
+   time_us_hi = (uint32_t) (time_us >> 32);
+@@ -327,7 +323,6 @@ meta_wayland_pointer_send_relative_motion (MetaWaylandPointer *pointer,
+                                                     dx_unaccelf,
+                                                     dy_unaccelf);
+     }
+-#endif
+ }
+ 
+ void

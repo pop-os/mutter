@@ -1,0 +1,40 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Fri, 31 Jul 2020 18:35:19 +0200
+Subject: backends: Use also a native cursor renderer for tablets
+
+This will resort to SW rendering if this cursor renderer does not
+own the MetaKmsCursorRenderer, so it's pretty much equivalent thus
+far, except we may now implement logic to flip the kms cursor renderer
+around.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ src/backends/native/meta-seat-native.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/backends/native/meta-seat-native.c b/src/backends/native/meta-seat-native.c
+index ede4798e..c254a95 100644
+--- a/src/backends/native/meta-seat-native.c
++++ b/src/backends/native/meta-seat-native.c
+@@ -1837,7 +1837,7 @@ update_tablet_cursor_state (MetaSeatNative     *seat_native,
+ {
+   if (in)
+     {
+-      MetaCursorRenderer *cursor_renderer;
++      MetaCursorRendererNative *cursor_renderer_native;
+ 
+       if (!seat_native->tablet_cursors)
+         {
+@@ -1845,9 +1845,10 @@ update_tablet_cursor_state (MetaSeatNative     *seat_native,
+                                                                g_object_unref);
+         }
+ 
+-      cursor_renderer = meta_cursor_renderer_new (meta_get_backend (), device);
++      cursor_renderer_native =
++        meta_cursor_renderer_native_new (meta_get_backend (), device);
+       g_hash_table_insert (seat_native->tablet_cursors,
+-                           device, cursor_renderer);
++                           device, cursor_renderer_native);
+     }
+   else
+     {

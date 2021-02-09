@@ -1,0 +1,35 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Mon, 28 Dec 2020 19:06:27 +0100
+Subject: wayland: Repick (again) on pointer motion
+
+Unfortunately there's situations where we can't fully rely on only
+crossing events here. One such situation is pointer visibility changes
+due to touch interaction, or e.g. after closing the lid.
+
+In these situations the pointer position stays the same, picks the
+same actor, yet we want to see the right surface as the pointer focus
+again in the wayland side.
+
+This used to happen on the first motion event after the pointer
+visibility change before commit ad3f2b0b863, use motion events again
+for picking so we don't break these usecases.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1657>
+---
+ src/wayland/meta-wayland-pointer.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/wayland/meta-wayland-pointer.c b/src/wayland/meta-wayland-pointer.c
+index 28203c2..7c6071a 100644
+--- a/src/wayland/meta-wayland-pointer.c
++++ b/src/wayland/meta-wayland-pointer.c
+@@ -611,7 +611,8 @@ void
+ meta_wayland_pointer_update (MetaWaylandPointer *pointer,
+                              const ClutterEvent *event)
+ {
+-  if ((event->type == CLUTTER_ENTER ||
++  if ((event->type == CLUTTER_MOTION ||
++       event->type == CLUTTER_ENTER ||
+        event->type == CLUTTER_LEAVE) &&
+       !clutter_event_get_event_sequence (event))
+     repick_for_event (pointer, event);

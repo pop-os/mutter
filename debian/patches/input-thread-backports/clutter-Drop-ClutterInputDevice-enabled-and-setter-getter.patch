@@ -1,0 +1,271 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Thu, 16 Jul 2020 12:13:04 +0200
+Subject: clutter: Drop ClutterInputDevice::enabled and setter/getter
+
+This is unused now, and not something we generally allow.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ clutter/clutter/clutter-event.c                | 11 ----
+ clutter/clutter/clutter-input-device.c         | 78 --------------------------
+ clutter/clutter/clutter-input-device.h         |  5 --
+ src/backends/native/meta-input-device-native.c |  2 -
+ src/backends/x11/meta-seat-x11.c               | 10 +---
+ src/tests/clutter/interactive/test-devices.c   |  4 --
+ 6 files changed, 1 insertion(+), 109 deletions(-)
+
+diff --git a/clutter/clutter/clutter-event.c b/clutter/clutter/clutter-event.c
+index 44a6651..ac1d2cf 100644
+--- a/clutter/clutter/clutter-event.c
++++ b/clutter/clutter/clutter-event.c
+@@ -1460,23 +1460,12 @@ _clutter_event_push (const ClutterEvent *event,
+                      gboolean            do_copy)
+ {
+   ClutterMainContext *context = _clutter_context_get_default ();
+-  ClutterInputDevice *device;
+ 
+   g_assert (context != NULL);
+ 
+   if (context->events_queue == NULL)
+     context->events_queue = g_queue_new ();
+ 
+-  /* disabled devices don't propagate events */
+-  device = clutter_event_get_device (event);
+-  if (device != NULL)
+-    {
+-      if (event->type != CLUTTER_DEVICE_ADDED &&
+-          event->type != CLUTTER_DEVICE_REMOVED &&
+-          !clutter_input_device_get_enabled (device))
+-        return;
+-    }
+-
+   if (do_copy)
+     {
+       ClutterEvent *copy;
+diff --git a/clutter/clutter/clutter-input-device.c b/clutter/clutter/clutter-input-device.c
+index 82cc5b8..9a69dd6 100644
+--- a/clutter/clutter/clutter-input-device.c
++++ b/clutter/clutter/clutter-input-device.c
+@@ -60,7 +60,6 @@ enum
+   PROP_DEVICE_MODE,
+ 
+   PROP_HAS_CURSOR,
+-  PROP_ENABLED,
+ 
+   PROP_N_AXES,
+ 
+@@ -184,10 +183,6 @@ clutter_input_device_set_property (GObject      *gobject,
+       self->has_cursor = g_value_get_boolean (value);
+       break;
+ 
+-    case PROP_ENABLED:
+-      clutter_input_device_set_enabled (self, g_value_get_boolean (value));
+-      break;
+-
+     case PROP_VENDOR_ID:
+       self->vendor_id = g_value_dup_string (value);
+       break;
+@@ -256,10 +251,6 @@ clutter_input_device_get_property (GObject    *gobject,
+       g_value_set_uint (value, clutter_input_device_get_n_axes (self));
+       break;
+ 
+-    case PROP_ENABLED:
+-      g_value_set_boolean (value, self->is_enabled);
+-      break;
+-
+     case PROP_VENDOR_ID:
+       g_value_set_string (value, self->vendor_id);
+       break;
+@@ -367,25 +358,6 @@ clutter_input_device_class_init (ClutterInputDeviceClass *klass)
+                           FALSE,
+                           CLUTTER_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY);
+ 
+-  /**
+-   * ClutterInputDevice:enabled:
+-   *
+-   * Whether the device is enabled.
+-   *
+-   * A device with the #ClutterInputDevice:device-mode property set
+-   * to %CLUTTER_INPUT_MODE_LOGICAL cannot be disabled.
+-   *
+-   * A device must be enabled in order to receive events from it.
+-   *
+-   * Since: 1.6
+-   */
+-  obj_props[PROP_ENABLED] =
+-    g_param_spec_boolean ("enabled",
+-                          P_("Enabled"),
+-                          P_("Whether the device is enabled"),
+-                          FALSE,
+-                          CLUTTER_PARAM_READWRITE);
+-
+   /**
+    * ClutterInputDevice:n-axes:
+    *
+@@ -710,56 +682,6 @@ clutter_input_device_get_device_type (ClutterInputDevice *device)
+   return device->device_type;
+ }
+ 
+-/**
+- * clutter_input_device_set_enabled:
+- * @device: a #ClutterInputDevice
+- * @enabled: %TRUE to enable the @device
+- *
+- * Enables or disables a #ClutterInputDevice.
+- *
+- * Only devices with a #ClutterInputDevice:device-mode property set
+- * to %CLUTTER_INPUT_MODE_PHYSICAL or %CLUTTER_INPUT_MODE_FLOATING can
+- * be disabled.
+- *
+- * Since: 1.6
+- */
+-void
+-clutter_input_device_set_enabled (ClutterInputDevice *device,
+-                                  gboolean            enabled)
+-{
+-  g_return_if_fail (CLUTTER_IS_INPUT_DEVICE (device));
+-
+-  enabled = !!enabled;
+-
+-  if (!enabled && device->device_mode == CLUTTER_INPUT_MODE_LOGICAL)
+-    return;
+-
+-  if (device->is_enabled == enabled)
+-    return;
+-
+-  device->is_enabled = enabled;
+-
+-  g_object_notify_by_pspec (G_OBJECT (device), obj_props[PROP_ENABLED]);
+-}
+-
+-/**
+- * clutter_input_device_get_enabled:
+- * @device: a #ClutterInputDevice
+- *
+- * Retrieves whether @device is enabled.
+- *
+- * Return value: %TRUE if the device is enabled
+- *
+- * Since: 1.6
+- */
+-gboolean
+-clutter_input_device_get_enabled (ClutterInputDevice *device)
+-{
+-  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), FALSE);
+-
+-  return device->is_enabled;
+-}
+-
+ /**
+  * clutter_input_device_get_coords:
+  * @device: a #ClutterInputDevice
+diff --git a/clutter/clutter/clutter-input-device.h b/clutter/clutter/clutter-input-device.h
+index 51f6758..e95909b 100644
+--- a/clutter/clutter/clutter-input-device.h
++++ b/clutter/clutter/clutter-input-device.h
+@@ -98,11 +98,6 @@ CLUTTER_EXPORT
+ ClutterInputMode        clutter_input_device_get_device_mode    (ClutterInputDevice  *device);
+ CLUTTER_EXPORT
+ gboolean                clutter_input_device_get_has_cursor     (ClutterInputDevice  *device);
+-CLUTTER_EXPORT
+-void                    clutter_input_device_set_enabled        (ClutterInputDevice  *device,
+-                                                                 gboolean             enabled);
+-CLUTTER_EXPORT
+-gboolean                clutter_input_device_get_enabled        (ClutterInputDevice  *device);
+ 
+ CLUTTER_EXPORT
+ guint                   clutter_input_device_get_n_axes         (ClutterInputDevice  *device);
+diff --git a/src/backends/native/meta-input-device-native.c b/src/backends/native/meta-input-device-native.c
+index 453b1fc..af20922 100644
+--- a/src/backends/native/meta-input-device-native.c
++++ b/src/backends/native/meta-input-device-native.c
+@@ -1295,7 +1295,6 @@ meta_input_device_native_new (MetaSeatNative         *seat,
+                          "name", libinput_device_get_name (libinput_device),
+                          "device-type", type,
+                          "device-mode", CLUTTER_INPUT_MODE_PHYSICAL,
+-                         "enabled", TRUE,
+                          "vendor-id", vendor,
+                          "product-id", product,
+                          "n-rings", n_rings,
+@@ -1355,7 +1354,6 @@ meta_input_device_native_new_virtual (MetaSeatNative         *seat,
+                          "name", name,
+                          "device-type", type,
+                          "device-mode", mode,
+-                         "enabled", TRUE,
+                          "seat", seat,
+                          NULL);
+ 
+diff --git a/src/backends/x11/meta-seat-x11.c b/src/backends/x11/meta-seat-x11.c
+index 858c401..ad0a86d 100644
+--- a/src/backends/x11/meta-seat-x11.c
++++ b/src/backends/x11/meta-seat-x11.c
+@@ -482,7 +482,6 @@ create_device (MetaSeatX11    *seat_x11,
+   ClutterInputDeviceType source, touch_source;
+   ClutterInputDevice *retval;
+   ClutterInputMode mode;
+-  gboolean is_enabled;
+   uint32_t num_touches = 0, num_rings = 0, num_strips = 0;
+   char *vendor_id = NULL, *product_id = NULL, *node_path = NULL;
+ 
+@@ -528,19 +527,16 @@ create_device (MetaSeatX11    *seat_x11,
+     case XIMasterKeyboard:
+     case XIMasterPointer:
+       mode = CLUTTER_INPUT_MODE_LOGICAL;
+-      is_enabled = TRUE;
+       break;
+ 
+     case XISlaveKeyboard:
+     case XISlavePointer:
+       mode = CLUTTER_INPUT_MODE_PHYSICAL;
+-      is_enabled = FALSE;
+       break;
+ 
+     case XIFloatingSlave:
+     default:
+       mode = CLUTTER_INPUT_MODE_FLOATING;
+-      is_enabled = FALSE;
+       break;
+     }
+ 
+@@ -552,10 +548,7 @@ create_device (MetaSeatX11    *seat_x11,
+     }
+ 
+   if (source == CLUTTER_PAD_DEVICE)
+-    {
+-      is_enabled = TRUE;
+-      get_pad_features (info, &num_rings, &num_strips);
+-    }
++    get_pad_features (info, &num_rings, &num_strips);
+ 
+   retval = g_object_new (META_TYPE_INPUT_DEVICE_X11,
+                          "name", info->name,
+@@ -564,7 +557,6 @@ create_device (MetaSeatX11    *seat_x11,
+                          "device-type", source,
+                          "device-mode", mode,
+                          "backend", backend,
+-                         "enabled", is_enabled,
+                          "vendor-id", vendor_id,
+                          "product-id", product_id,
+                          "device-node", node_path,
+diff --git a/src/tests/clutter/interactive/test-devices.c b/src/tests/clutter/interactive/test-devices.c
+index 9a63f73..e5b894b 100644
+--- a/src/tests/clutter/interactive/test-devices.c
++++ b/src/tests/clutter/interactive/test-devices.c
+@@ -171,8 +171,6 @@ seat_device_added_cb (ClutterSeat        *seat,
+       g_print ("*** enabling device '%s' ***\n",
+                clutter_input_device_get_device_name (device));
+ 
+-      clutter_input_device_set_enabled (device, TRUE);
+-
+       hand = clutter_test_utils_create_texture_from_file (TESTS_DATADIR
+                                                           G_DIR_SEPARATOR_S
+                                                           "redhand.png",
+@@ -268,8 +266,6 @@ test_devices_main (int argc, char **argv)
+           g_print ("*** enabling device '%s' ***\n",
+                    clutter_input_device_get_device_name (device));
+ 
+-          clutter_input_device_set_enabled (device, TRUE);
+-
+           hand = clutter_test_utils_create_texture_from_file (TESTS_DATADIR
+                                                               G_DIR_SEPARATOR_S
+                                                               "redhand.png",

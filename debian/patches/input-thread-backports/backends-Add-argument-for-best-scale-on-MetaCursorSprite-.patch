@@ -1,0 +1,232 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Fri, 10 Jul 2020 12:25:12 +0200
+Subject: backends: Add argument for best scale on
+ MetaCursorSprite::prepare-at
+
+Instead of letting implementations poke backend internals from various
+places, give that information right away.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ src/backends/meta-cursor-renderer.c       | 48 +++++++++++++++++++++++++++++--
+ src/backends/meta-cursor.c                | 12 ++++----
+ src/backends/meta-cursor.h                |  1 +
+ src/core/display.c                        | 44 ++--------------------------
+ src/wayland/meta-wayland-cursor-surface.c |  1 +
+ src/wayland/meta-wayland-tablet-tool.c    |  1 +
+ 6 files changed, 58 insertions(+), 49 deletions(-)
+
+diff --git a/src/backends/meta-cursor-renderer.c b/src/backends/meta-cursor-renderer.c
+index ac81def..53b1a10 100644
+--- a/src/backends/meta-cursor-renderer.c
++++ b/src/backends/meta-cursor-renderer.c
+@@ -28,6 +28,8 @@
+ 
+ #include <math.h>
+ 
++#include "backends/meta-backend-private.h"
++#include "backends/meta-logical-monitor.h"
+ #include "backends/meta-stage-private.h"
+ #include "clutter/clutter.h"
+ #include "clutter/clutter-mutter.h"
+@@ -332,6 +334,41 @@ meta_cursor_renderer_calculate_rect (MetaCursorRenderer *renderer,
+   };
+ }
+ 
++static float
++find_highest_logical_monitor_scale (MetaBackend      *backend,
++                                    MetaCursorSprite *cursor_sprite)
++{
++  MetaMonitorManager *monitor_manager =
++    meta_backend_get_monitor_manager (backend);
++  MetaCursorRenderer *cursor_renderer =
++    meta_backend_get_cursor_renderer (backend);
++  graphene_rect_t cursor_rect;
++  GList *logical_monitors;
++  GList *l;
++  float highest_scale = 0.0f;
++
++  cursor_rect = meta_cursor_renderer_calculate_rect (cursor_renderer,
++                                                     cursor_sprite);
++
++  logical_monitors =
++    meta_monitor_manager_get_logical_monitors (monitor_manager);
++  for (l = logical_monitors; l; l = l->next)
++    {
++      MetaLogicalMonitor *logical_monitor = l->data;
++      graphene_rect_t logical_monitor_rect =
++        meta_rectangle_to_graphene_rect (&logical_monitor->rect);
++
++      if (!graphene_rect_intersection (&cursor_rect,
++                                       &logical_monitor_rect,
++                                       NULL))
++        continue;
++
++      highest_scale = MAX (highest_scale, logical_monitor->scale);
++    }
++
++  return highest_scale;
++}
++
+ static void
+ meta_cursor_renderer_update_cursor (MetaCursorRenderer *renderer,
+                                     MetaCursorSprite   *cursor_sprite)
+@@ -340,9 +377,14 @@ meta_cursor_renderer_update_cursor (MetaCursorRenderer *renderer,
+   gboolean handled_by_backend;
+ 
+   if (cursor_sprite)
+-    meta_cursor_sprite_prepare_at (cursor_sprite,
+-                                   (int) priv->current_x,
+-                                   (int) priv->current_y);
++    {
++      float scale = find_highest_logical_monitor_scale (priv->backend,
++                                                        cursor_sprite);
++      meta_cursor_sprite_prepare_at (cursor_sprite,
++                                     MAX (1, scale),
++                                     (int) priv->current_x,
++                                     (int) priv->current_y);
++    }
+ 
+   handled_by_backend =
+     META_CURSOR_RENDERER_GET_CLASS (renderer)->update_cursor (renderer,
+diff --git a/src/backends/meta-cursor.c b/src/backends/meta-cursor.c
+index 874593d..d0fb2ba 100644
+--- a/src/backends/meta-cursor.c
++++ b/src/backends/meta-cursor.c
+@@ -179,11 +179,12 @@ meta_cursor_sprite_get_texture_transform (MetaCursorSprite *sprite)
+ }
+ 
+ void
+-meta_cursor_sprite_prepare_at (MetaCursorSprite *sprite,
+-                               int               x,
+-                               int               y)
++meta_cursor_sprite_prepare_at (MetaCursorSprite   *sprite,
++                               float               best_scale,
++                               int                 x,
++                               int                 y)
+ {
+-  g_signal_emit (sprite, signals[PREPARE_AT], 0, x, y);
++  g_signal_emit (sprite, signals[PREPARE_AT], 0, best_scale, x, y);
+ }
+ 
+ void
+@@ -226,7 +227,8 @@ meta_cursor_sprite_class_init (MetaCursorSpriteClass *klass)
+                                       G_SIGNAL_RUN_LAST,
+                                       0,
+                                       NULL, NULL, NULL,
+-                                      G_TYPE_NONE, 2,
++                                      G_TYPE_NONE, 3,
++                                      G_TYPE_FLOAT,
+                                       G_TYPE_INT,
+                                       G_TYPE_INT);
+   signals[TEXTURE_CHANGED] = g_signal_new ("texture-changed",
+diff --git a/src/backends/meta-cursor.h b/src/backends/meta-cursor.h
+index 80eaa31..a65e128 100644
+--- a/src/backends/meta-cursor.h
++++ b/src/backends/meta-cursor.h
+@@ -43,6 +43,7 @@ struct _MetaCursorSpriteClass
+ };
+ 
+ void meta_cursor_sprite_prepare_at (MetaCursorSprite *sprite,
++                                    float             best_scale,
+                                     int               x,
+                                     int               y);
+ 
+diff --git a/src/core/display.c b/src/core/display.c
+index 521e5d0..81410b1 100644
+--- a/src/core/display.c
++++ b/src/core/display.c
+@@ -46,7 +46,6 @@
+ #include "backends/meta-idle-monitor-dbus.h"
+ #include "backends/meta-input-device-private.h"
+ #include "backends/meta-input-settings-private.h"
+-#include "backends/meta-logical-monitor.h"
+ #include "backends/meta-stage-private.h"
+ #include "backends/x11/meta-backend-x11.h"
+ #include "backends/x11/meta-event-x11.h"
+@@ -1629,43 +1628,9 @@ meta_cursor_for_grab_op (MetaGrabOp op)
+   return META_CURSOR_DEFAULT;
+ }
+ 
+-static float
+-find_highest_logical_monitor_scale (MetaBackend      *backend,
+-                                    MetaCursorSprite *cursor_sprite)
+-{
+-  MetaMonitorManager *monitor_manager =
+-    meta_backend_get_monitor_manager (backend);
+-  MetaCursorRenderer *cursor_renderer =
+-    meta_backend_get_cursor_renderer (backend);
+-  graphene_rect_t cursor_rect;
+-  GList *logical_monitors;
+-  GList *l;
+-  float highest_scale = 0.0;
+-
+-  cursor_rect = meta_cursor_renderer_calculate_rect (cursor_renderer,
+-                                                     cursor_sprite);
+-
+-  logical_monitors =
+-    meta_monitor_manager_get_logical_monitors (monitor_manager);
+-  for (l = logical_monitors; l; l = l->next)
+-    {
+-      MetaLogicalMonitor *logical_monitor = l->data;
+-      graphene_rect_t logical_monitor_rect =
+-        meta_rectangle_to_graphene_rect (&logical_monitor->rect);
+-
+-      if (!graphene_rect_intersection (&cursor_rect,
+-                                       &logical_monitor_rect,
+-                                       NULL))
+-        continue;
+-
+-      highest_scale = MAX (highest_scale, logical_monitor->scale);
+-    }
+-
+-  return highest_scale;
+-}
+-
+ static void
+ root_cursor_prepare_at (MetaCursorSpriteXcursor *sprite_xcursor,
++                        float                    best_scale,
+                         int                      x,
+                         int                      y,
+                         MetaDisplay             *display)
+@@ -1675,14 +1640,11 @@ root_cursor_prepare_at (MetaCursorSpriteXcursor *sprite_xcursor,
+ 
+   if (meta_is_stage_views_scaled ())
+     {
+-      float scale;
+-
+-      scale = find_highest_logical_monitor_scale (backend, cursor_sprite);
+-      if (scale != 0.0)
++      if (best_scale != 0.0f)
+         {
+           float ceiled_scale;
+ 
+-          ceiled_scale = ceilf (scale);
++          ceiled_scale = ceilf (best_scale);
+           meta_cursor_sprite_xcursor_set_theme_scale (sprite_xcursor,
+                                                       (int) ceiled_scale);
+           meta_cursor_sprite_set_texture_scale (cursor_sprite,
+diff --git a/src/wayland/meta-wayland-cursor-surface.c b/src/wayland/meta-wayland-cursor-surface.c
+index 95f8186..af1bc17 100644
+--- a/src/wayland/meta-wayland-cursor-surface.c
++++ b/src/wayland/meta-wayland-cursor-surface.c
+@@ -81,6 +81,7 @@ update_cursor_sprite_texture (MetaWaylandCursorSurface *cursor_surface)
+ 
+ static void
+ cursor_sprite_prepare_at (MetaCursorSprite         *cursor_sprite,
++                          float                     best_scale,
+                           int                       x,
+                           int                       y,
+                           MetaWaylandCursorSurface *cursor_surface)
+diff --git a/src/wayland/meta-wayland-tablet-tool.c b/src/wayland/meta-wayland-tablet-tool.c
+index 677ccdd..e88d724 100644
+--- a/src/wayland/meta-wayland-tablet-tool.c
++++ b/src/wayland/meta-wayland-tablet-tool.c
+@@ -395,6 +395,7 @@ tablet_tool_handle_cursor_surface_destroy (struct wl_listener *listener,
+ 
+ static void
+ tool_cursor_prepare_at (MetaCursorSpriteXcursor *sprite_xcursor,
++                        float                    best_scale,
+                         int                      x,
+                         int                      y,
+                         MetaWaylandTabletTool   *tool)

@@ -1,0 +1,238 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Wed, 18 Nov 2020 16:07:12 +0100
+Subject: clutter: Drop clutter_input_device_get_key()/n_keys API
+
+And the corresponding setters. This is completely unused, and
+unrecommended. In xkb we trust.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ clutter/clutter/clutter-input-device-private.h |  18 ----
+ clutter/clutter/clutter-input-device.c         | 115 -------------------------
+ clutter/clutter/clutter-input-device.h         |   8 --
+ src/backends/x11/meta-seat-x11.c               |  17 ----
+ 4 files changed, 158 deletions(-)
+
+diff --git a/clutter/clutter/clutter-input-device-private.h b/clutter/clutter/clutter-input-device-private.h
+index 2b8dca6..31be9df 100644
+--- a/clutter/clutter/clutter-input-device-private.h
++++ b/clutter/clutter/clutter-input-device-private.h
+@@ -45,12 +45,6 @@ typedef struct _ClutterAxisInfo
+   double resolution;
+ } ClutterAxisInfo;
+ 
+-typedef struct _ClutterKeyInfo
+-{
+-  guint keyval;
+-  ClutterModifierType modifiers;
+-} ClutterKeyInfo;
+-
+ typedef struct _ClutterScrollInfo
+ {
+   guint axis_id;
+@@ -124,9 +118,6 @@ struct _ClutterInputDevice
+ 
+   GArray *axes;
+ 
+-  guint n_keys;
+-  GArray *keys;
+-
+   GArray *scroll_info;
+ 
+   char *vendor_id;
+@@ -169,15 +160,6 @@ CLUTTER_EXPORT
+ void _clutter_input_device_remove_event_sequence (ClutterInputDevice *device,
+                                                   ClutterEvent       *event);
+ CLUTTER_EXPORT
+-void _clutter_input_device_set_n_keys (ClutterInputDevice *device,
+-                                       guint               n_keys);
+-CLUTTER_EXPORT
+-void clutter_input_device_set_key (ClutterInputDevice  *device,
+-                                   guint                index_,
+-                                   guint                keyval,
+-                                   ClutterModifierType  modifiers);
+-
+-CLUTTER_EXPORT
+ gboolean _clutter_input_device_translate_axis (ClutterInputDevice *device,
+                                                guint               index_,
+                                                gdouble             value,
+diff --git a/clutter/clutter/clutter-input-device.c b/clutter/clutter/clutter-input-device.c
+index d3059c2..e6c6f6f 100644
+--- a/clutter/clutter/clutter-input-device.c
++++ b/clutter/clutter/clutter-input-device.c
+@@ -108,7 +108,6 @@ clutter_input_device_dispose (GObject *gobject)
+     g_clear_object (&device->accessibility_virtual_device);
+ 
+   g_clear_pointer (&device->axes, g_array_unref);
+-  g_clear_pointer (&device->keys, g_array_unref);
+   g_clear_pointer (&device->scroll_info, g_array_unref);
+   g_clear_pointer (&device->touch_sequence_actors, g_hash_table_unref);
+ 
+@@ -1041,120 +1040,6 @@ clutter_input_device_get_n_axes (ClutterInputDevice *device)
+   return 0;
+ }
+ 
+-/*< private >
+- * clutter_input_device_set_n_keys:
+- * @device: a #ClutterInputDevice
+- * @n_keys: the number of keys of the device
+- *
+- * Initializes the keys of @device.
+- *
+- * Call clutter_input_device_set_key() on each key to set the keyval
+- * and modifiers.
+- */
+-void
+-_clutter_input_device_set_n_keys (ClutterInputDevice *device,
+-                                  guint               n_keys)
+-{
+-  if (device->keys != NULL)
+-    g_array_free (device->keys, TRUE);
+-
+-  device->n_keys = n_keys;
+-  device->keys = g_array_sized_new (FALSE, TRUE,
+-                                    sizeof (ClutterKeyInfo),
+-                                    n_keys);
+-}
+-
+-/**
+- * clutter_input_device_get_n_keys:
+- * @device: a #ClutterInputDevice
+- *
+- * Retrieves the number of keys registered for @device.
+- *
+- * Return value: the number of registered keys
+- *
+- * Since: 1.6
+- */
+-guint
+-clutter_input_device_get_n_keys (ClutterInputDevice *device)
+-{
+-  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), 0);
+-
+-  return device->n_keys;
+-}
+-
+-/**
+- * clutter_input_device_set_key:
+- * @device: a #ClutterInputDevice
+- * @index_: the index of the key
+- * @keyval: the keyval
+- * @modifiers: a bitmask of modifiers
+- *
+- * Sets the keyval and modifiers at the given @index_ for @device.
+- *
+- * Clutter will use the keyval and modifiers set when filling out
+- * an event coming from the same input device.
+- *
+- * Since: 1.6
+- */
+-void
+-clutter_input_device_set_key (ClutterInputDevice  *device,
+-                              guint                index_,
+-                              guint                keyval,
+-                              ClutterModifierType  modifiers)
+-{
+-  ClutterKeyInfo *key_info;
+-
+-  g_return_if_fail (CLUTTER_IS_INPUT_DEVICE (device));
+-  g_return_if_fail (index_ < device->n_keys);
+-
+-  key_info = &g_array_index (device->keys, ClutterKeyInfo, index_);
+-  key_info->keyval = keyval;
+-  key_info->modifiers = modifiers;
+-}
+-
+-/**
+- * clutter_input_device_get_key:
+- * @device: a #ClutterInputDevice
+- * @index_: the index of the key
+- * @keyval: (out): return location for the keyval at @index_
+- * @modifiers: (out): return location for the modifiers at @index_
+- *
+- * Retrieves the key set using clutter_input_device_set_key()
+- *
+- * Return value: %TRUE if a key was set at the given index
+- *
+- * Since: 1.6
+- */
+-gboolean
+-clutter_input_device_get_key (ClutterInputDevice  *device,
+-                              guint                index_,
+-                              guint               *keyval,
+-                              ClutterModifierType *modifiers)
+-{
+-  ClutterKeyInfo *key_info;
+-
+-  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), FALSE);
+-
+-  if (device->keys == NULL)
+-    return FALSE;
+-
+-  if (index_ > device->keys->len)
+-    return FALSE;
+-
+-  key_info = &g_array_index (device->keys, ClutterKeyInfo, index_);
+-
+-  if (!key_info->keyval && !key_info->modifiers)
+-    return FALSE;
+-
+-  if (keyval)
+-    *keyval = key_info->keyval;
+-
+-  if (modifiers)
+-    *modifiers = key_info->modifiers;
+-
+-  return TRUE;
+-}
+-
+ /*< private >
+  * clutter_input_device_add_physical_device:
+  * @logical: a #ClutterInputDevice
+diff --git a/clutter/clutter/clutter-input-device.h b/clutter/clutter/clutter-input-device.h
+index 34206af..78b09ef 100644
+--- a/clutter/clutter/clutter-input-device.h
++++ b/clutter/clutter/clutter-input-device.h
+@@ -104,14 +104,6 @@ gboolean                clutter_input_device_get_axis_value     (ClutterInputDev
+                                                                  ClutterInputAxis     axis,
+                                                                  gdouble             *value);
+ 
+-CLUTTER_EXPORT
+-guint                   clutter_input_device_get_n_keys         (ClutterInputDevice  *device);
+-CLUTTER_EXPORT
+-gboolean                clutter_input_device_get_key            (ClutterInputDevice  *device,
+-                                                                 guint                index_,
+-                                                                 guint               *keyval,
+-                                                                 ClutterModifierType *modifiers);
+-
+ CLUTTER_EXPORT
+ ClutterInputDevice *    clutter_input_device_get_associated_device (ClutterInputDevice *device);
+ CLUTTER_EXPORT
+diff --git a/src/backends/x11/meta-seat-x11.c b/src/backends/x11/meta-seat-x11.c
+index e8dfe25..e858f01 100644
+--- a/src/backends/x11/meta-seat-x11.c
++++ b/src/backends/x11/meta-seat-x11.c
+@@ -175,23 +175,6 @@ translate_device_classes (Display             *xdisplay,
+ 
+       switch (class_info->type)
+         {
+-        case XIKeyClass:
+-          {
+-            XIKeyClassInfo *key_info = (XIKeyClassInfo *) class_info;
+-            int j;
+-
+-            _clutter_input_device_set_n_keys (device,
+-                                              key_info->num_keycodes);
+-
+-            for (j = 0; j < key_info->num_keycodes; j++)
+-              {
+-                clutter_input_device_set_key (device, j,
+-                                              key_info->keycodes[i],
+-                                              0);
+-              }
+-          }
+-          break;
+-
+         case XIValuatorClass:
+           translate_valuator_class (xdisplay, device,
+                                     (XIValuatorClassInfo *) class_info);

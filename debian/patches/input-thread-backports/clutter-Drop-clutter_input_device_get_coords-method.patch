@@ -1,0 +1,248 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Wed, 18 Nov 2020 15:49:02 +0100
+Subject: clutter: Drop clutter_input_device_get_coords() method
+
+This is not device state anymore. It uses ClutterSeat API underneath,
+so let callers do that instead.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ clutter/clutter/clutter-input-device.c             | 34 ++--------------------
+ clutter/clutter/clutter-input-device.h             |  4 ---
+ clutter/clutter/clutter-stage.c                    |  3 +-
+ src/backends/meta-backend.c                        |  2 +-
+ src/backends/meta-cursor-renderer.c                |  3 +-
+ src/backends/native/meta-barrier-native.c          |  3 +-
+ .../native/meta-pointer-constraint-native.c        |  3 +-
+ src/wayland/meta-pointer-lock-wayland.c            |  2 +-
+ src/wayland/meta-wayland-cursor-surface.c          |  3 +-
+ src/wayland/meta-wayland-data-device.c             |  3 +-
+ src/wayland/meta-wayland-pointer.c                 |  6 ++--
+ src/wayland/meta-xwayland-dnd.c                    |  6 ++--
+ 12 files changed, 24 insertions(+), 48 deletions(-)
+
+diff --git a/clutter/clutter/clutter-input-device.c b/clutter/clutter/clutter-input-device.c
+index 9a69dd6..25dd06d 100644
+--- a/clutter/clutter/clutter-input-device.c
++++ b/clutter/clutter/clutter-input-device.c
+@@ -682,37 +682,6 @@ clutter_input_device_get_device_type (ClutterInputDevice *device)
+   return device->device_type;
+ }
+ 
+-/**
+- * clutter_input_device_get_coords:
+- * @device: a #ClutterInputDevice
+- * @sequence: (allow-none): a #ClutterEventSequence, or %NULL if
+- *   the device is not touch-based
+- * @point: (out caller-allocates): return location for the pointer
+- *   or touch point
+- *
+- * Retrieves the latest coordinates of a pointer or touch point of
+- * @device.
+- *
+- * Return value: %FALSE if the device's sequence hasn't been found,
+- *   and %TRUE otherwise.
+- *
+- * Since: 1.12
+- */
+-gboolean
+-clutter_input_device_get_coords (ClutterInputDevice   *device,
+-                                 ClutterEventSequence *sequence,
+-                                 graphene_point_t     *point)
+-{
+-  ClutterSeat *seat;
+-
+-  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), FALSE);
+-  g_return_val_if_fail (point != NULL, FALSE);
+-
+-  seat = clutter_input_device_get_seat (device);
+-
+-  return clutter_seat_query_state (seat, device, sequence, point, NULL);
+-}
+-
+ /*
+  * clutter_input_device_update:
+  * @device: a #ClutterInputDevice
+@@ -750,7 +719,8 @@ clutter_input_device_update (ClutterInputDevice   *device,
+     }
+   else
+     {
+-      clutter_input_device_get_coords (device, sequence, &point);
++      clutter_seat_query_state (clutter_input_device_get_seat (device),
++                                device, NULL, &point, NULL);
+       time_ms = CLUTTER_CURRENT_TIME;
+     }
+ 
+diff --git a/clutter/clutter/clutter-input-device.h b/clutter/clutter/clutter-input-device.h
+index e95909b..5952745 100644
+--- a/clutter/clutter/clutter-input-device.h
++++ b/clutter/clutter/clutter-input-device.h
+@@ -83,10 +83,6 @@ GType clutter_input_device_get_type (void) G_GNUC_CONST;
+ CLUTTER_EXPORT
+ ClutterInputDeviceType  clutter_input_device_get_device_type    (ClutterInputDevice  *device);
+ 
+-CLUTTER_EXPORT
+-gboolean                clutter_input_device_get_coords        (ClutterInputDevice   *device,
+-                                                                ClutterEventSequence *sequence,
+-                                                                graphene_point_t     *point);
+ CLUTTER_EXPORT
+ ClutterModifierType     clutter_input_device_get_modifier_state (ClutterInputDevice  *device);
+ CLUTTER_EXPORT
+diff --git a/clutter/clutter/clutter-stage.c b/clutter/clutter/clutter-stage.c
+index dfbaccf..a55d7d4 100644
+--- a/clutter/clutter/clutter-stage.c
++++ b/clutter/clutter/clutter-stage.c
+@@ -1274,7 +1274,8 @@ clutter_stage_find_updated_devices (ClutterStage *stage)
+         case CLUTTER_PEN_DEVICE:
+         case CLUTTER_ERASER_DEVICE:
+         case CLUTTER_CURSOR_DEVICE:
+-          if (!clutter_input_device_get_coords (dev, NULL, &point))
++          if (!clutter_seat_query_state (seat, dev, NULL,
++                                         &point, NULL))
+             continue;
+ 
+           view = clutter_stage_get_view_at (stage, point.x, point.y);
+diff --git a/src/backends/meta-backend.c b/src/backends/meta-backend.c
+index dd8e847..69cf7bf 100644
+--- a/src/backends/meta-backend.c
++++ b/src/backends/meta-backend.c
+@@ -324,7 +324,7 @@ meta_backend_monitors_changed (MetaBackend *backend)
+ 
+   meta_backend_sync_screen_size (backend);
+ 
+-  if (clutter_input_device_get_coords (device, NULL, &point))
++  if (clutter_seat_query_state (seat, device, NULL, &point, NULL))
+     {
+       /* If we're outside all monitors, warp the pointer back inside */
+       if ((!meta_monitor_manager_get_logical_monitor_at (monitor_manager,
+diff --git a/src/backends/meta-cursor-renderer.c b/src/backends/meta-cursor-renderer.c
+index a0b09c7..46f561f 100644
+--- a/src/backends/meta-cursor-renderer.c
++++ b/src/backends/meta-cursor-renderer.c
+@@ -448,7 +448,8 @@ meta_cursor_renderer_update_position (MetaCursorRenderer *renderer)
+   MetaCursorRendererPrivate *priv = meta_cursor_renderer_get_instance_private (renderer);
+   graphene_point_t pos;
+ 
+-  clutter_input_device_get_coords (priv->device, NULL, &pos);
++  clutter_seat_query_state (clutter_input_device_get_seat (priv->device),
++                            priv->device, NULL, &pos, NULL);
+   priv->current_x = pos.x;
+   priv->current_y = pos.y;
+ 
+diff --git a/src/backends/native/meta-barrier-native.c b/src/backends/native/meta-barrier-native.c
+index 8db73ee..d6267ce 100644
+--- a/src/backends/native/meta-barrier-native.c
++++ b/src/backends/native/meta-barrier-native.c
+@@ -515,7 +515,8 @@ meta_barrier_manager_native_process (MetaBarrierManagerNative *manager,
+   MetaBarrierEventData barrier_event_data;
+   MetaBarrierImplNative *barrier_impl;
+ 
+-  if (!clutter_input_device_get_coords (device, NULL, &prev_pos))
++  if (!clutter_seat_query_state (clutter_input_device_get_seat (device),
++                                 device, NULL, &prev_pos, NULL))
+     return;
+ 
+   g_mutex_lock (&manager->mutex);
+diff --git a/src/backends/native/meta-pointer-constraint-native.c b/src/backends/native/meta-pointer-constraint-native.c
+index 8ce678a..6a1c066 100644
+--- a/src/backends/native/meta-pointer-constraint-native.c
++++ b/src/backends/native/meta-pointer-constraint-native.c
+@@ -609,7 +609,8 @@ meta_pointer_constraint_impl_native_ensure_constrained (MetaPointerConstraintImp
+   constraint_impl_native = META_POINTER_CONSTRAINT_IMPL_NATIVE (constraint_impl);
+   region = cairo_region_reference (constraint_impl_native->region);
+ 
+-  clutter_input_device_get_coords (device, NULL, &point);
++  clutter_seat_query_state (clutter_input_device_get_seat (device),
++                            device, NULL, &point, NULL);
+   x = point.x;
+   y = point.y;
+ 
+diff --git a/src/wayland/meta-pointer-lock-wayland.c b/src/wayland/meta-pointer-lock-wayland.c
+index e872247..9e0e8bc 100644
+--- a/src/wayland/meta-pointer-lock-wayland.c
++++ b/src/wayland/meta-pointer-lock-wayland.c
+@@ -63,7 +63,7 @@ meta_pointer_lock_wayland_create_constraint (MetaPointerConfinementWayland *conf
+   cairo_region_t *region;
+   float sx, sy, x, y;
+ 
+-  clutter_input_device_get_coords (pointer, NULL, &point);
++  clutter_seat_query_state (seat, pointer, NULL, &point, NULL);
+   wayland_constraint =
+     meta_pointer_confinement_wayland_get_wayland_pointer_constraint (confinement);
+   surface = meta_wayland_pointer_constraint_get_surface (wayland_constraint);
+diff --git a/src/wayland/meta-wayland-cursor-surface.c b/src/wayland/meta-wayland-cursor-surface.c
+index 7281be8..60c5d6c 100644
+--- a/src/wayland/meta-wayland-cursor-surface.c
++++ b/src/wayland/meta-wayland-cursor-surface.c
+@@ -198,7 +198,8 @@ meta_wayland_cursor_surface_is_on_logical_monitor (MetaWaylandSurfaceRole *role,
+     meta_rectangle_to_graphene_rect (&logical_monitor->rect);
+ 
+   device = meta_cursor_renderer_get_input_device (priv->cursor_renderer);
+-  clutter_input_device_get_coords (device, NULL,  &point);
++  clutter_seat_query_state (clutter_input_device_get_seat (device),
++                            device, NULL, &point, NULL);
+ 
+   return graphene_rect_contains_point (&logical_monitor_rect, &point);
+ }
+diff --git a/src/wayland/meta-wayland-data-device.c b/src/wayland/meta-wayland-data-device.c
+index e40a58c..16dccb6 100644
+--- a/src/wayland/meta-wayland-data-device.c
++++ b/src/wayland/meta-wayland-data-device.c
+@@ -639,7 +639,8 @@ meta_wayland_data_device_start_drag (MetaWaylandDataDevice                 *data
+                                       0, 0);
+       clutter_actor_add_child (drag_grab->feedback_actor, drag_surface_actor);
+ 
+-      clutter_input_device_get_coords (seat->pointer->device, NULL, &pos);
++      clutter_seat_query_state (clutter_input_device_get_seat (seat->pointer->device),
++                                seat->pointer->device, NULL, &pos, NULL);
+       meta_feedback_actor_set_position (META_FEEDBACK_ACTOR (drag_grab->feedback_actor),
+                                         pos.x, pos.y);
+     }
+diff --git a/src/wayland/meta-wayland-pointer.c b/src/wayland/meta-wayland-pointer.c
+index c71a5ee..df7d6a4 100644
+--- a/src/wayland/meta-wayland-pointer.c
++++ b/src/wayland/meta-wayland-pointer.c
+@@ -949,7 +949,8 @@ meta_wayland_pointer_set_focus (MetaWaylandPointer *pointer,
+                                 G_CALLBACK (focus_surface_destroyed),
+                                 pointer);
+ 
+-      clutter_input_device_get_coords (pointer->device, NULL, &pos);
++      clutter_seat_query_state (clutter_input_device_get_seat (pointer->device),
++                                pointer->device, NULL, &pos, NULL);
+ 
+       focus_window = meta_wayland_surface_get_window (pointer->focus_surface);
+       if (focus_window)
+@@ -1061,7 +1062,8 @@ meta_wayland_pointer_get_relative_coordinates (MetaWaylandPointer *pointer,
+   float xf = 0.0f, yf = 0.0f;
+   graphene_point_t pos;
+ 
+-  clutter_input_device_get_coords (pointer->device, NULL, &pos);
++  clutter_seat_query_state (clutter_input_device_get_seat (pointer->device),
++                            pointer->device, NULL, &pos, NULL);
+   meta_wayland_surface_get_relative_coordinates (surface, pos.x, pos.y, &xf, &yf);
+ 
+   *sx = wl_fixed_from_double (xf);
+diff --git a/src/wayland/meta-xwayland-dnd.c b/src/wayland/meta-xwayland-dnd.c
+index eb667fd..148dd56 100644
+--- a/src/wayland/meta-xwayland-dnd.c
++++ b/src/wayland/meta-xwayland-dnd.c
+@@ -554,7 +554,8 @@ meta_x11_drag_dest_update (MetaWaylandDataDevice *data_device,
+   MetaWaylandSeat *seat = compositor->seat;
+   graphene_point_t pos;
+ 
+-  clutter_input_device_get_coords (seat->pointer->device, NULL, &pos);
++  clutter_seat_query_state (clutter_input_device_get_seat (seat->pointer->device),
++                            seat->pointer->device, NULL, &pos, NULL);
+   xdnd_send_position (dnd, dnd->dnd_dest,
+                       clutter_get_current_event_time (),
+                       pos.x, pos.y);
+@@ -842,7 +843,8 @@ meta_xwayland_dnd_handle_client_message (MetaWaylandCompositor *compositor,
+           dnd->client_message_timestamp = event->data.l[3];
+ 
+           motion = clutter_event_new (CLUTTER_MOTION);
+-          clutter_input_device_get_coords (seat->pointer->device, NULL, &pos);
++          clutter_seat_query_state (clutter_input_device_get_seat (seat->pointer->device),
++                                    seat->pointer->device, NULL, &pos, NULL);
+           clutter_event_set_coords (motion, pos.x, pos.y);
+           clutter_event_set_device (motion, seat->pointer->device);
+           clutter_event_set_source_device (motion, seat->pointer->device);

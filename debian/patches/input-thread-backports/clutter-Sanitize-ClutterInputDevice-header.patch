@@ -1,0 +1,97 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Wed, 6 May 2020 18:56:06 +0200
+Subject: clutter: Sanitize ClutterInputDevice header
+
+Move some exposed setters to private headers. It makes some sense to
+provide those for backends, not as much to the upper layers.
+
+https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1486
+---
+ clutter/clutter/clutter-input-device-private.h | 15 +++++++++++++++
+ clutter/clutter/clutter-input-device.h         | 15 ---------------
+ src/tests/clutter/performance/test-common.h    |  1 +
+ 3 files changed, 16 insertions(+), 15 deletions(-)
+
+diff --git a/clutter/clutter/clutter-input-device-private.h b/clutter/clutter/clutter-input-device-private.h
+index da3741a..b8506d5 100644
+--- a/clutter/clutter/clutter-input-device-private.h
++++ b/clutter/clutter/clutter-input-device-private.h
+@@ -214,6 +214,12 @@ CLUTTER_EXPORT
+ void _clutter_input_device_set_n_keys (ClutterInputDevice *device,
+                                        guint               n_keys);
+ CLUTTER_EXPORT
++void clutter_input_device_set_key (ClutterInputDevice  *device,
++                                   guint                index_,
++                                   guint                keyval,
++                                   ClutterModifierType  modifiers);
++
++CLUTTER_EXPORT
+ gboolean _clutter_input_device_translate_axis (ClutterInputDevice *device,
+                                                guint               index_,
+                                                gdouble             value,
+@@ -252,4 +258,13 @@ ClutterInputDeviceTool *
+                                      guint64                     serial,
+                                      ClutterInputDeviceToolType  type);
+ 
++CLUTTER_EXPORT
++void clutter_input_device_update_from_event (ClutterInputDevice  *device,
++                                             ClutterEvent        *event,
++                                             gboolean             update_stage);
++CLUTTER_EXPORT
++gboolean clutter_input_device_keycode_to_evdev (ClutterInputDevice *device,
++                                                guint               hardware_keycode,
++                                                guint              *evdev_keycode);
++
+ #endif /* CLUTTER_INPUT_DEVICE_PRIVATE_H */
+diff --git a/clutter/clutter/clutter-input-device.h b/clutter/clutter/clutter-input-device.h
+index 274d172..c92f722 100644
+--- a/clutter/clutter/clutter-input-device.h
++++ b/clutter/clutter/clutter-input-device.h
+@@ -122,11 +122,6 @@ gboolean                clutter_input_device_get_axis_value     (ClutterInputDev
+ CLUTTER_EXPORT
+ guint                   clutter_input_device_get_n_keys         (ClutterInputDevice  *device);
+ CLUTTER_EXPORT
+-void                    clutter_input_device_set_key            (ClutterInputDevice  *device,
+-                                                                 guint                index_,
+-                                                                 guint                keyval,
+-                                                                 ClutterModifierType  modifiers);
+-CLUTTER_EXPORT
+ gboolean                clutter_input_device_get_key            (ClutterInputDevice  *device,
+                                                                  guint                index_,
+                                                                  guint               *keyval,
+@@ -137,11 +132,6 @@ ClutterInputDevice *    clutter_input_device_get_associated_device (ClutterInput
+ CLUTTER_EXPORT
+ GList *                 clutter_input_device_get_physical_devices  (ClutterInputDevice  *device);
+ 
+-CLUTTER_EXPORT
+-void                    clutter_input_device_update_from_event  (ClutterInputDevice  *device,
+-                                                                 ClutterEvent        *event,
+-                                                                 gboolean             update_stage);
+-
+ CLUTTER_EXPORT
+ void                    clutter_input_device_grab               (ClutterInputDevice  *device,
+                                                                  ClutterActor        *actor);
+@@ -161,11 +151,6 @@ CLUTTER_EXPORT
+ ClutterActor *          clutter_input_device_sequence_get_grabbed_actor (ClutterInputDevice   *device,
+                                                                          ClutterEventSequence *sequence);
+ 
+-CLUTTER_EXPORT
+-gboolean                clutter_input_device_keycode_to_evdev   (ClutterInputDevice *device,
+-                                                                 guint               hardware_keycode,
+-                                                                 guint              *evdev_keycode);
+-
+ CLUTTER_EXPORT
+ const gchar *           clutter_input_device_get_vendor_id      (ClutterInputDevice *device);
+ CLUTTER_EXPORT
+diff --git a/src/tests/clutter/performance/test-common.h b/src/tests/clutter/performance/test-common.h
+index caab59c..10dd8fe 100644
+--- a/src/tests/clutter/performance/test-common.h
++++ b/src/tests/clutter/performance/test-common.h
+@@ -1,6 +1,7 @@
+ #include <stdlib.h>
+ #include <glib.h>
+ #include <clutter/clutter.h>
++#include <clutter/clutter-mutter.h>
+ 
+ #include "tests/clutter-test-utils.h"
+ 

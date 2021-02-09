@@ -1,0 +1,176 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Fri, 5 Feb 2021 00:33:56 +0100
+Subject: backends/native: Disable touch-mode with pointer presence
+
+The original implementation of ::touch-mode tested for keyboard
+presence to know whether the OSK and other touch-only features were
+enabled.
+
+However that didn't pan out, every webcam, card reader and kitchen
+sink like to live a second life as EV_KEY devices. This made the
+detection of actual external keyboards a much harder task than it
+sounds, and was thus removed in commit f8e2234ce59fbb.
+
+Try a different approach here, and test for pointer devices, it
+doesn't matter if internal or external devices, the rationales:
+
+- It is significantly easier to get this right, there's virtually
+  no devices with abs/rel axes that don't try to be a real input
+  device of some sorts.
+- It's not as good as testing for keyboard presence, but it's the
+  next best thing. These usually come in pairs, except in weird
+  setups.
+- It is better than not having anything for a number of situations:
+  - Non-convertible laptops with a touchscreen will get touch-mode
+    disabled due to touchpad presence (plus keyboard). There's
+    been complains about OSK triggering with those.
+  - Same for desktop machines with USB touchscreens, the mouse
+    (and presumably keyboard) attached would make touch-mode
+    get in the middle.
+  - Convertible laptops with a broken tablet-mode switch get a
+    chance to work on tablet modes that do disable input devices
+    (e.g. detachable keyboards, or via firmware)
+  - Kiosk machines, tablets, and other devices that have a
+    touchscreen but will not regularly have a mouse/keyboard
+    will get the touch-mode enabled.
+
+All in all, this seems to cover more situations the way we expect it,
+there's only one situation that the OSK would show where it might
+not be desirable, and one that might not show when it better should:
+
+- Tablets and kiosk machines that get one keyboard plugged, but not a
+  mouse, will still show the OSK, despite being able to type right
+  away.
+- Convertible laptops with broken/unreliable tablet-mode switch (e.g.
+  ignored by the kernel) rely entirely on the device/firmware
+  characteristics to work. If after folding into tablet mode the
+  touchpad remains active, touch-mode will not turn on.
+  Fixing the tablet-mode switch on these devices should be preferred,
+  as that'll also make libinput magically disable the touchpad.
+
+The latter can be worked around with the a11y toggle. The former is
+merely inconvenient, and nothing prevents the user from plugging a mouse
+in addition.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1710>
+---
+ src/backends/native/meta-seat-impl.c | 46 ++++++++++++++++++++++++++++++------
+ src/backends/native/meta-seat-impl.h |  1 +
+ 2 files changed, 40 insertions(+), 7 deletions(-)
+
+diff --git a/src/backends/native/meta-seat-impl.c b/src/backends/native/meta-seat-impl.c
+index 1784772..f87178a 100644
+--- a/src/backends/native/meta-seat-impl.c
++++ b/src/backends/native/meta-seat-impl.c
+@@ -1490,6 +1490,30 @@ has_touchscreen (MetaSeatImpl *seat_impl)
+   return FALSE;
+ }
+ 
++static inline gboolean
++device_type_is_pointer (ClutterInputDeviceType device_type)
++{
++  return device_type == CLUTTER_POINTER_DEVICE ||
++    device_type == CLUTTER_TOUCHPAD_DEVICE;
++}
++
++static gboolean
++has_pointer (MetaSeatImpl *seat_impl)
++{
++  GSList *l;
++
++  for (l = seat_impl->devices; l; l = l->next)
++    {
++      ClutterInputDeviceType device_type;
++
++      device_type = clutter_input_device_get_device_type (l->data);
++      if (device_type_is_pointer (device_type))
++        return TRUE;
++    }
++
++  return FALSE;
++}
++
+ static gboolean
+ device_is_tablet_switch (MetaInputDeviceNative *device_native)
+ {
+@@ -1529,11 +1553,14 @@ update_touch_mode (MetaSeatImpl *seat_impl)
+   /* If we have a tablet mode switch, honor it being unset */
+   else if (seat_impl->has_tablet_switch && !seat_impl->tablet_mode_switch_state)
+     touch_mode = FALSE;
+-  /* If tablet mode is enabled, or if there is no tablet mode switch
+-   * (eg. kiosk machines), assume touch-mode.
++  /* If tablet mode is enabled, go for it */
++  else if (seat_impl->has_tablet_switch && seat_impl->tablet_mode_switch_state)
++    touch_mode = TRUE;
++  /* If there is no tablet mode switch (eg. kiosk machines),
++   * assume touch-mode is mutually exclusive with pointers.
+    */
+   else
+-    touch_mode = TRUE;
++    touch_mode = !seat_impl->has_pointer;
+ 
+   if (seat_impl->touch_mode != touch_mode)
+     {
+@@ -1553,7 +1580,7 @@ evdev_add_device (MetaSeatImpl           *seat_impl,
+ {
+   ClutterInputDeviceType type;
+   ClutterInputDevice *device;
+-  gboolean is_touchscreen, is_tablet_switch;
++  gboolean is_touchscreen, is_tablet_switch, is_pointer;
+ 
+   device = meta_input_device_native_new_in_impl (seat_impl, libinput_device);
+ 
+@@ -1566,11 +1593,13 @@ evdev_add_device (MetaSeatImpl           *seat_impl,
+   is_touchscreen = type == CLUTTER_TOUCHSCREEN_DEVICE;
+   is_tablet_switch =
+     device_is_tablet_switch (META_INPUT_DEVICE_NATIVE (device));
++  is_pointer = device_type_is_pointer (type);
+ 
+   seat_impl->has_touchscreen |= is_touchscreen;
+   seat_impl->has_tablet_switch |= is_tablet_switch;
++  seat_impl->has_pointer |= is_pointer;
+ 
+-  if (is_touchscreen || is_tablet_switch)
++  if (is_touchscreen || is_tablet_switch || is_pointer)
+     update_touch_mode (seat_impl);
+ 
+   return device;
+@@ -1582,7 +1611,7 @@ evdev_remove_device (MetaSeatImpl          *seat_impl,
+ {
+   ClutterInputDevice *device;
+   ClutterInputDeviceType device_type;
+-  gboolean is_touchscreen, is_tablet_switch;
++  gboolean is_touchscreen, is_tablet_switch, is_pointer;
+ 
+   device = CLUTTER_INPUT_DEVICE (device_native);
+   seat_impl->devices = g_slist_remove (seat_impl->devices, device);
+@@ -1591,13 +1620,16 @@ evdev_remove_device (MetaSeatImpl          *seat_impl,
+ 
+   is_touchscreen = device_type == CLUTTER_TOUCHSCREEN_DEVICE;
+   is_tablet_switch = device_is_tablet_switch (device_native);
++  is_pointer = device_type_is_pointer (device_type);
+ 
+   if (is_touchscreen)
+     seat_impl->has_touchscreen = has_touchscreen (seat_impl);
+   if (is_tablet_switch)
+     seat_impl->has_tablet_switch = has_tablet_switch (seat_impl);
++  if (is_pointer)
++    seat_impl->has_pointer = has_pointer (seat_impl);
+ 
+-  if (is_touchscreen || is_tablet_switch)
++  if (is_touchscreen || is_tablet_switch || is_pointer)
+     update_touch_mode (seat_impl);
+ 
+   if (seat_impl->repeat_source && seat_impl->repeat_device == device)
+diff --git a/src/backends/native/meta-seat-impl.h b/src/backends/native/meta-seat-impl.h
+index ab0ef75..4acf6a6 100644
+--- a/src/backends/native/meta-seat-impl.h
++++ b/src/backends/native/meta-seat-impl.h
+@@ -100,6 +100,7 @@ struct _MetaSeatImpl
+   gboolean tablet_mode_switch_state;
+   gboolean has_touchscreen;
+   gboolean has_tablet_switch;
++  gboolean has_pointer;
+   gboolean touch_mode;
+   gboolean input_thread_initialized;
+ 

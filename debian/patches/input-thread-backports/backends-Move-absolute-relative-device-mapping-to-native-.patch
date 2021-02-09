@@ -1,0 +1,330 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Wed, 6 May 2020 19:06:59 +0200
+Subject: backends: Move absolute/relative device mapping to native backend
+
+This is a bit scattered around, with the setter/getter in Clutter, and
+it only being only directly honored in Wayland (it goes straight through
+device properties in X11).
+
+Make this private native API, and out of public ClutterInputDevice API.
+
+https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1486
+---
+ clutter/clutter/clutter-enums.h                  |  6 ---
+ clutter/clutter/clutter-input-device-private.h   |  2 -
+ clutter/clutter/clutter-input-device.c           | 54 ------------------------
+ clutter/clutter/clutter-input-device.h           |  6 ---
+ src/backends/native/meta-input-device-native.c   | 35 +++++++++++++++
+ src/backends/native/meta-input-device-native.h   | 12 +++++-
+ src/backends/native/meta-input-settings-native.c | 16 +++----
+ src/backends/native/meta-seat-native.c           |  2 +-
+ src/backends/x11/meta-input-settings-x11.c       |  9 ----
+ 9 files changed, 55 insertions(+), 87 deletions(-)
+
+diff --git a/clutter/clutter/clutter-enums.h b/clutter/clutter/clutter-enums.h
+index cddaf53..04cc52a 100644
+--- a/clutter/clutter/clutter-enums.h
++++ b/clutter/clutter/clutter-enums.h
+@@ -1635,12 +1635,6 @@ typedef enum
+   CLUTTER_INPUT_DEVICE_PAD_SOURCE_FINGER,
+ } ClutterInputDevicePadSource;
+ 
+-typedef enum
+-{
+-  CLUTTER_INPUT_DEVICE_MAPPING_ABSOLUTE,
+-  CLUTTER_INPUT_DEVICE_MAPPING_RELATIVE,
+-} ClutterInputDeviceMapping;
+-
+ typedef enum
+ {
+   CLUTTER_INPUT_CONTENT_HINT_COMPLETION          = 1 << 0,
+diff --git a/clutter/clutter/clutter-input-device-private.h b/clutter/clutter/clutter-input-device-private.h
+index b8506d5..cad9b23 100644
+--- a/clutter/clutter/clutter-input-device-private.h
++++ b/clutter/clutter/clutter-input-device-private.h
+@@ -157,8 +157,6 @@ struct _ClutterInputDevice
+   int n_strips;
+   int n_mode_groups;
+ 
+-  ClutterInputDeviceMapping mapping_mode;
+-
+   guint has_cursor : 1;
+   guint is_enabled : 1;
+ 
+diff --git a/clutter/clutter/clutter-input-device.c b/clutter/clutter/clutter-input-device.c
+index b5d0d0b..ae52292 100644
+--- a/clutter/clutter/clutter-input-device.c
++++ b/clutter/clutter/clutter-input-device.c
+@@ -72,7 +72,6 @@ enum
+   PROP_N_RINGS,
+   PROP_N_MODE_GROUPS,
+   PROP_DEVICE_NODE,
+-  PROP_MAPPING_MODE,
+ 
+   PROP_LAST
+ };
+@@ -219,10 +218,6 @@ clutter_input_device_set_property (GObject      *gobject,
+       self->node_path = g_value_dup_string (value);
+       break;
+ 
+-    case PROP_MAPPING_MODE:
+-      self->mapping_mode = g_value_get_enum (value);
+-      break;
+-
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (gobject, prop_id, pspec);
+       break;
+@@ -299,10 +294,6 @@ clutter_input_device_get_property (GObject    *gobject,
+       g_value_set_string (value, self->node_path);
+       break;
+ 
+-    case PROP_MAPPING_MODE:
+-      g_value_set_enum (value, self->mapping_mode);
+-      break;
+-
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (gobject, prop_id, pspec);
+       break;
+@@ -506,14 +497,6 @@ clutter_input_device_class_init (ClutterInputDeviceClass *klass)
+                          NULL,
+                          CLUTTER_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY);
+ 
+-  obj_props[PROP_MAPPING_MODE] =
+-    g_param_spec_enum ("mapping-mode",
+-                       P_("Device mapping mode"),
+-                       P_("Device mapping mode"),
+-                       CLUTTER_TYPE_INPUT_DEVICE_MAPPING,
+-                       CLUTTER_INPUT_DEVICE_MAPPING_ABSOLUTE,
+-                       CLUTTER_PARAM_READWRITE);
+-
+   gobject_class->dispose = clutter_input_device_dispose;
+   gobject_class->set_property = clutter_input_device_set_property;
+   gobject_class->get_property = clutter_input_device_get_property;
+@@ -2391,43 +2374,6 @@ clutter_input_device_get_device_node (ClutterInputDevice *device)
+   return device->node_path;
+ }
+ 
+-ClutterInputDeviceMapping
+-clutter_input_device_get_mapping_mode (ClutterInputDevice *device)
+-{
+-  ClutterInputDeviceType device_type;
+-
+-  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device),
+-                        CLUTTER_INPUT_DEVICE_MAPPING_ABSOLUTE);
+-
+-  device_type = clutter_input_device_get_device_type (device);
+-  g_return_val_if_fail (device_type == CLUTTER_TABLET_DEVICE ||
+-                        device_type == CLUTTER_PEN_DEVICE ||
+-                        device_type == CLUTTER_ERASER_DEVICE,
+-                        CLUTTER_INPUT_DEVICE_MAPPING_ABSOLUTE);
+-
+-  return device->mapping_mode;
+-}
+-
+-void
+-clutter_input_device_set_mapping_mode (ClutterInputDevice        *device,
+-                                       ClutterInputDeviceMapping  mapping)
+-{
+-  ClutterInputDeviceType device_type;
+-
+-  g_return_if_fail (CLUTTER_IS_INPUT_DEVICE (device));
+-
+-  device_type = clutter_input_device_get_device_type (device);
+-  g_return_if_fail (device_type == CLUTTER_TABLET_DEVICE ||
+-                    device_type == CLUTTER_PEN_DEVICE ||
+-                    device_type == CLUTTER_ERASER_DEVICE);
+-
+-  if (device->mapping_mode == mapping)
+-    return;
+-
+-  device->mapping_mode = mapping;
+-  g_object_notify (G_OBJECT (device), "mapping-mode");
+-}
+-
+ gboolean
+ clutter_input_device_is_grouped (ClutterInputDevice *device,
+                                  ClutterInputDevice *other_device)
+diff --git a/clutter/clutter/clutter-input-device.h b/clutter/clutter/clutter-input-device.h
+index c92f722..dd4512a 100644
+--- a/clutter/clutter/clutter-input-device.h
++++ b/clutter/clutter/clutter-input-device.h
+@@ -178,12 +178,6 @@ gint                    clutter_input_device_get_mode_switch_button_group (Clutt
+ CLUTTER_EXPORT
+ const gchar *           clutter_input_device_get_device_node    (ClutterInputDevice *device);
+ 
+-CLUTTER_EXPORT
+-ClutterInputDeviceMapping clutter_input_device_get_mapping_mode (ClutterInputDevice *device);
+-
+-CLUTTER_EXPORT
+-void                      clutter_input_device_set_mapping_mode (ClutterInputDevice        *device,
+-                                                                 ClutterInputDeviceMapping  mapping);
+ CLUTTER_EXPORT
+ gboolean                  clutter_input_device_is_grouped       (ClutterInputDevice *device,
+                                                                  ClutterInputDevice *other_device);
+diff --git a/src/backends/native/meta-input-device-native.c b/src/backends/native/meta-input-device-native.c
+index 0498238..072c807 100644
+--- a/src/backends/native/meta-input-device-native.c
++++ b/src/backends/native/meta-input-device-native.c
+@@ -1472,3 +1472,38 @@ meta_input_device_native_translate_coordinates (ClutterInputDevice *device,
+   *x = CLAMP (x_d, MIN (min_x, max_x), MAX (min_x, max_x)) * stage_width;
+   *y = CLAMP (y_d, MIN (min_y, max_y), MAX (min_y, max_y)) * stage_height;
+ }
++
++MetaInputDeviceMapping
++meta_input_device_native_get_mapping_mode (ClutterInputDevice *device)
++{
++  MetaInputDeviceNative *device_native = META_INPUT_DEVICE_NATIVE (device);
++  ClutterInputDeviceType device_type;
++
++  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device),
++                        META_INPUT_DEVICE_MAPPING_ABSOLUTE);
++
++  device_type = clutter_input_device_get_device_type (device);
++  g_return_val_if_fail (device_type == CLUTTER_TABLET_DEVICE ||
++                        device_type == CLUTTER_PEN_DEVICE ||
++                        device_type == CLUTTER_ERASER_DEVICE,
++                        META_INPUT_DEVICE_MAPPING_ABSOLUTE);
++
++  return device_native->mapping_mode;
++}
++
++void
++meta_input_device_native_set_mapping_mode (ClutterInputDevice     *device,
++                                           MetaInputDeviceMapping  mapping)
++{
++  MetaInputDeviceNative *device_native = META_INPUT_DEVICE_NATIVE (device);
++  ClutterInputDeviceType device_type;
++
++  g_return_if_fail (CLUTTER_IS_INPUT_DEVICE (device));
++
++  device_type = clutter_input_device_get_device_type (device);
++  g_return_if_fail (device_type == CLUTTER_TABLET_DEVICE ||
++                    device_type == CLUTTER_PEN_DEVICE ||
++                    device_type == CLUTTER_ERASER_DEVICE);
++
++  device_native->mapping_mode = mapping;
++}
+diff --git a/src/backends/native/meta-input-device-native.h b/src/backends/native/meta-input-device-native.h
+index 999e670..cbc33ce 100644
+--- a/src/backends/native/meta-input-device-native.h
++++ b/src/backends/native/meta-input-device-native.h
+@@ -54,6 +54,12 @@
+   (G_TYPE_INSTANCE_GET_CLASS ((obj), \
+   META_TYPE_INPUT_DEVICE_NATIVE, MetaInputDeviceNativeClass))
+ 
++typedef enum
++{
++  META_INPUT_DEVICE_MAPPING_ABSOLUTE,
++  META_INPUT_DEVICE_MAPPING_RELATIVE,
++} MetaInputDeviceMapping;
++
+ typedef struct _MetaInputDeviceNative MetaInputDeviceNative;
+ typedef struct _MetaInputDeviceNativeClass MetaInputDeviceNativeClass;
+ 
+@@ -68,6 +74,7 @@ struct _MetaInputDeviceNative
+   cairo_matrix_t device_matrix;
+   double device_aspect_ratio; /* w:h */
+   double output_ratio;        /* w:h */
++  MetaInputDeviceMapping mapping_mode;
+ 
+   /* Keyboard a11y */
+   ClutterKeyboardA11yFlags a11y_flags;
+@@ -97,7 +104,6 @@ struct _MetaInputDeviceNativeClass
+   ClutterInputDeviceClass parent_class;
+ };
+ 
+-
+ GType                     meta_input_device_native_get_type        (void) G_GNUC_CONST;
+ 
+ ClutterInputDevice *      meta_input_device_native_new             (MetaSeatNative          *seat,
+@@ -120,6 +126,10 @@ void                      meta_input_device_native_translate_coordinates (Clutte
+                                                                           float              *x,
+                                                                           float              *y);
+ 
++MetaInputDeviceMapping    meta_input_device_native_get_mapping_mode (ClutterInputDevice     *device);
++void                      meta_input_device_native_set_mapping_mode (ClutterInputDevice     *device,
++                                                                     MetaInputDeviceMapping  mapping);
++
+ void                      meta_input_device_native_apply_kbd_a11y_settings (MetaInputDeviceNative  *device,
+                                                                             ClutterKbdA11ySettings *settings);
+ 
+diff --git a/src/backends/native/meta-input-settings-native.c b/src/backends/native/meta-input-settings-native.c
+index 46c644c..c57cd02 100644
+--- a/src/backends/native/meta-input-settings-native.c
++++ b/src/backends/native/meta-input-settings-native.c
+@@ -72,8 +72,8 @@ meta_input_settings_native_set_matrix (MetaInputSettings  *settings,
+ 
+   if (clutter_input_device_get_device_type (device) ==
+       CLUTTER_TOUCHSCREEN_DEVICE ||
+-      clutter_input_device_get_mapping_mode (device) ==
+-      CLUTTER_INPUT_DEVICE_MAPPING_ABSOLUTE)
++      meta_input_device_native_get_mapping_mode (device) ==
++      META_INPUT_DEVICE_MAPPING_ABSOLUTE)
+     {
+       cairo_matrix_init (&dev_matrix, matrix[0], matrix[3], matrix[1],
+                          matrix[4], matrix[2], matrix[5]);
+@@ -527,16 +527,16 @@ meta_input_settings_native_set_tablet_mapping (MetaInputSettings     *settings,
+                                                ClutterInputDevice    *device,
+                                                GDesktopTabletMapping  mapping)
+ {
+-  ClutterInputDeviceMapping dev_mapping;
++  MetaInputDeviceMapping dev_mapping;
+ 
+   if (mapping == G_DESKTOP_TABLET_MAPPING_ABSOLUTE)
+-    dev_mapping = CLUTTER_INPUT_DEVICE_MAPPING_ABSOLUTE;
++    dev_mapping = META_INPUT_DEVICE_MAPPING_ABSOLUTE;
+   else if (mapping == G_DESKTOP_TABLET_MAPPING_RELATIVE)
+-    dev_mapping = CLUTTER_INPUT_DEVICE_MAPPING_RELATIVE;
++    dev_mapping = META_INPUT_DEVICE_MAPPING_RELATIVE;
+   else
+     return;
+ 
+-  clutter_input_device_set_mapping_mode (device, dev_mapping);
++  meta_input_device_native_set_mapping_mode (device, dev_mapping);
+ }
+ 
+ static void
+@@ -547,8 +547,8 @@ meta_input_settings_native_set_tablet_keep_aspect (MetaInputSettings  *settings,
+ {
+   double aspect_ratio = 0;
+ 
+-  if (clutter_input_device_get_mapping_mode (device) ==
+-      CLUTTER_INPUT_DEVICE_MAPPING_RELATIVE)
++  if (meta_input_device_native_get_mapping_mode (device) ==
++      META_INPUT_DEVICE_MAPPING_RELATIVE)
+     keep_aspect = FALSE;
+ 
+   if (keep_aspect)
+diff --git a/src/backends/native/meta-seat-native.c b/src/backends/native/meta-seat-native.c
+index d70a987..bc5e621 100644
+--- a/src/backends/native/meta-seat-native.c
++++ b/src/backends/native/meta-seat-native.c
+@@ -1760,7 +1760,7 @@ process_tablet_axis (MetaSeatNative        *seat,
+ 
+   time = libinput_event_tablet_tool_get_time_usec (tablet_event);
+ 
+-  if (clutter_input_device_get_mapping_mode (device) == CLUTTER_INPUT_DEVICE_MAPPING_RELATIVE ||
++  if (meta_input_device_native_get_mapping_mode (device) == META_INPUT_DEVICE_MAPPING_RELATIVE ||
+       clutter_input_device_tool_get_tool_type (evdev_device->last_tool) == CLUTTER_INPUT_DEVICE_TOOL_MOUSE ||
+       clutter_input_device_tool_get_tool_type (evdev_device->last_tool) == CLUTTER_INPUT_DEVICE_TOOL_LENS)
+     {
+diff --git a/src/backends/x11/meta-input-settings-x11.c b/src/backends/x11/meta-input-settings-x11.c
+index a7a77d6..0002598 100644
+--- a/src/backends/x11/meta-input-settings-x11.c
++++ b/src/backends/x11/meta-input-settings-x11.c
+@@ -780,15 +780,6 @@ meta_input_settings_x11_set_tablet_mapping (MetaInputSettings     *settings,
+       g_warning ("Could not set tablet mapping for %s",
+                  clutter_input_device_get_device_name (device));
+     }
+-  else
+-    {
+-      ClutterInputDeviceMapping dev_mapping;
+-
+-      dev_mapping = (mapping == G_DESKTOP_TABLET_MAPPING_ABSOLUTE) ?
+-        CLUTTER_INPUT_DEVICE_MAPPING_ABSOLUTE :
+-        CLUTTER_INPUT_DEVICE_MAPPING_RELATIVE;
+-      clutter_input_device_set_mapping_mode (device, dev_mapping);
+-    }
+ }
+ 
+ static gboolean

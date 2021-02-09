@@ -1,0 +1,25 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Thu, 21 Jan 2021 15:15:26 +0100
+Subject: backends/native: Update keymap state on latched modifier updates
+
+The input thread refactors missed to update the MetaKeymapNative state when
+the keys that trigger the latched modifiers are being pressed. Let that happen
+here.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1679>
+---
+ src/backends/native/meta-seat-impl.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/backends/native/meta-seat-impl.c b/src/backends/native/meta-seat-impl.c
+index 904a907..1784772 100644
+--- a/src/backends/native/meta-seat-impl.c
++++ b/src/backends/native/meta-seat-impl.c
+@@ -424,6 +424,7 @@ meta_seat_impl_notify_key_in_impl (MetaSeatImpl       *seat_impl,
+       MetaInputDeviceNative *keyboard_native;
+       gboolean numlock_active;
+ 
++      meta_keymap_native_update_in_impl (seat_impl->keymap, seat_impl->xkb);
+       emit_signal (seat_impl, signals[MODS_STATE_CHANGED], NULL, 0);
+       meta_seat_impl_sync_leds_in_impl (seat_impl);
+ 

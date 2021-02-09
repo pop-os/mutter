@@ -1,0 +1,32 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Sat, 21 Nov 2020 18:03:27 +0100
+Subject: backend/native: Let cursor renderer/tracker be updated by events
+ after warp
+
+We will generate a motion event, which will end up with the same result, at
+a time we can ensure it did happen.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ src/backends/native/meta-seat-native.c | 6 ------
+ 1 file changed, 6 deletions(-)
+
+diff --git a/src/backends/native/meta-seat-native.c b/src/backends/native/meta-seat-native.c
+index e9c8392..fa86b77 100644
+--- a/src/backends/native/meta-seat-native.c
++++ b/src/backends/native/meta-seat-native.c
+@@ -333,14 +333,8 @@ meta_seat_native_warp_pointer (ClutterSeat *seat,
+                                int          y)
+ {
+   MetaSeatNative *seat_native = META_SEAT_NATIVE (seat);
+-  MetaBackend *backend = meta_get_backend ();
+-  MetaCursorRenderer *cursor_renderer =
+-    meta_backend_get_cursor_renderer (backend);
+-  MetaCursorTracker *cursor_tracker = meta_backend_get_cursor_tracker (backend);
+ 
+   meta_seat_impl_warp_pointer (seat_native->impl, x, y);
+-  meta_cursor_renderer_update_position (cursor_renderer);
+-  meta_cursor_tracker_invalidate_position (cursor_tracker);
+ }
+ 
+ static gboolean

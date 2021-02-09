@@ -1,0 +1,32 @@
+From: =?utf-8?q?Jonas_Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Tue, 16 Feb 2021 09:54:41 +0100
+Subject: clutter: Also pick on TOUCH_BEGIN events
+
+With 734a185915464d2da32b6b1251c8af9a631b0f8c an optimization was
+introduced to only pick on events which can actually cause the pointer
+to move. In case of touch events, the first event (TOUCH_BEGIN) will
+already move the touchpoint though, and we'll send our crossing
+CLUTTER_ENTER event to the actor this TOUCH_BEGIN happened on.
+
+So fix this embarrassing bug that caused touch input to break by also
+picking to find an event-actor on TOUCH_BEGIN events.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1733>
+---
+ clutter/clutter/clutter-main.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/clutter/clutter/clutter-main.c b/clutter/clutter/clutter-main.c
+index 005269e..48d3974 100644
+--- a/clutter/clutter/clutter-main.c
++++ b/clutter/clutter/clutter-main.c
+@@ -2005,7 +2005,8 @@ _clutter_process_event_details (ClutterActor        *stage,
+                   break;
+                 }
+ 
+-              if (event->type == CLUTTER_TOUCH_UPDATE)
++              if (event->type == CLUTTER_TOUCH_BEGIN ||
++                  event->type == CLUTTER_TOUCH_UPDATE)
+                 {
+                   event->any.source =
+                     update_device_for_event (CLUTTER_STAGE (stage), event, TRUE);

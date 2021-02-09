@@ -1,0 +1,1076 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Wed, 5 Aug 2020 16:40:04 +0200
+Subject: backends: Move keyboard a11y into backends
+
+And out of Clutter API. This is mainly set via settings, or the windowing
+itself, so we don't need to leak these details up our own backend.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ clutter/clutter/clutter-enums.h                | 38 ------------
+ clutter/clutter/clutter-seat.c                 | 40 ------------
+ clutter/clutter/clutter-seat.h                 | 28 ---------
+ src/backends/meta-input-settings-private.h     | 39 ++++++++++++
+ src/backends/meta-input-settings.c             | 85 +++++++++++++++++---------
+ src/backends/native/meta-backend-native.c      | 18 ++++++
+ src/backends/native/meta-input-device-native.c | 85 +++++++++++++-------------
+ src/backends/native/meta-input-device-native.h |  7 ++-
+ src/backends/native/meta-seat-native.c         | 13 ----
+ src/backends/x11/meta-backend-x11.c            | 22 +++++++
+ src/backends/x11/meta-seat-x11.c               |  9 +--
+ src/backends/x11/meta-xkb-a11y-x11.c           | 73 +++++++++++-----------
+ src/backends/x11/meta-xkb-a11y-x11.h           |  5 +-
+ 13 files changed, 227 insertions(+), 235 deletions(-)
+
+diff --git a/clutter/clutter/clutter-enums.h b/clutter/clutter/clutter-enums.h
+index 04cc52a..cd058b3 100644
+--- a/clutter/clutter/clutter-enums.h
++++ b/clutter/clutter/clutter-enums.h
+@@ -387,44 +387,6 @@ typedef enum
+   CLUTTER_MODIFIER_MASK = 0x5c001fff
+ } ClutterModifierType;
+ 
+-/**
+- * ClutterKeyboardA11yFlags:
+- * @CLUTTER_A11Y_KEYBOARD_ENABLED:
+- * @CLUTTER_A11Y_TIMEOUT_ENABLED:
+- * @CLUTTER_A11Y_MOUSE_KEYS_ENABLED:
+- * @CLUTTER_A11Y_SLOW_KEYS_ENABLED:
+- * @CLUTTER_A11Y_SLOW_KEYS_BEEP_PRESS:
+- * @CLUTTER_A11Y_SLOW_KEYS_BEEP_ACCEPT:
+- * @CLUTTER_A11Y_SLOW_KEYS_BEEP_REJECT:
+- * @CLUTTER_A11Y_BOUNCE_KEYS_ENABLED:
+- * @CLUTTER_A11Y_BOUNCE_KEYS_BEEP_REJECT:
+- * @CLUTTER_A11Y_TOGGLE_KEYS_ENABLED:
+- * @CLUTTER_A11Y_STICKY_KEYS_ENABLED:
+- * @CLUTTER_A11Y_STICKY_KEYS_TWO_KEY_OFF:
+- * @CLUTTER_A11Y_STICKY_KEYS_BEEP:
+- * @CLUTTER_A11Y_FEATURE_STATE_CHANGE_BEEP:
+- *
+- * Keyboard accessibility features applied to a ClutterInputDevice keyboard.
+- *
+- */
+-typedef enum
+-{
+-  CLUTTER_A11Y_KEYBOARD_ENABLED          = 1 << 0,
+-  CLUTTER_A11Y_TIMEOUT_ENABLED           = 1 << 1,
+-  CLUTTER_A11Y_MOUSE_KEYS_ENABLED        = 1 << 2,
+-  CLUTTER_A11Y_SLOW_KEYS_ENABLED         = 1 << 3,
+-  CLUTTER_A11Y_SLOW_KEYS_BEEP_PRESS      = 1 << 4,
+-  CLUTTER_A11Y_SLOW_KEYS_BEEP_ACCEPT     = 1 << 5,
+-  CLUTTER_A11Y_SLOW_KEYS_BEEP_REJECT     = 1 << 6,
+-  CLUTTER_A11Y_BOUNCE_KEYS_ENABLED       = 1 << 7,
+-  CLUTTER_A11Y_BOUNCE_KEYS_BEEP_REJECT   = 1 << 8,
+-  CLUTTER_A11Y_TOGGLE_KEYS_ENABLED       = 1 << 9,
+-  CLUTTER_A11Y_STICKY_KEYS_ENABLED       = 1 << 10,
+-  CLUTTER_A11Y_STICKY_KEYS_TWO_KEY_OFF   = 1 << 11,
+-  CLUTTER_A11Y_STICKY_KEYS_BEEP          = 1 << 12,
+-  CLUTTER_A11Y_FEATURE_STATE_CHANGE_BEEP = 1 << 13,
+-} ClutterKeyboardA11yFlags;
+-
+ /**
+  * ClutterPointerA11yFlags:
+  * @CLUTTER_A11Y_POINTER_ENABLED:
+diff --git a/clutter/clutter/clutter-seat.c b/clutter/clutter/clutter-seat.c
+index 3254701..ed8a5de 100644
+--- a/clutter/clutter/clutter-seat.c
++++ b/clutter/clutter/clutter-seat.c
+@@ -65,9 +65,6 @@ struct _ClutterSeatPrivate
+ 
+   unsigned int inhibit_unfocus_count;
+ 
+-  /* Keyboard a11y */
+-  ClutterKbdA11ySettings kbd_a11y_settings;
+-
+   /* Pointer a11y */
+   ClutterPointerA11ySettings pointer_a11y_settings;
+ };
+@@ -404,43 +401,6 @@ clutter_seat_get_keymap (ClutterSeat *seat)
+   return CLUTTER_SEAT_GET_CLASS (seat)->get_keymap (seat);
+ }
+ 
+-static gboolean
+-are_kbd_a11y_settings_equal (ClutterKbdA11ySettings *a,
+-                             ClutterKbdA11ySettings *b)
+-{
+-  return (memcmp (a, b, sizeof (ClutterKbdA11ySettings)) == 0);
+-}
+-
+-void
+-clutter_seat_set_kbd_a11y_settings (ClutterSeat            *seat,
+-                                    ClutterKbdA11ySettings *settings)
+-{
+-  ClutterSeatClass *seat_class;
+-  ClutterSeatPrivate *priv = clutter_seat_get_instance_private (seat);
+-
+-  g_return_if_fail (CLUTTER_IS_SEAT (seat));
+-
+-  if (are_kbd_a11y_settings_equal (&priv->kbd_a11y_settings, settings))
+-    return;
+-
+-  priv->kbd_a11y_settings = *settings;
+-
+-  seat_class = CLUTTER_SEAT_GET_CLASS (seat);
+-  if (seat_class->apply_kbd_a11y_settings)
+-    seat_class->apply_kbd_a11y_settings (seat, settings);
+-}
+-
+-void
+-clutter_seat_get_kbd_a11y_settings (ClutterSeat            *seat,
+-                                    ClutterKbdA11ySettings *settings)
+-{
+-  ClutterSeatPrivate *priv = clutter_seat_get_instance_private (seat);
+-
+-  g_return_if_fail (CLUTTER_IS_SEAT (seat));
+-
+-  *settings = priv->kbd_a11y_settings;
+-}
+-
+ void
+ clutter_seat_ensure_a11y_state (ClutterSeat *seat)
+ {
+diff --git a/clutter/clutter/clutter-seat.h b/clutter/clutter/clutter-seat.h
+index 082c3e9..4f8d0f4 100644
+--- a/clutter/clutter/clutter-seat.h
++++ b/clutter/clutter/clutter-seat.h
+@@ -37,24 +37,6 @@ CLUTTER_EXPORT
+ G_DECLARE_DERIVABLE_TYPE (ClutterSeat, clutter_seat,
+ 			  CLUTTER, SEAT, GObject)
+ 
+-/**
+- * ClutterKbdA11ySettings:
+- *
+- * The #ClutterKbdA11ySettings structure contains keyboard accessibility
+- * settings
+- *
+- */
+-typedef struct _ClutterKbdA11ySettings
+-{
+-  ClutterKeyboardA11yFlags controls;
+-  gint slowkeys_delay;
+-  gint debounce_delay;
+-  gint timeout_delay;
+-  gint mousekeys_init_delay;
+-  gint mousekeys_max_speed;
+-  gint mousekeys_accel_time;
+-} ClutterKbdA11ySettings;
+-
+ /**
+  * ClutterPointerA11ySettings:
+  *
+@@ -126,10 +108,6 @@ struct _ClutterSeatClass
+   void (* free_event_data) (ClutterSeat        *seat,
+                             ClutterEvent       *event);
+ 
+-  /* Keyboard accessibility */
+-  void (* apply_kbd_a11y_settings) (ClutterSeat            *seat,
+-                                    ClutterKbdA11ySettings *settings);
+-
+   /* Virtual devices */
+   ClutterVirtualInputDevice * (* create_virtual_device) (ClutterSeat            *seat,
+                                                          ClutterInputDeviceType  device_type);
+@@ -149,12 +127,6 @@ void clutter_seat_bell_notify (ClutterSeat *seat);
+ CLUTTER_EXPORT
+ ClutterKeymap * clutter_seat_get_keymap (ClutterSeat *seat);
+ 
+-CLUTTER_EXPORT
+-void clutter_seat_set_kbd_a11y_settings (ClutterSeat            *seat,
+-                                         ClutterKbdA11ySettings *settings);
+-CLUTTER_EXPORT
+-void clutter_seat_get_kbd_a11y_settings (ClutterSeat            *seat,
+-                                         ClutterKbdA11ySettings *settings);
+ CLUTTER_EXPORT
+ void clutter_seat_ensure_a11y_state     (ClutterSeat            *seat);
+ 
+diff --git a/src/backends/meta-input-settings-private.h b/src/backends/meta-input-settings-private.h
+index 3c3abde..84a5797 100644
+--- a/src/backends/meta-input-settings-private.h
++++ b/src/backends/meta-input-settings-private.h
+@@ -36,6 +36,42 @@
+ G_DECLARE_DERIVABLE_TYPE (MetaInputSettings, meta_input_settings,
+                           META, INPUT_SETTINGS, GObject)
+ 
++typedef enum
++{
++  META_A11Y_KEYBOARD_ENABLED = 1 << 0,
++  META_A11Y_TIMEOUT_ENABLED = 1 << 1,
++  META_A11Y_MOUSE_KEYS_ENABLED = 1 << 2,
++  META_A11Y_SLOW_KEYS_ENABLED = 1 << 3,
++  META_A11Y_SLOW_KEYS_BEEP_PRESS = 1 << 4,
++  META_A11Y_SLOW_KEYS_BEEP_ACCEPT = 1 << 5,
++  META_A11Y_SLOW_KEYS_BEEP_REJECT = 1 << 6,
++  META_A11Y_BOUNCE_KEYS_ENABLED = 1 << 7,
++  META_A11Y_BOUNCE_KEYS_BEEP_REJECT = 1 << 8,
++  META_A11Y_TOGGLE_KEYS_ENABLED = 1 << 9,
++  META_A11Y_STICKY_KEYS_ENABLED = 1 << 10,
++  META_A11Y_STICKY_KEYS_TWO_KEY_OFF = 1 << 11,
++  META_A11Y_STICKY_KEYS_BEEP = 1 << 12,
++  META_A11Y_FEATURE_STATE_CHANGE_BEEP = 1 << 13,
++} MetaKeyboardA11yFlags;
++
++/**
++ * MetaKbdA11ySettings:
++ *
++ * The #MetaKbdA11ySettings structure contains keyboard accessibility
++ * settings
++ *
++ */
++typedef struct _MetaKbdA11ySettings
++{
++  MetaKeyboardA11yFlags controls;
++  int slowkeys_delay;
++  int debounce_delay;
++  int timeout_delay;
++  int mousekeys_init_delay;
++  int mousekeys_max_speed;
++  int mousekeys_accel_time;
++} MetaKbdA11ySettings;
++
+ struct _MetaInputSettingsClass
+ {
+   GObjectClass parent_class;
+@@ -149,4 +185,7 @@ void meta_input_settings_set_device_aspect_ratio (MetaInputSettings  *input_sett
+                                                   ClutterInputDevice *device,
+                                                   double              aspect_ratio);
+ 
++void meta_input_settings_get_kbd_a11y_settings (MetaInputSettings   *input_settings,
++                                                MetaKbdA11ySettings *a11y_settings);
++
+ #endif /* META_INPUT_SETTINGS_PRIVATE_H */
+diff --git a/src/backends/meta-input-settings.c b/src/backends/meta-input-settings.c
+index 7974953..4a5a8ba 100644
+--- a/src/backends/meta-input-settings.c
++++ b/src/backends/meta-input-settings.c
+@@ -82,6 +82,8 @@ struct _MetaInputSettingsPrivate
+   GHashTable *current_tools;
+ 
+   GHashTable *two_finger_devices;
++
++  MetaKbdA11ySettings kbd_a11y_settings;
+ };
+ 
+ typedef gboolean (* ConfigBoolMappingFunc) (MetaInputSettings  *input_settings,
+@@ -100,6 +102,14 @@ typedef void (*ConfigUintFunc)   (MetaInputSettings  *input_settings,
+ 
+ G_DEFINE_TYPE_WITH_PRIVATE (MetaInputSettings, meta_input_settings, G_TYPE_OBJECT)
+ 
++enum
++{
++  KBD_A11Y_CHANGED,
++  N_SIGNALS
++};
++
++static guint signals[N_SIGNALS] = { 0 };
++
+ static GSList *
+ meta_input_settings_get_devices (MetaInputSettings      *settings,
+                                  ClutterInputDeviceType  type)
+@@ -1147,39 +1157,31 @@ apply_mappable_device_settings (MetaInputSettings *input_settings,
+ 
+ struct _keyboard_a11y_settings_flags_pair {
+   const char *name;
+-  ClutterKeyboardA11yFlags flag;
++  MetaKeyboardA11yFlags flag;
+ } keyboard_a11y_settings_flags_pair[] = {
+-  { "enable",                    CLUTTER_A11Y_KEYBOARD_ENABLED },
+-  { "timeout-enable",            CLUTTER_A11Y_TIMEOUT_ENABLED },
+-  { "mousekeys-enable",          CLUTTER_A11Y_MOUSE_KEYS_ENABLED },
+-  { "slowkeys-enable",           CLUTTER_A11Y_SLOW_KEYS_ENABLED },
+-  { "slowkeys-beep-press",       CLUTTER_A11Y_SLOW_KEYS_BEEP_PRESS },
+-  { "slowkeys-beep-accept",      CLUTTER_A11Y_SLOW_KEYS_BEEP_ACCEPT },
+-  { "slowkeys-beep-reject",      CLUTTER_A11Y_SLOW_KEYS_BEEP_REJECT },
+-  { "bouncekeys-enable",         CLUTTER_A11Y_BOUNCE_KEYS_ENABLED },
+-  { "bouncekeys-beep-reject",    CLUTTER_A11Y_BOUNCE_KEYS_BEEP_REJECT },
+-  { "togglekeys-enable",         CLUTTER_A11Y_TOGGLE_KEYS_ENABLED },
+-  { "stickykeys-enable",         CLUTTER_A11Y_STICKY_KEYS_ENABLED },
+-  { "stickykeys-modifier-beep",  CLUTTER_A11Y_STICKY_KEYS_BEEP },
+-  { "stickykeys-two-key-off",    CLUTTER_A11Y_STICKY_KEYS_TWO_KEY_OFF },
+-  { "feature-state-change-beep", CLUTTER_A11Y_FEATURE_STATE_CHANGE_BEEP },
++  { "enable",                    META_A11Y_KEYBOARD_ENABLED },
++  { "timeout-enable",            META_A11Y_TIMEOUT_ENABLED },
++  { "mousekeys-enable",          META_A11Y_MOUSE_KEYS_ENABLED },
++  { "slowkeys-enable",           META_A11Y_SLOW_KEYS_ENABLED },
++  { "slowkeys-beep-press",       META_A11Y_SLOW_KEYS_BEEP_PRESS },
++  { "slowkeys-beep-accept",      META_A11Y_SLOW_KEYS_BEEP_ACCEPT },
++  { "slowkeys-beep-reject",      META_A11Y_SLOW_KEYS_BEEP_REJECT },
++  { "bouncekeys-enable",         META_A11Y_BOUNCE_KEYS_ENABLED },
++  { "bouncekeys-beep-reject",    META_A11Y_BOUNCE_KEYS_BEEP_REJECT },
++  { "togglekeys-enable",         META_A11Y_TOGGLE_KEYS_ENABLED },
++  { "stickykeys-enable",         META_A11Y_STICKY_KEYS_ENABLED },
++  { "stickykeys-modifier-beep",  META_A11Y_STICKY_KEYS_BEEP },
++  { "stickykeys-two-key-off",    META_A11Y_STICKY_KEYS_TWO_KEY_OFF },
++  { "feature-state-change-beep", META_A11Y_FEATURE_STATE_CHANGE_BEEP },
+ };
+ 
+ static void
+-load_keyboard_a11y_settings (MetaInputSettings  *input_settings,
+-                             ClutterInputDevice *device)
++load_keyboard_a11y_settings (MetaInputSettings *input_settings)
+ {
+   MetaInputSettingsPrivate *priv = meta_input_settings_get_instance_private (input_settings);
+-  ClutterKbdA11ySettings kbd_a11y_settings = { 0 };
+-  ClutterInputDevice *core_keyboard;
+-  ClutterBackend *backend = clutter_get_default_backend ();
+-  ClutterSeat *seat = clutter_backend_get_default_seat (backend);
++  MetaKbdA11ySettings kbd_a11y_settings = { 0 };
+   guint i;
+ 
+-  core_keyboard = clutter_seat_get_keyboard (priv->seat);
+-  if (device && device != core_keyboard)
+-    return;
+-
+   kbd_a11y_settings.controls = 0;
+   for (i = 0; i < G_N_ELEMENTS (keyboard_a11y_settings_flags_pair); i++)
+     {
+@@ -1200,13 +1202,14 @@ load_keyboard_a11y_settings (MetaInputSettings  *input_settings,
+   kbd_a11y_settings.mousekeys_accel_time = g_settings_get_int (priv->keyboard_a11y_settings,
+                                                                "mousekeys-accel-time");
+ 
+-  clutter_seat_set_kbd_a11y_settings (seat, &kbd_a11y_settings);
++  priv->kbd_a11y_settings = kbd_a11y_settings;
++  g_signal_emit (input_settings, signals[KBD_A11Y_CHANGED], 0, &priv->kbd_a11y_settings);
+ }
+ 
+ static void
+ on_keyboard_a11y_settings_changed (ClutterSeat              *seat,
+-                                   ClutterKeyboardA11yFlags  new_flags,
+-                                   ClutterKeyboardA11yFlags  what_changed,
++                                   MetaKeyboardA11yFlags     new_flags,
++                                   MetaKeyboardA11yFlags     what_changed,
+                                    MetaInputSettings        *input_settings)
+ {
+   MetaInputSettingsPrivate *priv = meta_input_settings_get_instance_private (input_settings);
+@@ -1228,7 +1231,7 @@ meta_input_keyboard_a11y_settings_changed (GSettings  *settings,
+ {
+   MetaInputSettings *input_settings = META_INPUT_SETTINGS (user_data);
+ 
+-  load_keyboard_a11y_settings (input_settings, NULL);
++  load_keyboard_a11y_settings (input_settings);
+ }
+ 
+ struct _pointer_a11y_settings_flags_pair {
+@@ -1490,7 +1493,6 @@ apply_device_settings (MetaInputSettings  *input_settings,
+   update_pointer_accel_profile (input_settings,
+                                 priv->trackball_settings,
+                                 device);
+-  load_keyboard_a11y_settings (input_settings, device);
+   load_pointer_a11y_settings (input_settings, device);
+ 
+   update_middle_click_emulation (input_settings, priv->mouse_settings, device);
+@@ -1714,6 +1716,8 @@ meta_input_settings_constructed (GObject *object)
+   apply_device_settings (input_settings, NULL);
+   update_keyboard_repeat (input_settings);
+   check_mappable_devices (input_settings);
++
++  load_keyboard_a11y_settings (input_settings);
+ }
+ 
+ static void
+@@ -1726,6 +1730,14 @@ meta_input_settings_class_init (MetaInputSettingsClass *klass)
+ 
+   quark_tool_settings =
+     g_quark_from_static_string ("meta-input-settings-tool-settings");
++
++  signals[KBD_A11Y_CHANGED] =
++    g_signal_new ("kbd-a11y-changed",
++                  G_TYPE_FROM_CLASS (object_class),
++                  G_SIGNAL_RUN_LAST,
++                  0, NULL, NULL, NULL,
++                  G_TYPE_NONE, 1,
++                  G_TYPE_POINTER);
+ }
+ 
+ static void
+@@ -1873,3 +1885,16 @@ meta_input_settings_set_device_aspect_ratio (MetaInputSettings  *input_settings,
+   info->aspect_ratio = aspect_ratio;
+   update_tablet_keep_aspect (input_settings, info->settings, device);
+ }
++
++void
++meta_input_settings_get_kbd_a11y_settings (MetaInputSettings   *input_settings,
++                                           MetaKbdA11ySettings *a11y_settings)
++{
++  MetaInputSettingsPrivate *priv;
++
++  g_return_if_fail (META_IS_INPUT_SETTINGS (input_settings));
++
++  priv = meta_input_settings_get_instance_private (input_settings);
++
++  *a11y_settings = priv->kbd_a11y_settings;
++}
+diff --git a/src/backends/native/meta-backend-native.c b/src/backends/native/meta-backend-native.c
+index 79c2e80..5895402 100644
+--- a/src/backends/native/meta-backend-native.c
++++ b/src/backends/native/meta-backend-native.c
+@@ -50,6 +50,7 @@
+ #include "backends/meta-stage-private.h"
+ #include "backends/native/meta-clutter-backend-native.h"
+ #include "backends/native/meta-event-native.h"
++#include "backends/native/meta-input-device-native.h"
+ #include "backends/native/meta-input-settings-native.h"
+ #include "backends/native/meta-kms.h"
+ #include "backends/native/meta-kms-device.h"
+@@ -234,6 +235,21 @@ meta_backend_native_create_renderer (MetaBackend *backend,
+   return META_RENDERER (renderer_native);
+ }
+ 
++static void
++kbd_a11y_changed_cb (MetaInputSettings   *input_settings,
++                     MetaKbdA11ySettings *a11y_settings,
++                     MetaBackend         *backend)
++{
++  ClutterBackend *clutter_backend = meta_backend_get_clutter_backend (backend);
++  ClutterSeat *seat = clutter_backend_get_default_seat (clutter_backend);
++  ClutterInputDevice *device;
++
++  device = clutter_seat_get_keyboard (seat);
++  if (device)
++    meta_input_device_native_apply_kbd_a11y_settings (META_INPUT_DEVICE_NATIVE (device),
++                                                      a11y_settings);
++}
++
+ static MetaInputSettings *
+ meta_backend_native_create_input_settings (MetaBackend *backend)
+ {
+@@ -243,6 +259,8 @@ meta_backend_native_create_input_settings (MetaBackend *backend)
+     {
+       backend_native->input_settings =
+         g_object_new (META_TYPE_INPUT_SETTINGS_NATIVE, NULL);
++      g_signal_connect_object (backend_native->input_settings, "kbd-a11y-changed",
++                               G_CALLBACK (kbd_a11y_changed_cb), backend, 0);
+     }
+ 
+   return backend_native->input_settings;
+diff --git a/src/backends/native/meta-input-device-native.c b/src/backends/native/meta-input-device-native.c
+index 8d4b835..3117402 100644
+--- a/src/backends/native/meta-input-device-native.c
++++ b/src/backends/native/meta-input-device-native.c
+@@ -24,6 +24,7 @@
+ #include <math.h>
+ #include <cairo-gobject.h>
+ 
++#include "backends/meta-backend-private.h"
+ #include "backends/native/meta-input-device-tool-native.h"
+ #include "backends/native/meta-input-device-native.h"
+ #include "backends/native/meta-seat-native.h"
+@@ -238,11 +239,11 @@ clear_slow_keys (MetaInputDeviceNative *device)
+ static guint
+ get_slow_keys_delay (ClutterInputDevice *device)
+ {
+-  MetaInputDeviceNative *device_native = META_INPUT_DEVICE_NATIVE (device);
+-  ClutterKbdA11ySettings a11y_settings;
++  MetaKbdA11ySettings a11y_settings;
++  MetaInputSettings *input_settings;
+ 
+-  clutter_seat_get_kbd_a11y_settings (CLUTTER_SEAT (device_native->seat),
+-                                      &a11y_settings);
++  input_settings = meta_backend_get_input_settings (meta_get_backend ());
++  meta_input_settings_get_kbd_a11y_settings (input_settings, &a11y_settings);
+   /* Settings use int, we use uint, make sure we dont go negative */
+   return MAX (0, a11y_settings.slowkeys_delay);
+ }
+@@ -263,7 +264,7 @@ trigger_slow_keys (gpointer data)
+   device->slow_keys_list = g_list_remove (device->slow_keys_list, slow_keys_event);
+   meta_input_device_native_free_pending_slow_key (slow_keys_event);
+ 
+-  if (device->a11y_flags & CLUTTER_A11Y_SLOW_KEYS_BEEP_ACCEPT)
++  if (device->a11y_flags & META_A11Y_SLOW_KEYS_BEEP_ACCEPT)
+     meta_input_device_native_bell_notify (device);
+ 
+   return G_SOURCE_REMOVE;
+@@ -301,7 +302,7 @@ start_slow_keys (ClutterEvent                *event,
+                                  slow_keys_event);
+   device->slow_keys_list = g_list_append (device->slow_keys_list, slow_keys_event);
+ 
+-  if (device->a11y_flags & CLUTTER_A11Y_SLOW_KEYS_BEEP_PRESS)
++  if (device->a11y_flags & META_A11Y_SLOW_KEYS_BEEP_PRESS)
+     meta_input_device_native_bell_notify (device);
+ }
+ 
+@@ -321,7 +322,7 @@ stop_slow_keys (ClutterEvent                *event,
+       device->slow_keys_list = g_list_delete_link (device->slow_keys_list, item);
+       meta_input_device_native_free_pending_slow_key (slow_keys_event);
+ 
+-      if (device->a11y_flags & CLUTTER_A11Y_SLOW_KEYS_BEEP_REJECT)
++      if (device->a11y_flags & META_A11Y_SLOW_KEYS_BEEP_REJECT)
+         meta_input_device_native_bell_notify (device);
+ 
+       return;
+@@ -334,11 +335,11 @@ stop_slow_keys (ClutterEvent                *event,
+ static guint
+ get_debounce_delay (ClutterInputDevice *device)
+ {
+-  MetaInputDeviceNative *device_native = META_INPUT_DEVICE_NATIVE (device);
+-  ClutterKbdA11ySettings a11y_settings;
++  MetaKbdA11ySettings a11y_settings;
++  MetaInputSettings *input_settings;
+ 
+-  clutter_seat_get_kbd_a11y_settings (CLUTTER_SEAT (device_native->seat),
+-                                      &a11y_settings);
++  input_settings = meta_backend_get_input_settings (meta_get_backend ());
++  meta_input_settings_get_kbd_a11y_settings (input_settings, &a11y_settings);
+   /* Settings use int, we use uint, make sure we dont go negative */
+   return MAX (0, a11y_settings.debounce_delay);
+ }
+@@ -376,7 +377,7 @@ stop_bounce_keys (MetaInputDeviceNative *device)
+ static void
+ notify_bounce_keys_reject (MetaInputDeviceNative *device)
+ {
+-  if (device->a11y_flags & CLUTTER_A11Y_BOUNCE_KEYS_BEEP_REJECT)
++  if (device->a11y_flags & META_A11Y_BOUNCE_KEYS_BEEP_REJECT)
+     meta_input_device_native_bell_notify (device);
+ }
+ 
+@@ -490,20 +491,20 @@ notify_stickykeys_change (MetaInputDeviceNative *device)
+   g_signal_emit_by_name (CLUTTER_INPUT_DEVICE (device)->seat,
+                          "kbd-a11y-flags-changed",
+                          device->a11y_flags,
+-                         CLUTTER_A11Y_STICKY_KEYS_ENABLED);
++                         META_A11Y_STICKY_KEYS_ENABLED);
+ }
+ 
+ static void
+ set_stickykeys_off (MetaInputDeviceNative *device)
+ {
+-  device->a11y_flags &= ~CLUTTER_A11Y_STICKY_KEYS_ENABLED;
++  device->a11y_flags &= ~META_A11Y_STICKY_KEYS_ENABLED;
+   notify_stickykeys_change (device);
+ }
+ 
+ static void
+ set_stickykeys_on (MetaInputDeviceNative *device)
+ {
+-  device->a11y_flags |= CLUTTER_A11Y_STICKY_KEYS_ENABLED;
++  device->a11y_flags |= META_A11Y_STICKY_KEYS_ENABLED;
+   notify_stickykeys_change (device);
+ }
+ 
+@@ -518,23 +519,23 @@ clear_stickykeys_event (ClutterEvent          *event,
+ static void
+ set_slowkeys_off (MetaInputDeviceNative *device)
+ {
+-  device->a11y_flags &= ~CLUTTER_A11Y_SLOW_KEYS_ENABLED;
++  device->a11y_flags &= ~META_A11Y_SLOW_KEYS_ENABLED;
+ 
+   g_signal_emit_by_name (CLUTTER_INPUT_DEVICE (device)->seat,
+                          "kbd-a11y-flags-changed",
+                          device->a11y_flags,
+-                         CLUTTER_A11Y_SLOW_KEYS_ENABLED);
++                         META_A11Y_SLOW_KEYS_ENABLED);
+ }
+ 
+ static void
+ set_slowkeys_on (MetaInputDeviceNative *device)
+ {
+-  device->a11y_flags |= CLUTTER_A11Y_SLOW_KEYS_ENABLED;
++  device->a11y_flags |= META_A11Y_SLOW_KEYS_ENABLED;
+ 
+   g_signal_emit_by_name (CLUTTER_INPUT_DEVICE (device)->seat,
+                          "kbd-a11y-flags-changed",
+                          device->a11y_flags,
+-                         CLUTTER_A11Y_SLOW_KEYS_ENABLED);
++                         META_A11Y_SLOW_KEYS_ENABLED);
+ }
+ 
+ static void
+@@ -550,7 +551,7 @@ handle_stickykeys_press (ClutterEvent          *event,
+     return;
+ 
+   if (device->stickykeys_depressed_mask &&
+-      (device->a11y_flags & CLUTTER_A11Y_STICKY_KEYS_TWO_KEY_OFF))
++      (device->a11y_flags & META_A11Y_STICKY_KEYS_TWO_KEY_OFF))
+     {
+       clear_stickykeys_event (event, device);
+       return;
+@@ -596,7 +597,7 @@ handle_stickykeys_release (ClutterEvent          *event,
+ 
+   if (key_event_is_modifier (event))
+     {
+-      if (device->a11y_flags & CLUTTER_A11Y_STICKY_KEYS_BEEP)
++      if (device->a11y_flags & META_A11Y_STICKY_KEYS_BEEP)
+         meta_input_device_native_bell_notify (device);
+ 
+       return;
+@@ -615,10 +616,10 @@ trigger_toggle_slowkeys (gpointer data)
+ 
+   device->toggle_slowkeys_timer = 0;
+ 
+-  if (device->a11y_flags & CLUTTER_A11Y_FEATURE_STATE_CHANGE_BEEP)
++  if (device->a11y_flags & META_A11Y_FEATURE_STATE_CHANGE_BEEP)
+     meta_input_device_native_bell_notify (device);
+ 
+-  if (device->a11y_flags & CLUTTER_A11Y_SLOW_KEYS_ENABLED)
++  if (device->a11y_flags & META_A11Y_SLOW_KEYS_ENABLED)
+     set_slowkeys_off (device);
+   else
+     set_slowkeys_on (device);
+@@ -677,10 +678,10 @@ handle_enablekeys_release (ClutterEvent          *event,
+         {
+           device->shift_count = 0;
+ 
+-          if (device->a11y_flags & CLUTTER_A11Y_FEATURE_STATE_CHANGE_BEEP)
++          if (device->a11y_flags & META_A11Y_FEATURE_STATE_CHANGE_BEEP)
+             meta_input_device_native_bell_notify (device);
+ 
+-          if (device->a11y_flags & CLUTTER_A11Y_STICKY_KEYS_ENABLED)
++          if (device->a11y_flags & META_A11Y_STICKY_KEYS_ENABLED)
+             set_stickykeys_off (device);
+           else
+             set_stickykeys_on (device);
+@@ -747,8 +748,8 @@ emulate_button_click (MetaInputDeviceNative *device)
+ #define MOUSEKEYS_CURVE (1.0 + (((double) 50.0) * 0.001))
+ 
+ static void
+-update_mousekeys_params (MetaInputDeviceNative  *device,
+-                         ClutterKbdA11ySettings *settings)
++update_mousekeys_params (MetaInputDeviceNative *device,
++                         MetaKbdA11ySettings   *settings)
+ {
+   /* Prevent us from broken settings values */
+   device->mousekeys_max_speed = MAX (1, settings->mousekeys_max_speed);
+@@ -1117,7 +1118,7 @@ meta_input_device_native_process_kbd_a11y_event (ClutterEvent               *eve
+   if (event->key.flags & CLUTTER_EVENT_FLAG_INPUT_METHOD)
+     goto emit_event;
+ 
+-  if (device_evdev->a11y_flags & CLUTTER_A11Y_KEYBOARD_ENABLED)
++  if (device_evdev->a11y_flags & META_A11Y_KEYBOARD_ENABLED)
+     {
+       if (event->type == CLUTTER_KEY_PRESS)
+         handle_enablekeys_press (event, device_evdev);
+@@ -1125,7 +1126,7 @@ meta_input_device_native_process_kbd_a11y_event (ClutterEvent               *eve
+         handle_enablekeys_release (event, device_evdev);
+     }
+ 
+-  if (device_evdev->a11y_flags & CLUTTER_A11Y_MOUSE_KEYS_ENABLED)
++  if (device_evdev->a11y_flags & META_A11Y_MOUSE_KEYS_ENABLED)
+     {
+       if (event->type == CLUTTER_KEY_PRESS &&
+           handle_mousekeys_press (event, device_evdev))
+@@ -1135,7 +1136,7 @@ meta_input_device_native_process_kbd_a11y_event (ClutterEvent               *eve
+         return; /* swallow event */
+     }
+ 
+-  if ((device_evdev->a11y_flags & CLUTTER_A11Y_BOUNCE_KEYS_ENABLED) &&
++  if ((device_evdev->a11y_flags & META_A11Y_BOUNCE_KEYS_ENABLED) &&
+       (get_debounce_delay (device) != 0))
+     {
+       if ((event->type == CLUTTER_KEY_PRESS) && debounce_key (event, device_evdev))
+@@ -1148,7 +1149,7 @@ meta_input_device_native_process_kbd_a11y_event (ClutterEvent               *eve
+         start_bounce_keys (event, device_evdev);
+     }
+ 
+-  if ((device_evdev->a11y_flags & CLUTTER_A11Y_SLOW_KEYS_ENABLED) &&
++  if ((device_evdev->a11y_flags & META_A11Y_SLOW_KEYS_ENABLED) &&
+       (get_slow_keys_delay (device) != 0))
+     {
+       if (event->type == CLUTTER_KEY_PRESS)
+@@ -1159,7 +1160,7 @@ meta_input_device_native_process_kbd_a11y_event (ClutterEvent               *eve
+       return;
+     }
+ 
+-  if (device_evdev->a11y_flags & CLUTTER_A11Y_STICKY_KEYS_ENABLED)
++  if (device_evdev->a11y_flags & META_A11Y_STICKY_KEYS_ENABLED)
+     {
+       if (event->type == CLUTTER_KEY_PRESS)
+         handle_stickykeys_press (event, device_evdev);
+@@ -1172,34 +1173,34 @@ emit_event:
+ }
+ 
+ void
+-meta_input_device_native_apply_kbd_a11y_settings (MetaInputDeviceNative  *device,
+-                                                  ClutterKbdA11ySettings *settings)
++meta_input_device_native_apply_kbd_a11y_settings (MetaInputDeviceNative *device,
++                                                  MetaKbdA11ySettings   *settings)
+ {
+-  ClutterKeyboardA11yFlags changed_flags = (device->a11y_flags ^ settings->controls);
++  MetaKeyboardA11yFlags changed_flags = (device->a11y_flags ^ settings->controls);
+ 
+-  if (changed_flags & (CLUTTER_A11Y_KEYBOARD_ENABLED | CLUTTER_A11Y_SLOW_KEYS_ENABLED))
++  if (changed_flags & (META_A11Y_KEYBOARD_ENABLED | META_A11Y_SLOW_KEYS_ENABLED))
+     clear_slow_keys (device);
+ 
+-  if (changed_flags & (CLUTTER_A11Y_KEYBOARD_ENABLED | CLUTTER_A11Y_BOUNCE_KEYS_ENABLED))
++  if (changed_flags & (META_A11Y_KEYBOARD_ENABLED | META_A11Y_BOUNCE_KEYS_ENABLED))
+     device->debounce_key = 0;
+ 
+-  if (changed_flags & (CLUTTER_A11Y_KEYBOARD_ENABLED | CLUTTER_A11Y_STICKY_KEYS_ENABLED))
++  if (changed_flags & (META_A11Y_KEYBOARD_ENABLED | META_A11Y_STICKY_KEYS_ENABLED))
+     {
+       device->stickykeys_depressed_mask = 0;
+       update_internal_xkb_state (device, 0, 0);
+     }
+ 
+-  if (changed_flags & CLUTTER_A11Y_KEYBOARD_ENABLED)
++  if (changed_flags & META_A11Y_KEYBOARD_ENABLED)
+     {
+       device->toggle_slowkeys_timer = 0;
+       device->shift_count = 0;
+       device->last_shift_time = 0;
+     }
+ 
+-  if (changed_flags & (CLUTTER_A11Y_KEYBOARD_ENABLED | CLUTTER_A11Y_MOUSE_KEYS_ENABLED))
++  if (changed_flags & (META_A11Y_KEYBOARD_ENABLED | META_A11Y_MOUSE_KEYS_ENABLED))
+     {
+       if (settings->controls &
+-          (CLUTTER_A11Y_KEYBOARD_ENABLED | CLUTTER_A11Y_MOUSE_KEYS_ENABLED))
++          (META_A11Y_KEYBOARD_ENABLED | META_A11Y_MOUSE_KEYS_ENABLED))
+         enable_mousekeys (device);
+       else
+         disable_mousekeys (device);
+@@ -1213,7 +1214,7 @@ meta_input_device_native_apply_kbd_a11y_settings (MetaInputDeviceNative  *device
+ void
+ meta_input_device_native_a11y_maybe_notify_toggle_keys (MetaInputDeviceNative *device)
+ {
+-  if (device->a11y_flags & CLUTTER_A11Y_TOGGLE_KEYS_ENABLED)
++  if (device->a11y_flags & META_A11Y_TOGGLE_KEYS_ENABLED)
+     meta_input_device_native_bell_notify (device);
+ }
+ 
+diff --git a/src/backends/native/meta-input-device-native.h b/src/backends/native/meta-input-device-native.h
+index da23b17..0586e93 100644
+--- a/src/backends/native/meta-input-device-native.h
++++ b/src/backends/native/meta-input-device-native.h
+@@ -29,6 +29,7 @@
+ #include <glib-object.h>
+ 
+ #include "backends/meta-input-device-private.h"
++#include "backends/meta-input-settings-private.h"
+ #include "backends/native/meta-seat-native.h"
+ #include "clutter/clutter-mutter.h"
+ 
+@@ -81,7 +82,7 @@ struct _MetaInputDeviceNative
+   float pointer_y;
+ 
+   /* Keyboard a11y */
+-  ClutterKeyboardA11yFlags a11y_flags;
++  MetaKeyboardA11yFlags a11y_flags;
+   GList *slow_keys_list;
+   guint debounce_timer;
+   uint16_t debounce_key;
+@@ -134,8 +135,8 @@ MetaInputDeviceMapping    meta_input_device_native_get_mapping_mode (ClutterInpu
+ void                      meta_input_device_native_set_mapping_mode (ClutterInputDevice     *device,
+                                                                      MetaInputDeviceMapping  mapping);
+ 
+-void                      meta_input_device_native_apply_kbd_a11y_settings (MetaInputDeviceNative  *device,
+-                                                                            ClutterKbdA11ySettings *settings);
++void                      meta_input_device_native_apply_kbd_a11y_settings (MetaInputDeviceNative *device,
++                                                                            MetaKbdA11ySettings   *settings);
+ 
+ void                      meta_input_device_native_a11y_maybe_notify_toggle_keys  (MetaInputDeviceNative *device_evdev);
+ 
+diff --git a/src/backends/native/meta-seat-native.c b/src/backends/native/meta-seat-native.c
+index 3f45df7..eefc67d 100644
+--- a/src/backends/native/meta-seat-native.c
++++ b/src/backends/native/meta-seat-native.c
+@@ -2683,18 +2683,6 @@ meta_seat_native_free_event_data (ClutterSeat  *seat,
+     meta_event_native_free (event_evdev);
+ }
+ 
+-static void
+-meta_seat_native_apply_kbd_a11y_settings (ClutterSeat            *seat,
+-                                          ClutterKbdA11ySettings *settings)
+-{
+-  ClutterInputDevice *device;
+-
+-  device = clutter_seat_get_keyboard (seat);
+-  if (device)
+-    meta_input_device_native_apply_kbd_a11y_settings (META_INPUT_DEVICE_NATIVE (device),
+-                                                      settings);
+-}
+-
+ static guint
+ bump_virtual_touch_slot_base (MetaSeatNative *seat_native)
+ {
+@@ -2858,7 +2846,6 @@ meta_seat_native_class_init (MetaSeatNativeClass *klass)
+   seat_class->get_keymap = meta_seat_native_get_keymap;
+   seat_class->copy_event_data = meta_seat_native_copy_event_data;
+   seat_class->free_event_data = meta_seat_native_free_event_data;
+-  seat_class->apply_kbd_a11y_settings = meta_seat_native_apply_kbd_a11y_settings;
+   seat_class->create_virtual_device = meta_seat_native_create_virtual_device;
+   seat_class->get_supported_virtual_device_types = meta_seat_native_get_supported_virtual_device_types;
+   seat_class->compress_motion = meta_seat_native_compress_motion;
+diff --git a/src/backends/x11/meta-backend-x11.c b/src/backends/x11/meta-backend-x11.c
+index 215b4f5..999a440 100644
+--- a/src/backends/x11/meta-backend-x11.c
++++ b/src/backends/x11/meta-backend-x11.c
+@@ -50,6 +50,7 @@
+ #include "backends/x11/meta-seat-x11.h"
+ #include "backends/x11/meta-stage-x11.h"
+ #include "backends/x11/meta-renderer-x11.h"
++#include "backends/x11/meta-xkb-a11y-x11.h"
+ #include "clutter/clutter.h"
+ #include "clutter/x11/clutter-x11.h"
+ #include "compositor/compositor-private.h"
+@@ -519,6 +520,17 @@ on_monitors_changed (MetaMonitorManager *manager,
+   priv->cached_current_logical_monitor = NULL;
+ }
+ 
++static void
++on_kbd_a11y_changed (MetaInputSettings   *input_settings,
++                     MetaKbdA11ySettings *a11y_settings,
++                     MetaBackend         *backend)
++{
++  ClutterBackend *clutter_backend = meta_backend_get_clutter_backend (backend);
++  ClutterSeat *seat = clutter_backend_get_default_seat (clutter_backend);
++
++  meta_seat_x11_apply_kbd_a11y_settings (seat, a11y_settings);
++}
++
+ static void
+ meta_backend_x11_post_init (MetaBackend *backend)
+ {
+@@ -527,6 +539,7 @@ meta_backend_x11_post_init (MetaBackend *backend)
+   MetaMonitorManager *monitor_manager;
+   ClutterBackend *clutter_backend;
+   ClutterSeat *seat;
++  MetaInputSettings *input_settings;
+   int major, minor;
+   gboolean has_xi = FALSE;
+ 
+@@ -584,6 +597,15 @@ meta_backend_x11_post_init (MetaBackend *backend)
+   seat = clutter_backend_get_default_seat (clutter_backend);
+   meta_seat_x11_notify_devices (META_SEAT_X11 (seat),
+                                 CLUTTER_STAGE (meta_backend_get_stage (backend)));
++
++  input_settings = meta_backend_get_input_settings (backend);
++
++  if (input_settings)
++    {
++      g_signal_connect_object (meta_backend_get_input_settings (backend),
++                               "kbd-a11y-changed",
++                               G_CALLBACK (on_kbd_a11y_changed), backend, 0);
++    }
+ }
+ 
+ static ClutterBackend *
+diff --git a/src/backends/x11/meta-seat-x11.c b/src/backends/x11/meta-seat-x11.c
+index ad0a86d..f4d7dc3 100644
+--- a/src/backends/x11/meta-seat-x11.c
++++ b/src/backends/x11/meta-seat-x11.c
+@@ -1333,13 +1333,15 @@ static void
+ on_keymap_state_change (MetaKeymapX11 *keymap_x11,
+                         gpointer       data)
+ {
+-  ClutterSeat *seat = CLUTTER_SEAT (data);
+-  ClutterKbdA11ySettings kbd_a11y_settings;
++  ClutterSeat *seat = data;
++  MetaInputSettings *input_settings;
++  MetaKbdA11ySettings kbd_a11y_settings;
+ 
+   /* On keymaps state change, just reapply the current settings, it'll
+    * take care of enabling/disabling mousekeys based on NumLock state.
+    */
+-  clutter_seat_get_kbd_a11y_settings (seat, &kbd_a11y_settings);
++  input_settings = meta_backend_get_input_settings (meta_get_backend ());
++  meta_input_settings_get_kbd_a11y_settings (input_settings, &kbd_a11y_settings);
+   meta_seat_x11_apply_kbd_a11y_settings (seat, &kbd_a11y_settings);
+ }
+ 
+@@ -1763,7 +1765,6 @@ meta_seat_x11_class_init (MetaSeatX11Class *klass)
+   seat_class->get_keymap = meta_seat_x11_get_keymap;
+   seat_class->copy_event_data = meta_seat_x11_copy_event_data;
+   seat_class->free_event_data = meta_seat_x11_free_event_data;
+-  seat_class->apply_kbd_a11y_settings = meta_seat_x11_apply_kbd_a11y_settings;
+   seat_class->create_virtual_device = meta_seat_x11_create_virtual_device;
+   seat_class->get_supported_virtual_device_types = meta_seat_x11_get_supported_virtual_device_types;
+   seat_class->warp_pointer = meta_seat_x11_warp_pointer;
+diff --git a/src/backends/x11/meta-xkb-a11y-x11.c b/src/backends/x11/meta-xkb-a11y-x11.c
+index 5deb6f3..024618b 100644
+--- a/src/backends/x11/meta-xkb-a11y-x11.c
++++ b/src/backends/x11/meta-xkb-a11y-x11.c
+@@ -78,40 +78,43 @@ static void
+ check_settings_changed (ClutterSeat *seat)
+ {
+   Display *xdisplay = clutter_x11_get_default_display ();
+-  ClutterKbdA11ySettings kbd_a11y_settings;
+-  ClutterKeyboardA11yFlags what_changed = 0;
++  MetaKbdA11ySettings kbd_a11y_settings;
++  MetaKeyboardA11yFlags what_changed = 0;
++  MetaInputSettings *input_settings;
+   XkbDescRec *desc;
+ 
+   desc = get_xkb_desc_rec (xdisplay);
+   if (!desc)
+     return;
+ 
+-  clutter_seat_get_kbd_a11y_settings (seat, &kbd_a11y_settings);
++  input_settings = meta_backend_get_input_settings (meta_get_backend ());
++  meta_input_settings_get_kbd_a11y_settings (input_settings,
++                                             &kbd_a11y_settings);
+ 
+   if (desc->ctrls->enabled_ctrls & XkbSlowKeysMask &&
+-      !(kbd_a11y_settings.controls & CLUTTER_A11Y_SLOW_KEYS_ENABLED))
++      !(kbd_a11y_settings.controls & META_A11Y_SLOW_KEYS_ENABLED))
+     {
+-      what_changed |= CLUTTER_A11Y_SLOW_KEYS_ENABLED;
+-      kbd_a11y_settings.controls |= CLUTTER_A11Y_SLOW_KEYS_ENABLED;
++      what_changed |= META_A11Y_SLOW_KEYS_ENABLED;
++      kbd_a11y_settings.controls |= META_A11Y_SLOW_KEYS_ENABLED;
+     }
+   else if (!(desc->ctrls->enabled_ctrls & XkbSlowKeysMask) &&
+-           kbd_a11y_settings.controls & CLUTTER_A11Y_SLOW_KEYS_ENABLED)
++           kbd_a11y_settings.controls & META_A11Y_SLOW_KEYS_ENABLED)
+     {
+-      what_changed |= CLUTTER_A11Y_SLOW_KEYS_ENABLED;
+-      kbd_a11y_settings.controls &= ~CLUTTER_A11Y_SLOW_KEYS_ENABLED;
++      what_changed |= META_A11Y_SLOW_KEYS_ENABLED;
++      kbd_a11y_settings.controls &= ~META_A11Y_SLOW_KEYS_ENABLED;
+     }
+ 
+   if (desc->ctrls->enabled_ctrls & XkbStickyKeysMask &&
+-      !(kbd_a11y_settings.controls & CLUTTER_A11Y_STICKY_KEYS_ENABLED))
++      !(kbd_a11y_settings.controls & META_A11Y_STICKY_KEYS_ENABLED))
+     {
+-      what_changed |= CLUTTER_A11Y_STICKY_KEYS_ENABLED;
+-      kbd_a11y_settings.controls |= CLUTTER_A11Y_STICKY_KEYS_ENABLED;
++      what_changed |= META_A11Y_STICKY_KEYS_ENABLED;
++      kbd_a11y_settings.controls |= META_A11Y_STICKY_KEYS_ENABLED;
+     }
+   else if (!(desc->ctrls->enabled_ctrls & XkbStickyKeysMask) &&
+-           kbd_a11y_settings.controls & CLUTTER_A11Y_STICKY_KEYS_ENABLED)
++           kbd_a11y_settings.controls & META_A11Y_STICKY_KEYS_ENABLED)
+     {
+-      what_changed |= CLUTTER_A11Y_STICKY_KEYS_ENABLED;
+-      kbd_a11y_settings.controls &= ~CLUTTER_A11Y_STICKY_KEYS_ENABLED;
++      what_changed |= META_A11Y_STICKY_KEYS_ENABLED;
++      kbd_a11y_settings.controls &= ~META_A11Y_STICKY_KEYS_ENABLED;
+     }
+ 
+   if (what_changed)
+@@ -182,10 +185,10 @@ set_value_mask (gboolean      flag,
+ }
+ 
+ static gboolean
+-set_xkb_ctrl (XkbDescRec               *desc,
+-              ClutterKeyboardA11yFlags settings,
+-              ClutterKeyboardA11yFlags flag,
+-              unsigned long            mask)
++set_xkb_ctrl (XkbDescRec            *desc,
++              MetaKeyboardA11yFlags  settings,
++              MetaKeyboardA11yFlags  flag,
++              unsigned long          mask)
+ {
+   gboolean result = (settings & flag) == flag;
+   desc->ctrls->enabled_ctrls = set_value_mask (result, desc->ctrls->enabled_ctrls, mask);
+@@ -194,8 +197,8 @@ set_xkb_ctrl (XkbDescRec               *desc,
+ }
+ 
+ void
+-meta_seat_x11_apply_kbd_a11y_settings (ClutterSeat            *seat,
+-                                       ClutterKbdA11ySettings *kbd_a11y_settings)
++meta_seat_x11_apply_kbd_a11y_settings (ClutterSeat         *seat,
++                                       MetaKbdA11ySettings *kbd_a11y_settings)
+ {
+   Display *xdisplay = clutter_x11_get_default_display ();
+   XkbDescRec *desc;
+@@ -206,13 +209,13 @@ meta_seat_x11_apply_kbd_a11y_settings (ClutterSeat            *seat,
+     return;
+ 
+   /* general */
+-  enable_accessX = kbd_a11y_settings->controls & CLUTTER_A11Y_KEYBOARD_ENABLED;
++  enable_accessX = kbd_a11y_settings->controls & META_A11Y_KEYBOARD_ENABLED;
+ 
+   desc->ctrls->enabled_ctrls = set_value_mask (enable_accessX,
+                                                desc->ctrls->enabled_ctrls,
+                                                XkbAccessXKeysMask);
+ 
+-  if (set_xkb_ctrl (desc, kbd_a11y_settings->controls, CLUTTER_A11Y_TIMEOUT_ENABLED,
++  if (set_xkb_ctrl (desc, kbd_a11y_settings->controls, META_A11Y_TIMEOUT_ENABLED,
+                     XkbAccessXTimeoutMask))
+     {
+       desc->ctrls->ax_timeout = kbd_a11y_settings->timeout_delay;
+@@ -226,17 +229,17 @@ meta_seat_x11_apply_kbd_a11y_settings (ClutterSeat            *seat,
+     }
+ 
+   desc->ctrls->ax_options =
+-    set_value_mask (kbd_a11y_settings->controls & CLUTTER_A11Y_FEATURE_STATE_CHANGE_BEEP,
++    set_value_mask (kbd_a11y_settings->controls & META_A11Y_FEATURE_STATE_CHANGE_BEEP,
+                     desc->ctrls->ax_options,
+                     XkbAccessXFeedbackMask | XkbAX_FeatureFBMask | XkbAX_SlowWarnFBMask);
+ 
+   /* bounce keys */
+   if (set_xkb_ctrl (desc, kbd_a11y_settings->controls,
+-                    CLUTTER_A11Y_BOUNCE_KEYS_ENABLED, XkbBounceKeysMask))
++                    META_A11Y_BOUNCE_KEYS_ENABLED, XkbBounceKeysMask))
+     {
+       desc->ctrls->debounce_delay = kbd_a11y_settings->debounce_delay;
+       desc->ctrls->ax_options =
+-        set_value_mask (kbd_a11y_settings->controls & CLUTTER_A11Y_BOUNCE_KEYS_BEEP_REJECT,
++        set_value_mask (kbd_a11y_settings->controls & META_A11Y_BOUNCE_KEYS_BEEP_REJECT,
+                         desc->ctrls->ax_options,
+                         XkbAccessXFeedbackMask | XkbAX_BKRejectFBMask);
+     }
+@@ -248,7 +251,7 @@ meta_seat_x11_apply_kbd_a11y_settings (ClutterSeat            *seat,
+       desc->ctrls->enabled_ctrls &= ~(XkbMouseKeysMask | XkbMouseKeysAccelMask);
+     }
+   else if (set_xkb_ctrl (desc, kbd_a11y_settings->controls,
+-                         CLUTTER_A11Y_MOUSE_KEYS_ENABLED, XkbMouseKeysMask | XkbMouseKeysAccelMask))
++                         META_A11Y_MOUSE_KEYS_ENABLED, XkbMouseKeysMask | XkbMouseKeysAccelMask))
+     {
+       int mk_max_speed;
+       int mk_accel_time;
+@@ -273,16 +276,16 @@ meta_seat_x11_apply_kbd_a11y_settings (ClutterSeat            *seat,
+ 
+   /* slow keys */
+   if (set_xkb_ctrl (desc, kbd_a11y_settings->controls,
+-                    CLUTTER_A11Y_SLOW_KEYS_ENABLED, XkbSlowKeysMask))
++                    META_A11Y_SLOW_KEYS_ENABLED, XkbSlowKeysMask))
+     {
+       desc->ctrls->ax_options =
+-        set_value_mask (kbd_a11y_settings->controls & CLUTTER_A11Y_SLOW_KEYS_BEEP_PRESS,
++        set_value_mask (kbd_a11y_settings->controls & META_A11Y_SLOW_KEYS_BEEP_PRESS,
+                         desc->ctrls->ax_options, XkbAccessXFeedbackMask | XkbAX_SKPressFBMask);
+       desc->ctrls->ax_options =
+-        set_value_mask (kbd_a11y_settings->controls & CLUTTER_A11Y_SLOW_KEYS_BEEP_ACCEPT,
++        set_value_mask (kbd_a11y_settings->controls & META_A11Y_SLOW_KEYS_BEEP_ACCEPT,
+                         desc->ctrls->ax_options, XkbAccessXFeedbackMask | XkbAX_SKAcceptFBMask);
+       desc->ctrls->ax_options =
+-        set_value_mask (kbd_a11y_settings->controls & CLUTTER_A11Y_SLOW_KEYS_BEEP_REJECT,
++        set_value_mask (kbd_a11y_settings->controls & META_A11Y_SLOW_KEYS_BEEP_REJECT,
+                         desc->ctrls->ax_options, XkbAccessXFeedbackMask | XkbAX_SKRejectFBMask);
+       desc->ctrls->slow_keys_delay = kbd_a11y_settings->slowkeys_delay;
+       /* anything larger than 500 seems to loose all keyboard input */
+@@ -292,20 +295,20 @@ meta_seat_x11_apply_kbd_a11y_settings (ClutterSeat            *seat,
+ 
+   /* sticky keys */
+   if (set_xkb_ctrl (desc, kbd_a11y_settings->controls,
+-                    CLUTTER_A11Y_STICKY_KEYS_ENABLED, XkbStickyKeysMask))
++                    META_A11Y_STICKY_KEYS_ENABLED, XkbStickyKeysMask))
+   {
+     desc->ctrls->ax_options |= XkbAX_LatchToLockMask;
+     desc->ctrls->ax_options =
+-      set_value_mask (kbd_a11y_settings->controls & CLUTTER_A11Y_STICKY_KEYS_TWO_KEY_OFF,
++      set_value_mask (kbd_a11y_settings->controls & META_A11Y_STICKY_KEYS_TWO_KEY_OFF,
+                       desc->ctrls->ax_options, XkbAccessXFeedbackMask | XkbAX_TwoKeysMask);
+     desc->ctrls->ax_options =
+-      set_value_mask (kbd_a11y_settings->controls &  CLUTTER_A11Y_STICKY_KEYS_BEEP,
++      set_value_mask (kbd_a11y_settings->controls &  META_A11Y_STICKY_KEYS_BEEP,
+                       desc->ctrls->ax_options, XkbAccessXFeedbackMask | XkbAX_StickyKeysFBMask);
+   }
+ 
+   /* toggle keys */
+   desc->ctrls->ax_options =
+-    set_value_mask (kbd_a11y_settings->controls & CLUTTER_A11Y_TOGGLE_KEYS_ENABLED,
++    set_value_mask (kbd_a11y_settings->controls & META_A11Y_TOGGLE_KEYS_ENABLED,
+                     desc->ctrls->ax_options, XkbAccessXFeedbackMask | XkbAX_IndicatorFBMask);
+ 
+   set_xkb_desc_rec (xdisplay, desc);
+diff --git a/src/backends/x11/meta-xkb-a11y-x11.h b/src/backends/x11/meta-xkb-a11y-x11.h
+index 7f11bf7..58a4e17 100644
+--- a/src/backends/x11/meta-xkb-a11y-x11.h
++++ b/src/backends/x11/meta-xkb-a11y-x11.h
+@@ -26,11 +26,12 @@
+ 
+ #include <X11/Xlib.h>
+ 
++#include "backends/meta-input-settings-private.h"
+ #include "clutter/clutter.h"
+ 
+ void
+-meta_seat_x11_apply_kbd_a11y_settings (ClutterSeat            *seat,
+-                                       ClutterKbdA11ySettings *kbd_a11y_settings);
++meta_seat_x11_apply_kbd_a11y_settings (ClutterSeat         *seat,
++                                       MetaKbdA11ySettings *kbd_a11y_settings);
+ 
+ gboolean
+ meta_seat_x11_a11y_init               (ClutterSeat            *seat);

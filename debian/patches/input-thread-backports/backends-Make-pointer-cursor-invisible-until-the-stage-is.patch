@@ -1,0 +1,54 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Wed, 28 Oct 2020 19:41:40 +0100
+Subject: backends: Make pointer cursor invisible until the stage is shown
+
+We are able to show the cursor before that, it doesn't mean we should.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1403>
+---
+ src/backends/meta-backend.c        | 11 +++++++++++
+ src/backends/meta-cursor-tracker.c |  2 +-
+ 2 files changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/src/backends/meta-backend.c b/src/backends/meta-backend.c
+index b748b71..dd8e847 100644
+--- a/src/backends/meta-backend.c
++++ b/src/backends/meta-backend.c
+@@ -588,6 +588,14 @@ input_mapper_device_aspect_ratio_cb (MetaInputMapper    *mapper,
+   meta_input_settings_set_device_aspect_ratio (input_settings, device, aspect_ratio);
+ }
+ 
++static void
++on_stage_shown_cb (MetaBackend *backend)
++{
++  MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
++
++  meta_cursor_tracker_set_pointer_visible (priv->cursor_tracker, TRUE);
++}
++
+ static void
+ meta_backend_real_post_init (MetaBackend *backend)
+ {
+@@ -597,6 +605,9 @@ meta_backend_real_post_init (MetaBackend *backend)
+   priv->stage = meta_stage_new (backend);
+   clutter_actor_realize (priv->stage);
+   META_BACKEND_GET_CLASS (backend)->select_stage_events (backend);
++  g_signal_connect_object (priv->stage, "show",
++                           G_CALLBACK (on_stage_shown_cb), backend,
++                           G_CONNECT_SWAPPED);
+ 
+   meta_monitor_manager_setup (priv->monitor_manager);
+ 
+diff --git a/src/backends/meta-cursor-tracker.c b/src/backends/meta-cursor-tracker.c
+index 6b3d228..d2bd226 100644
+--- a/src/backends/meta-cursor-tracker.c
++++ b/src/backends/meta-cursor-tracker.c
+@@ -196,7 +196,7 @@ meta_cursor_tracker_init (MetaCursorTracker *tracker)
+   MetaCursorTrackerPrivate *priv =
+     meta_cursor_tracker_get_instance_private (tracker);
+ 
+-  priv->is_showing = TRUE;
++  priv->is_showing = FALSE;
+   priv->x = -1.0;
+   priv->y = -1.0;
+ }
