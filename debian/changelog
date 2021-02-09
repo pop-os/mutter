@@ -1,3 +1,11 @@
+mutter (3.38.3-3ubuntu1) UNRELEASED; urgency=medium
+
+  * debian/patches: Backport wayland input thread support (LP: #1690719)
+  * debian/libmutter-7-0.symbols: Sync as per private symbols changes
+  * debian/control: Set breaks on previous gnome-shell versions
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 09 Feb 2021 05:30:39 +0100
+
 mutter (3.38.3-3) unstable; urgency=medium
 
   * Team upload
