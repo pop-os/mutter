@@ -1,3 +1,9 @@
+mutter (3.38.3-2ubuntu0.20.10.1pop1) groovy; urgency=medium
+
+  * Upstream update 
+
+ -- Michael Aaron Murphy <michael@system76.com>  Mon, 22 Feb 2021 10:50:10 -0700
+
 mutter (3.38.3-2ubuntu0.20.10.1) groovy; urgency=medium
 
   * Merge with debian, containing new upstream release (LP: #1915025)
