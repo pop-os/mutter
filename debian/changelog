@@ -1,3 +1,9 @@
+mutter (3.36.7+git20201123-0.20.04.1pop1) focal; urgency=medium
+
+  * Upstream update
+
+ -- Michael Aaron Murphy <mmstick@pop-os.localdomain>  Mon, 22 Feb 2021 10:36:44 -0700
+
 mutter (3.36.7+git20201123-0.20.04.1) focal; urgency=medium
 
   * New upstream release and git snapshot (LP: #1903230)
