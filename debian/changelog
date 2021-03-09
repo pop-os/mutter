@@ -1,4 +1,6 @@
-mutter (3.38.3-4) UNRELEASED; urgency=medium
+mutter (3.38.3-4) unstable; urgency=medium
+
+  * Team upload
 
   [ Marco Trevisan (Treviño) ]
   * debian/patches: cherry-pick more upstream gnome-3-38 fixes
@@ -15,7 +17,7 @@ mutter (3.38.3-4) UNRELEASED; urgency=medium
       in X11 applications not always being redrawn when they should be
     - Fix a crash when clicking below titlebar with broken GTK themes
 
- -- Simon McVittie <smcv@debian.org>  Tue, 09 Mar 2021 20:21:49 +0000
+ -- Simon McVittie <smcv@debian.org>  Tue, 09 Mar 2021 20:34:42 +0000
 
 mutter (3.38.3-3) unstable; urgency=medium
 
