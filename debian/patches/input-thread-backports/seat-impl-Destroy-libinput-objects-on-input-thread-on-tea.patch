@@ -1,0 +1,120 @@
+From: =?utf-8?q?Jonas_=C3=85dahl?= <jadahl@gmail.com>
+Date: Thu, 7 Jan 2021 08:31:22 +0100
+Subject: seat-impl: Destroy libinput objects on input thread on tear down
+
+We didn't tear down the libinput objects in the right thread when
+exiting, but did so after the input thread exited.
+
+We also tried to destroy the libinput devices after the libinput context
+was destroyed, which isn't allowed.
+
+Fix these two issues by tearing down the libinput objects in a input
+thread task that when done exits the input thread. This effectively
+"flushes" the input thread tasks while destroying the libinput objects
+just before the thread exits.
+
+While it might fine to tear down libinput objects in an arbitrary (main
+in this case) thread while making sure nothing pokes at it in parallel
+(e.g. the input thread is gone), libinput is by definition single
+threaded, and could theoretically make assumptions about this, and we
+shouldn't cause any possible surprises here, so make sure to destroy it
+all in the right thread.
+
+This fixes an abort() on exit caused by an assert about invalid object
+destruction in libinput.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1663>
+---
+ src/backends/native/meta-input-device-native.c |  3 +-
+ src/backends/native/meta-seat-impl.c           | 43 +++++++++++++++-----------
+ 2 files changed, 26 insertions(+), 20 deletions(-)
+
+diff --git a/src/backends/native/meta-input-device-native.c b/src/backends/native/meta-input-device-native.c
+index 04b34c9..fb77a07 100644
+--- a/src/backends/native/meta-input-device-native.c
++++ b/src/backends/native/meta-input-device-native.c
+@@ -69,8 +69,7 @@ meta_input_device_native_finalize (GObject *object)
+ {
+   MetaInputDeviceNative *device_evdev = META_INPUT_DEVICE_NATIVE (object);
+ 
+-  if (device_evdev->libinput_device)
+-    libinput_device_unref (device_evdev->libinput_device);
++  g_warn_if_fail (!device_evdev->libinput_device);
+ 
+   clear_slow_keys (device_evdev);
+   stop_bounce_keys (device_evdev);
+diff --git a/src/backends/native/meta-seat-impl.c b/src/backends/native/meta-seat-impl.c
+index e27e9a1..c1b35c4 100644
+--- a/src/backends/native/meta-seat-impl.c
++++ b/src/backends/native/meta-seat-impl.c
+@@ -2806,18 +2806,23 @@ meta_seat_impl_get_property (GObject    *object,
+     }
+ }
+ 
+-static void
+-meta_seat_impl_dispose (GObject *object)
++static gboolean
++destroy_in_impl (GTask *task)
+ {
+-  MetaSeatImpl *seat_impl = META_SEAT_IMPL (object);
++  MetaSeatImpl *seat_impl = g_task_get_task_data (task);
+ 
+-  if (seat_impl->libinput)
+-    {
+-      libinput_unref (seat_impl->libinput);
+-      seat_impl->libinput = NULL;
+-    }
++  g_slist_foreach (seat_impl->devices,
++                   (GFunc) meta_input_device_native_detach_libinput_in_impl,
++                   NULL);
++  g_slist_free_full (seat_impl->devices, g_object_unref);
++  seat_impl->devices = NULL;
+ 
+-  G_OBJECT_CLASS (meta_seat_impl_parent_class)->dispose (object);
++  g_clear_pointer (&seat_impl->libinput, libinput_unref);
++
++  g_main_loop_quit (seat_impl->input_loop);
++  g_task_return_boolean (task, TRUE);
++
++  return G_SOURCE_REMOVE;
+ }
+ 
+ static void
+@@ -2825,18 +2830,21 @@ meta_seat_impl_finalize (GObject *object)
+ {
+   MetaSeatImpl *seat_impl = META_SEAT_IMPL (object);
+   gboolean numlock_active;
+-  GSList *iter;
+ 
+-  g_main_loop_quit (seat_impl->input_loop);
+-  g_thread_join (seat_impl->input_thread);
+-
+-  for (iter = seat_impl->devices; iter; iter = g_slist_next (iter))
++  if (seat_impl->libinput)
+     {
+-      ClutterInputDevice *device = iter->data;
++      GTask *task;
+ 
+-      g_object_unref (device);
++      task = g_task_new (seat_impl, NULL, NULL, NULL);
++      g_task_set_task_data (task, seat_impl, NULL);
++      meta_seat_impl_run_input_task (seat_impl, task,
++                                     (GSourceFunc) destroy_in_impl);
++      g_object_unref (task);
++
++      g_thread_join (seat_impl->input_thread);
++      g_assert (!seat_impl->libinput);
+     }
+-  g_slist_free (seat_impl->devices);
++
+   g_clear_pointer (&seat_impl->tools, g_hash_table_unref);
+ 
+   if (seat_impl->touch_states)
+@@ -2996,7 +3004,6 @@ meta_seat_impl_class_init (MetaSeatImplClass *klass)
+   object_class->constructed = meta_seat_impl_constructed;
+   object_class->set_property = meta_seat_impl_set_property;
+   object_class->get_property = meta_seat_impl_get_property;
+-  object_class->dispose = meta_seat_impl_dispose;
+   object_class->finalize = meta_seat_impl_finalize;
+ 
+   props[PROP_SEAT] =

@@ -1,0 +1,47 @@
+From: Pascal Nowack <Pascal.Nowack@gmx.de>
+Date: Wed, 17 Feb 2021 21:33:21 +0100
+Subject: remote-desktop: Document NotifyPointerAxis() more explicit
+
+Currently, the documentation for NotifyPointerAxis() just mentions that
+a smooth scroll event is emitted.
+However, this is not entirely correct. For each NotifyPointerAxis(),
+mutter emits an emulated discrete scrolling event based on the
+submitted accumulated smooth scrolling deltas.
+Additionally, it doesn't mention how the motion deltas need to be
+interpreted.
+
+So, document the NotifyPointerAxis() notification better by mentioning
+the emulation of discrete scroll events, how these discrete scroll
+events are calculated and how the motion deltas need to be interpreted.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1727>
+---
+ src/org.gnome.Mutter.RemoteDesktop.xml | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/src/org.gnome.Mutter.RemoteDesktop.xml b/src/org.gnome.Mutter.RemoteDesktop.xml
+index a07aefe..a90bd12 100644
+--- a/src/org.gnome.Mutter.RemoteDesktop.xml
++++ b/src/org.gnome.Mutter.RemoteDesktop.xml
+@@ -111,7 +111,20 @@
+     <!--
+ 	NotifyPointerAxis:
+ 
+-	A smooth pointer axis event notification
++	A smooth pointer axis event notification. Relative motion deltas are to be
++	interpreted as pixel movement of a standardized mouse.
++
++	Additionally to the smooth pointer axis event notification, an emulated
++	discrete pointer axis event notification is emitted based on the submitted
++	accumulated smooth scrolling steps.
++	The base for these emulated discrete pointer axis event is the discrete step
++	with the value 10.0.
++	This means that for a delta dx (or dy) with the value 10.0 one emulated
++	discrete scrolling event is emitted.
++	For a high resolution smooth pointer axis event, a smaller value is submitted
++	for each scrolling step.
++	This means: For a double resolution mouse wheel one emulated discrete event
++	is emitted for 2 smooth pointer axis events with each having the value 5.0.
+ 
+ 	Possible @flags:
+ 	  1: finish - scroll motion was finished (e.g. fingers lifted)

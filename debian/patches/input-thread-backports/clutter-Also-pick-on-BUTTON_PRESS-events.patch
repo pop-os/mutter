@@ -1,0 +1,40 @@
+From: =?utf-8?q?Jonas_Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Mon, 1 Mar 2021 15:51:51 +0100
+Subject: clutter: Also pick on BUTTON_PRESS events
+
+In an x11 session, we don't receive motion events from X when the
+pointer is above a window. Since commit 734a1859 we only do picking on
+motion events though, which means when clicking the mouse to focus a
+window, we don't repick and might still think the pointer is hovering
+above another window or actor, ending up not focussing the window.
+
+Fix this by always repicking on BUTTON_PRESS events. While this is not
+necessary in the wayland session, button presses happen rarely compared
+to motion events, so it's not a performance regression to do it in
+Wayland sessions, too.
+
+Fixes https://gitlab.gnome.org/GNOME/mutter/-/issues/1660
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1752>
+---
+ clutter/clutter/clutter-main.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/clutter/clutter/clutter-main.c b/clutter/clutter/clutter-main.c
+index 48d3974..c4a6e83 100644
+--- a/clutter/clutter/clutter-main.c
++++ b/clutter/clutter/clutter-main.c
+@@ -1900,7 +1900,12 @@ _clutter_process_event_details (ClutterActor        *stage,
+                   break;
+                 }
+ 
+-              if (event->type == CLUTTER_MOTION)
++              /* We need to repick on both motion and button press events, the
++               * latter is only needed for X11 (there the device actor might be
++               * stale because we don't always receive motion events).
++               */
++              if (event->type == CLUTTER_BUTTON_PRESS ||
++                  event->type == CLUTTER_MOTION)
+                 {
+                   event->any.source =
+                     update_device_for_event (CLUTTER_STAGE (stage), event, TRUE);
