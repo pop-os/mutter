@@ -198,3 +198,5 @@ input-thread-backports/backends-native-Disable-touch-mode-with-pointer-presence.
 input-thread-backports/clutter-Use-event-source-directly-for-debug-message.patch
 input-thread-backports/clutter-Only-pick-on-motion-or-touch-update-events.patch
 input-thread-backports/clutter-Also-pick-on-TOUCH_BEGIN-events.patch
+input-thread-backports/backends-x11-Use-XkbBuildCoreState-the-right-way-around.patch
+input-thread-backports/backends-x11-Iterate-button-modifiers-all-the-way.patch
