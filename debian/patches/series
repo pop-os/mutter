@@ -230,3 +230,4 @@ input-thread-backports/backends-x11-Don-t-try-to-read-more-button-states-than-th
 input-thread-backports/backends-x11-Free-button-state-mask-allocated-by-XIQueryP.patch
 input-thread-backports/backends-x11-Unref-keymap-on-finalize.patch
 input-thread-backports/backends-x11-Don-t-leak-XRRGetPanning-result.patch
+input-thread-backports/clutter-Use-G_PARAM_EXPLICIT_NOTIFY-for-actor-and-stage-p.patch
