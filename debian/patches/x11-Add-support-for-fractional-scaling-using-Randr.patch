@@ -3445,7 +3445,7 @@ index b7d18a0..ef0a88a 100644
    output_info_init_modes (output_info, gpu, xrandr_output);
    output_info_init_crtcs (output_info, gpu, xrandr_output);
 diff --git a/src/compositor/meta-compositor-x11.c b/src/compositor/meta-compositor-x11.c
-index e7da103..32b05b4 100644
+index 339ef03..7b782a6 100644
 --- a/src/compositor/meta-compositor-x11.c
 +++ b/src/compositor/meta-compositor-x11.c
 @@ -31,6 +31,7 @@
@@ -3456,7 +3456,7 @@ index e7da103..32b05b4 100644
  #include "x11/meta-x11-display-private.h"
  
  struct _MetaCompositorX11
-@@ -49,6 +50,8 @@ struct _MetaCompositorX11
+@@ -50,6 +51,8 @@ struct _MetaCompositorX11
    gboolean xserver_uses_monotonic_clock;
    int64_t xserver_time_query_time_us;
    int64_t xserver_time_offset_us;
@@ -3465,7 +3465,7 @@ index e7da103..32b05b4 100644
  };
  
  G_DEFINE_TYPE (MetaCompositorX11, meta_compositor_x11, META_TYPE_COMPOSITOR)
-@@ -266,20 +269,91 @@ shape_cow_for_window (MetaCompositorX11 *compositor_x11,
+@@ -267,20 +270,91 @@ shape_cow_for_window (MetaCompositorX11 *compositor_x11,
      }
  }
  
@@ -3558,7 +3558,7 @@ index e7da103..32b05b4 100644
        window_actor = meta_window_actor_from_window (prev_unredirected_window);
        window_actor_x11 = META_WINDOW_ACTOR_X11 (window_actor);
        meta_window_actor_x11_set_unredirected (window_actor_x11, FALSE);
-@@ -293,6 +367,17 @@ set_unredirected_window (MetaCompositorX11 *compositor_x11,
+@@ -294,6 +368,17 @@ set_unredirected_window (MetaCompositorX11 *compositor_x11,
        MetaWindowActor *window_actor;
        MetaWindowActorX11 *window_actor_x11;
  
@@ -3576,7 +3576,7 @@ index e7da103..32b05b4 100644
        window_actor = meta_window_actor_from_window (window);
        window_actor_x11 = META_WINDOW_ACTOR_X11 (window_actor);
        meta_window_actor_x11_set_unredirected (window_actor_x11, TRUE);
-@@ -304,21 +389,11 @@ maybe_unredirect_top_window (MetaCompositorX11 *compositor_x11)
+@@ -305,21 +390,11 @@ maybe_unredirect_top_window (MetaCompositorX11 *compositor_x11)
  {
    MetaCompositor *compositor = META_COMPOSITOR (compositor_x11);
    MetaWindow *window_to_unredirect = NULL;
