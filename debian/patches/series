@@ -220,3 +220,6 @@ input-thread-backports/seat-native-Explicitly-destroy-MetaSeatImpl.patch
 input-thread-backports/backend-Tear-down-in-dispose-instead-of-finalize.patch
 input-thread-backports/backend-native-Destroy-logind-helper-after-seat.patch
 input-thread-backports/x11-cm-backend-x11-cm-Pass-the-seat-to-the-input-settings.patch
+input-thread-backports/meta-seat-x11-fix-event-handling-for-x11-backend.patch
+input-thread-backports/backends-x11-Add-dummy-input-settings-x11-nested-implemen.patch
+input-thread-backports/clutter-Ensure-we-always-call-handle_event_post-for-proce.patch
