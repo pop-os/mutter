@@ -1,4 +1,4 @@
-mutter (3.38.4-1ubuntu1) UNRELEASED; urgency=medium
+mutter (3.38.4-1ubuntu1) hirsute; urgency=medium
 
   * Merge with debian, containing new upstream release.
   * debian/tests: Adapt autopkgtest name and linked library to current soname
@@ -19,7 +19,7 @@ mutter (3.38.4-1ubuntu1) UNRELEASED; urgency=medium
     - debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
       + X11: Add support for fractional scaling using Randr
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 26 Mar 2021 05:36:23 +0100
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 26 Mar 2021 07:17:54 +0100
 
 mutter (3.38.4-1) unstable; urgency=medium
 
