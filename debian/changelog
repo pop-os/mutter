@@ -1,3 +1,26 @@
+mutter (3.38.4-1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge with debian, containing new upstream release.
+  * debian/tests: Adapt autopkgtest name and linked library to current soname
+  * debian/tests/control: Update references to libmutter-7-dev
+  * debian/patches: Remove Input Thread backport patches.
+    It has been fun, but we decided to revert this, so here it is.
+    (LP: #1918874, LP: #1919310)
+  * debian/control: Set breaks on gnome-shell 3.38.4.
+    That's the first version on which we'll remove the input thread patches
+  * debian/libmutter-7-0.symbols: Revert symbol changes due to input thread
+  * debian/patches: Add support for ABFR2101010 in v3d used by Raspberry Pi 4
+    (LP: #1896171)
+  * debian/patches: Handle NVIDIA's zero presentation times (LP: #1880086)
+  * debian/patches: Properly handle configuration events on windows
+    (LP: #191793)
+  * Remaining changes with debian:
+    - debian/gbp.conf: update upstream branch to point to ubuntu/master
+    - debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+      + X11: Add support for fractional scaling using Randr
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 26 Mar 2021 05:36:23 +0100
+
 mutter (3.38.4-1) unstable; urgency=medium
 
   * Team upload
