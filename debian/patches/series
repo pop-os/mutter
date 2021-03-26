@@ -4,3 +4,4 @@ meson-add-back-default_driver-option.patch
 debian/synaptics-support.patch
 debian/tests-Tag-unstable-tests-as-flaky.patch
 x11-Add-support-for-fractional-scaling-using-Randr.patch
+wayland-dma-buf-Add-support-for-DRM_FORMAT_ABGR2101010.patch
