@@ -21,6 +21,7 @@ libmutter-7.so.0 libmutter-7-0 #MINVER#
  meta_backend_is_rendering_hardware_accelerated@Base 3.35.92
  meta_backend_lock_layout_group@Base 3.28.2
  meta_backend_set_keymap@Base 3.28.2
+ meta_backend_set_numlock@Base 3.28.2
  meta_backend_x11_nested_get_type@Base 3.28.2
  meta_background_actor_get_type@Base 3.28.2
  meta_background_actor_new@Base 3.28.2
@@ -746,6 +747,23 @@ libmutter-clutter-7.so.0 libmutter-7-0 #MINVER#
  _clutter_event_set_platform_data@Base 3.33.92
  _clutter_event_set_pointer_emulated@Base 3.33.92
  _clutter_event_set_state_full@Base 3.33.92
+ _clutter_input_device_add_axis@Base 3.33.92
+ _clutter_input_device_add_event_sequence@Base 3.33.92
+ _clutter_input_device_add_physical_device@Base 3.37.92
+ _clutter_input_device_add_scroll_info@Base 3.33.92
+ _clutter_input_device_get_scroll_delta@Base 3.33.92
+ _clutter_input_device_get_stage@Base 3.33.92
+ _clutter_input_device_remove_event_sequence@Base 3.33.92
+ _clutter_input_device_remove_physical_device@Base 3.37.92
+ _clutter_input_device_reset_axes@Base 3.33.92
+ _clutter_input_device_reset_scroll_info@Base 3.33.92
+ _clutter_input_device_set_associated_device@Base 3.33.92
+ _clutter_input_device_set_coords@Base 3.33.92
+ _clutter_input_device_set_n_keys@Base 3.33.92
+ _clutter_input_device_set_stage@Base 3.33.92
+ _clutter_input_device_set_state@Base 3.33.92
+ _clutter_input_device_set_time@Base 3.33.92
+ _clutter_input_device_translate_axis@Base 3.33.92
  _clutter_input_pointer_a11y_add_device@Base 3.33.92
  _clutter_input_pointer_a11y_on_button_event@Base 3.33.92
  _clutter_input_pointer_a11y_on_motion_event@Base 3.33.92
@@ -755,9 +773,12 @@ libmutter-clutter-7.so.0 libmutter-7-0 #MINVER#
  _clutter_process_event@Base 3.33.92
  _clutter_set_sync_to_vblank@Base 3.33.92
  _clutter_stage_cogl_get_type@Base 3.29.4
+ _clutter_stage_get_state@Base 3.33.92
  _clutter_stage_get_window@Base 3.33.92
+ _clutter_stage_is_activated@Base 3.33.92
  _clutter_stage_queue_event@Base 3.33.92
  _clutter_stage_set_window@Base 3.33.92
+ _clutter_stage_update_state@Base 3.33.92
  _clutter_stage_window_get_geometry@Base 3.33.92
  cally_accessibility_init@Base 3.29.4
  cally_actor_add_action@Base 3.29.4
@@ -1216,10 +1237,10 @@ libmutter-clutter-7.so.0 libmutter-7-0 #MINVER#
  clutter_event_get_click_count@Base 3.29.4
  clutter_event_get_coords@Base 3.29.4
  clutter_event_get_device@Base 3.29.4
+ clutter_event_get_device_id@Base 3.29.4
  clutter_event_get_device_tool@Base 3.29.4
  clutter_event_get_device_type@Base 3.29.4
  clutter_event_get_distance@Base 3.29.4
- clutter_event_get_event_code@Base 3.38.3-3ubuntu1
  clutter_event_get_event_sequence@Base 3.29.4
  clutter_event_get_flags@Base 3.29.4
  clutter_event_get_gesture_motion_delta@Base 3.29.4
@@ -1233,7 +1254,6 @@ libmutter-clutter-7.so.0 libmutter-7-0 #MINVER#
  clutter_event_get_pad_event_details@Base 3.29.4
  clutter_event_get_position@Base 3.29.4
  clutter_event_get_related@Base 3.29.4
- clutter_event_get_relative_motion@Base 3.38.3-3ubuntu1
  clutter_event_get_scroll_delta@Base 3.29.4
  clutter_event_get_scroll_direction@Base 3.29.4
  clutter_event_get_scroll_finish_flags@Base 3.31.90
@@ -1244,16 +1264,15 @@ libmutter-clutter-7.so.0 libmutter-7-0 #MINVER#
  clutter_event_get_state@Base 3.29.4
  clutter_event_get_state_full@Base 3.29.4
  clutter_event_get_time@Base 3.29.4
- clutter_event_get_time_us@Base 3.38.3-3ubuntu1
  clutter_event_get_touchpad_gesture_finger_count@Base 3.29.4
  clutter_event_get_type@Base 3.29.4
  clutter_event_has_control_modifier@Base 3.29.4
  clutter_event_has_shift_modifier@Base 3.29.4
  clutter_event_is_pointer_emulated@Base 3.29.4
  clutter_event_new@Base 3.29.4
+ clutter_event_peek@Base 3.29.4
  clutter_event_put@Base 3.29.4
  clutter_event_remove_filter@Base 3.29.4
- clutter_event_sequence_get_slot@Base 3.38.3-3ubuntu1
  clutter_event_sequence_get_type@Base 3.29.4
  clutter_event_set_button@Base 3.29.4
  clutter_event_set_coords@Base 3.29.4
@@ -1368,23 +1387,35 @@ libmutter-clutter-7.so.0 libmutter-7-0 #MINVER#
  clutter_init_error_get_type@Base 3.29.4
  clutter_init_error_quark@Base 3.29.4
  clutter_init_with_args@Base 3.29.4
- clutter_input_axis_flags_get_type@Base 3.38.3-3ubuntu1
  clutter_input_axis_get_type@Base 3.29.4
  clutter_input_content_hint_flags_get_type@Base 3.29.4
  clutter_input_content_purpose_get_type@Base 3.29.4
+ clutter_input_device_add_tool@Base 3.33.92
+ clutter_input_device_get_actor@Base 3.37.91
+ clutter_input_device_get_associated_device@Base 3.29.4
+ clutter_input_device_get_axis@Base 3.29.4
+ clutter_input_device_get_axis_value@Base 3.29.4
+ clutter_input_device_get_coords@Base 3.29.4
+ clutter_input_device_get_device_id@Base 3.29.4
  clutter_input_device_get_device_mode@Base 3.29.4
  clutter_input_device_get_device_name@Base 3.29.4
  clutter_input_device_get_device_node@Base 3.29.4
  clutter_input_device_get_device_type@Base 3.29.4
+ clutter_input_device_get_enabled@Base 3.29.4
  clutter_input_device_get_grabbed_actor@Base 3.29.4
  clutter_input_device_get_group_n_modes@Base 3.29.4
  clutter_input_device_get_has_cursor@Base 3.29.4
+ clutter_input_device_get_key@Base 3.29.4
+ clutter_input_device_get_mapping_mode@Base 3.29.4
  clutter_input_device_get_mode_switch_button_group@Base 3.29.4
- clutter_input_device_get_n_buttons@Base 3.38.3-3ubuntu1
+ clutter_input_device_get_modifier_state@Base 3.29.4
+ clutter_input_device_get_n_axes@Base 3.29.4
+ clutter_input_device_get_n_keys@Base 3.29.4
  clutter_input_device_get_n_mode_groups@Base 3.29.4
  clutter_input_device_get_n_rings@Base 3.29.4
  clutter_input_device_get_n_strips@Base 3.29.4
- clutter_input_device_get_pad_feature_group@Base 3.38.3-3ubuntu1
+ clutter_input_device_get_physical_devices@Base 3.37.92
+ clutter_input_device_get_pointer_stage@Base 3.29.4
  clutter_input_device_get_product_id@Base 3.29.4
  clutter_input_device_get_seat@Base 3.35.90
  clutter_input_device_get_type@Base 3.29.4
@@ -1392,12 +1423,16 @@ libmutter-clutter-7.so.0 libmutter-7-0 #MINVER#
  clutter_input_device_grab@Base 3.29.4
  clutter_input_device_is_grouped@Base 3.29.4
  clutter_input_device_is_mode_switch_button@Base 3.29.4
- clutter_input_device_pad_feature_get_type@Base 3.38.3-3ubuntu1
+ clutter_input_device_keycode_to_evdev@Base 3.29.4
+ clutter_input_device_lookup_tool@Base 3.33.92
+ clutter_input_device_mapping_get_type@Base 3.29.4
  clutter_input_device_pad_source_get_type@Base 3.29.4
  clutter_input_device_sequence_get_grabbed_actor@Base 3.29.4
  clutter_input_device_sequence_grab@Base 3.29.4
  clutter_input_device_sequence_ungrab@Base 3.29.4
- clutter_input_device_tool_get_axes@Base 3.38.3-3ubuntu1
+ clutter_input_device_set_enabled@Base 3.29.4
+ clutter_input_device_set_key@Base 3.29.4
+ clutter_input_device_set_mapping_mode@Base 3.29.4
  clutter_input_device_tool_get_id@Base 3.29.4
  clutter_input_device_tool_get_serial@Base 3.29.4
  clutter_input_device_tool_get_tool_type@Base 3.29.4
@@ -1405,6 +1440,9 @@ libmutter-clutter-7.so.0 libmutter-7-0 #MINVER#
  clutter_input_device_tool_type_get_type@Base 3.29.4
  clutter_input_device_type_get_type@Base 3.29.4
  clutter_input_device_ungrab@Base 3.29.4
+ clutter_input_device_update@Base 3.35.90
+ clutter_input_device_update_from_event@Base 3.29.4
+ clutter_input_device_update_from_tool@Base 3.33.92
  clutter_input_focus_filter_event@Base 3.37.92
  clutter_input_focus_get_type@Base 3.29.4
  clutter_input_focus_is_focused@Base 3.29.4
@@ -1449,6 +1487,7 @@ libmutter-clutter-7.so.0 libmutter-7-0 #MINVER#
  clutter_interval_set_interval@Base 3.29.4
  clutter_interval_validate@Base 3.29.4
  clutter_key_state_get_type@Base 3.29.4
+ clutter_keyboard_a11y_flags_get_type@Base 3.29.4
  clutter_keyframe_transition_clear@Base 3.29.4
  clutter_keyframe_transition_get_key_frame@Base 3.29.4
  clutter_keyframe_transition_get_n_key_frames@Base 3.29.4
@@ -1675,6 +1714,7 @@ libmutter-clutter-7.so.0 libmutter-7-0 #MINVER#
  clutter_seat_bell_notify@Base 3.35.90
  clutter_seat_create_virtual_device@Base 3.35.90
  clutter_seat_ensure_a11y_state@Base 3.35.90
+ clutter_seat_get_kbd_a11y_settings@Base 3.35.90
  clutter_seat_get_keyboard@Base 3.35.90
  clutter_seat_get_keymap@Base 3.35.90
  clutter_seat_get_pointer@Base 3.35.90
@@ -1682,11 +1722,10 @@ libmutter-clutter-7.so.0 libmutter-7-0 #MINVER#
  clutter_seat_get_supported_virtual_device_types@Base 3.35.90
  clutter_seat_get_touch_mode@Base 3.35.91
  clutter_seat_get_type@Base 3.35.90
- clutter_seat_handle_event_post@Base 3.38.3-3ubuntu1
  clutter_seat_inhibit_unfocus@Base 3.35.92
  clutter_seat_is_unfocus_inhibited@Base 3.35.92
  clutter_seat_list_devices@Base 3.35.90
- clutter_seat_query_state@Base 3.38.3-3ubuntu1
+ clutter_seat_set_kbd_a11y_settings@Base 3.35.90
  clutter_seat_set_pointer_a11y_dwell_click_type@Base 3.35.90
  clutter_seat_set_pointer_a11y_settings@Base 3.35.90
  clutter_seat_uninhibit_unfocus@Base 3.35.92
@@ -1717,10 +1756,9 @@ libmutter-clutter-7.so.0 libmutter-7-0 #MINVER#
  clutter_stage_capture_into@Base 3.29.4
  clutter_stage_clear_stage_views@Base 3.37.91
  clutter_stage_ensure_viewport@Base 3.29.4
+ clutter_stage_event@Base 3.29.4
  clutter_stage_get_actor_at_pos@Base 3.29.4
  clutter_stage_get_capture_final_size@Base 3.31.92
- clutter_stage_get_device_actor@Base 3.38.3-3ubuntu1
- clutter_stage_get_device_coords@Base 3.38.3-3ubuntu1
  clutter_stage_get_frame_counter@Base 3.29.4
  clutter_stage_get_key_focus@Base 3.29.4
  clutter_stage_get_minimum_size@Base 3.29.4
@@ -1740,7 +1778,6 @@ libmutter-clutter-7.so.0 libmutter-7-0 #MINVER#
  clutter_stage_paint_to_framebuffer@Base 3.36.2
  clutter_stage_peek_stage_views@Base 3.37.91
  clutter_stage_read_pixels@Base 3.29.4
- clutter_stage_repick_device@Base 3.38.3-3ubuntu1
  clutter_stage_schedule_update@Base 3.37.91
  clutter_stage_set_key_focus@Base 3.29.4
  clutter_stage_set_minimum_size@Base 3.29.4
@@ -1748,7 +1785,7 @@ libmutter-clutter-7.so.0 libmutter-7-0 #MINVER#
  clutter_stage_set_sync_delay@Base 3.29.4
  clutter_stage_set_throttle_motion_events@Base 3.29.4
  clutter_stage_set_title@Base 3.29.4
- clutter_stage_update_device@Base 3.38.3-3ubuntu1
+ clutter_stage_state_get_type@Base 3.29.4
  clutter_stage_view_assign_next_scanout@Base 3.37.91
  clutter_stage_view_cogl_get_type@Base 3.29.4
  clutter_stage_view_destroy@Base 3.37.91
