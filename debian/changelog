@@ -1,4 +1,4 @@
-mutter (3.36.9-0ubuntu0.20.04.1) UNRELEASED; urgency=medium
+mutter (3.36.9-0ubuntu0.20.04.1) focal; urgency=medium
 
   * New upstream release (LP: #1919143)
     - Do not ping unmanaging windows
@@ -14,7 +14,7 @@ mutter (3.36.9-0ubuntu0.20.04.1) UNRELEASED; urgency=medium
     - Fixed crashes
     - Plugged memory leaks
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 31 Mar 2021 01:44:08 +0200
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 31 Mar 2021 02:15:27 +0200
 
 mutter (3.36.7+git20201123-0.20.04.1) focal; urgency=medium
 
