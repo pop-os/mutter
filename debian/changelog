@@ -1,4 +1,4 @@
-mutter (3.38.4-1ubuntu2) UNRELEASED; urgency=medium
+mutter (3.38.4-1ubuntu2) hirsute; urgency=medium
 
   [ Daniel van Vugt ]
   * Revert "debian/patches: Properly handle configuration events on windows"
@@ -13,7 +13,7 @@ mutter (3.38.4-1ubuntu2) UNRELEASED; urgency=medium
   * debian/patches: Use Xwayland pkg-config if available
   * debian/patches: Use -listenfd to invoke XWayland if available (LP: #1922539)
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Thu, 15 Apr 2021 05:30:28 +0200
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Thu, 15 Apr 2021 06:28:51 +0200
 
 mutter (3.38.4-1ubuntu1) hirsute; urgency=medium
 
