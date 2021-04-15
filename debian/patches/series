@@ -12,3 +12,5 @@ region-utils-Fix-typo-in-crop_and_scale-fastpath.patch
 shaped-texture-Use-G_APPROX_VALUE-to-compare-viewport-sou.patch
 shaped-texture-Expose-ensure_size_valid-API.patch
 wayland-actor-surface-Call-ensure_size_valid-on-shaped-te.patch
+build-Use-Xwayland-pkg-config-if-available.patch
+xwayland-Check-for-listenfd-option.patch
