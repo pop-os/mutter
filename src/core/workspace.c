@@ -31,39 +31,38 @@
  * are unmapped.
  */
 
-#include <config.h>
-#include "backends/meta-backend-private.h"
-#include "backends/meta-logical-monitor.h"
-#include "x11/meta-x11-display-private.h"
-#include <meta/workspace.h>
-#include "meta-workspace-manager-private.h"
-#include "workspace-private.h"
-#include "boxes-private.h"
-#include <meta/meta-x11-errors.h>
-#include <meta/prefs.h>
+#include "config.h"
 
-#include <meta/compositor.h>
+#include "meta/workspace.h"
 
 #include <X11/Xatom.h>
 #include <string.h>
-#ifdef HAVE_LIBCANBERRA
-#include <canberra-gtk.h>
-#endif
+
+#include "backends/meta-backend-private.h"
+#include "backends/meta-logical-monitor.h"
+#include "cogl/cogl.h"
+#include "core/boxes-private.h"
+#include "core/meta-workspace-manager-private.h"
+#include "core/workspace-private.h"
+#include "meta/compositor.h"
+#include "meta/meta-x11-errors.h"
+#include "meta/prefs.h"
+#include "x11/meta-x11-display-private.h"
 
 void meta_workspace_queue_calc_showing   (MetaWorkspace *workspace);
 static void focus_ancestor_or_top_window (MetaWorkspace *workspace,
                                           MetaWindow    *not_this_one,
                                           guint32        timestamp);
-static void free_this                    (gpointer candidate,
-                                          gpointer dummy);
 
 G_DEFINE_TYPE (MetaWorkspace, meta_workspace, G_TYPE_OBJECT);
 
-enum {
+enum
+{
   PROP_0,
 
   PROP_N_WINDOWS,
   PROP_WORKSPACE_INDEX,
+  PROP_ACTIVE,
 
   PROP_LAST,
 };
@@ -85,6 +84,12 @@ typedef struct _MetaWorkspaceLogicalMonitorData
   GList *logical_monitor_region;
   MetaRectangle logical_monitor_work_area;
 } MetaWorkspaceLogicalMonitorData;
+
+typedef struct _MetaWorkspaceFocusableAncestorData
+{
+  MetaWorkspace *workspace;
+  MetaWindow *out_window;
+} MetaWorkspaceFocusableAncestorData;
 
 static MetaWorkspaceLogicalMonitorData *
 meta_workspace_get_logical_monitor_data (MetaWorkspace      *workspace,
@@ -168,12 +173,15 @@ meta_workspace_get_property (GObject      *object,
     case PROP_N_WINDOWS:
       /*
        * This is reliable, but not very efficient; should we store
-       * the list lenth ?
+       * the list length ?
        */
       g_value_set_uint (value, g_list_length (ws->windows));
       break;
     case PROP_WORKSPACE_INDEX:
       g_value_set_uint (value, meta_workspace_index (ws));
+      break;
+    case PROP_ACTIVE:
+      g_value_set_boolean (value, ws->manager->active_workspace == ws);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -214,6 +222,11 @@ meta_workspace_class_init (MetaWorkspaceClass *klass)
                                                        "The workspace's index",
                                                        0, G_MAXUINT, 0,
                                                        G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
+  obj_props[PROP_ACTIVE] = g_param_spec_boolean ("active",
+                                                 "Active",
+                                                 "Whether the workspace is currently active",
+                                                 FALSE,
+                                                 G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
 
   g_object_class_install_properties (object_class, PROP_LAST, obj_props);
 }
@@ -266,13 +279,6 @@ meta_workspace_new (MetaWorkspaceManager *workspace_manager)
   return workspace;
 }
 
-/* Foreach function for workspace_free_struts() */
-static void
-free_this (gpointer candidate, gpointer dummy)
-{
-  g_free (candidate);
-}
-
 /**
  * workspace_free_all_struts:
  * @workspace: The workspace.
@@ -285,8 +291,7 @@ workspace_free_all_struts (MetaWorkspace *workspace)
   if (workspace->all_struts == NULL)
     return;
 
-  g_slist_foreach (workspace->all_struts, free_this, NULL);
-  g_slist_free (workspace->all_struts);
+  g_slist_free_full (workspace->all_struts, g_free);
   workspace->all_struts = NULL;
 }
 
@@ -302,8 +307,7 @@ workspace_free_builtin_struts (MetaWorkspace *workspace)
   if (workspace->builtin_struts == NULL)
     return;
 
-  g_slist_foreach (workspace->builtin_struts, free_this, NULL);
-  g_slist_free (workspace->builtin_struts);
+  g_slist_free_full (workspace->builtin_struts, g_free);
   workspace->builtin_struts = NULL;
 }
 
@@ -365,7 +369,11 @@ void
 meta_workspace_add_window (MetaWorkspace *workspace,
                            MetaWindow    *window)
 {
-  g_assert (g_list_find (workspace->mru_list, window) == NULL);
+  g_return_if_fail (g_list_find (workspace->mru_list, window) == NULL);
+
+  COGL_TRACE_BEGIN_SCOPED (MetaWorkspaceAddWindow,
+                           "Workspace (add window)");
+
   workspace->mru_list = g_list_prepend (workspace->mru_list, window);
 
   workspace->windows = g_list_prepend (workspace->windows, window);
@@ -386,6 +394,9 @@ void
 meta_workspace_remove_window (MetaWorkspace *workspace,
                               MetaWindow    *window)
 {
+  COGL_TRACE_BEGIN_SCOPED (MetaWorkspaceRemoveWindow,
+                           "Workspace (remove window)");
+
   workspace->windows = g_list_remove (workspace->windows, window);
 
   workspace->mru_list = g_list_remove (workspace->mru_list, window);
@@ -440,7 +451,7 @@ static void
 workspace_switch_sound(MetaWorkspace *from,
                        MetaWorkspace *to)
 {
-#ifdef HAVE_LIBCANBERRA
+  MetaSoundPlayer *player;
   MetaWorkspaceLayout layout;
   int i, nw, x, y, fi, ti;
   const char *e;
@@ -488,15 +499,11 @@ workspace_switch_sound(MetaWorkspace *from,
       goto finish;
     }
 
-  ca_context_play(ca_gtk_context_get(), 1,
-                  CA_PROP_EVENT_ID, e,
-                  CA_PROP_EVENT_DESCRIPTION, "Desktop switched",
-                  CA_PROP_CANBERRA_CACHE_CONTROL, "permanent",
-                  NULL);
+  player = meta_display_get_sound_player (from->display);
+  meta_sound_player_play_from_theme (player, e, "Desktop switched", NULL);
 
  finish:
   meta_workspace_manager_free_workspace_layout (&layout);
-#endif /* HAVE_LIBCANBERRA */
 }
 
 /**
@@ -534,7 +541,11 @@ meta_workspace_activate_with_focus (MetaWorkspace *workspace,
                 meta_workspace_index (workspace));
 
   if (workspace->manager->active_workspace == workspace)
-    return;
+    {
+      if (focus_this)
+        meta_window_activate (focus_this, timestamp);
+      return;
+    }
 
   /* Free any cached pointers to the workspaces's edges from
    * a current resize or move operation */
@@ -550,8 +561,12 @@ meta_workspace_activate_with_focus (MetaWorkspace *workspace,
 
   g_signal_emit_by_name (workspace->manager, "active-workspace-changed");
 
+  g_object_notify_by_pspec (G_OBJECT (workspace), obj_props[PROP_ACTIVE]);
+
   if (old == NULL)
     return;
+
+  g_object_notify_by_pspec (G_OBJECT (old), obj_props[PROP_ACTIVE]);
 
   /* If the "show desktop" mode is active for either the old workspace
    * or the new one *but not both*, then update the
@@ -1193,7 +1208,7 @@ meta_motion_direction_to_string (MetaMotionDirection direction)
  * @workspace: a #MetaWorkspace
  * @direction: a #MetaMotionDirection, relative to @workspace
  *
- * Calculate and retrive the workspace that is next to @workspace,
+ * Calculate and retrieve the workspace that is next to @workspace,
  * according to @direction and the current workspace layout, as set
  * by meta_screen_override_workspace_layout().
  *
@@ -1320,20 +1335,61 @@ meta_workspace_focus_default_window (MetaWorkspace *workspace,
           meta_topic (META_DEBUG_FOCUS,
                       "Setting focus to no_focus_window, since no valid "
                       "window to focus found.\n");
-          meta_x11_display_focus_the_no_focus_window (workspace->display->x11_display,
-                                                      timestamp);
+          meta_display_unset_input_focus (workspace->display, timestamp);
         }
     }
 }
 
 static gboolean
-record_ancestor (MetaWindow *window,
-                 void       *data)
+find_focusable_ancestor (MetaWindow *window,
+                         gpointer    user_data)
 {
-  MetaWindow **result = data;
+  MetaWorkspaceFocusableAncestorData *data = user_data;
 
-  *result = window;
-  return FALSE; /* quit with the first ancestor we find */
+  if (!window->unmanaging &&
+      window->mapped &&
+      !window->hidden &&
+      meta_window_is_focusable (window) &&
+      meta_window_located_on_workspace (window, data->workspace) &&
+      meta_window_showing_on_its_workspace (window))
+    {
+      data->out_window = window;
+      return FALSE;
+    }
+
+  return TRUE;
+}
+
+static gboolean
+try_to_set_focus_and_check (MetaWindow *window,
+                            MetaWindow *not_this_one,
+                            uint32_t    timestamp)
+{
+  meta_window_focus (window, timestamp);
+
+  /* meta_focus_window() will not change focus for clients using the
+   * "globally active input" model of input handling, hence defeating
+   * the assumption that focus should be changed for such windows.
+   * See https://tronche.com/gui/x/icccm/sec-4.html#s-4.1.7
+   */
+  if (meta_window_is_focus_async (window))
+    return TRUE;
+
+  /* meta_window_focus() does not guarantee that focus will end up
+   * where we expect, it can fail for various reasons, better check
+   * it did not actually changed or even left focus to the window we
+   * explicitly want to avoid.
+   */
+  if (not_this_one &&
+      meta_display_get_focus_window (window->display) == not_this_one)
+    {
+      meta_warning ("Failed to focus window %s while avoiding %s\n",
+                    window->desc, not_this_one->desc);
+
+      return FALSE;
+    }
+
+  return TRUE;
 }
 
 /* Focus ancestor of not_this_one if there is one */
@@ -1355,23 +1411,28 @@ focus_ancestor_or_top_window (MetaWorkspace *workspace,
   if (not_this_one)
     {
       MetaWindow *ancestor;
-      ancestor = NULL;
-      meta_window_foreach_ancestor (not_this_one, record_ancestor, &ancestor);
-      if (ancestor != NULL &&
-          meta_window_located_on_workspace (ancestor, workspace) &&
-          meta_window_showing_on_its_workspace (ancestor))
+      MetaWorkspaceFocusableAncestorData data;
+
+      data = (MetaWorkspaceFocusableAncestorData) {
+        .workspace = workspace,
+      };
+      meta_window_foreach_ancestor (not_this_one, find_focusable_ancestor, &data);
+      ancestor = data.out_window;
+
+      if (ancestor)
         {
           meta_topic (META_DEBUG_FOCUS,
                       "Focusing %s, ancestor of %s\n",
                       ancestor->desc, not_this_one->desc);
 
-          meta_window_focus (ancestor, timestamp);
+          if (try_to_set_focus_and_check (ancestor, not_this_one, timestamp))
+            {
+              /* Also raise the window if in click-to-focus */
+              if (meta_prefs_get_focus_mode () == G_DESKTOP_FOCUS_MODE_CLICK)
+                meta_window_raise (ancestor);
 
-          /* Also raise the window if in click-to-focus */
-          if (meta_prefs_get_focus_mode () == G_DESKTOP_FOCUS_MODE_CLICK)
-            meta_window_raise (ancestor);
-
-          return;
+              return;
+            }
         }
     }
 
@@ -1383,19 +1444,19 @@ focus_ancestor_or_top_window (MetaWorkspace *workspace,
     {
       meta_topic (META_DEBUG_FOCUS,
                   "Focusing workspace MRU window %s\n", window->desc);
+      if (try_to_set_focus_and_check (window, not_this_one, timestamp))
+        {
+          /* Also raise the window if in click-to-focus */
+          if (meta_prefs_get_focus_mode () == G_DESKTOP_FOCUS_MODE_CLICK)
+            meta_window_raise (window);
 
-      meta_window_focus (window, timestamp);
+          return;
+        }
+    }
 
-      /* Also raise the window if in click-to-focus */
-      if (meta_prefs_get_focus_mode () == G_DESKTOP_FOCUS_MODE_CLICK)
-        meta_window_raise (window);
-    }
-  else
-    {
-      meta_topic (META_DEBUG_FOCUS, "No MRU window to focus found; focusing no_focus_window.\n");
-      meta_x11_display_focus_the_no_focus_window (workspace->display->x11_display,
-                                                  timestamp);
-    }
+  meta_topic (META_DEBUG_FOCUS,
+             "No MRU window to focus found; focusing no_focus_window.\n");
+  meta_display_unset_input_focus (workspace->display, timestamp);
 }
 
 /**

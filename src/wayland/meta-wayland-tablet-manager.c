@@ -21,19 +21,18 @@
  * Author: Carlos Garnacho <carlosg@gnome.org>
  */
 
-#define _GNU_SOURCE
-
 #include "config.h"
 
 #include <glib.h>
 
 #include <wayland-server.h>
-#include "tablet-unstable-v2-server-protocol.h"
 
-#include "meta-wayland-private.h"
-#include "meta-wayland-tablet-manager.h"
-#include "meta-wayland-tablet-seat.h"
-#include "meta-wayland-tablet-tool.h"
+#include "wayland/meta-wayland-private.h"
+#include "wayland/meta-wayland-tablet-manager.h"
+#include "wayland/meta-wayland-tablet-seat.h"
+#include "wayland/meta-wayland-tablet-tool.h"
+
+#include "tablet-unstable-v2-server-protocol.h"
 
 static void
 unbind_resource (struct wl_resource *resource)
@@ -46,7 +45,7 @@ is_tablet_device (ClutterInputDevice *device)
 {
   ClutterInputDeviceType device_type;
 
-  if (clutter_input_device_get_device_mode (device) == CLUTTER_INPUT_MODE_MASTER)
+  if (clutter_input_device_get_device_mode (device) == CLUTTER_INPUT_MODE_LOGICAL)
     return FALSE;
 
   device_type = clutter_input_device_get_device_type (device);
@@ -132,11 +131,6 @@ meta_wayland_tablet_manager_init (MetaWaylandCompositor *compositor)
 void
 meta_wayland_tablet_manager_free (MetaWaylandTabletManager *tablet_manager)
 {
-  ClutterDeviceManager *device_manager;
-
-  device_manager = clutter_device_manager_get_default ();
-  g_signal_handlers_disconnect_by_data (device_manager, tablet_manager);
-
   g_hash_table_destroy (tablet_manager->seats);
   g_slice_free (MetaWaylandTabletManager, tablet_manager);
 }

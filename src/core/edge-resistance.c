@@ -19,12 +19,14 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <config.h>
-#include "edge-resistance.h"
-#include "boxes-private.h"
-#include "display-private.h"
-#include "meta-workspace-manager-private.h"
-#include "workspace-private.h"
+#include "config.h"
+
+#include "core/edge-resistance.h"
+
+#include "core/boxes-private.h"
+#include "core/display-private.h"
+#include "core/meta-workspace-manager-private.h"
+#include "core/workspace-private.h"
 
 /* A simple macro for whether a given window's edges are potentially
  * relevant for resistance/snapping during a move/resize operation
@@ -306,6 +308,7 @@ movement_towards_edge (MetaSide side, int increment)
       return increment > 0;
     default:
       g_assert_not_reached ();
+      return FALSE;
     }
 }
 
@@ -360,11 +363,7 @@ apply_edge_resistance (MetaWindow                *window,
         resistance_data->timeout_edge_pos < new_pos)))
     {
       resistance_data->timeout_setup = FALSE;
-      if (resistance_data->timeout_id != 0)
-        {
-          g_source_remove (resistance_data->timeout_id);
-          resistance_data->timeout_id = 0;
-        }
+      g_clear_handle_id (&resistance_data->timeout_id, g_source_remove);
     }
 
   /* Get the range of indices in the edge array that we move past/to. */
@@ -781,18 +780,14 @@ meta_display_cleanup_edges (MetaDisplay *display)
   edge_data->bottom_edges = NULL;
 
   /* Cleanup the timeouts */
-  if (edge_data->left_data.timeout_setup   &&
-      edge_data->left_data.timeout_id   != 0)
-    g_source_remove (edge_data->left_data.timeout_id);
-  if (edge_data->right_data.timeout_setup  &&
-      edge_data->right_data.timeout_id  != 0)
-    g_source_remove (edge_data->right_data.timeout_id);
-  if (edge_data->top_data.timeout_setup    &&
-      edge_data->top_data.timeout_id    != 0)
-    g_source_remove (edge_data->top_data.timeout_id);
-  if (edge_data->bottom_data.timeout_setup &&
-      edge_data->bottom_data.timeout_id != 0)
-    g_source_remove (edge_data->bottom_data.timeout_id);
+  if (edge_data->left_data.timeout_setup)
+    g_clear_handle_id (&edge_data->left_data.timeout_id, g_source_remove);
+  if (edge_data->right_data.timeout_setup)
+    g_clear_handle_id (&edge_data->right_data.timeout_id, g_source_remove);
+  if (edge_data->top_data.timeout_setup)
+    g_clear_handle_id (&edge_data->top_data.timeout_id, g_source_remove);
+  if (edge_data->bottom_data.timeout_setup)
+    g_clear_handle_id (&edge_data->bottom_data.timeout_id, g_source_remove);
 
   g_free (display->grab_edge_resistance_data);
   display->grab_edge_resistance_data = NULL;
@@ -1154,13 +1149,7 @@ compute_resistance_and_snapping_edges (MetaDisplay *display)
   g_list_free (stacked_windows);
   /* Free the memory used by the obscuring windows/docks lists */
   g_slist_free (window_stacking);
-  /* FIXME: Shouldn't there be a helper function to make this one line of code
-   * to free a list instead of four ugly ones?
-   */
-  g_slist_foreach (obscuring_windows,
-                   (void (*)(gpointer,gpointer))&g_free, /* ew, for ugly */
-                   NULL);
-  g_slist_free (obscuring_windows);
+  g_slist_free_full (obscuring_windows, g_free);
 
   /* Sort the list.  FIXME: Should I bother with this sorting?  I just
    * sort again later in cache_edges() anyway...
@@ -1266,7 +1255,7 @@ void
 meta_window_edge_resistance_for_resize (MetaWindow  *window,
                                         int         *new_width,
                                         int         *new_height,
-                                        int          gravity,
+                                        MetaGravity  gravity,
                                         GSourceFunc  timeout_func,
                                         gboolean     snap,
                                         gboolean     is_keyboard_op)

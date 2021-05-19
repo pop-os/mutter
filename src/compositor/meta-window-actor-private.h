@@ -3,14 +3,43 @@
 #ifndef META_WINDOW_ACTOR_PRIVATE_H
 #define META_WINDOW_ACTOR_PRIVATE_H
 
-#include <config.h>
-
 #include <X11/extensions/Xdamage.h>
-#include <meta/compositor-mutter.h>
-#include "meta-surface-actor.h"
-#include "meta-plugin-manager.h"
 
-MetaWindowActor *meta_window_actor_new (MetaWindow *window);
+#include "compositor/meta-plugin-manager.h"
+#include "compositor/meta-surface-actor.h"
+#include "meta/compositor-mutter.h"
+
+struct _MetaWindowActorClass
+{
+  ClutterActorClass parent;
+
+  void (*frame_complete) (MetaWindowActor  *actor,
+                          ClutterFrameInfo *frame_info,
+                          int64_t           presentation_time);
+
+  void (*assign_surface_actor) (MetaWindowActor  *actor,
+                                MetaSurfaceActor *surface_actor);
+
+  void (*queue_frame_drawn) (MetaWindowActor *actor,
+                             gboolean         skip_sync_delay);
+
+  void (*before_paint) (MetaWindowActor  *actor,
+                        ClutterStageView *stage_view);
+  void (*after_paint) (MetaWindowActor  *actor,
+                       ClutterStageView *stage_view);
+
+  void (*queue_destroy) (MetaWindowActor *actor);
+  void (*set_frozen) (MetaWindowActor *actor,
+                      gboolean         frozen);
+  void (*update_regions) (MetaWindowActor *actor);
+  gboolean (*can_freeze_commits) (MetaWindowActor *actor);
+};
+
+typedef enum
+{
+  META_WINDOW_ACTOR_CHANGE_SIZE     = 1 << 0,
+  META_WINDOW_ACTOR_CHANGE_POSITION = 1 << 1
+} MetaWindowActorChanges;
 
 void meta_window_actor_queue_destroy   (MetaWindowActor *self);
 
@@ -24,28 +53,19 @@ void meta_window_actor_size_change   (MetaWindowActor *self,
                                       MetaRectangle   *old_frame_rect,
                                       MetaRectangle   *old_buffer_rect);
 
-void meta_window_actor_process_x11_damage (MetaWindowActor    *self,
-                                           XDamageNotifyEvent *event);
-
-void meta_window_actor_pre_paint      (MetaWindowActor    *self);
-void meta_window_actor_post_paint     (MetaWindowActor    *self);
+void meta_window_actor_before_paint   (MetaWindowActor    *self,
+                                       ClutterStageView   *stage_view);
+void meta_window_actor_after_paint    (MetaWindowActor    *self,
+                                       ClutterStageView   *stage_view);
 void meta_window_actor_frame_complete (MetaWindowActor    *self,
                                        ClutterFrameInfo   *frame_info,
                                        gint64              presentation_time);
 
-void meta_window_actor_invalidate_shadow (MetaWindowActor *self);
-
-void meta_window_actor_get_shape_bounds (MetaWindowActor       *self,
-                                          cairo_rectangle_int_t *bounds);
-
-gboolean meta_window_actor_should_unredirect   (MetaWindowActor *self);
-void     meta_window_actor_set_unredirected    (MetaWindowActor *self,
-                                                gboolean         unredirected);
-
 gboolean meta_window_actor_effect_in_progress  (MetaWindowActor *self);
-void     meta_window_actor_sync_actor_geometry (MetaWindowActor *self,
-                                                gboolean         did_placement);
-void     meta_window_actor_update_shape        (MetaWindowActor *self);
+
+MetaWindowActorChanges meta_window_actor_sync_actor_geometry (MetaWindowActor *self,
+                                                              gboolean         did_placement);
+
 void     meta_window_actor_update_opacity      (MetaWindowActor *self);
 void     meta_window_actor_mapped              (MetaWindowActor *self);
 void     meta_window_actor_unmapped            (MetaWindowActor *self);
@@ -57,7 +77,26 @@ void meta_window_actor_effect_completed (MetaWindowActor  *actor,
                                          MetaPluginEffect  event);
 
 MetaSurfaceActor *meta_window_actor_get_surface (MetaWindowActor *self);
-void meta_window_actor_update_surface (MetaWindowActor *self);
+
+void meta_window_actor_assign_surface_actor (MetaWindowActor  *self,
+                                             MetaSurfaceActor *surface_actor);
+
 MetaWindowActor *meta_window_actor_from_window (MetaWindow *window);
+MetaWindowActor *meta_window_actor_from_actor (ClutterActor *actor);
+
+void meta_window_actor_set_geometry_scale (MetaWindowActor *window_actor,
+                                           int              geometry_scale);
+
+int meta_window_actor_get_geometry_scale (MetaWindowActor *window_actor);
+
+void meta_window_actor_notify_damaged (MetaWindowActor *window_actor);
+
+gboolean meta_window_actor_is_frozen (MetaWindowActor *self);
+
+gboolean meta_window_actor_is_opaque (MetaWindowActor *self);
+
+void meta_window_actor_update_regions (MetaWindowActor *self);
+
+gboolean meta_window_actor_can_freeze_commits (MetaWindowActor *self);
 
 #endif /* META_WINDOW_ACTOR_PRIVATE_H */

@@ -24,22 +24,25 @@
 
 #include "config.h"
 
-#include "meta-window-wayland.h"
+#include "wayland/meta-window-wayland.h"
 
-#include <meta/meta-x11-errors.h>
 #include <errno.h>
-#include <string.h> /* for strerror () */
-#include "window-private.h"
-#include "boxes-private.h"
-#include "stack-tracker.h"
-#include "meta-wayland-actor-surface.h"
-#include "meta-wayland-private.h"
-#include "meta-wayland-surface.h"
-#include "meta-wayland-xdg-shell.h"
+#include <string.h>
+
+#include "backends/meta-backend-private.h"
 #include "backends/meta-backend-private.h"
 #include "backends/meta-logical-monitor.h"
 #include "compositor/meta-surface-actor-wayland.h"
-#include "backends/meta-backend-private.h"
+#include "compositor/meta-window-actor-private.h"
+#include "core/boxes-private.h"
+#include "core/stack-tracker.h"
+#include "core/window-private.h"
+#include "meta/meta-x11-errors.h"
+#include "wayland/meta-wayland-actor-surface.h"
+#include "wayland/meta-wayland-private.h"
+#include "wayland/meta-wayland-surface.h"
+#include "wayland/meta-wayland-window-configuration.h"
+#include "wayland/meta-wayland-xdg-shell.h"
 
 struct _MetaWindowWayland
 {
@@ -47,16 +50,18 @@ struct _MetaWindowWayland
 
   int geometry_scale;
 
-  MetaWaylandSerial pending_configure_serial;
+  GList *pending_configurations;
   gboolean has_pending_state_change;
-  gboolean has_pending_move;
-  int pending_move_x;
-  int pending_move_y;
 
+  gboolean has_last_sent_configuration;
   int last_sent_x;
   int last_sent_y;
   int last_sent_width;
   int last_sent_height;
+  int last_sent_rel_x;
+  int last_sent_rel_y;
+  int last_sent_geometry_scale;
+  MetaGravity last_sent_gravity;
 
   gboolean has_been_shown;
 };
@@ -67,6 +72,19 @@ struct _MetaWindowWaylandClass
 };
 
 G_DEFINE_TYPE (MetaWindowWayland, meta_window_wayland, META_TYPE_WINDOW)
+
+static void
+set_geometry_scale_for_window (MetaWindowWayland *wl_window,
+                               int                geometry_scale)
+{
+  MetaWindowActor *window_actor;
+
+  wl_window->geometry_scale = geometry_scale;
+
+  window_actor = meta_window_actor_from_window (META_WINDOW (wl_window));
+  if (window_actor)
+    meta_window_actor_set_geometry_scale (window_actor, geometry_scale);
+}
 
 static int
 get_window_geometry_scale_for_logical_monitor (MetaLogicalMonitor *logical_monitor)
@@ -140,28 +158,51 @@ static void
 meta_window_wayland_focus (MetaWindow *window,
                            guint32     timestamp)
 {
-  if (window->input)
-    meta_x11_display_set_input_focus_window (window->display->x11_display,
-                                             window,
-                                             FALSE,
-                                             timestamp);
+  if (meta_window_is_focusable (window))
+    {
+      meta_display_set_input_focus (window->display,
+                                    window,
+                                    FALSE,
+                                    timestamp);
+    }
+}
+
+static void
+meta_window_wayland_configure (MetaWindowWayland              *wl_window,
+                               MetaWaylandWindowConfiguration *configuration)
+{
+  MetaWindow *window = META_WINDOW (wl_window);
+
+  meta_wayland_surface_configure_notify (window->surface, configuration);
+
+  wl_window->pending_configurations =
+    g_list_prepend (wl_window->pending_configurations, configuration);
 }
 
 static void
 surface_state_changed (MetaWindow *window)
 {
   MetaWindowWayland *wl_window = META_WINDOW_WAYLAND (window);
+  MetaWaylandWindowConfiguration *configuration;
 
   /* don't send notify when the window is being unmanaged */
   if (window->unmanaging)
     return;
 
-  meta_wayland_surface_configure_notify (window->surface,
-                                         wl_window->last_sent_x,
-                                         wl_window->last_sent_y,
-                                         wl_window->last_sent_width,
-                                         wl_window->last_sent_height,
-                                         &wl_window->pending_configure_serial);
+  g_return_if_fail (wl_window->has_last_sent_configuration);
+  if (!wl_window->has_last_sent_configuration)
+    return;
+
+  configuration =
+    meta_wayland_window_configuration_new (wl_window->last_sent_x,
+                                           wl_window->last_sent_y,
+                                           wl_window->last_sent_width,
+                                           wl_window->last_sent_height,
+                                           wl_window->last_sent_geometry_scale,
+                                           META_MOVE_RESIZE_STATE_CHANGED,
+                                           wl_window->last_sent_gravity);
+
+  meta_window_wayland_configure (wl_window, configuration);
 }
 
 static void
@@ -186,19 +227,26 @@ meta_window_wayland_grab_op_ended (MetaWindow *window,
 
 static void
 meta_window_wayland_move_resize_internal (MetaWindow                *window,
-                                          int                        gravity,
+                                          MetaGravity                gravity,
                                           MetaRectangle              unconstrained_rect,
                                           MetaRectangle              constrained_rect,
+                                          MetaRectangle              temporary_rect,
+                                          int                        rel_x,
+                                          int                        rel_y,
                                           MetaMoveResizeFlags        flags,
                                           MetaMoveResizeResultFlags *result)
 {
   MetaWindowWayland *wl_window = META_WINDOW_WAYLAND (window);
-  gboolean can_move_now;
+  gboolean can_move_now = FALSE;
   int configured_x;
   int configured_y;
   int configured_width;
   int configured_height;
   int geometry_scale;
+  int new_x;
+  int new_y;
+  int new_buffer_x;
+  int new_buffer_y;
 
   g_assert (window->frame == NULL);
 
@@ -214,16 +262,24 @@ meta_window_wayland_move_resize_internal (MetaWindow                *window,
    * coordinate space so that we can have a scale independent size to pass
    * to the Wayland surface. */
   geometry_scale = meta_window_wayland_get_geometry_scale (window);
-  if (flags & META_MOVE_RESIZE_UNMAXIMIZE)
+
+  if (flags & META_MOVE_RESIZE_UNMAXIMIZE &&
+      !meta_window_is_fullscreen (window))
     {
-      /* On un-maximize, let the client decide on its size */
+      configured_width = 0;
+      configured_height = 0;
+    }
+  else if (flags & META_MOVE_RESIZE_UNFULLSCREEN &&
+           !meta_window_get_maximized (window) &&
+           meta_window_get_tile_mode (window) == META_TILE_NONE)
+    {
       configured_width = 0;
       configured_height = 0;
     }
   else
     {
-      configured_width = constrained_rect.width / geometry_scale;
-      configured_height = constrained_rect.height / geometry_scale;
+      configured_width = constrained_rect.width;
+      configured_height = constrained_rect.height;
     }
 
   /* For wayland clients, the size is completely determined by the client,
@@ -240,7 +296,7 @@ meta_window_wayland_move_resize_internal (MetaWindow                *window,
     {
       can_move_now = TRUE;
     }
-  else if (flags & META_MOVE_RESIZE_WAYLAND_RESIZE)
+  else if (flags & META_MOVE_RESIZE_WAYLAND_FINISH_MOVE_RESIZE)
     {
       /* This is a call to wl_surface_commit(), ignore the constrained_rect and
        * update the real client size to match the buffer size.
@@ -257,15 +313,65 @@ meta_window_wayland_move_resize_internal (MetaWindow                *window,
       /* This is a commit of an attach. We should move the window to match the
        * new position the client wants. */
       can_move_now = TRUE;
+      if (window->placement.state == META_PLACEMENT_STATE_CONSTRAINED_CONFIGURED)
+        window->placement.state = META_PLACEMENT_STATE_CONSTRAINED_FINISHED;
     }
   else
     {
-      /* If the size changed, or the state changed, then we have to wait until
-       * the client acks our configure before moving the window. */
-      if (constrained_rect.width != window->rect.width ||
-          constrained_rect.height != window->rect.height ||
-          (flags & META_MOVE_RESIZE_STATE_CHANGED))
+      if (window->placement.rule)
         {
+          switch (window->placement.state)
+            {
+            case META_PLACEMENT_STATE_UNCONSTRAINED:
+            case META_PLACEMENT_STATE_CONSTRAINED_CONFIGURED:
+            case META_PLACEMENT_STATE_INVALIDATED:
+              can_move_now = FALSE;
+              break;
+            case META_PLACEMENT_STATE_CONSTRAINED_PENDING:
+              {
+                if (flags & META_MOVE_RESIZE_PLACEMENT_CHANGED ||
+                    rel_x != wl_window->last_sent_rel_x ||
+                    rel_y != wl_window->last_sent_rel_y ||
+                    constrained_rect.width != window->rect.width ||
+                    constrained_rect.height != window->rect.height)
+                  {
+                    MetaWaylandWindowConfiguration *configuration;
+
+                    configuration =
+                      meta_wayland_window_configuration_new_relative (rel_x,
+                                                                      rel_y,
+                                                                      configured_width,
+                                                                      configured_height,
+                                                                      geometry_scale);
+                    meta_window_wayland_configure (wl_window, configuration);
+
+                    wl_window->last_sent_rel_x = rel_x;
+                    wl_window->last_sent_rel_y = rel_y;
+
+                    window->placement.state = META_PLACEMENT_STATE_CONSTRAINED_CONFIGURED;
+
+                    can_move_now = FALSE;
+                  }
+                else
+                  {
+                    window->placement.state =
+                      META_PLACEMENT_STATE_CONSTRAINED_FINISHED;
+
+                    can_move_now = TRUE;
+                  }
+                break;
+              }
+            case META_PLACEMENT_STATE_CONSTRAINED_FINISHED:
+              can_move_now = TRUE;
+              break;
+            }
+        }
+      else if (constrained_rect.width != window->rect.width ||
+               constrained_rect.height != window->rect.height ||
+               flags & META_MOVE_RESIZE_STATE_CHANGED)
+        {
+          MetaWaylandWindowConfiguration *configuration;
+
           /* If the constrained size is 1x1 and the unconstrained size is 0x0
            * it means that we are trying to resize a window where the client has
            * not yet committed a buffer. The 1x1 constrained size is a result of
@@ -283,68 +389,73 @@ meta_window_wayland_move_resize_internal (MetaWindow                *window,
               constrained_rect.height == 1)
             return;
 
-          meta_wayland_surface_configure_notify (window->surface,
-                                                 configured_x,
-                                                 configured_y,
-                                                 configured_width,
-                                                 configured_height,
-                                                 &wl_window->pending_configure_serial);
-
-          /* We need to wait until the resize completes before we can move */
+          configuration =
+            meta_wayland_window_configuration_new (configured_x,
+                                                   configured_y,
+                                                   configured_width,
+                                                   configured_height,
+                                                   geometry_scale,
+                                                   flags,
+                                                   gravity);
+          meta_window_wayland_configure (wl_window, configuration);
           can_move_now = FALSE;
         }
       else
         {
-          /* We're just moving the window, so we don't need to wait for a configure
-           * and then ack to simply move the window. */
           can_move_now = TRUE;
         }
     }
 
+  wl_window->has_last_sent_configuration = TRUE;
   wl_window->last_sent_x = configured_x;
   wl_window->last_sent_y = configured_y;
   wl_window->last_sent_width = configured_width;
   wl_window->last_sent_height = configured_height;
+  wl_window->last_sent_geometry_scale = geometry_scale;
+  wl_window->last_sent_gravity = gravity;
 
   if (can_move_now)
     {
-      int new_x = constrained_rect.x;
-      int new_y = constrained_rect.y;
-
-      if (new_x != window->rect.x || new_y != window->rect.y)
-        {
-          *result |= META_MOVE_RESIZE_RESULT_MOVED;
-          window->rect.x = new_x;
-          window->rect.y = new_y;
-        }
-
-      int new_buffer_x = new_x - window->custom_frame_extents.left;
-      int new_buffer_y = new_y - window->custom_frame_extents.top;
-
-      if (new_buffer_x != window->buffer_rect.x || new_buffer_y != window->buffer_rect.y)
-        {
-          *result |= META_MOVE_RESIZE_RESULT_MOVED;
-          window->buffer_rect.x = new_buffer_x;
-          window->buffer_rect.y = new_buffer_y;
-        }
-
-      if (flags & META_MOVE_RESIZE_WAYLAND_STATE_CHANGED)
-        *result |= META_MOVE_RESIZE_RESULT_STATE_CHANGED;
+      new_x = constrained_rect.x;
+      new_y = constrained_rect.y;
     }
   else
     {
-      int new_x = constrained_rect.x;
-      int new_y = constrained_rect.y;
+      new_x = temporary_rect.x;
+      new_y = temporary_rect.y;
 
-      if (new_x != window->rect.x || new_y != window->rect.y)
-        {
-          wl_window->has_pending_move = TRUE;
-          wl_window->pending_move_x = new_x;
-          wl_window->pending_move_y = new_y;
-        }
-
-      wl_window->has_pending_state_change = (flags & META_MOVE_RESIZE_STATE_CHANGED) != 0;
+      wl_window->has_pending_state_change |=
+        !!(flags & META_MOVE_RESIZE_STATE_CHANGED);
     }
+
+  if (new_x != window->rect.x || new_y != window->rect.y)
+    {
+      *result |= META_MOVE_RESIZE_RESULT_MOVED;
+      window->rect.x = new_x;
+      window->rect.y = new_y;
+    }
+
+  if (window->placement.rule &&
+      window->placement.state == META_PLACEMENT_STATE_CONSTRAINED_FINISHED)
+    {
+      window->placement.current.rel_x = rel_x;
+      window->placement.current.rel_y = rel_y;
+    }
+
+  new_buffer_x = new_x - window->custom_frame_extents.left;
+  new_buffer_y = new_y - window->custom_frame_extents.top;
+
+  if (new_buffer_x != window->buffer_rect.x ||
+      new_buffer_y != window->buffer_rect.y)
+    {
+      *result |= META_MOVE_RESIZE_RESULT_MOVED;
+      window->buffer_rect.x = new_buffer_x;
+      window->buffer_rect.y = new_buffer_y;
+    }
+
+  if (can_move_now &&
+      flags & META_MOVE_RESIZE_WAYLAND_STATE_CHANGED)
+    *result |= META_MOVE_RESIZE_RESULT_STATE_CHANGED;
 }
 
 static void
@@ -489,7 +600,7 @@ meta_window_wayland_main_monitor_changed (MetaWindow               *window,
   scale_size (&window->size_hints.max_width, &window->size_hints.max_height, scale_factor);
 
   /* Window geometry offset (XXX: Need a better place, see
-   * meta_window_wayland_move_resize). */
+   * meta_window_wayland_finish_move_resize). */
   window->custom_frame_extents.left =
     (int)(scale_factor * window->custom_frame_extents.left);
   window->custom_frame_extents.top =
@@ -515,12 +626,11 @@ meta_window_wayland_main_monitor_changed (MetaWindow               *window,
       meta_wayland_actor_surface_sync_actor_state (actor_surface);
     }
 
-  wl_window->geometry_scale = geometry_scale;
-
+  set_geometry_scale_for_window (wl_window, geometry_scale);
   meta_window_emit_size_changed (window);
 }
 
-static uint32_t
+static pid_t
 meta_window_wayland_get_client_pid (MetaWindow *window)
 {
   MetaWaylandSurface *surface = window->surface;
@@ -528,7 +638,7 @@ meta_window_wayland_get_client_pid (MetaWindow *window)
   pid_t pid;
 
   wl_client_get_credentials (wl_resource_get_client (resource), &pid, NULL, NULL);
-  return (uint32_t)pid;
+  return pid;
 }
 
 static void
@@ -537,6 +647,10 @@ appears_focused_changed (GObject    *object,
                          gpointer    user_data)
 {
   MetaWindow *window = META_WINDOW (object);
+
+  if (window->placement.rule)
+    return;
+
   surface_state_changed (window);
 }
 
@@ -585,6 +699,18 @@ meta_window_wayland_shortcuts_inhibited (MetaWindow         *window,
 }
 
 static gboolean
+meta_window_wayland_is_focusable (MetaWindow *window)
+{
+  return window->input;
+}
+
+static gboolean
+meta_window_wayland_can_ping (MetaWindow *window)
+{
+  return TRUE;
+}
+
+static gboolean
 meta_window_wayland_is_stackable (MetaWindow *window)
 {
   return meta_wayland_surface_get_buffer (window->surface) != NULL;
@@ -598,10 +724,46 @@ meta_window_wayland_are_updates_frozen (MetaWindow *window)
   return !wl_window->has_been_shown;
 }
 
+static gboolean
+meta_window_wayland_is_focus_async (MetaWindow *window)
+{
+  return FALSE;
+}
+
+static MetaStackLayer
+meta_window_wayland_calculate_layer (MetaWindow *window)
+{
+  return meta_window_get_default_layer (window);
+}
+
+static void
+meta_window_wayland_map (MetaWindow *window)
+{
+}
+
+static void
+meta_window_wayland_unmap (MetaWindow *window)
+{
+}
+
+static void
+meta_window_wayland_finalize (GObject *object)
+{
+  MetaWindowWayland *wl_window = META_WINDOW_WAYLAND (object);
+
+  g_list_free_full (wl_window->pending_configurations,
+                    (GDestroyNotify) meta_wayland_window_configuration_free);
+
+  G_OBJECT_CLASS (meta_window_wayland_parent_class)->finalize (object);
+}
+
 static void
 meta_window_wayland_class_init (MetaWindowWaylandClass *klass)
 {
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
   MetaWindowClass *window_class = META_WINDOW_CLASS (klass);
+
+  object_class->finalize = meta_window_wayland_finalize;
 
   window_class->manage = meta_window_wayland_manage;
   window_class->unmanage = meta_window_wayland_unmanage;
@@ -617,8 +779,14 @@ meta_window_wayland_class_init (MetaWindowWaylandClass *klass)
   window_class->get_client_pid = meta_window_wayland_get_client_pid;
   window_class->force_restore_shortcuts = meta_window_wayland_force_restore_shortcuts;
   window_class->shortcuts_inhibited = meta_window_wayland_shortcuts_inhibited;
+  window_class->is_focusable = meta_window_wayland_is_focusable;
   window_class->is_stackable = meta_window_wayland_is_stackable;
+  window_class->can_ping = meta_window_wayland_can_ping;
   window_class->are_updates_frozen = meta_window_wayland_are_updates_frozen;
+  window_class->calculate_layer = meta_window_wayland_calculate_layer;
+  window_class->map = meta_window_wayland_map;
+  window_class->unmap = meta_window_wayland_unmap;
+  window_class->is_focus_async = meta_window_wayland_is_focus_async;
 }
 
 MetaWindow *
@@ -626,6 +794,7 @@ meta_window_wayland_new (MetaDisplay        *display,
                          MetaWaylandSurface *surface)
 {
   XWindowAttributes attrs = { 0 };
+  MetaWindowWayland *wl_window;
   MetaWindow *window;
 
   /*
@@ -641,15 +810,6 @@ meta_window_wayland_new (MetaDisplay        *display,
   attrs.map_state = IsUnmapped;
   attrs.override_redirect = False;
 
-  /* XXX: Note: In the Wayland case we currently still trap X errors while
-   * creating a MetaWindow because we will still be making various redundant
-   * X requests (passing a window xid of None) until we thoroughly audit all
-   * the code to make sure it knows about non X based clients...
-   */
-  meta_x11_error_trap_push (display->x11_display); /* Push a trap over all of window
-                                                * creation, to reduce XSync() calls
-                                                */
-
   window = _meta_window_shared_new (display,
                                     META_WINDOW_CLIENT_TYPE_WAYLAND,
                                     surface,
@@ -657,31 +817,75 @@ meta_window_wayland_new (MetaDisplay        *display,
                                     WithdrawnState,
                                     META_COMP_EFFECT_CREATE,
                                     &attrs);
-  window->can_ping = TRUE;
 
-  meta_x11_error_trap_pop (display->x11_display); /* pop the XSync()-reducing trap */
+  wl_window = META_WINDOW_WAYLAND (window);
+  set_geometry_scale_for_window (wl_window, wl_window->geometry_scale);
 
   return window;
 }
 
-static gboolean
-is_pending_ack_configure (MetaWindowWayland *wl_window,
-                          MetaWaylandSerial *acked_configure_serial)
+MetaWaylandWindowConfiguration *
+meta_window_wayland_peek_configuration (MetaWindowWayland *wl_window,
+                                        uint32_t           serial)
 {
-  if (wl_window->pending_configure_serial.set)
-    {
-      /* If we're waiting for a configure and this isn't an ACK for
-       * any configure, then fizzle it out. */
-      if (!acked_configure_serial->set)
-        return FALSE;
+  GList *l;
 
-      /* If we're waiting for a configure and this isn't an ACK for
-       * the configure we're waiting for, then fizzle it out. */
-      if (acked_configure_serial->value != wl_window->pending_configure_serial.value)
-        return FALSE;
+  for (l = wl_window->pending_configurations; l; l = l->next)
+    {
+      MetaWaylandWindowConfiguration *configuration = l->data;
+
+      if (configuration->serial == serial)
+        return configuration;
     }
 
-  return TRUE;
+  return NULL;
+}
+
+static MetaWaylandWindowConfiguration *
+acquire_acked_configuration (MetaWindowWayland       *wl_window,
+                             MetaWaylandSurfaceState *pending)
+{
+  GList *l;
+
+  if (!pending->has_acked_configure_serial)
+    return NULL;
+
+  for (l = wl_window->pending_configurations; l; l = l->next)
+    {
+      MetaWaylandWindowConfiguration *configuration = l->data;
+      GList *tail;
+      gboolean is_matching_configuration;
+
+      if (configuration->serial > pending->acked_configure_serial)
+        continue;
+
+      tail = l;
+
+      if (tail->prev)
+        {
+          tail->prev->next = NULL;
+          tail->prev = NULL;
+        }
+      else
+        {
+          wl_window->pending_configurations = NULL;
+        }
+
+      is_matching_configuration =
+        configuration->serial == pending->acked_configure_serial;
+
+      if (is_matching_configuration)
+        tail = g_list_delete_link (tail, l);
+      g_list_free_full (tail,
+                        (GDestroyNotify) meta_wayland_window_configuration_free);
+
+      if (is_matching_configuration)
+        return configuration;
+      else
+        return NULL;
+    }
+
+  return NULL;
 }
 
 int
@@ -693,24 +897,57 @@ meta_window_wayland_get_geometry_scale (MetaWindow *window)
   return get_window_geometry_scale_for_logical_monitor (window->monitor);
 }
 
+static void
+calculate_offset (MetaWaylandWindowConfiguration *configuration,
+                  MetaRectangle                  *geometry,
+                  MetaRectangle                  *rect)
+{
+  int offset_x;
+  int offset_y;
+
+  rect->x = configuration->x;
+  rect->y = configuration->y;
+
+  offset_x = configuration->width - geometry->width;
+  offset_y = configuration->height - geometry->height;
+  switch (configuration->gravity)
+    {
+    case META_GRAVITY_SOUTH:
+    case META_GRAVITY_SOUTH_WEST:
+      rect->y += offset_y;
+      break;
+    case META_GRAVITY_EAST:
+    case META_GRAVITY_NORTH_EAST:
+      rect->x += offset_x;
+      break;
+    case META_GRAVITY_SOUTH_EAST:
+      rect->x += offset_x;
+      rect->y += offset_y;
+      break;
+    default:
+      break;
+    }
+}
+
 /**
  * meta_window_move_resize_wayland:
  *
  * Complete a resize operation from a wayland client.
  */
 void
-meta_window_wayland_move_resize (MetaWindow        *window,
-                                 MetaWaylandSerial *acked_configure_serial,
-                                 MetaRectangle      new_geom,
-                                 int                dx,
-                                 int                dy)
+meta_window_wayland_finish_move_resize (MetaWindow              *window,
+                                        MetaRectangle            new_geom,
+                                        MetaWaylandSurfaceState *pending)
 {
   MetaWindowWayland *wl_window = META_WINDOW_WAYLAND (window);
+  MetaDisplay *display = window->display;
+  int dx, dy;
   int geometry_scale;
-  int gravity;
+  MetaGravity gravity;
   MetaRectangle rect;
   MetaMoveResizeFlags flags;
-  gboolean pending_ack_configure;
+  MetaWaylandWindowConfiguration *acked_configuration;
+  gboolean is_window_being_resized;
 
   /* new_geom is in the logical pixel coordinate space, but MetaWindow wants its
    * rects to represent what in turn will end up on the stage, i.e. we need to
@@ -725,26 +962,37 @@ meta_window_wayland_move_resize (MetaWindow        *window,
 
   /* The (dx, dy) offset is also in logical pixel coordinate space and needs
    * to be scaled in the same way as new_geom. */
-  dx *= geometry_scale;
-  dy *= geometry_scale;
+  dx = pending->dx * geometry_scale;
+  dy = pending->dy * geometry_scale;
 
   /* XXX: Find a better place to store the window geometry offsets. */
   window->custom_frame_extents.left = new_geom.x;
   window->custom_frame_extents.top = new_geom.y;
 
-  flags = META_MOVE_RESIZE_WAYLAND_RESIZE;
+  flags = META_MOVE_RESIZE_WAYLAND_FINISH_MOVE_RESIZE;
 
-  pending_ack_configure = is_pending_ack_configure (wl_window, acked_configure_serial);
+  acked_configuration = acquire_acked_configuration (wl_window, pending);
 
   /* x/y are ignored when we're doing interactive resizing */
-  if (!meta_grab_op_is_resizing (window->display->grab_op))
+  is_window_being_resized = (meta_grab_op_is_resizing (display->grab_op) &&
+                             display->grab_window == window);
+
+  if (!is_window_being_resized)
     {
-      if (wl_window->has_pending_move && pending_ack_configure)
+      if (acked_configuration)
         {
-          rect.x = wl_window->pending_move_x;
-          rect.y = wl_window->pending_move_y;
-          wl_window->has_pending_move = FALSE;
-          flags |= META_MOVE_RESIZE_MOVE_ACTION;
+          if (window->placement.rule)
+            {
+              MetaWindow *parent;
+
+              parent = meta_window_get_transient_for (window);
+              rect.x = parent->rect.x + acked_configuration->rel_x;
+              rect.y = parent->rect.y + acked_configuration->rel_y;
+            }
+          else
+            {
+              calculate_offset (acked_configuration, &new_geom, &rect);
+            }
         }
       else
         {
@@ -752,21 +1000,30 @@ meta_window_wayland_move_resize (MetaWindow        *window,
           rect.y = window->rect.y;
         }
 
-      if (dx != 0 || dy != 0)
+      rect.x += dx;
+      rect.y += dy;
+    }
+  else
+    {
+      if (acked_configuration)
         {
-          rect.x += dx;
-          rect.y += dy;
-          flags |= META_MOVE_RESIZE_MOVE_ACTION;
+          calculate_offset (acked_configuration, &new_geom, &rect);
+        }
+      else
+        {
+          rect.x = window->rect.x;
+          rect.y = window->rect.y;
         }
     }
 
-  if (wl_window->has_pending_state_change && pending_ack_configure)
+  if (rect.x != window->rect.x || rect.y != window->rect.y)
+    flags |= META_MOVE_RESIZE_MOVE_ACTION;
+
+  if (wl_window->has_pending_state_change && acked_configuration)
     {
       flags |= META_MOVE_RESIZE_WAYLAND_STATE_CHANGED;
       wl_window->has_pending_state_change = FALSE;
     }
-
-  wl_window->pending_configure_serial.set = FALSE;
 
   rect.width = new_geom.width;
   rect.height = new_geom.height;
@@ -774,8 +1031,13 @@ meta_window_wayland_move_resize (MetaWindow        *window,
   if (rect.width != window->rect.width || rect.height != window->rect.height)
     flags |= META_MOVE_RESIZE_RESIZE_ACTION;
 
-  gravity = meta_resize_gravity_from_grab_op (window->display->grab_op);
+  if (window->display->grab_window == window)
+    gravity = meta_resize_gravity_from_grab_op (window->display->grab_op);
+  else
+    gravity = META_GRAVITY_STATIC;
   meta_window_move_resize_internal (window, flags, gravity, rect);
+
+  g_clear_pointer (&acked_configuration, meta_wayland_window_configuration_free);
 }
 
 void
@@ -801,13 +1063,35 @@ void
 meta_window_place_with_placement_rule (MetaWindow        *window,
                                        MetaPlacementRule *placement_rule)
 {
-  g_clear_pointer (&window->placement_rule, g_free);
-  window->placement_rule = g_new0 (MetaPlacementRule, 1);
-  *window->placement_rule = *placement_rule;
+  gboolean first_placement;
 
+  first_placement = !window->placement.rule;
+
+  g_clear_pointer (&window->placement.rule, g_free);
+  window->placement.rule = g_new0 (MetaPlacementRule, 1);
+  *window->placement.rule = *placement_rule;
+
+  window->unconstrained_rect.x = window->rect.x;
+  window->unconstrained_rect.y = window->rect.y;
   window->unconstrained_rect.width = placement_rule->width;
   window->unconstrained_rect.height = placement_rule->height;
-  meta_window_force_placement (window, FALSE);
+
+  window->calc_placement = first_placement;
+  meta_window_move_resize_internal (window,
+                                    (META_MOVE_RESIZE_MOVE_ACTION |
+                                     META_MOVE_RESIZE_RESIZE_ACTION |
+                                     META_MOVE_RESIZE_PLACEMENT_CHANGED),
+                                    META_GRAVITY_NORTH_WEST,
+                                    window->unconstrained_rect);
+  window->calc_placement = FALSE;
+}
+
+void
+meta_window_update_placement_rule (MetaWindow        *window,
+                                   MetaPlacementRule *placement_rule)
+{
+  window->placement.state = META_PLACEMENT_STATE_INVALIDATED;
+  meta_window_place_with_placement_rule (window, placement_rule);
 }
 
 void
@@ -943,12 +1227,4 @@ meta_window_wayland_get_max_size (MetaWindow *window,
 
   scale = 1.0 / (float) meta_window_wayland_get_geometry_scale (window);
   scale_size (width, height, scale);
-}
-
-gboolean
-meta_window_wayland_needs_move_resize (MetaWindow *window)
-{
-  MetaWindowWayland *wl_window = META_WINDOW_WAYLAND (window);
-
-  return wl_window->has_pending_state_change || wl_window->has_pending_move;
 }

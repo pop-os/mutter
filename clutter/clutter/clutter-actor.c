@@ -43,8 +43,7 @@
  *  5. rotation around the #ClutterActor:rotation-angle-x and #ClutterActor:rotation-center-x
  *  6. rotation around the #ClutterActor:rotation-angle-y and #ClutterActor:rotation-center-y
  *  7. rotation around the #ClutterActor:rotation-angle-z and #ClutterActor:rotation-center-z
- *  8. negative translation by the #ClutterActor:anchor-x and #ClutterActor:anchor-y point.
- *  9. negative translation by the actor's #ClutterActor:pivot-point
+ *  8. negative translation by the actor's #ClutterActor:pivot-point
  *
  * ## Modifying an actor's geometry ## {#clutter-actor-geometry}
  *
@@ -254,7 +253,7 @@
  *
  * // animate the actor's opacity and depth
  * clutter_actor_set_opacity (actor, 0);
- * clutter_actor_set_depth (actor, -100);
+ * clutter_actor_set_z_position (actor, -100);
  *
  * clutter_actor_restore_easing_state (actor);
  *
@@ -262,7 +261,7 @@
  *
  * // animate another actor's opacity
  * clutter_actor_set_opacity (another_actor, 255);
- * clutter_actor_set_depth (another_actor, 100);
+ * clutter_actor_set_z_position (another_actor, 100);
  *
  * clutter_actor_restore_easing_state (another_actor);
  * ]|
@@ -312,7 +311,7 @@
  * |[<!-- language="C" -->
  * ClutterTransition *transition;
  *
- * transition = clutter_property_transition_new ("opacity");
+ * transition = clutter_property_transition_new_for_actor (actor, "opacity");
  * clutter_timeline_set_duration (CLUTTER_TIMELINE (transition), 3000);
  * clutter_timeline_set_repeat_count (CLUTTER_TIMELINE (transition), 2);
  * clutter_timeline_set_auto_reverse (CLUTTER_TIMELINE (transition), TRUE);
@@ -345,7 +344,7 @@
  * ClutterTransition *transition;
  * ClutterInterval *interval;
  *
- * transition = clutter_property_transition_new ("opacity");
+ * transition = clutter_property_transition_new_for_actor (actor, "opacity");
  *
  * // we want to animate the opacity between 0 and 255
  * clutter_transition_set_from (transition, G_TYPE_UINT, 0);
@@ -433,7 +432,7 @@
  *
  * #ClutterActor allows accessing properties of #ClutterAction,
  * #ClutterEffect, and #ClutterConstraint instances associated to an actor
- * instance for animation purposes.
+ * instance for animation purposes, as well as its #ClutterLayoutManager.
  *
  * In order to access a specific #ClutterAction or a #ClutterConstraint
  * property it is necessary to set the #ClutterActorMeta:name property on the
@@ -446,7 +445,8 @@
  * ]|
  *
  *  - the initial `@` is mandatory
- *  - the `section` fragment can be one between "actions", "constraints" and "effects"
+ *  - the `section` fragment can be one between "actions", "constraints", "content",
+ *    and "effects"
  *  - the `meta-name` fragment is the name of the action, effect, or constraint, as
  *    specified by the #ClutterActorMeta:name property of #ClutterActorMeta
  *  - the `property-name` fragment is the name of the action, effect, or constraint
@@ -456,6 +456,13 @@
  * using an explicit transition. The `rect` actor has a binding constraint
  * on the `origin` actor, and in its initial state is overlapping the actor
  * to which is bound to.
+ *
+ * As the actor has only one #ClutterLayoutManager, the syntax for accessing its
+ * properties is simpler:
+ *
+ * |[
+ *   @layout.<property-name>
+ * ]|
  *
  * |[<!-- language="C" -->
  * constraint = clutter_bind_constraint_new (origin, CLUTTER_BIND_X, 0.0);
@@ -498,7 +505,7 @@
  *   const char *prop = "@constraints.bind-x.offset";
  *
  *   // create a new transition for the given property
- *   transition = clutter_property_transition_new (prop);
+ *   transition = clutter_property_transition_new_for_actor (rect, prop);
  *
  *   // set the easing mode and duration
  *   clutter_timeline_set_progress_mode (CLUTTER_TIMELINE (transition),
@@ -624,7 +631,7 @@
 #include "clutter-color-static.h"
 #include "clutter-color.h"
 #include "clutter-constraint-private.h"
-#include "clutter-container.h"
+#include "clutter-container-private.h"
 #include "clutter-content-private.h"
 #include "clutter-debug.h"
 #include "clutter-easing.h"
@@ -635,6 +642,8 @@
 #include "clutter-interval.h"
 #include "clutter-main.h"
 #include "clutter-marshal.h"
+#include "clutter-mutter.h"
+#include "clutter-paint-context-private.h"
 #include "clutter-paint-nodes.h"
 #include "clutter-paint-node-private.h"
 #include "clutter-paint-volume-private.h"
@@ -643,19 +652,19 @@
 #include "clutter-scriptable.h"
 #include "clutter-script-private.h"
 #include "clutter-stage-private.h"
+#include "clutter-stage-view-private.h"
 #include "clutter-timeline.h"
 #include "clutter-transition.h"
 #include "clutter-units.h"
 
-#include "deprecated/clutter-actor.h"
-#include "deprecated/clutter-behaviour.h"
 #include "deprecated/clutter-container.h"
 
 /* Internal enum used to control mapped state update.  This is a hint
  * which indicates when to do something other than just enforce
  * invariants.
  */
-typedef enum {
+typedef enum
+{
   MAP_STATE_CHECK,           /* just enforce invariants. */
   MAP_STATE_MAKE_UNREALIZED, /* force unrealize, ignoring invariants,
                               * used when about to unparent.
@@ -689,16 +698,18 @@ struct _ClutterActorPrivate
    * allocation
    */
   ClutterActorBox allocation;
-  ClutterAllocationFlags allocation_flags;
 
   /* clip, in actor coordinates */
-  ClutterRect clip;
+  graphene_rect_t clip;
 
   /* the cached transformation matrix; see apply_transform() */
   CoglMatrix transform;
 
+  float resource_scale;
+
   guint8 opacity;
   gint opacity_override;
+  unsigned int inhibit_culling_counter;
 
   ClutterOffscreenRedirect offscreen_redirect;
 
@@ -725,8 +736,6 @@ struct _ClutterActorPrivate
 
   gchar *name; /* a non-unique name, used for debugging */
 
-  gint32 pick_id; /* per-stage unique id, used for picking */
-
   /* a back-pointer to the Pango context that we can use
    * to create pre-configured PangoLayout
    */
@@ -736,9 +745,6 @@ struct _ClutterActorPrivate
    * application code, or by the actor's parent
    */
   ClutterTextDirection text_direction;
-
-  /* a counter used to toggle the CLUTTER_INTERNAL_CHILD flag */
-  gint internal_child;
 
   /* meta classes */
   ClutterMetaGroup *actions;
@@ -798,10 +804,18 @@ struct _ClutterActorPrivate
    */
   gulong in_cloned_branch;
 
+  guint unmapped_paint_branch_counter;
+
   GListModel *child_model;
   ClutterActorCreateChildFunc create_child_func;
   gpointer create_child_data;
   GDestroyNotify create_child_notify;
+
+  gulong resolution_changed_id;
+  gulong font_changed_id;
+  gulong layout_changed_id;
+
+  GList *stage_views;
 
   /* bitfields: KEEP AT THE END */
 
@@ -823,6 +837,7 @@ struct _ClutterActorPrivate
   guint enable_model_view_transform : 1;
   guint enable_paint_unmapped       : 1;
   guint has_pointer                 : 1;
+  guint has_key_focus               : 1;
   guint propagated_one_redraw       : 1;
   guint paint_volume_valid          : 1;
   guint last_paint_volume_valid     : 1;
@@ -842,6 +857,8 @@ struct _ClutterActorPrivate
   guint needs_y_expand              : 1;
   guint needs_paint_volume_update   : 1;
   guint had_effects_on_last_paint_volume_update : 1;
+  guint absolute_origin_changed     : 1;
+  guint needs_update_stage_views    : 1;
 };
 
 enum
@@ -888,10 +905,8 @@ enum
   /* Allocation properties are read-only */
   PROP_ALLOCATION,
 
-  PROP_DEPTH, /* XXX:2.0 remove */
   PROP_Z_POSITION,
 
-  PROP_CLIP, /* XXX:2.0 remove */
   PROP_CLIP_RECT,
   PROP_HAS_CLIP,
   PROP_CLIP_TO_ALLOCATION,
@@ -911,24 +926,10 @@ enum
   PROP_SCALE_X,
   PROP_SCALE_Y,
   PROP_SCALE_Z,
-  PROP_SCALE_CENTER_X, /* XXX:2.0 remove */
-  PROP_SCALE_CENTER_Y, /* XXX:2.0 remove */
-  PROP_SCALE_GRAVITY, /* XXX:2.0 remove */
 
   PROP_ROTATION_ANGLE_X, /* XXX:2.0 rename to rotation-x */
   PROP_ROTATION_ANGLE_Y, /* XXX:2.0 rename to rotation-y */
   PROP_ROTATION_ANGLE_Z, /* XXX:2.0 rename to rotation-z */
-  PROP_ROTATION_CENTER_X, /* XXX:2.0 remove */
-  PROP_ROTATION_CENTER_Y, /* XXX:2.0 remove */
-  PROP_ROTATION_CENTER_Z, /* XXX:2.0 remove */
-  /* This property only makes sense for the z rotation because the
-     others would depend on the actor having a size along the
-     z-axis */
-  PROP_ROTATION_CENTER_Z_GRAVITY, /* XXX:2.0 remove */
-
-  PROP_ANCHOR_X, /* XXX:2.0 remove */
-  PROP_ANCHOR_Y, /* XXX:2.0 remove */
-  PROP_ANCHOR_GRAVITY, /*XXX:2.0 remove */
 
   PROP_TRANSLATION_X,
   PROP_TRANSLATION_Y,
@@ -1001,10 +1002,11 @@ enum
   MOTION_EVENT,
   ENTER_EVENT,
   LEAVE_EVENT,
-  ALLOCATION_CHANGED,
   TRANSITIONS_COMPLETED,
   TOUCH_EVENT,
   TRANSITION_STOPPED,
+  STAGE_VIEWS_CHANGED,
+  RESOURCE_SCALE_CHANGED,
 
   LAST_SIGNAL
 };
@@ -1017,12 +1019,11 @@ typedef struct _TransitionClosure
   ClutterTransition *transition;
   gchar *name;
   gulong completed_id;
-  guint is_implicit : 1;
 } TransitionClosure;
 
 static void clutter_container_iface_init  (ClutterContainerIface  *iface);
 static void clutter_scriptable_iface_init (ClutterScriptableIface *iface);
-static void clutter_animatable_iface_init (ClutterAnimatableIface *iface);
+static void clutter_animatable_iface_init (ClutterAnimatableInterface *iface);
 static void atk_implementor_iface_init    (AtkImplementorIface    *iface);
 
 /* These setters are all static for now, maybe they should be in the
@@ -1048,23 +1049,6 @@ static void clutter_actor_set_natural_height_set (ClutterActor *self,
 static void clutter_actor_update_map_state       (ClutterActor  *self,
                                                   MapStateChange change);
 static void clutter_actor_unrealize_not_hiding   (ClutterActor *self);
-
-/* Helper routines for managing anchor coords */
-static void clutter_anchor_coord_get_units (ClutterActor      *self,
-                                            const AnchorCoord *coord,
-                                            gfloat            *x,
-                                            gfloat            *y,
-                                            gfloat            *z);
-static void clutter_anchor_coord_set_units (AnchorCoord       *coord,
-                                            gfloat             x,
-                                            gfloat             y,
-                                            gfloat             z);
-
-static ClutterGravity clutter_anchor_coord_get_gravity (const AnchorCoord *coord);
-static void           clutter_anchor_coord_set_gravity (AnchorCoord       *coord,
-                                                        ClutterGravity     gravity);
-
-static gboolean clutter_anchor_coord_is_zero (const AnchorCoord *coord);
 
 static void _clutter_actor_get_relative_transformation_matrix (ClutterActor *self,
                                                                ClutterActor *ancestor,
@@ -1099,19 +1083,28 @@ static void clutter_actor_push_in_cloned_branch (ClutterActor *self,
 static void clutter_actor_pop_in_cloned_branch (ClutterActor *self,
                                                 gulong        count);
 
-/* Helper macro which translates by the anchor coord, applies the
-   given transformation and then translates back */
-#define TRANSFORM_ABOUT_ANCHOR_COORD(a,m,c,_transform)  G_STMT_START { \
-  gfloat _tx, _ty, _tz;                                                \
-  clutter_anchor_coord_get_units ((a), (c), &_tx, &_ty, &_tz);         \
-  cogl_matrix_translate ((m), _tx, _ty, _tz);                          \
-  { _transform; }                                                      \
-  cogl_matrix_translate ((m), -_tx, -_ty, -_tz);        } G_STMT_END
+static void push_in_paint_unmapped_branch (ClutterActor *self,
+                                           guint         count);
+static void pop_in_paint_unmapped_branch (ClutterActor *self,
+                                          guint         count);
 
-static GQuark quark_shader_data = 0;
 static GQuark quark_actor_layout_info = 0;
 static GQuark quark_actor_transform_info = 0;
 static GQuark quark_actor_animation_info = 0;
+
+static GQuark quark_key = 0;
+static GQuark quark_motion = 0;
+static GQuark quark_pointer_focus = 0;
+static GQuark quark_button = 0;
+static GQuark quark_scroll = 0;
+static GQuark quark_stage = 0;
+static GQuark quark_destroy = 0;
+static GQuark quark_client = 0;
+static GQuark quark_touch = 0;
+static GQuark quark_touchpad = 0;
+static GQuark quark_proximity = 0;
+static GQuark quark_pad = 0;
+static GQuark quark_im = 0;
 
 G_DEFINE_TYPE_WITH_CODE (ClutterActor,
                          clutter_actor,
@@ -1172,27 +1165,20 @@ clutter_actor_verify_map_state (ClutterActor *self)
 
   if (CLUTTER_ACTOR_IS_REALIZED (self))
     {
-      /* all bets are off during reparent when we're potentially realized,
-       * but should not be according to invariants
-       */
-      if (!CLUTTER_ACTOR_IN_REPARENT (self))
+      if (priv->parent == NULL)
         {
-          if (priv->parent == NULL)
+          if (!CLUTTER_ACTOR_IS_TOPLEVEL (self))
             {
-              if (CLUTTER_ACTOR_IS_TOPLEVEL (self))
-                {
-                }
-              else
-                g_warning ("Realized non-toplevel actor '%s' should "
-                           "have a parent",
-                           _clutter_actor_get_debug_name (self));
+              g_warning ("Realized non-toplevel actor '%s' should "
+                         "have a parent",
+                         _clutter_actor_get_debug_name (self));
             }
-          else if (!CLUTTER_ACTOR_IS_REALIZED (priv->parent))
-            {
-              g_warning ("Realized actor %s has an unrealized parent %s",
-                         _clutter_actor_get_debug_name (self),
-                         _clutter_actor_get_debug_name (priv->parent));
-            }
+        }
+      else if (!CLUTTER_ACTOR_IS_REALIZED (priv->parent))
+        {
+          g_warning ("Realized actor %s has an unrealized parent %s",
+                     _clutter_actor_get_debug_name (self),
+                     _clutter_actor_get_debug_name (priv->parent));
         }
     }
 
@@ -1202,76 +1188,176 @@ clutter_actor_verify_map_state (ClutterActor *self)
         g_warning ("Actor '%s' is mapped but not realized",
                    _clutter_actor_get_debug_name (self));
 
-      /* remaining bets are off during reparent when we're potentially
-       * mapped, but should not be according to invariants
-       */
-      if (!CLUTTER_ACTOR_IN_REPARENT (self))
+      if (priv->parent == NULL)
         {
-          if (priv->parent == NULL)
+          if (CLUTTER_ACTOR_IS_TOPLEVEL (self))
             {
-              if (CLUTTER_ACTOR_IS_TOPLEVEL (self))
+              if (!CLUTTER_ACTOR_IS_VISIBLE (self) &&
+                  !CLUTTER_ACTOR_IN_DESTRUCTION (self))
                 {
-                  if (!CLUTTER_ACTOR_IS_VISIBLE (self) &&
-                      !CLUTTER_ACTOR_IN_DESTRUCTION (self))
-                    {
-                      g_warning ("Toplevel actor '%s' is mapped "
-                                 "but not visible",
-                                 _clutter_actor_get_debug_name (self));
-                    }
-                }
-              else
-                {
-                  g_warning ("Mapped actor '%s' should have a parent",
+                  g_warning ("Toplevel actor '%s' is mapped "
+                             "but not visible",
                              _clutter_actor_get_debug_name (self));
                 }
             }
           else
             {
-              ClutterActor *iter = self;
+              g_warning ("Mapped actor '%s' should have a parent",
+                         _clutter_actor_get_debug_name (self));
+            }
+        }
+      else
+        {
+          ClutterActor *iter = self;
 
-              /* check for the enable_paint_unmapped flag on the actor
-               * and parents; if the flag is enabled at any point of this
-               * branch of the scene graph then all the later checks
-               * become pointless
-               */
-              while (iter != NULL)
-                {
-                  if (iter->priv->enable_paint_unmapped)
-                    return;
+          /* check for the enable_paint_unmapped flag on the actor
+           * and parents; if the flag is enabled at any point of this
+           * branch of the scene graph then all the later checks
+           * become pointless
+           */
+          while (iter != NULL)
+            {
+              if (iter->priv->enable_paint_unmapped)
+                return;
 
-                  iter = iter->priv->parent;
-                }
+              iter = iter->priv->parent;
+            }
 
-              if (!CLUTTER_ACTOR_IS_VISIBLE (priv->parent))
-                {
-                  g_warning ("Actor '%s' should not be mapped if parent '%s'"
-                             "is not visible",
-                             _clutter_actor_get_debug_name (self),
-                             _clutter_actor_get_debug_name (priv->parent));
-                }
+          if (!CLUTTER_ACTOR_IS_VISIBLE (priv->parent))
+            {
+              g_warning ("Actor '%s' should not be mapped if parent '%s'"
+                         "is not visible",
+                         _clutter_actor_get_debug_name (self),
+                         _clutter_actor_get_debug_name (priv->parent));
+            }
 
-              if (!CLUTTER_ACTOR_IS_REALIZED (priv->parent))
-                {
-                  g_warning ("Actor '%s' should not be mapped if parent '%s'"
-                             "is not realized",
-                             _clutter_actor_get_debug_name (self),
-                             _clutter_actor_get_debug_name (priv->parent));
-                }
+          if (!CLUTTER_ACTOR_IS_REALIZED (priv->parent))
+            {
+              g_warning ("Actor '%s' should not be mapped if parent '%s'"
+                         "is not realized",
+                         _clutter_actor_get_debug_name (self),
+                         _clutter_actor_get_debug_name (priv->parent));
+            }
 
-              if (!CLUTTER_ACTOR_IS_TOPLEVEL (priv->parent))
-                {
-                  if (!CLUTTER_ACTOR_IS_MAPPED (priv->parent))
-                    g_warning ("Actor '%s' is mapped but its non-toplevel "
-                               "parent '%s' is not mapped",
-                               _clutter_actor_get_debug_name (self),
-                               _clutter_actor_get_debug_name (priv->parent));
-                }
+          if (!CLUTTER_ACTOR_IS_TOPLEVEL (priv->parent))
+            {
+              if (!CLUTTER_ACTOR_IS_MAPPED (priv->parent))
+                g_warning ("Actor '%s' is mapped but its non-toplevel "
+                           "parent '%s' is not mapped",
+                           _clutter_actor_get_debug_name (self),
+                           _clutter_actor_get_debug_name (priv->parent));
             }
         }
     }
 }
 
 #endif /* CLUTTER_ENABLE_DEBUG */
+
+static gboolean
+_clutter_actor_transform_local_box_to_stage (ClutterActor          *self,
+                                             ClutterStage          *stage,
+                                             ClutterPickContext    *pick_context,
+                                             const ClutterActorBox *box,
+                                             graphene_point_t       vertices[4])
+{
+  CoglFramebuffer *fb =
+   clutter_pick_context_get_framebuffer (pick_context);
+  CoglMatrix stage_transform, inv_stage_transform;
+  CoglMatrix modelview, transform_to_stage;
+  int v;
+
+  clutter_actor_get_transform (CLUTTER_ACTOR (stage), &stage_transform);
+  if (!cogl_matrix_get_inverse (&stage_transform, &inv_stage_transform))
+    return FALSE;
+  cogl_framebuffer_get_modelview_matrix (fb, &modelview);
+  cogl_matrix_multiply (&transform_to_stage, &inv_stage_transform, &modelview);
+
+  vertices[0].x = box->x1;
+  vertices[0].y = box->y1;
+
+  vertices[1].x = box->x2;
+  vertices[1].y = box->y1;
+
+  vertices[2].x = box->x2;
+  vertices[2].y = box->y2;
+
+  vertices[3].x = box->x1;
+  vertices[3].y = box->y2;
+
+  for (v = 0; v < 4; v++)
+    {
+      float z = 0.f;
+      float w = 1.f;
+
+      cogl_matrix_transform_point (&transform_to_stage,
+                                   &vertices[v].x,
+                                   &vertices[v].y,
+                                   &z,
+                                   &w);
+    }
+
+  return TRUE;
+}
+
+/**
+ * clutter_actor_pick_box:
+ * @self: The #ClutterActor being "pick" painted.
+ * @pick_context: The #ClutterPickContext
+ * @box: A rectangle in the actor's own local coordinates.
+ *
+ * Logs (does a virtual paint of) a rectangle for picking. Note that @box is
+ * in the actor's own local coordinates, so is usually {0,0,width,height}
+ * to include the whole actor. That is unless the actor has a shaped input
+ * region in which case you may wish to log the (multiple) smaller rectangles
+ * that make up the input region.
+ */
+void
+clutter_actor_pick_box (ClutterActor          *self,
+                        ClutterPickContext    *pick_context,
+                        const ClutterActorBox *box)
+{
+  ClutterStage *stage;
+  graphene_point_t vertices[4];
+
+  g_return_if_fail (CLUTTER_IS_ACTOR (self));
+  g_return_if_fail (box != NULL);
+
+  if (box->x1 >= box->x2 || box->y1 >= box->y2)
+    return;
+
+  stage = CLUTTER_STAGE (_clutter_actor_get_stage_internal (self));
+
+  if (_clutter_actor_transform_local_box_to_stage (self, stage, pick_context,
+                                                   box, vertices))
+    clutter_stage_log_pick (stage, vertices, self);
+}
+
+static gboolean
+_clutter_actor_push_pick_clip (ClutterActor          *self,
+                               ClutterPickContext    *pick_context,
+                               const ClutterActorBox *clip)
+{
+  ClutterStage *stage;
+  graphene_point_t vertices[4];
+
+  stage = CLUTTER_STAGE (_clutter_actor_get_stage_internal (self));
+
+  if (!_clutter_actor_transform_local_box_to_stage (self, stage, pick_context,
+                                                    clip, vertices))
+    return FALSE;
+
+  clutter_stage_push_pick_clip (stage, vertices);
+  return TRUE;
+}
+
+static void
+_clutter_actor_pop_pick_clip (ClutterActor *self)
+{
+  ClutterActor *stage;
+
+  stage = _clutter_actor_get_stage_internal (self);
+  clutter_stage_pop_pick_clip (CLUTTER_STAGE (stage));
+}
 
 static void
 clutter_actor_set_mapped (ClutterActor *self,
@@ -1454,13 +1540,10 @@ clutter_actor_update_map_state (ClutterActor  *self,
                        _clutter_actor_get_debug_name (priv->parent));
         }
 
-      /* If in reparent, we temporarily suspend unmap and unrealize.
-       *
-       * We want to go in the order "realize, map" and "unmap, unrealize"
-       */
+      /* We want to go in the order "realize, map" and "unmap, unrealize" */
 
       /* Unmap */
-      if (!should_be_mapped && !CLUTTER_ACTOR_IN_REPARENT (self))
+      if (!should_be_mapped)
         clutter_actor_set_mapped (self, FALSE);
 
       /* Realize */
@@ -1471,7 +1554,7 @@ clutter_actor_update_map_state (ClutterActor  *self,
       g_assert (!(must_be_realized && !may_be_realized));
 
       /* Unrealize */
-      if (!may_be_realized && !CLUTTER_ACTOR_IN_REPARENT (self))
+      if (!may_be_realized)
         clutter_actor_unrealize_not_hiding (self);
 
       /* Map */
@@ -1499,10 +1582,26 @@ clutter_actor_update_map_state (ClutterActor  *self,
 }
 
 static void
+queue_update_stage_views (ClutterActor *actor)
+{
+  while (actor && !actor->priv->needs_update_stage_views)
+    {
+      actor->priv->needs_update_stage_views = TRUE;
+
+      /* We don't really need to update the stage-views of the actors up the
+       * hierarchy, we set the flag anyway though so we can avoid traversing
+       * the whole scenegraph when looking for actors which need an update
+       * in clutter_actor_update_stage_views().
+       */
+      actor = actor->priv->parent;
+    }
+}
+
+static void
 clutter_actor_real_map (ClutterActor *self)
 {
   ClutterActorPrivate *priv = self->priv;
-  ClutterActor *stage, *iter;
+  ClutterActor *iter;
 
   g_assert (!CLUTTER_ACTOR_IS_MAPPED (self));
 
@@ -1511,21 +1610,36 @@ clutter_actor_real_map (ClutterActor *self)
 
   CLUTTER_ACTOR_SET_FLAGS (self, CLUTTER_ACTOR_MAPPED);
 
-  self->priv->needs_paint_volume_update = TRUE;
+  if (priv->unmapped_paint_branch_counter == 0)
+    {
+      priv->needs_paint_volume_update = TRUE;
 
-  stage = _clutter_actor_get_stage_internal (self);
-  priv->pick_id = _clutter_stage_acquire_pick_id (CLUTTER_STAGE (stage), self);
+      /* We skip unmapped actors when updating the stage-views list, so if
+       * an actors list got invalidated while it was unmapped make sure to
+       * set priv->needs_update_stage_views to TRUE for all actors up the
+       * hierarchy now.
+       */
+      if (priv->needs_update_stage_views)
+        {
+          /* Avoid the early return in queue_update_stage_views() */
+          priv->needs_update_stage_views = FALSE;
+          queue_update_stage_views (self);
+        }
 
-  CLUTTER_NOTE (ACTOR, "Pick id '%d' for actor '%s'",
-                priv->pick_id,
-                _clutter_actor_get_debug_name (self));
+      /* Avoid the early return in clutter_actor_queue_relayout() */
+      priv->needs_width_request = FALSE;
+      priv->needs_height_request = FALSE;
+      priv->needs_allocation = FALSE;
+
+      clutter_actor_queue_relayout (self);
+    }
 
   /* notify on parent mapped before potentially mapping
    * children, so apps see a top-down notification.
    */
   g_object_notify_by_pspec (G_OBJECT (self), obj_props[PROP_MAPPED]);
 
-  for (iter = self->priv->first_child;
+  for (iter = priv->first_child;
        iter != NULL;
        iter = iter->priv->next_sibling)
     {
@@ -1541,7 +1655,7 @@ clutter_actor_real_map (ClutterActor *self)
  * and realizes its children if they are visible. Does nothing if the
  * actor is not visible.
  *
- * Calling this function is strongly disencouraged: the default
+ * Calling this function is strongly discouraged: the default
  * implementation of #ClutterActorClass.map() will map all the children
  * of an actor when mapping its parent.
  *
@@ -1585,6 +1699,20 @@ clutter_actor_is_mapped (ClutterActor *self)
 }
 
 static void
+maybe_unset_key_focus (ClutterActor *self)
+{
+  ClutterActor *stage;
+
+  if (!self->priv->has_key_focus)
+    return;
+
+  stage = _clutter_actor_get_stage_internal (self);
+
+  if (stage)
+    clutter_stage_set_key_focus (CLUTTER_STAGE (stage), NULL);
+}
+
+static void
 clutter_actor_real_unmap (ClutterActor *self)
 {
   ClutterActorPrivate *priv = self->priv;
@@ -1595,7 +1723,7 @@ clutter_actor_real_unmap (ClutterActor *self)
   CLUTTER_NOTE (ACTOR, "Unmapping actor '%s'",
                 _clutter_actor_get_debug_name (self));
 
-  for (iter = self->priv->first_child;
+  for (iter = priv->first_child;
        iter != NULL;
        iter = iter->priv->next_sibling)
     {
@@ -1604,11 +1732,22 @@ clutter_actor_real_unmap (ClutterActor *self)
 
   CLUTTER_ACTOR_UNSET_FLAGS (self, CLUTTER_ACTOR_MAPPED);
 
-  /* clear the contents of the last paint volume, so that hiding + moving +
-   * showing will not result in the wrong area being repainted
-   */
-  _clutter_paint_volume_init_static (&priv->last_paint_volume, NULL);
-  priv->last_paint_volume_valid = TRUE;
+  if (priv->unmapped_paint_branch_counter == 0)
+    {
+      /* clear the contents of the last paint volume, so that hiding + moving +
+       * showing will not result in the wrong area being repainted
+       */
+     _clutter_paint_volume_init_static (&priv->last_paint_volume, NULL);
+      priv->last_paint_volume_valid = TRUE;
+
+      if (priv->parent && !CLUTTER_ACTOR_IN_DESTRUCTION (priv->parent))
+        {
+          if (G_UNLIKELY (priv->parent->flags & CLUTTER_ACTOR_NO_LAYOUT))
+            clutter_actor_queue_redraw (priv->parent);
+          else
+            clutter_actor_queue_relayout (priv->parent);
+        }
+    }
 
   /* notify on parent mapped after potentially unmapping
    * children, so apps see a bottom-up notification.
@@ -1617,22 +1756,7 @@ clutter_actor_real_unmap (ClutterActor *self)
 
   /* relinquish keyboard focus if we were unmapped while owning it */
   if (!CLUTTER_ACTOR_IS_TOPLEVEL (self))
-    {
-      ClutterStage *stage;
-
-      stage = CLUTTER_STAGE (_clutter_actor_get_stage_internal (self));
-
-      if (stage != NULL)
-        _clutter_stage_release_pick_id (stage, priv->pick_id);
-
-      priv->pick_id = -1;
-
-      if (stage != NULL &&
-          clutter_stage_get_key_focus (stage) == self)
-        {
-          clutter_stage_set_key_focus (stage, NULL);
-        }
-    }
+    maybe_unset_key_focus (self);
 }
 
 /**
@@ -1669,10 +1793,17 @@ clutter_actor_unmap (ClutterActor *self)
 }
 
 static void
+clutter_actor_queue_shallow_relayout (ClutterActor *self)
+{
+  ClutterActor *stage = _clutter_actor_get_stage_internal (self);
+
+  if (stage != NULL)
+    clutter_stage_queue_actor_relayout (CLUTTER_STAGE (stage), self);
+}
+
+static void
 clutter_actor_real_show (ClutterActor *self)
 {
-  ClutterActorPrivate *priv = self->priv;
-
   if (CLUTTER_ACTOR_IS_VISIBLE (self))
     return;
 
@@ -1683,24 +1814,6 @@ clutter_actor_real_show (ClutterActor *self)
    * and the branch of the scene graph is in a stable state
    */
   clutter_actor_update_map_state (self, MAP_STATE_CHECK);
-
-  /* we queue a relayout unless the actor is inside a
-   * container that explicitly told us not to
-   */
-  if (priv->parent != NULL &&
-      (!(priv->parent->flags & CLUTTER_ACTOR_NO_LAYOUT)))
-    {
-      /* While an actor is hidden the parent may not have
-       * allocated/requested so we need to start from scratch
-       * and avoid the short-circuiting in
-       * clutter_actor_queue_relayout().
-       */
-      priv->needs_width_request  = FALSE;
-      priv->needs_height_request = FALSE;
-      priv->needs_allocation     = FALSE;
-
-      clutter_actor_queue_relayout (self);
-    }
 }
 
 static inline void
@@ -1720,6 +1833,22 @@ set_show_on_set_parent (ClutterActor *self,
       g_object_notify_by_pspec (G_OBJECT (self),
                                 obj_props[PROP_SHOW_ON_SET_PARENT]);
     }
+}
+
+static void
+clutter_actor_queue_redraw_on_parent (ClutterActor *self)
+{
+  const ClutterPaintVolume *pv;
+
+  if (!self->priv->parent)
+    return;
+
+  /* A relayout/redraw is underway */
+  if (self->priv->needs_allocation)
+    return;
+
+  pv = clutter_actor_get_transformed_paint_volume (self, self->priv->parent);
+  _clutter_actor_queue_redraw_with_clip (self->priv->parent, 0, pv);
 }
 
 /**
@@ -1777,7 +1906,7 @@ clutter_actor_show (ClutterActor *self)
   g_object_notify_by_pspec (G_OBJECT (self), obj_props[PROP_VISIBLE]);
 
   if (priv->parent != NULL)
-    clutter_actor_queue_redraw (priv->parent);
+    clutter_actor_queue_redraw (self);
 
   g_object_thaw_notify (G_OBJECT (self));
 }
@@ -1802,33 +1931,9 @@ clutter_actor_is_visible (ClutterActor *self)
   return CLUTTER_ACTOR_IS_VISIBLE (self);
 }
 
-/**
- * clutter_actor_show_all:
- * @self: a #ClutterActor
- *
- * Calls clutter_actor_show() on all children of an actor (if any).
- *
- * Since: 0.2
- *
- * Deprecated: 1.10: Actors are visible by default
- */
-void
-clutter_actor_show_all (ClutterActor *self)
-{
-  ClutterActorClass *klass;
-
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-
-  klass = CLUTTER_ACTOR_GET_CLASS (self);
-  if (klass->show_all)
-    klass->show_all (self);
-}
-
 static void
 clutter_actor_real_hide (ClutterActor *self)
 {
-  ClutterActorPrivate *priv = self->priv;
-
   if (!CLUTTER_ACTOR_IS_VISIBLE (self))
     return;
 
@@ -1839,13 +1944,6 @@ clutter_actor_real_hide (ClutterActor *self)
    * and the branch of the scene graph is in a stable state
    */
   clutter_actor_update_map_state (self, MAP_STATE_CHECK);
-
-  /* we queue a relayout unless the actor is inside a
-   * container that explicitly told us not to
-   */
-  if (priv->parent != NULL &&
-      (!(priv->parent->flags & CLUTTER_ACTOR_NO_LAYOUT)))
-    clutter_actor_queue_relayout (priv->parent);
 }
 
 /**
@@ -1902,33 +2000,12 @@ clutter_actor_hide (ClutterActor *self)
   g_signal_emit (self, actor_signals[HIDE], 0);
   g_object_notify_by_pspec (G_OBJECT (self), obj_props[PROP_VISIBLE]);
 
-  if (priv->parent != NULL)
+  if (priv->parent != NULL && priv->needs_allocation)
     clutter_actor_queue_redraw (priv->parent);
+  else
+    clutter_actor_queue_redraw_on_parent (self);
 
   g_object_thaw_notify (G_OBJECT (self));
-}
-
-/**
- * clutter_actor_hide_all:
- * @self: a #ClutterActor
- *
- * Calls clutter_actor_hide() on all child actors (if any).
- *
- * Since: 0.2
- *
- * Deprecated: 1.10: Using clutter_actor_hide() on the actor will
- *   prevent its children from being painted as well.
- */
-void
-clutter_actor_hide_all (ClutterActor *self)
-{
-  ClutterActorClass *klass;
-
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-
-  klass = CLUTTER_ACTOR_GET_CLASS (self);
-  if (klass->hide_all)
-    klass->hide_all (self);
 }
 
 /**
@@ -2119,11 +2196,19 @@ unrealize_actor_after_children_cb (ClutterActor *self,
                                    int depth,
                                    void *user_data)
 {
+  ClutterActor *stage = user_data;
+
   /* We want to unset the realized flag only _after_
    * child actors are unrealized, to maintain invariants.
    */
   CLUTTER_ACTOR_UNSET_FLAGS (self, CLUTTER_ACTOR_REALIZED);
   g_object_notify_by_pspec (G_OBJECT (self), obj_props[PROP_REALIZED]);
+
+  if (stage != NULL &&
+      self->priv->parent != NULL &&
+      self->priv->parent->flags & CLUTTER_ACTOR_NO_LAYOUT)
+    clutter_stage_dequeue_actor_relayout (CLUTTER_STAGE (stage), self);
+
   return CLUTTER_ACTOR_TRAVERSE_VISIT_CONTINUE;
 }
 
@@ -2154,11 +2239,13 @@ unrealize_actor_after_children_cb (ClutterActor *self,
 static void
 clutter_actor_unrealize_not_hiding (ClutterActor *self)
 {
+  ClutterActor *stage = _clutter_actor_get_stage_internal (self);
+
   _clutter_actor_traverse (self,
                            CLUTTER_ACTOR_TRAVERSE_DEPTH_FIRST,
                            unrealize_actor_before_children_cb,
                            unrealize_actor_after_children_cb,
-                           NULL);
+                           stage);
 }
 
 /*
@@ -2225,27 +2312,18 @@ _clutter_actor_rerealize (ClutterActor    *self,
 
 static void
 clutter_actor_real_pick (ClutterActor       *self,
-			 const ClutterColor *color)
+                         ClutterPickContext *pick_context)
 {
-  /* the default implementation is just to paint a rectangle
-   * with the same size of the actor using the passed color
-   */
   if (clutter_actor_should_pick_paint (self))
     {
-      ClutterActorBox box = { 0, };
-      float width, height;
+      ClutterActorBox box = {
+        .x1 = 0,
+        .y1 = 0,
+        .x2 = clutter_actor_get_width (self),
+        .y2 = clutter_actor_get_height (self),
+      };
 
-      clutter_actor_get_allocation_box (self, &box);
-
-      width = box.x2 - box.x1;
-      height = box.y2 - box.y1;
-
-      cogl_set_source_color4ub (color->red,
-                                color->green,
-                                color->blue,
-                                color->alpha);
-
-      cogl_rectangle (0, 0, width, height);
+      clutter_actor_pick_box (self, pick_context, &box);
     }
 
   /* XXX - this thoroughly sucks, but we need to maintain compatibility
@@ -2262,7 +2340,7 @@ clutter_actor_real_pick (ClutterActor       *self,
       for (iter = self->priv->first_child;
            iter != NULL;
            iter = iter->priv->next_sibling)
-        clutter_actor_paint (iter);
+        clutter_actor_pick (iter, pick_context);
     }
 }
 
@@ -2285,6 +2363,7 @@ clutter_actor_should_pick_paint (ClutterActor *self)
   g_return_val_if_fail (CLUTTER_IS_ACTOR (self), FALSE);
 
   if (CLUTTER_ACTOR_IS_MAPPED (self) &&
+      clutter_actor_has_allocation (self) &&
       (_clutter_context_get_pick_mode () == CLUTTER_PICK_ALL ||
        CLUTTER_ACTOR_IS_REACTIVE (self)))
     return TRUE;
@@ -2300,8 +2379,7 @@ clutter_actor_real_get_preferred_width (ClutterActor *self,
 {
   ClutterActorPrivate *priv = self->priv;
 
-  if (priv->n_children != 0 &&
-      priv->layout_manager != NULL)
+  if (priv->layout_manager != NULL)
     {
       ClutterContainer *container = CLUTTER_CONTAINER (self);
 
@@ -2340,8 +2418,7 @@ clutter_actor_real_get_preferred_height (ClutterActor *self,
 {
   ClutterActorPrivate *priv = self->priv;
 
-  if (priv->n_children != 0 &&
-      priv->layout_manager != NULL)
+  if (priv->layout_manager != NULL)
     {
       ClutterContainer *container = CLUTTER_CONTAINER (self);
 
@@ -2451,6 +2528,34 @@ clutter_actor_notify_if_geometry_changed (ClutterActor          *self,
   g_object_thaw_notify (obj);
 }
 
+static void
+absolute_geometry_changed (ClutterActor *actor)
+{
+  queue_update_stage_views (actor);
+}
+
+static ClutterActorTraverseVisitFlags
+absolute_geometry_changed_cb (ClutterActor *actor,
+                              int           depth,
+                              gpointer      user_data)
+{
+  absolute_geometry_changed (actor);
+
+  return CLUTTER_ACTOR_TRAVERSE_VISIT_CONTINUE;
+}
+
+static void
+transform_changed (ClutterActor *actor)
+{
+  actor->priv->transform_valid = FALSE;
+
+  _clutter_actor_traverse (actor,
+                           CLUTTER_ACTOR_TRAVERSE_DEPTH_FIRST,
+                           absolute_geometry_changed_cb,
+                           NULL,
+                           NULL);
+}
+
 /*< private >
  * clutter_actor_set_allocation_internal:
  * @self: a #ClutterActor
@@ -2467,16 +2572,17 @@ clutter_actor_notify_if_geometry_changed (ClutterActor          *self,
  * Return value: %TRUE if the allocation of the #ClutterActor has been
  *   changed, and %FALSE otherwise
  */
-static inline gboolean
+static inline void
 clutter_actor_set_allocation_internal (ClutterActor           *self,
-                                       const ClutterActorBox  *box,
-                                       ClutterAllocationFlags  flags)
+                                       const ClutterActorBox  *box)
 {
   ClutterActorPrivate *priv = self->priv;
   GObject *obj;
   gboolean x1_changed, y1_changed, x2_changed, y2_changed;
-  gboolean retval;
   ClutterActorBox old_alloc = { 0, };
+
+  g_return_if_fail (!isnan (box->x1) && !isnan (box->x2) &&
+                    !isnan (box->y1) && !isnan (box->y2));
 
   obj = G_OBJECT (self);
 
@@ -2490,12 +2596,16 @@ clutter_actor_set_allocation_internal (ClutterActor           *self,
   y2_changed = priv->allocation.y2 != box->y2;
 
   priv->allocation = *box;
-  priv->allocation_flags = flags;
 
   /* allocation is authoritative */
   priv->needs_width_request = FALSE;
   priv->needs_height_request = FALSE;
   priv->needs_allocation = FALSE;
+
+  priv->absolute_origin_changed |= x1_changed || y1_changed;
+
+  if (priv->absolute_origin_changed || x2_changed || y2_changed)
+    absolute_geometry_changed (self);
 
   if (x1_changed ||
       y1_changed ||
@@ -2505,7 +2615,7 @@ clutter_actor_set_allocation_internal (ClutterActor           *self,
       CLUTTER_NOTE (LAYOUT, "Allocation for '%s' changed",
                     _clutter_actor_get_debug_name (self));
 
-      priv->transform_valid = FALSE;
+      transform_changed (self);
 
       g_object_notify_by_pspec (obj, obj_props[PROP_ALLOCATION]);
 
@@ -2515,88 +2625,37 @@ clutter_actor_set_allocation_internal (ClutterActor           *self,
           priv->content_box_valid = FALSE;
           g_object_notify_by_pspec (obj, obj_props[PROP_CONTENT_BOX]);
         }
-
-      retval = TRUE;
     }
-  else
-    retval = FALSE;
 
   clutter_actor_notify_if_geometry_changed (self, &old_alloc);
 
   g_object_thaw_notify (obj);
-
-  return retval;
 }
 
-static void clutter_actor_real_allocate (ClutterActor           *self,
-                                         const ClutterActorBox  *box,
-                                         ClutterAllocationFlags  flags);
-
-static inline void
-clutter_actor_maybe_layout_children (ClutterActor           *self,
-                                     const ClutterActorBox  *allocation,
-                                     ClutterAllocationFlags  flags)
+static void
+clutter_actor_real_allocate (ClutterActor           *self,
+                             const ClutterActorBox  *box)
 {
   ClutterActorPrivate *priv = self->priv;
 
-  /* this is going to be a bit hard to follow, so let's put an explanation
-   * here.
-   *
-   * we want ClutterActor to have a default layout manager if the actor was
-   * created using "g_object_new (CLUTTER_TYPE_ACTOR, NULL)".
-   *
-   * we also want any subclass of ClutterActor that does not override the
-   * ::allocate() virtual function to delegate to a layout manager.
-   *
-   * finally, we want to allow people subclassing ClutterActor and overriding
-   * the ::allocate() vfunc to let Clutter delegate to the layout manager.
-   *
-   * on the other hand, we want existing actor subclasses overriding the
-   * ::allocate() virtual function and chaining up to the parent's
-   * implementation to continue working without allocating their children
-   * twice, or without entering an allocation loop.
-   *
-   * for the first two points, we check if the class of the actor is
-   * overridding the ::allocate() virtual function; if it isn't, then we
-   * follow through with checking whether we have children and a layout
-   * manager, and eventually calling clutter_layout_manager_allocate().
-   *
-   * for the third point, we check the CLUTTER_DELEGATE_LAYOUT flag in the
-   * allocation flags that we got passed, and if it is present, we continue
-   * with the check above.
-   *
-   * if neither of these two checks yields a positive result, we just
-   * assume that the ::allocate() virtual function that resulted in this
-   * function being called will also allocate the children of the actor.
+  g_object_freeze_notify (G_OBJECT (self));
+
+  clutter_actor_set_allocation_internal (self, box);
+
+  /* we allocate our children before we notify changes in our geometry,
+   * so that people connecting to properties will be able to get valid
+   * data out of the sub-tree of the scene graph that has this actor at
+   * the root.
    */
-
-  if (CLUTTER_ACTOR_GET_CLASS (self)->allocate == clutter_actor_real_allocate)
-    goto check_layout;
-
-  if ((flags & CLUTTER_DELEGATE_LAYOUT) != 0)
-    goto check_layout;
-
-  return;
-
-check_layout:
   if (priv->n_children != 0 &&
       priv->layout_manager != NULL)
     {
-      ClutterContainer *container = CLUTTER_CONTAINER (self);
-      ClutterAllocationFlags children_flags;
       ClutterActorBox children_box;
 
       /* normalize the box passed to the layout manager */
       children_box.x1 = children_box.y1 = 0.f;
-      children_box.x2 = (allocation->x2 - allocation->x1);
-      children_box.y2 = (allocation->y2 - allocation->y1);
-
-      /* remove the DELEGATE_LAYOUT flag; this won't be passed to
-       * the actor's children, since it refers only to the current
-       * actor's allocation.
-       */
-      children_flags = flags;
-      children_flags &= ~CLUTTER_DELEGATE_LAYOUT;
+      children_box.x2 = box->x2 - box->x1;
+      children_box.y2 = box->y2 - box->y1;
 
       CLUTTER_NOTE (LAYOUT,
                     "Allocating %d children of %s "
@@ -2604,55 +2663,27 @@ check_layout:
                     "using %s",
                     priv->n_children,
                     _clutter_actor_get_debug_name (self),
-                    allocation->x1,
-                    allocation->y1,
-                    (allocation->x2 - allocation->x1),
-                    (allocation->y2 - allocation->y1),
+                    box->x1,
+                    box->y1,
+                    (box->x2 - box->x1),
+                    (box->y2 - box->y1),
                     G_OBJECT_TYPE_NAME (priv->layout_manager));
 
       clutter_layout_manager_allocate (priv->layout_manager,
-                                       container,
-                                       &children_box,
-                                       children_flags);
-    }
-}
-
-static void
-clutter_actor_real_allocate (ClutterActor           *self,
-                             const ClutterActorBox  *box,
-                             ClutterAllocationFlags  flags)
-{
-  ClutterActorPrivate *priv = self->priv;
-  gboolean changed;
-
-  g_object_freeze_notify (G_OBJECT (self));
-
-  changed = clutter_actor_set_allocation_internal (self, box, flags);
-
-  /* we allocate our children before we notify changes in our geometry,
-   * so that people connecting to properties will be able to get valid
-   * data out of the sub-tree of the scene graph that has this actor at
-   * the root.
-   */
-  clutter_actor_maybe_layout_children (self, box, flags);
-
-  if (changed)
-    {
-      ClutterActorBox signal_box = priv->allocation;
-      ClutterAllocationFlags signal_flags = priv->allocation_flags;
-
-      g_signal_emit (self, actor_signals[ALLOCATION_CHANGED], 0,
-                     &signal_box,
-                     signal_flags);
+                                       CLUTTER_CONTAINER (self),
+                                       &children_box);
     }
 
   g_object_thaw_notify (G_OBJECT (self));
 }
 
 static void
-_clutter_actor_signal_queue_redraw (ClutterActor *self,
-                                    ClutterActor *origin)
+_clutter_actor_propagate_queue_redraw (ClutterActor       *self,
+                                       ClutterActor       *origin,
+                                       ClutterPaintVolume *pv)
 {
+  gboolean stop = FALSE;
+
   /* no point in queuing a redraw on a destroyed actor */
   if (CLUTTER_ACTOR_IN_DESTRUCTION (self))
     return;
@@ -2661,27 +2692,33 @@ _clutter_actor_signal_queue_redraw (ClutterActor *self,
    * the actor bas been cloned. In this case the clone will need to
    * receive the signal so it can queue its own redraw.
    */
+  while (self)
+    {
+      _clutter_actor_queue_redraw_on_clones (self);
 
-  _clutter_actor_queue_redraw_on_clones (self);
-
-  /* calls klass->queue_redraw in default handler */
-  if (g_signal_has_handler_pending (self, actor_signals[QUEUE_REDRAW],
+      /* calls klass->queue_redraw in default handler */
+      if (g_signal_has_handler_pending (self, actor_signals[QUEUE_REDRAW],
                                     0, TRUE))
-    {
-      g_signal_emit (self, actor_signals[QUEUE_REDRAW], 0, origin);
-    }
-  else
-    {
-      CLUTTER_ACTOR_GET_CLASS (self)->queue_redraw (self, origin);
+        {
+          g_signal_emit (self, actor_signals[QUEUE_REDRAW], 0, origin, pv, &stop);
+        }
+      else
+        {
+          stop = CLUTTER_ACTOR_GET_CLASS (self)->queue_redraw (self, origin, pv);
+        }
+
+      if (stop)
+        break;
+
+      self = self->priv->parent;
     }
 }
 
-static void
-clutter_actor_real_queue_redraw (ClutterActor *self,
-                                 ClutterActor *origin)
+static gboolean
+clutter_actor_real_queue_redraw (ClutterActor       *self,
+                                 ClutterActor       *origin,
+                                 ClutterPaintVolume *paint_volume)
 {
-  ClutterActor *parent;
-
   CLUTTER_NOTE (PAINT, "Redraw queued on '%s' (from: '%s')",
                 _clutter_actor_get_debug_name (self),
                 origin != NULL ? _clutter_actor_get_debug_name (origin)
@@ -2689,7 +2726,7 @@ clutter_actor_real_queue_redraw (ClutterActor *self,
 
   /* no point in queuing a redraw on a destroyed actor */
   if (CLUTTER_ACTOR_IN_DESTRUCTION (self))
-    return;
+    return TRUE;
 
   /* If the queue redraw is coming from a child then the actor has
      become dirty and any queued effect is no longer valid */
@@ -2704,7 +2741,7 @@ clutter_actor_real_queue_redraw (ClutterActor *self,
    * won't change so we don't have to propagate up the hierarchy.
    */
   if (!CLUTTER_ACTOR_IS_VISIBLE (self))
-    return;
+    return TRUE;
 
   /* Although we could determine here that a full stage redraw
    * has already been queued and immediately bail out, we actually
@@ -2718,7 +2755,7 @@ clutter_actor_real_queue_redraw (ClutterActor *self,
       ClutterActor *stage = _clutter_actor_get_stage_internal (self);
       if (stage != NULL &&
           _clutter_stage_has_full_redraw_queued (CLUTTER_STAGE (stage)))
-        return;
+        return TRUE;
     }
 
   self->priv->propagated_one_redraw = TRUE;
@@ -2726,12 +2763,17 @@ clutter_actor_real_queue_redraw (ClutterActor *self,
   /* notify parents, if they are all visible eventually we'll
    * queue redraw on the stage, which queues the redraw idle.
    */
-  parent = clutter_actor_get_parent (self);
-  if (parent != NULL)
-    {
-      /* this will go up recursively */
-      _clutter_actor_signal_queue_redraw (parent, origin);
-    }
+  return FALSE;
+}
+
+static inline gboolean
+clutter_actor_needs_relayout (ClutterActor *self)
+{
+  ClutterActorPrivate *priv = self->priv;
+
+  return (priv->needs_width_request ||
+          priv->needs_height_request ||
+          priv->needs_allocation);
 }
 
 static void
@@ -2754,9 +2796,23 @@ clutter_actor_real_queue_relayout (ClutterActor *self)
   memset (priv->height_requests, 0,
           N_CACHED_SIZE_REQUESTS * sizeof (SizeRequest));
 
-  /* We need to go all the way up the hierarchy */
+  /* We may need to go all the way up the hierarchy */
   if (priv->parent != NULL)
-    _clutter_actor_queue_only_relayout (priv->parent);
+    {
+      if (priv->parent->flags & CLUTTER_ACTOR_NO_LAYOUT)
+        {
+          clutter_actor_queue_shallow_relayout (self);
+
+          /* The above might have invalidated the parent's paint volume if self
+           * has moved or resized. DnD seems to require this...
+           */
+          priv->parent->priv->needs_paint_volume_update = TRUE;
+        }
+      else
+        {
+          _clutter_actor_queue_only_relayout (priv->parent);
+        }
+    }
 }
 
 /**
@@ -2764,8 +2820,8 @@ clutter_actor_real_queue_relayout (ClutterActor *self)
  * @self: A #ClutterActor
  * @ancestor: (allow-none): A #ClutterActor ancestor, or %NULL to use the
  *   default #ClutterStage
- * @point: A point as #ClutterVertex
- * @vertex: (out caller-allocates): The translated #ClutterVertex
+ * @point: A point as #graphene_point3d_t
+ * @vertex: (out caller-allocates): The translated #graphene_point3d_t
  *
  * Transforms @point in coordinates relative to the actor into
  * ancestor-relative coordinates using the relevant transform
@@ -2779,10 +2835,10 @@ clutter_actor_real_queue_relayout (ClutterActor *self)
  * Since: 0.6
  */
 void
-clutter_actor_apply_relative_transform_to_point (ClutterActor        *self,
-						 ClutterActor        *ancestor,
-						 const ClutterVertex *point,
-						 ClutterVertex       *vertex)
+clutter_actor_apply_relative_transform_to_point (ClutterActor             *self,
+                                                 ClutterActor             *ancestor,
+                                                 const graphene_point3d_t *point,
+                                                 graphene_point3d_t       *vertex)
 {
   gfloat w;
   CoglMatrix matrix;
@@ -2809,10 +2865,10 @@ clutter_actor_apply_relative_transform_to_point (ClutterActor        *self,
 }
 
 static gboolean
-_clutter_actor_fully_transform_vertices (ClutterActor *self,
-                                         const ClutterVertex *vertices_in,
-                                         ClutterVertex *vertices_out,
-                                         int n_vertices)
+_clutter_actor_fully_transform_vertices (ClutterActor             *self,
+                                         const graphene_point3d_t *vertices_in,
+                                         graphene_point3d_t       *vertices_out,
+                                         int                       n_vertices)
 {
   ClutterActor *stage;
   CoglMatrix modelview;
@@ -2854,8 +2910,8 @@ _clutter_actor_fully_transform_vertices (ClutterActor *self,
 /**
  * clutter_actor_apply_transform_to_point:
  * @self: A #ClutterActor
- * @point: A point as #ClutterVertex
- * @vertex: (out caller-allocates): The translated #ClutterVertex
+ * @point: A point as #graphene_point3d_t
+ * @vertex: (out caller-allocates): The translated #graphene_point3d_t
  *
  * Transforms @point in coordinates relative to the actor
  * into screen-relative coordinates with the current actor
@@ -2864,9 +2920,9 @@ _clutter_actor_fully_transform_vertices (ClutterActor *self,
  * Since: 0.4
  **/
 void
-clutter_actor_apply_transform_to_point (ClutterActor        *self,
-                                        const ClutterVertex *point,
-                                        ClutterVertex       *vertex)
+clutter_actor_apply_transform_to_point (ClutterActor             *self,
+                                        const graphene_point3d_t *point,
+                                        graphene_point3d_t       *vertex)
 {
   g_return_if_fail (point != NULL);
   g_return_if_fail (vertex != NULL);
@@ -2916,10 +2972,10 @@ _clutter_actor_get_relative_transformation_matrix (ClutterActor *self,
  * transformed vertices to @verts[]. */
 static gboolean
 _clutter_actor_transform_and_project_box (ClutterActor          *self,
-					  const ClutterActorBox *box,
-					  ClutterVertex          verts[])
+                                          const ClutterActorBox *box,
+                                          graphene_point3d_t    *verts)
 {
-  ClutterVertex box_vertices[4];
+  graphene_point3d_t box_vertices[4];
 
   box_vertices[0].x = box->x1;
   box_vertices[0].y = box->y1;
@@ -2939,100 +2995,10 @@ _clutter_actor_transform_and_project_box (ClutterActor          *self,
 }
 
 /**
- * clutter_actor_get_allocation_vertices:
- * @self: A #ClutterActor
- * @ancestor: (allow-none): A #ClutterActor to calculate the vertices
- *   against, or %NULL to use the #ClutterStage
- * @verts: (out) (array fixed-size=4) (element-type Clutter.Vertex): return
- *   location for an array of 4 #ClutterVertex in which to store the result
- *
- * Calculates the transformed coordinates of the four corners of the
- * actor in the plane of @ancestor. The returned vertices relate to
- * the #ClutterActorBox coordinates as follows:
- *
- *  - @verts[0] contains (x1, y1)
- *  - @verts[1] contains (x2, y1)
- *  - @verts[2] contains (x1, y2)
- *  - @verts[3] contains (x2, y2)
- *
- * If @ancestor is %NULL the ancestor will be the #ClutterStage. In
- * this case, the coordinates returned will be the coordinates on
- * the stage before the projection is applied. This is different from
- * the behaviour of clutter_actor_get_abs_allocation_vertices().
- *
- * Since: 0.6
- */
-void
-clutter_actor_get_allocation_vertices (ClutterActor  *self,
-                                       ClutterActor  *ancestor,
-                                       ClutterVertex  verts[])
-{
-  ClutterActorPrivate *priv;
-  ClutterActorBox box;
-  ClutterVertex vertices[4];
-  CoglMatrix modelview;
-
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-  g_return_if_fail (ancestor == NULL || CLUTTER_IS_ACTOR (ancestor));
-
-  if (ancestor == NULL)
-    ancestor = _clutter_actor_get_stage_internal (self);
-
-  /* Fallback to a NOP transform if the actor isn't parented under a
-   * stage. */
-  if (ancestor == NULL)
-    ancestor = self;
-
-  priv = self->priv;
-
-  /* if the actor needs to be allocated we force a relayout, so that
-   * we will have valid values to use in the transformations */
-  if (priv->needs_allocation)
-    {
-      ClutterActor *stage = _clutter_actor_get_stage_internal (self);
-      if (stage)
-        _clutter_stage_maybe_relayout (stage);
-      else
-        {
-          box.x1 = box.y1 = 0;
-          /* The result isn't really meaningful in this case but at
-           * least try to do something *vaguely* reasonable... */
-          clutter_actor_get_size (self, &box.x2, &box.y2);
-        }
-    }
-
-  clutter_actor_get_allocation_box (self, &box);
-
-  vertices[0].x = box.x1;
-  vertices[0].y = box.y1;
-  vertices[0].z = 0;
-  vertices[1].x = box.x2;
-  vertices[1].y = box.y1;
-  vertices[1].z = 0;
-  vertices[2].x = box.x1;
-  vertices[2].y = box.y2;
-  vertices[2].z = 0;
-  vertices[3].x = box.x2;
-  vertices[3].y = box.y2;
-  vertices[3].z = 0;
-
-  _clutter_actor_get_relative_transformation_matrix (self, ancestor,
-                                                     &modelview);
-
-  cogl_matrix_transform_points (&modelview,
-                                3,
-                                sizeof (ClutterVertex),
-                                vertices,
-                                sizeof (ClutterVertex),
-                                vertices,
-                                4);
-}
-
-/**
  * clutter_actor_get_abs_allocation_vertices:
  * @self: A #ClutterActor
  * @verts: (out) (array fixed-size=4): Pointer to a location of an array
- *   of 4 #ClutterVertex where to store the result.
+ *   of 4 #graphene_point3d_t where to store the result.
  *
  * Calculates the transformed screen coordinates of the four corners of
  * the actor; the returned vertices relate to the #ClutterActorBox
@@ -3046,8 +3012,8 @@ clutter_actor_get_allocation_vertices (ClutterActor  *self,
  * Since: 0.4
  */
 void
-clutter_actor_get_abs_allocation_vertices (ClutterActor  *self,
-                                           ClutterVertex  verts[])
+clutter_actor_get_abs_allocation_vertices (ClutterActor       *self,
+                                           graphene_point3d_t *verts)
 {
   ClutterActorPrivate *priv;
   ClutterActorBox actor_space_allocation;
@@ -3067,7 +3033,7 @@ clutter_actor_get_abs_allocation_vertices (ClutterActor  *self,
       if (!stage)
         return;
 
-      _clutter_stage_maybe_relayout (stage);
+      clutter_stage_maybe_relayout (stage);
     }
 
   /* NB: _clutter_actor_transform_and_project_box expects a box in the actor's
@@ -3086,13 +3052,8 @@ clutter_actor_real_apply_transform (ClutterActor  *self,
                                     ClutterMatrix *matrix)
 {
   ClutterActorPrivate *priv = self->priv;
-  CoglMatrix *transform = &priv->transform;
   const ClutterTransformInfo *info;
   float pivot_x = 0.f, pivot_y = 0.f;
-
-  /* we already have a cached transformation */
-  if (priv->transform_valid)
-    goto multiply_and_return;
 
   info = _clutter_actor_get_transform_info_or_defaults (self);
 
@@ -3119,10 +3080,10 @@ clutter_actor_real_apply_transform (ClutterActor  *self,
       const ClutterTransformInfo *parent_info;
 
       parent_info = _clutter_actor_get_transform_info_or_defaults (priv->parent);
-      clutter_matrix_init_from_matrix (transform, &(parent_info->child_transform));
+      clutter_matrix_init_from_matrix (matrix, &(parent_info->child_transform));
     }
   else
-    clutter_matrix_init_identity (transform);
+    clutter_matrix_init_identity (matrix);
 
   /* if we have an overriding transformation, we use that, and get out */
   if (info->transform_set)
@@ -3131,11 +3092,11 @@ clutter_actor_real_apply_transform (ClutterActor  *self,
        * translations, since :transform is relative to the actor's coordinate
        * space, and to the pivot point
        */
-      cogl_matrix_translate (transform,
+      cogl_matrix_translate (matrix,
                              priv->allocation.x1 + pivot_x,
                              priv->allocation.y1 + pivot_y,
                              info->pivot_z);
-      cogl_matrix_multiply (transform, transform, &info->transform);
+      cogl_matrix_multiply (matrix, matrix, &info->transform);
       goto roll_back_pivot;
     }
 
@@ -3143,7 +3104,7 @@ clutter_actor_real_apply_transform (ClutterActor  *self,
    * of decomposing the pivot and translation info separate operations,
    * we just compose everything into a single translation
    */
-  cogl_matrix_translate (transform,
+  cogl_matrix_translate (matrix,
                          priv->allocation.x1 + pivot_x + info->translation.x,
                          priv->allocation.y1 + pivot_y + info->translation.y,
                          info->z_position + info->pivot_z + info->translation.z);
@@ -3160,65 +3121,21 @@ clutter_actor_real_apply_transform (ClutterActor  *self,
    * code we use when interpolating transformations
    */
   if (info->scale_x != 1.0 || info->scale_y != 1.0 || info->scale_z != 1.0)
-    {
-      /* XXX:2.0 remove anchor coord */
-      TRANSFORM_ABOUT_ANCHOR_COORD (self, transform,
-                                    &info->scale_center,
-                                    cogl_matrix_scale (transform,
-                                                       info->scale_x,
-                                                       info->scale_y,
-                                                       info->scale_z));
-    }
+    cogl_matrix_scale (matrix, info->scale_x, info->scale_y, info->scale_z);
 
   if (info->rz_angle)
-    {
-      /* XXX:2.0 remove anchor coord */
-      TRANSFORM_ABOUT_ANCHOR_COORD (self, transform,
-                                    &info->rz_center,
-                                    cogl_matrix_rotate (transform,
-                                                        info->rz_angle,
-                                                        0, 0, 1.0));
-    }
+    cogl_matrix_rotate (matrix, info->rz_angle, 0, 0, 1.0);
 
   if (info->ry_angle)
-    {
-      /* XXX:2.0 remove anchor coord */
-      TRANSFORM_ABOUT_ANCHOR_COORD (self, transform,
-                                    &info->ry_center,
-                                    cogl_matrix_rotate (transform,
-                                                        info->ry_angle,
-                                                        0, 1.0, 0));
-    }
+    cogl_matrix_rotate (matrix, info->ry_angle, 0, 1.0, 0);
 
   if (info->rx_angle)
-    {
-      /* XXX:2.0 remove anchor coord */
-      TRANSFORM_ABOUT_ANCHOR_COORD (self, transform,
-                                    &info->rx_center,
-                                    cogl_matrix_rotate (transform,
-                                                        info->rx_angle,
-                                                        1.0, 0, 0));
-    }
-
-  /* XXX:2.0 remove anchor point translation */
-  if (!clutter_anchor_coord_is_zero (&info->anchor))
-    {
-      gfloat x, y, z;
-
-      clutter_anchor_coord_get_units (self, &info->anchor, &x, &y, &z);
-      cogl_matrix_translate (transform, -x, -y, -z);
-    }
+    cogl_matrix_rotate (matrix, info->rx_angle, 1.0, 0, 0);
 
 roll_back_pivot:
   /* roll back the pivot translation */
   if (pivot_x != 0.f || pivot_y != 0.f || info->pivot_z != 0.f)
-    cogl_matrix_translate (transform, -pivot_x, -pivot_y, -info->pivot_z);
-
-  /* we have a valid modelview */
-  priv->transform_valid = TRUE;
-
-multiply_and_return:
-  cogl_matrix_multiply (matrix, matrix, &priv->transform);
+    cogl_matrix_translate (matrix, -pivot_x, -pivot_y, -info->pivot_z);
 }
 
 /* Applies the transforms associated with this actor to the given
@@ -3227,7 +3144,17 @@ void
 _clutter_actor_apply_modelview_transform (ClutterActor  *self,
                                           ClutterMatrix *matrix)
 {
-  CLUTTER_ACTOR_GET_CLASS (self)->apply_transform (self, matrix);
+  ClutterActorPrivate *priv = self->priv;
+
+  if (priv->transform_valid)
+    goto out;
+
+  CLUTTER_ACTOR_GET_CLASS (self)->apply_transform (self, &priv->transform);
+
+  priv->transform_valid = TRUE;
+
+out:
+  cogl_matrix_multiply (matrix, matrix, &priv->transform);
 }
 
 /*
@@ -3262,8 +3189,6 @@ _clutter_actor_apply_relative_transformation_matrix (ClutterActor *self,
                                                      ClutterActor *ancestor,
                                                      CoglMatrix *matrix)
 {
-  ClutterActor *parent;
-
   /* Note we terminate before ever calling stage->apply_transform()
    * since that would conceptually be relative to the underlying
    * window OpenGL coordinates so we'd need a special @ancestor
@@ -3271,30 +3196,29 @@ _clutter_actor_apply_relative_transformation_matrix (ClutterActor *self,
   if (self == ancestor)
     return;
 
-  parent = clutter_actor_get_parent (self);
-
-  if (parent != NULL)
-    _clutter_actor_apply_relative_transformation_matrix (parent, ancestor,
+  if (self->priv->parent != NULL)
+    _clutter_actor_apply_relative_transformation_matrix (self->priv->parent,
+                                                         ancestor,
                                                          matrix);
 
   _clutter_actor_apply_modelview_transform (self, matrix);
 }
 
 static void
-_clutter_actor_draw_paint_volume_full (ClutterActor *self,
+_clutter_actor_draw_paint_volume_full (ClutterActor       *self,
                                        ClutterPaintVolume *pv,
-                                       const char *label,
-                                       const CoglColor *color)
+                                       const char         *label,
+                                       const ClutterColor *color,
+                                       ClutterPaintNode   *node)
 {
+  g_autoptr (ClutterPaintNode) pipeline_node = NULL;
   static CoglPipeline *outline = NULL;
   CoglPrimitive *prim;
-  ClutterVertex line_ends[12 * 2];
+  graphene_point3d_t line_ends[12 * 2];
   int n_vertices;
   CoglContext *ctx =
     clutter_backend_get_cogl_context (clutter_get_default_backend ());
-  /* XXX: at some point we'll query this from the stage but we can't
-   * do that until the osx backend uses Cogl natively. */
-  CoglFramebuffer *fb = cogl_get_draw_framebuffer ();
+  CoglColor cogl_color;
 
   if (outline == NULL)
     outline = cogl_pipeline_new (ctx);
@@ -3328,29 +3252,50 @@ _clutter_actor_draw_paint_volume_full (ClutterActor *self,
                                 n_vertices,
                                 (CoglVertexP3 *)line_ends);
 
-  cogl_pipeline_set_color (outline, color);
-  cogl_framebuffer_draw_primitive (fb, outline, prim);
+  cogl_color_init_from_4ub (&cogl_color,
+                            color->red,
+                            color->green,
+                            color->blue,
+                            color->alpha);
+  cogl_pipeline_set_color (outline, &cogl_color);
+
+  pipeline_node = clutter_pipeline_node_new (outline);
+  clutter_paint_node_set_static_name (pipeline_node,
+                                      "ClutterActor (paint volume outline)");
+  clutter_paint_node_add_primitive (pipeline_node, prim);
+  clutter_paint_node_add_child (node, pipeline_node);
   cogl_object_unref (prim);
 
   if (label)
     {
+      g_autoptr (ClutterPaintNode) text_node = NULL;
       PangoLayout *layout;
+
       layout = pango_layout_new (clutter_actor_get_pango_context (self));
       pango_layout_set_text (layout, label, -1);
-      cogl_pango_render_layout (layout,
-                                pv->vertices[0].x,
-                                pv->vertices[0].y,
-                                color,
-                                0);
+
+      text_node = clutter_text_node_new (layout, color);
+      clutter_paint_node_set_static_name (text_node,
+                                          "ClutterActor (paint volume label)");
+      clutter_paint_node_add_rectangle (text_node,
+                                        &(ClutterActorBox) {
+                                          .x1 = pv->vertices[0].x,
+                                          .y1 = pv->vertices[0].y,
+                                          .x2 = pv->vertices[2].x,
+                                          .y2 = pv->vertices[2].y,
+                                        });
+      clutter_paint_node_add_child (node, text_node);
+
       g_object_unref (layout);
     }
 }
 
 static void
-_clutter_actor_draw_paint_volume (ClutterActor *self)
+_clutter_actor_draw_paint_volume (ClutterActor     *self,
+                                  ClutterPaintNode *node)
 {
   ClutterPaintVolume *pv;
-  CoglColor color;
+  ClutterColor color;
 
   pv = _clutter_actor_get_paint_volume_mutable (self);
   if (!pv)
@@ -3365,61 +3310,79 @@ _clutter_actor_draw_paint_volume (ClutterActor *self)
       clutter_paint_volume_set_width (&fake_pv, width);
       clutter_paint_volume_set_height (&fake_pv, height);
 
-      cogl_color_init_from_4f (&color, 0, 0, 1, 1);
+      clutter_color_init (&color, 0, 0, 255, 255);
       _clutter_actor_draw_paint_volume_full (self, &fake_pv,
                                              _clutter_actor_get_debug_name (self),
-                                             &color);
+                                             &color,
+                                             node);
 
       clutter_paint_volume_free (&fake_pv);
     }
   else
     {
-      cogl_color_init_from_4f (&color, 0, 1, 0, 1);
+      clutter_color_init (&color, 0, 255, 0, 255);
       _clutter_actor_draw_paint_volume_full (self, pv,
                                              _clutter_actor_get_debug_name (self),
-                                             &color);
+                                             &color,
+                                             node);
     }
 }
 
 static void
-_clutter_actor_paint_cull_result (ClutterActor *self,
-                                  gboolean success,
-                                  ClutterCullResult result)
+_clutter_actor_paint_cull_result (ClutterActor      *self,
+                                  gboolean           success,
+                                  ClutterCullResult  result,
+                                  ClutterPaintNode  *node)
 {
+  ClutterActorPrivate *priv = self->priv;
   ClutterPaintVolume *pv;
-  CoglColor color;
+  ClutterColor color;
 
   if (success)
     {
       if (result == CLUTTER_CULL_RESULT_IN)
-        cogl_color_init_from_4f (&color, 0, 1, 0, 1);
+        clutter_color_init (&color, 0, 255, 0, 255);
       else if (result == CLUTTER_CULL_RESULT_OUT)
-        cogl_color_init_from_4f (&color, 0, 0, 1, 1);
+        clutter_color_init (&color, 0, 0, 255, 255);
       else
-        cogl_color_init_from_4f (&color, 0, 1, 1, 1);
+        clutter_color_init (&color, 0, 255, 255, 255);
     }
   else
-    cogl_color_init_from_4f (&color, 1, 1, 1, 1);
+    clutter_color_init (&color, 255, 255, 255, 255);
 
   if (success && (pv = _clutter_actor_get_paint_volume_mutable (self)))
     _clutter_actor_draw_paint_volume_full (self, pv,
                                            _clutter_actor_get_debug_name (self),
-                                           &color);
+                                           &color,
+                                           node);
   else
     {
+      g_autoptr (ClutterPaintNode) text_node = NULL;
       PangoLayout *layout;
+      float width;
+      float height;
       char *label =
         g_strdup_printf ("CULL FAILURE: %s", _clutter_actor_get_debug_name (self));
-      cogl_color_init_from_4f (&color, 1, 1, 1, 1);
-      cogl_set_source_color (&color);
+      clutter_color_init (&color, 255, 255, 255, 255);
+
+      width = clutter_actor_box_get_width (&priv->allocation);
+      height = clutter_actor_box_get_height (&priv->allocation);
 
       layout = pango_layout_new (clutter_actor_get_pango_context (self));
       pango_layout_set_text (layout, label, -1);
-      cogl_pango_render_layout (layout,
-                                0,
-                                0,
-                                &color,
-                                0);
+
+      text_node = clutter_text_node_new (layout, &color);
+      clutter_paint_node_set_static_name (text_node,
+                                          "ClutterActor (paint volume text)");
+      clutter_paint_node_add_rectangle (text_node,
+                                        &(ClutterActorBox) {
+                                          .x1 = 0.f,
+                                          .y1 = 0.f,
+                                          .x2 = width,
+                                          .y2 = height,
+                                        });
+      clutter_paint_node_add_child (node, text_node);
+
       g_free (label);
       g_object_unref (layout);
     }
@@ -3451,8 +3414,9 @@ in_clone_paint (void)
  * means there's no point in trying to cull descendants of the current
  * node. */
 static gboolean
-cull_actor (ClutterActor      *self,
-            ClutterCullResult *result_out)
+cull_actor (ClutterActor        *self,
+            ClutterPaintContext *paint_context,
+            ClutterCullResult   *result_out)
 {
   ClutterActorPrivate *priv = self->priv;
   ClutterStage *stage;
@@ -3479,16 +3443,53 @@ cull_actor (ClutterActor      *self,
       return FALSE;
     }
 
-  if (cogl_get_draw_framebuffer () != _clutter_stage_get_active_framebuffer (stage))
+  if (clutter_paint_context_is_drawing_off_stage (paint_context))
     {
       CLUTTER_NOTE (CLIPPING, "Bail from cull_actor without culling (%s): "
-                    "Current framebuffer doesn't correspond to stage",
+                    "Drawing off stage",
                     _clutter_actor_get_debug_name (self));
       return FALSE;
     }
 
   *result_out =
     _clutter_paint_volume_cull (&priv->last_paint_volume, stage_clip);
+
+  if (*result_out != CLUTTER_CULL_RESULT_OUT)
+    {
+      const cairo_region_t *redraw_clip;
+
+      redraw_clip = clutter_paint_context_get_redraw_clip (paint_context);
+      if (redraw_clip)
+        {
+          ClutterActorBox paint_box;
+          cairo_rectangle_int_t paint_box_bounds;
+          cairo_region_overlap_t overlap;
+
+          _clutter_paint_volume_get_stage_paint_box (&priv->last_paint_volume,
+                                                     stage,
+                                                     &paint_box);
+
+          paint_box_bounds.x = floorf (paint_box.x1);
+          paint_box_bounds.y = floorf (paint_box.y1);
+          paint_box_bounds.width = ceilf (paint_box.x2 - paint_box_bounds.x);
+          paint_box_bounds.height = ceilf (paint_box.y2 - paint_box_bounds.y);
+
+          overlap = cairo_region_contains_rectangle (redraw_clip,
+                                                     &paint_box_bounds);
+          switch (overlap)
+            {
+            case CAIRO_REGION_OVERLAP_IN:
+              *result_out = CLUTTER_CULL_RESULT_IN;
+              break;
+            case CAIRO_REGION_OVERLAP_PART:
+              *result_out = CLUTTER_CULL_RESULT_PARTIAL;
+              break;
+            case CAIRO_REGION_OVERLAP_OUT:
+              *result_out = CLUTTER_CULL_RESULT_OUT;
+              break;
+            }
+        }
+    }
 
   return TRUE;
 }
@@ -3520,21 +3521,6 @@ _clutter_actor_update_last_paint_volume (ClutterActor *self)
                                             NULL); /* eye coordinates */
 
   priv->last_paint_volume_valid = TRUE;
-}
-
-static inline gboolean
-actor_has_shader_data (ClutterActor *self)
-{
-  return g_object_get_qdata (G_OBJECT (self), quark_shader_data) != NULL;
-}
-
-guint32
-_clutter_actor_get_pick_id (ClutterActor *self)
-{
-  if (self->priv->pick_id < 0)
-    return 0;
-
-  return self->priv->pick_id;
 }
 
 /* This is the same as clutter_actor_add_effect except that it doesn't
@@ -3580,7 +3566,13 @@ needs_flatten_effect (ClutterActor *self)
                   CLUTTER_DEBUG_DISABLE_OFFSCREEN_REDIRECT))
     return FALSE;
 
-  if (priv->offscreen_redirect & CLUTTER_OFFSCREEN_REDIRECT_ALWAYS)
+  /* We need to enable the effect immediately even in ON_IDLE because that can
+   * only be implemented efficiently within the effect itself.
+   * If it was implemented here using just priv->is_dirty then we would lose
+   * the ability to animate opacity without repaints.
+   */
+  if ((priv->offscreen_redirect & CLUTTER_OFFSCREEN_REDIRECT_ALWAYS) ||
+      (priv->offscreen_redirect & CLUTTER_OFFSCREEN_REDIRECT_ON_IDLE))
     return TRUE;
   else if (priv->offscreen_redirect & CLUTTER_OFFSCREEN_REDIRECT_AUTOMATIC_FOR_OPACITY)
     {
@@ -3635,7 +3627,8 @@ add_or_remove_flatten_effect (ClutterActor *self)
 }
 
 static void
-clutter_actor_real_paint (ClutterActor *actor)
+clutter_actor_real_paint (ClutterActor        *actor,
+                          ClutterPaintContext *paint_context)
 {
   ClutterActorPrivate *priv = actor->priv;
   ClutterActor *iter;
@@ -3652,20 +3645,18 @@ clutter_actor_real_paint (ClutterActor *actor)
                     iter->priv->allocation.x2 - iter->priv->allocation.x1,
                     iter->priv->allocation.y2 - iter->priv->allocation.y1);
 
-      clutter_actor_paint (iter);
+      clutter_actor_paint (iter, paint_context);
     }
 }
 
 static gboolean
-clutter_actor_paint_node (ClutterActor     *actor,
-                          ClutterPaintNode *root)
+clutter_actor_paint_node (ClutterActor        *actor,
+                          ClutterPaintNode    *root,
+                          ClutterPaintContext *paint_context)
 {
   ClutterActorPrivate *priv = actor->priv;
   ClutterActorBox box;
   ClutterColor bg_color;
-
-  if (root == NULL)
-    return FALSE;
 
   box.x1 = 0.f;
   box.y1 = 0.f;
@@ -3680,16 +3671,9 @@ clutter_actor_paint_node (ClutterActor     *actor,
       CoglFramebuffer *fb;
       CoglBufferBit clear_flags;
 
-      fb = _clutter_stage_get_active_framebuffer (CLUTTER_STAGE (actor));
+      fb = clutter_paint_context_get_base_framebuffer (paint_context);
 
-      if (clutter_stage_get_use_alpha (CLUTTER_STAGE (actor)))
-        {
-          bg_color.alpha = priv->opacity
-                         * priv->bg_color.alpha
-                         / 255;
-        }
-      else
-        bg_color.alpha = 255;
+      bg_color.alpha = 255;
 
       CLUTTER_NOTE (PAINT, "Stage clear color: (%d, %d, %d, %d)",
                     bg_color.red,
@@ -3698,11 +3682,9 @@ clutter_actor_paint_node (ClutterActor     *actor,
                     bg_color.alpha);
 
       clear_flags = COGL_BUFFER_BIT_DEPTH;
-      if (!clutter_stage_get_no_clear_hint (CLUTTER_STAGE (actor)))
-        clear_flags |= COGL_BUFFER_BIT_COLOR;
 
-      node = _clutter_root_node_new (fb, &bg_color, clear_flags);
-      clutter_paint_node_set_name (node, "stageClear");
+      node = clutter_root_node_new (fb, &bg_color, clear_flags);
+      clutter_paint_node_set_static_name (node, "stageClear");
       clutter_paint_node_add_rectangle (node, &box);
       clutter_paint_node_add_child (root, node);
       clutter_paint_node_unref (node);
@@ -3717,14 +3699,14 @@ clutter_actor_paint_node (ClutterActor     *actor,
                      / 255;
 
       node = clutter_color_node_new (&bg_color);
-      clutter_paint_node_set_name (node, "backgroundColor");
+      clutter_paint_node_set_static_name (node, "backgroundColor");
       clutter_paint_node_add_rectangle (node, &box);
       clutter_paint_node_add_child (root, node);
       clutter_paint_node_unref (node);
     }
 
   if (priv->content != NULL)
-    _clutter_content_paint_content (priv->content, actor, root);
+    _clutter_content_paint_content (priv->content, actor, root, paint_context);
 
   if (CLUTTER_ACTOR_GET_CLASS (actor)->paint_node != NULL)
     CLUTTER_ACTOR_GET_CLASS (actor)->paint_node (actor, root);
@@ -3740,7 +3722,7 @@ clutter_actor_paint_node (ClutterActor     *actor,
     }
 #endif /* CLUTTER_ENABLE_DEBUG */
 
-  _clutter_paint_node_paint (root);
+  clutter_paint_node_paint (root, paint_context);
 
   return TRUE;
 }
@@ -3764,13 +3746,15 @@ clutter_actor_paint_node (ClutterActor     *actor,
  * unless it is performing a pick paint.
  */
 void
-clutter_actor_paint (ClutterActor *self)
+clutter_actor_paint (ClutterActor        *self,
+                     ClutterPaintContext *paint_context)
 {
+  g_autoptr (ClutterPaintNode) actor_node = NULL;
+  g_autoptr (ClutterPaintNode) root_node = NULL;
   ClutterActorPrivate *priv;
-  ClutterPickMode pick_mode;
+  ClutterActorBox clip;
+  gboolean culling_inhibited;
   gboolean clip_set = FALSE;
-  gboolean shader_applied = FALSE;
-  ClutterStage *stage;
 
   g_return_if_fail (CLUTTER_IS_ACTOR (self));
 
@@ -3778,16 +3762,11 @@ clutter_actor_paint (ClutterActor *self)
     return;
 
   priv = self->priv;
-
-  pick_mode = _clutter_context_get_pick_mode ();
-
-  if (pick_mode == CLUTTER_PICK_NONE)
-    priv->propagated_one_redraw = FALSE;
+  priv->propagated_one_redraw = FALSE;
 
   /* It's an important optimization that we consider painting of
    * actors with 0 opacity to be a NOP... */
-  if (pick_mode == CLUTTER_PICK_NONE &&
-      /* ignore top-levels, since they might be transparent */
+  if (/* ignore top-levels, since they might be transparent */
       !CLUTTER_ACTOR_IS_TOPLEVEL (self) &&
       /* Use the override opacity if its been set */
       ((priv->opacity_override >= 0) ?
@@ -3800,22 +3779,53 @@ clutter_actor_paint (ClutterActor *self)
   if (!CLUTTER_ACTOR_IS_MAPPED (self))
     return;
 
-  stage = (ClutterStage *) _clutter_actor_get_stage_internal (self);
+  actor_node = clutter_actor_node_new (self);
+  root_node = clutter_paint_node_ref (actor_node);
 
-  /* mark that we are in the paint process */
-  CLUTTER_SET_PRIVATE_FLAGS (self, CLUTTER_IN_PAINT);
+  if (priv->has_clip)
+    {
+      clip.x1 = priv->clip.origin.x;
+      clip.y1 = priv->clip.origin.y;
+      clip.x2 = priv->clip.origin.x + priv->clip.size.width;
+      clip.y2 = priv->clip.origin.y + priv->clip.size.height;
+      clip_set = TRUE;
+    }
+  else if (priv->clip_to_allocation)
+    {
+      clip.x1 = 0.f;
+      clip.y1 = 0.f;
+      clip.x2 = priv->allocation.x2 - priv->allocation.x1;
+      clip.y2 = priv->allocation.y2 - priv->allocation.y1;
+      clip_set = TRUE;
+    }
 
-  cogl_push_matrix ();
+  if (clip_set)
+    {
+      ClutterPaintNode *clip_node;
+
+      clip_node = clutter_clip_node_new ();
+      clutter_paint_node_add_rectangle (clip_node, &clip);
+      clutter_paint_node_add_child (clip_node, root_node);
+      clutter_paint_node_unref (root_node);
+
+      root_node = g_steal_pointer (&clip_node);
+    }
 
   if (priv->enable_model_view_transform)
     {
-      CoglMatrix matrix;
+      ClutterPaintNode *transform_node;
+      CoglMatrix transform;
 
-      /* XXX: It could be better to cache the modelview with the actor
-       * instead of progressively building up the transformations on
-       * the matrix stack every time we paint. */
-      cogl_get_modelview_matrix (&matrix);
-      _clutter_actor_apply_modelview_transform (self, &matrix);
+      clutter_actor_get_transform (self, &transform);
+
+      if (!cogl_matrix_is_identity (&transform))
+        {
+          transform_node = clutter_transform_node_new (&transform);
+          clutter_paint_node_add_child (transform_node, root_node);
+          clutter_paint_node_unref (root_node);
+
+          root_node = g_steal_pointer (&transform_node);
+        }
 
 #ifdef CLUTTER_ENABLE_DEBUG
       /* Catch when out-of-band transforms have been made by actors not as part
@@ -3827,7 +3837,7 @@ clutter_actor_paint (ClutterActor *self)
           _clutter_actor_get_relative_transformation_matrix (self, NULL,
                                                              &expected_matrix);
 
-          if (!cogl_matrix_equal (&matrix, &expected_matrix))
+          if (!cogl_matrix_equal (&transform, &expected_matrix))
             {
               GString *buf = g_string_sized_new (1024);
               ClutterActor *parent;
@@ -3854,40 +3864,14 @@ clutter_actor_paint (ClutterActor *self)
             }
         }
 #endif /* CLUTTER_ENABLE_DEBUG */
-
-      cogl_set_modelview_matrix (&matrix);
     }
 
-  if (priv->has_clip)
-    {
-      CoglFramebuffer *fb = _clutter_stage_get_active_framebuffer (stage);
-      cogl_framebuffer_push_rectangle_clip (fb,
-                                            priv->clip.origin.x,
-                                            priv->clip.origin.y,
-                                            priv->clip.origin.x + priv->clip.size.width,
-                                            priv->clip.origin.y + priv->clip.size.height);
-      clip_set = TRUE;
-    }
-  else if (priv->clip_to_allocation)
-    {
-      CoglFramebuffer *fb = _clutter_stage_get_active_framebuffer (stage);
-      gfloat width, height;
-
-      width  = priv->allocation.x2 - priv->allocation.x1;
-      height = priv->allocation.y2 - priv->allocation.y1;
-
-      cogl_framebuffer_push_rectangle_clip (fb, 0, 0, width, height);
-      clip_set = TRUE;
-    }
-
-  if (pick_mode == CLUTTER_PICK_NONE)
-    {
-      /* We check whether we need to add the flatten effect before
-         each paint so that we can avoid having a mechanism for
-         applications to notify when the value of the
-         has_overlaps virtual changes. */
-      add_or_remove_flatten_effect (self);
-    }
+  /* We check whether we need to add the flatten effect before
+   * each paint so that we can avoid having a mechanism for
+   * applications to notify when the value of the
+   * has_overlaps virtual changes.
+   */
+  add_or_remove_flatten_effect (self);
 
   /* We save the current paint volume so that the next time the
    * actor queues a redraw we can constrain the redraw to just
@@ -3916,7 +3900,8 @@ clutter_actor_paint (ClutterActor *self)
    * paint then the last-paint-volume would likely represent the new
    * actor position not the old.
    */
-  if (!in_clone_paint () && pick_mode == CLUTTER_PICK_NONE)
+  culling_inhibited = priv->inhibit_culling_counter > 0;
+  if (!culling_inhibited && !in_clone_paint ())
     {
       gboolean success;
       /* annoyingly gcc warns if uninitialized even though
@@ -3930,55 +3915,28 @@ clutter_actor_paint (ClutterActor *self)
                      CLUTTER_DEBUG_DISABLE_CLIPPED_REDRAWS)))
         _clutter_actor_update_last_paint_volume (self);
 
-      success = cull_actor (self, &result);
+      success = cull_actor (self, paint_context, &result);
 
       if (G_UNLIKELY (clutter_paint_debug_flags & CLUTTER_DEBUG_REDRAWS))
-        _clutter_actor_paint_cull_result (self, success, result);
+        _clutter_actor_paint_cull_result (self, success, result, actor_node);
       else if (result == CLUTTER_CULL_RESULT_OUT && success)
-        goto done;
+        return;
     }
 
   if (priv->effects == NULL)
-    {
-      if (pick_mode == CLUTTER_PICK_NONE &&
-          actor_has_shader_data (self))
-        {
-          _clutter_actor_shader_pre_paint (self, FALSE);
-          shader_applied = TRUE;
-        }
-
-      priv->next_effect_to_paint = NULL;
-    }
+    priv->next_effect_to_paint = NULL;
   else
     priv->next_effect_to_paint =
       _clutter_meta_group_peek_metas (priv->effects);
 
-  clutter_actor_continue_paint (self);
+  if (G_UNLIKELY (clutter_paint_debug_flags & CLUTTER_DEBUG_PAINT_VOLUMES))
+    _clutter_actor_draw_paint_volume (self, actor_node);
 
-  if (shader_applied)
-    _clutter_actor_shader_post_paint (self);
+  clutter_paint_node_paint (root_node, paint_context);
 
-  if (G_UNLIKELY (clutter_paint_debug_flags & CLUTTER_DEBUG_PAINT_VOLUMES &&
-                  pick_mode == CLUTTER_PICK_NONE))
-    _clutter_actor_draw_paint_volume (self);
-
-done:
   /* If we make it here then the actor has run through a complete
      paint run including all the effects so it's no longer dirty */
-  if (pick_mode == CLUTTER_PICK_NONE)
-    priv->is_dirty = FALSE;
-
-  if (clip_set)
-    {
-      CoglFramebuffer *fb = _clutter_stage_get_active_framebuffer (stage);
-
-      cogl_framebuffer_pop_clip (fb);
-    }
-
-  cogl_pop_matrix ();
-
-  /* paint sequence complete */
-  CLUTTER_UNSET_PRIVATE_FLAGS (self, CLUTTER_IN_PAINT);
+  priv->is_dirty = FALSE;
 }
 
 /**
@@ -3994,7 +3952,8 @@ done:
  * Since: 1.8
  */
 void
-clutter_actor_continue_paint (ClutterActor *self)
+clutter_actor_continue_paint (ClutterActor        *self,
+                              ClutterPaintContext *paint_context)
 {
   ClutterActorPrivate *priv;
 
@@ -4014,49 +3973,30 @@ clutter_actor_continue_paint (ClutterActor *self)
      actual actor */
   if (priv->next_effect_to_paint == NULL)
     {
-      if (_clutter_context_get_pick_mode () == CLUTTER_PICK_NONE)
-        {
-          ClutterPaintNode *dummy;
+      CoglFramebuffer *framebuffer;
+      ClutterPaintNode *dummy;
 
-          /* XXX - this will go away in 2.0, when we can get rid of this
-           * stuff and switch to a pure retained render tree of PaintNodes
-           * for the entire frame, starting from the Stage; the paint()
-           * virtual function can then be called directly.
-           */
-          dummy = _clutter_dummy_node_new (self);
-          clutter_paint_node_set_name (dummy, "Root");
+      /* XXX - this will go away in 2.0, when we can get rid of this
+       * stuff and switch to a pure retained render tree of PaintNodes
+       * for the entire frame, starting from the Stage; the paint()
+       * virtual function can then be called directly.
+       */
+      framebuffer = clutter_paint_context_get_base_framebuffer (paint_context);
+      dummy = _clutter_dummy_node_new (self, framebuffer);
+      clutter_paint_node_set_static_name (dummy, "Root");
 
-          /* XXX - for 1.12, we use the return value of paint_node() to
-           * decide whether we should emit the ::paint signal.
-           */
-          clutter_actor_paint_node (self, dummy);
-          clutter_paint_node_unref (dummy);
+      /* XXX - for 1.12, we use the return value of paint_node() to
+       * decide whether we should emit the ::paint signal.
+       */
+      clutter_actor_paint_node (self, dummy, paint_context);
+      clutter_paint_node_unref (dummy);
 
-          /* XXX:2.0 - Call the paint() virtual directly */
-          if (g_signal_has_handler_pending (self, actor_signals[PAINT],
-                                            0, TRUE))
-            g_signal_emit (self, actor_signals[PAINT], 0);
-          else
-            CLUTTER_ACTOR_GET_CLASS (self)->paint (self);
-        }
+      /* XXX:2.0 - Call the paint() virtual directly */
+      if (g_signal_has_handler_pending (self, actor_signals[PAINT],
+                                        0, TRUE))
+        g_signal_emit (self, actor_signals[PAINT], 0, paint_context);
       else
-        {
-          ClutterColor col = { 0, };
-
-          _clutter_id_to_color (_clutter_actor_get_pick_id (self), &col);
-
-          /* Actor will then paint silhouette of itself in supplied
-           * color.  See clutter_stage_get_actor_at_pos() for where
-           * picking is enabled.
-           *
-           * XXX:2.0 - Call the pick() virtual directly
-           */
-          if (g_signal_has_handler_pending (self, actor_signals[PICK],
-                                            0, TRUE))
-            g_signal_emit (self, actor_signals[PICK], 0, &col);
-          else
-            CLUTTER_ACTOR_GET_CLASS (self)->pick (self, &col);
-        }
+        CLUTTER_ACTOR_GET_CLASS (self)->paint (self, paint_context);
     }
   else
     {
@@ -4070,31 +4010,164 @@ clutter_actor_continue_paint (ClutterActor *self)
       priv->current_effect = priv->next_effect_to_paint->data;
       priv->next_effect_to_paint = priv->next_effect_to_paint->next;
 
-      if (_clutter_context_get_pick_mode () == CLUTTER_PICK_NONE)
+      if (priv->is_dirty)
         {
-          if (priv->is_dirty)
-            {
-              /* If there's an effect queued with this redraw then all
-                 effects up to that one will be considered dirty. It
-                 is expected the queued effect will paint the cached
-                 image and not call clutter_actor_continue_paint again
-                 (although it should work ok if it does) */
-              if (priv->effect_to_redraw == NULL ||
-                  priv->current_effect != priv->effect_to_redraw)
-                run_flags |= CLUTTER_EFFECT_PAINT_ACTOR_DIRTY;
-            }
-
-          _clutter_effect_paint (priv->current_effect, run_flags);
+          /* If there's an effect queued with this redraw then all
+           * effects up to that one will be considered dirty. It
+           * is expected the queued effect will paint the cached
+           * image and not call clutter_actor_continue_paint again
+           * (although it should work ok if it does)
+           */
+          if (priv->effect_to_redraw == NULL ||
+              priv->current_effect != priv->effect_to_redraw)
+            run_flags |= CLUTTER_EFFECT_PAINT_ACTOR_DIRTY;
         }
+
+      if (priv->current_effect == priv->flatten_effect &&
+          priv->offscreen_redirect & CLUTTER_OFFSCREEN_REDIRECT_ON_IDLE &&
+          run_flags & CLUTTER_EFFECT_PAINT_ACTOR_DIRTY)
+        run_flags |= CLUTTER_EFFECT_PAINT_BYPASS_EFFECT;
+
+      _clutter_effect_paint (priv->current_effect, paint_context, run_flags);
+
+      priv->current_effect = old_current_effect;
+    }
+}
+
+/**
+ * clutter_actor_pick:
+ * @actor: A #ClutterActor
+ *
+ * Asks @actor to perform a pick.
+ */
+void
+clutter_actor_pick (ClutterActor       *actor,
+                    ClutterPickContext *pick_context)
+{
+  ClutterActorPrivate *priv;
+  CoglFramebuffer *framebuffer;
+  ClutterActorBox clip;
+  gboolean clip_set = FALSE;
+
+  if (CLUTTER_ACTOR_IN_DESTRUCTION (actor))
+    return;
+
+  priv = actor->priv;
+
+  /* if we aren't paintable (not in a toplevel with all
+   * parents paintable) then do nothing.
+   */
+  if (!CLUTTER_ACTOR_IS_MAPPED (actor))
+    return;
+
+  /* mark that we are in the paint process */
+  CLUTTER_SET_PRIVATE_FLAGS (actor, CLUTTER_IN_PICK);
+
+  framebuffer = clutter_pick_context_get_framebuffer (pick_context);
+  cogl_framebuffer_push_matrix (framebuffer);
+
+  if (priv->enable_model_view_transform)
+    {
+      CoglMatrix matrix;
+
+      cogl_framebuffer_get_modelview_matrix (framebuffer, &matrix);
+      _clutter_actor_apply_modelview_transform (actor, &matrix);
+      cogl_framebuffer_set_modelview_matrix (framebuffer, &matrix);
+    }
+
+  if (priv->has_clip)
+    {
+      clip.x1 = priv->clip.origin.x;
+      clip.y1 = priv->clip.origin.y;
+      clip.x2 = priv->clip.origin.x + priv->clip.size.width;
+      clip.y2 = priv->clip.origin.y + priv->clip.size.height;
+      clip_set = TRUE;
+    }
+  else if (priv->clip_to_allocation)
+    {
+      clip.x1 = 0.f;
+      clip.y1 = 0.f;
+      clip.x2 = priv->allocation.x2 - priv->allocation.x1;
+      clip.y2 = priv->allocation.y2 - priv->allocation.y1;
+      clip_set = TRUE;
+    }
+
+  if (clip_set)
+    clip_set = _clutter_actor_push_pick_clip (actor, pick_context, &clip);
+
+  priv->next_effect_to_paint = NULL;
+  if (priv->effects)
+    {
+      priv->next_effect_to_paint =
+        _clutter_meta_group_peek_metas (priv->effects);
+    }
+
+  clutter_actor_continue_pick (actor, pick_context);
+
+  if (clip_set)
+    _clutter_actor_pop_pick_clip (actor);
+
+  cogl_framebuffer_pop_matrix (framebuffer);
+
+  /* paint sequence complete */
+  CLUTTER_UNSET_PRIVATE_FLAGS (actor, CLUTTER_IN_PICK);
+}
+
+/**
+ * clutter_actor_continue_pick:
+ * @actor: A #ClutterActor
+ *
+ * Run the next stage of the pick sequence. This function should only
+ * be called within the implementation of the ‘pick’ virtual of a
+ * #ClutterEffect. It will cause the run method of the next effect to
+ * be applied, or it will pick the actual actor if the current effect
+ * is the last effect in the chain.
+ */
+void
+clutter_actor_continue_pick (ClutterActor       *actor,
+                             ClutterPickContext *pick_context)
+{
+  ClutterActorPrivate *priv;
+
+  g_return_if_fail (CLUTTER_IS_ACTOR (actor));
+
+  g_return_if_fail (CLUTTER_ACTOR_IN_PICK (actor));
+
+  priv = actor->priv;
+
+  /* Skip any effects that are disabled */
+  while (priv->next_effect_to_paint &&
+         !clutter_actor_meta_get_enabled (priv->next_effect_to_paint->data))
+    priv->next_effect_to_paint = priv->next_effect_to_paint->next;
+
+  /* If this has come from the last effect then we'll just pick the
+   * actual actor.
+   */
+  if (priv->next_effect_to_paint == NULL)
+    {
+      /* The actor will log a silhouette of itself to the stage pick log.
+       *
+       * XXX:2.0 - Call the pick() virtual directly
+       */
+      if (g_signal_has_handler_pending (actor, actor_signals[PICK],
+                                        0, TRUE))
+        g_signal_emit (actor, actor_signals[PICK], 0, pick_context);
       else
-        {
-          /* We can't determine when an actor has been modified since
-             its last pick so lets just assume it has always been
-             modified */
-          run_flags |= CLUTTER_EFFECT_PAINT_ACTOR_DIRTY;
+        CLUTTER_ACTOR_GET_CLASS (actor)->pick (actor, pick_context);
+    }
+  else
+    {
+      ClutterEffect *old_current_effect;
 
-          _clutter_effect_pick (priv->current_effect, run_flags);
-        }
+      /* Cache the current effect so that we can put it back before
+       * returning.
+       */
+      old_current_effect = priv->current_effect;
+
+      priv->current_effect = priv->next_effect_to_paint->data;
+      priv->next_effect_to_paint = priv->next_effect_to_paint->next;
+
+      _clutter_effect_pick (priv->current_effect, pick_context);
 
       priv->current_effect = old_current_effect;
     }
@@ -4116,11 +4189,7 @@ _clutter_actor_stop_transitions (ClutterActor *self)
     {
       TransitionClosure *closure = value;
 
-      /* implicit transitions, and automatically managed explicit ones,
-       * should be removed at this point
-       */
-      if (closure->is_implicit ||
-          clutter_transition_get_remove_on_complete (closure->transition))
+      if (clutter_transition_get_remove_on_complete (closure->transition))
         {
           g_hash_table_iter_remove (&iter);
         }
@@ -4177,7 +4246,8 @@ remove_child (ClutterActor *self,
   child->priv->next_sibling = NULL;
 }
 
-typedef enum {
+typedef enum
+{
   REMOVE_CHILD_DESTROY_META       = 1 << 0,
   REMOVE_CHILD_EMIT_PARENT_SET    = 1 << 1,
   REMOVE_CHILD_EMIT_ACTOR_REMOVED = 1 << 2,
@@ -4185,6 +4255,7 @@ typedef enum {
   REMOVE_CHILD_FLUSH_QUEUE        = 1 << 4,
   REMOVE_CHILD_NOTIFY_FIRST_LAST  = 1 << 5,
   REMOVE_CHILD_STOP_TRANSITIONS   = 1 << 6,
+  REMOVE_CHILD_CLEAR_STAGE_VIEWS  = 1 << 7,
 
   /* default flags for public API */
   REMOVE_CHILD_DEFAULT_FLAGS      = REMOVE_CHILD_STOP_TRANSITIONS |
@@ -4193,14 +4264,8 @@ typedef enum {
                                     REMOVE_CHILD_EMIT_ACTOR_REMOVED |
                                     REMOVE_CHILD_CHECK_STATE |
                                     REMOVE_CHILD_FLUSH_QUEUE |
-                                    REMOVE_CHILD_NOTIFY_FIRST_LAST,
-
-  /* flags for legacy/deprecated API */
-  REMOVE_CHILD_LEGACY_FLAGS       = REMOVE_CHILD_STOP_TRANSITIONS |
-                                    REMOVE_CHILD_CHECK_STATE |
-                                    REMOVE_CHILD_FLUSH_QUEUE |
-                                    REMOVE_CHILD_EMIT_PARENT_SET |
-                                    REMOVE_CHILD_NOTIFY_FIRST_LAST
+                                    REMOVE_CHILD_NOTIFY_FIRST_LAST |
+                                    REMOVE_CHILD_CLEAR_STAGE_VIEWS,
 } ClutterActorRemoveChildFlags;
 
 /*< private >
@@ -4220,8 +4285,8 @@ clutter_actor_remove_child_internal (ClutterActor                 *self,
   gboolean destroy_meta, emit_parent_set, emit_actor_removed, check_state;
   gboolean flush_queue;
   gboolean notify_first_last;
-  gboolean was_mapped;
   gboolean stop_transitions;
+  gboolean clear_stage_views;
   GObject *obj;
 
   if (self == child)
@@ -4238,6 +4303,7 @@ clutter_actor_remove_child_internal (ClutterActor                 *self,
   flush_queue = (flags & REMOVE_CHILD_FLUSH_QUEUE) != 0;
   notify_first_last = (flags & REMOVE_CHILD_NOTIFY_FIRST_LAST) != 0;
   stop_transitions = (flags & REMOVE_CHILD_STOP_TRANSITIONS) != 0;
+  clear_stage_views = (flags & REMOVE_CHILD_CLEAR_STAGE_VIEWS) != 0;
 
   obj = G_OBJECT (self);
   g_object_freeze_notify (obj);
@@ -4250,8 +4316,6 @@ clutter_actor_remove_child_internal (ClutterActor                 *self,
 
   if (check_state)
     {
-      was_mapped = CLUTTER_ACTOR_IS_MAPPED (child);
-
       /* we need to unrealize *before* we set parent_actor to NULL,
        * because in an unrealize method actors are dissociating from the
        * stage, which means they need to be able to
@@ -4261,8 +4325,6 @@ clutter_actor_remove_child_internal (ClutterActor                 *self,
        */
       clutter_actor_update_map_state (child, MAP_STATE_MAKE_UNREALIZED);
     }
-  else
-    was_mapped = FALSE;
 
   if (flush_queue)
     {
@@ -4298,6 +4360,9 @@ clutter_actor_remove_child_internal (ClutterActor                 *self,
   if (self->priv->in_cloned_branch)
     clutter_actor_pop_in_cloned_branch (child, self->priv->in_cloned_branch);
 
+  if (self->priv->unmapped_paint_branch_counter)
+    pop_in_paint_unmapped_branch (child, self->priv->unmapped_paint_branch_counter);
+
   /* if the child that got removed was visible and set to
    * expand then we want to reset the parent's state in
    * case the child was the only thing that was making it
@@ -4311,19 +4376,19 @@ clutter_actor_remove_child_internal (ClutterActor                 *self,
       clutter_actor_queue_compute_expand (self);
     }
 
-  /* clutter_actor_reparent() will emit ::parent-set for us */
-  if (emit_parent_set && !CLUTTER_ACTOR_IN_REPARENT (child))
-    g_signal_emit (child, actor_signals[PARENT_SET], 0, self);
-
-  /* if the child was mapped then we need to relayout ourselves to account
-   * for the removed child
+  /* Only actors which are attached to a stage get notified about changes
+   * to the stage views, so make sure all the stage-views lists are
+   * cleared as the child and its children leave the actor tree.
    */
-  if (was_mapped)
-    clutter_actor_queue_relayout (self);
+  if (clear_stage_views && !CLUTTER_ACTOR_IN_DESTRUCTION (child))
+    clutter_actor_clear_stage_views_recursive (child);
+
+  if (emit_parent_set && !CLUTTER_ACTOR_IN_DESTRUCTION (child))
+    g_signal_emit (child, actor_signals[PARENT_SET], 0, self);
 
   /* we need to emit the signal before dropping the reference */
   if (emit_actor_removed)
-    g_signal_emit_by_name (self, "actor-removed", child);
+    _clutter_container_emit_actor_removed (CLUTTER_CONTAINER (self), child);
 
   if (notify_first_last)
     {
@@ -4341,19 +4406,17 @@ clutter_actor_remove_child_internal (ClutterActor                 *self,
 }
 
 static const ClutterTransformInfo default_transform_info = {
-  0.0, { 0, },                  /* rotation-x */
-  0.0, { 0, },                  /* rotation-y */
-  0.0, { 0, },                  /* rotation-z */
+  0.0,                          /* rotation-x */
+  0.0,                          /* rotation-y */
+  0.0,                          /* rotation-z */
 
-  1.0, 1.0, 1.0, { 0, },        /* scale */
+  1.0, 1.0, 1.0,                /* scale */
 
-  { 0, },                       /* anchor XXX:2.0 - remove*/
-
-  CLUTTER_VERTEX_INIT_ZERO,     /* translation */
+  GRAPHENE_POINT3D_INIT_ZERO,   /* translation */
 
   0.f,                          /* z-position */
 
-  CLUTTER_POINT_INIT_ZERO,      /* pivot */
+  GRAPHENE_POINT_INIT_ZERO,     /* pivot */
   0.f,                          /* pivot-z */
 
   CLUTTER_MATRIX_INIT_IDENTITY,
@@ -4432,15 +4495,15 @@ _clutter_actor_get_transform_info (ClutterActor *self)
 }
 
 static inline void
-clutter_actor_set_pivot_point_internal (ClutterActor       *self,
-                                        const ClutterPoint *pivot)
+clutter_actor_set_pivot_point_internal (ClutterActor           *self,
+                                        const graphene_point_t *pivot)
 {
   ClutterTransformInfo *info;
 
   info = _clutter_actor_get_transform_info (self);
   info->pivot = *pivot;
 
-  self->priv->transform_valid = FALSE;
+  transform_changed (self);
 
   g_object_notify_by_pspec (G_OBJECT (self), obj_props[PROP_PIVOT_POINT]);
 
@@ -4456,7 +4519,7 @@ clutter_actor_set_pivot_point_z_internal (ClutterActor *self,
   info = _clutter_actor_get_transform_info (self);
   info->pivot_z = pivot_z;
 
-  self->priv->transform_valid = FALSE;
+  transform_changed (self);
 
   g_object_notify_by_pspec (G_OBJECT (self), obj_props[PROP_PIVOT_POINT_Z]);
 
@@ -4490,7 +4553,8 @@ clutter_actor_set_translation_internal (ClutterActor *self,
   else
     g_assert_not_reached ();
 
-  self->priv->transform_valid = FALSE;
+  transform_changed (self);
+
   clutter_actor_queue_redraw (self);
   g_object_notify_by_pspec (obj, pspec);
 }
@@ -4622,7 +4686,7 @@ clutter_actor_set_rotation_angle_internal (ClutterActor *self,
   else
     g_assert_not_reached ();
 
-  self->priv->transform_valid = FALSE;
+  transform_changed (self);
 
   clutter_actor_queue_redraw (self);
 
@@ -4728,63 +4792,6 @@ clutter_actor_get_rotation_angle (ClutterActor      *self,
   return retval;
 }
 
-/*< private >
- * clutter_actor_set_rotation_center_internal:
- * @self: a #ClutterActor
- * @axis: the axis of the center to change
- * @center: the coordinates of the rotation center
- *
- * Sets the rotation center on the given axis without affecting the
- * rotation angle.
- */
-static inline void
-clutter_actor_set_rotation_center_internal (ClutterActor        *self,
-                                            ClutterRotateAxis    axis,
-                                            const ClutterVertex *center)
-{
-  ClutterVertex v = CLUTTER_VERTEX_INIT_ZERO; 
-  GObject *obj = G_OBJECT (self);
-  ClutterTransformInfo *info;
-
-  info = _clutter_actor_get_transform_info (self);
-
-  if (center != NULL)
-    v = *center;
-
-  g_object_freeze_notify (obj);
-
-  switch (axis)
-    {
-    case CLUTTER_X_AXIS:
-      clutter_anchor_coord_set_units (&info->rx_center, v.x, v.y, v.z);
-      g_object_notify_by_pspec (obj, obj_props[PROP_ROTATION_CENTER_X]);
-      break;
-
-    case CLUTTER_Y_AXIS:
-      clutter_anchor_coord_set_units (&info->ry_center, v.x, v.y, v.z);
-      g_object_notify_by_pspec (obj, obj_props[PROP_ROTATION_CENTER_Y]);
-      break;
-
-    case CLUTTER_Z_AXIS:
-      /* if the previously set rotation center was fractional, then
-       * setting explicit coordinates will have to notify the
-       * :rotation-center-z-gravity property as well
-       */
-      if (info->rz_center.is_fractional)
-        g_object_notify_by_pspec (obj, obj_props[PROP_ROTATION_CENTER_Z_GRAVITY]);
-
-      clutter_anchor_coord_set_units (&info->rz_center, v.x, v.y, v.z);
-      g_object_notify_by_pspec (obj, obj_props[PROP_ROTATION_CENTER_Z]);
-      break;
-    }
-
-  self->priv->transform_valid = FALSE;
-
-  g_object_thaw_notify (obj);
-
-  clutter_actor_queue_redraw (self);
-}
-
 static void
 clutter_actor_set_scale_factor_internal (ClutterActor *self,
                                          double factor,
@@ -4804,7 +4811,8 @@ clutter_actor_set_scale_factor_internal (ClutterActor *self,
   else
     g_assert_not_reached ();
 
-  self->priv->transform_valid = FALSE;
+  transform_changed (self);
+
   clutter_actor_queue_redraw (self);
   g_object_notify_by_pspec (obj, pspec);
 }
@@ -4841,135 +4849,13 @@ clutter_actor_set_scale_factor (ClutterActor      *self,
   g_assert (pspec != NULL);
   g_assert (scale_p != NULL);
 
-  _clutter_actor_create_transition (self, pspec, *scale_p, factor);
-}
-
-static inline void
-clutter_actor_set_scale_center (ClutterActor      *self,
-                                ClutterRotateAxis  axis,
-                                gfloat             coord)
-{
-  GObject *obj = G_OBJECT (self);
-  ClutterTransformInfo *info;
-  gfloat center_x, center_y;
-
-  info = _clutter_actor_get_transform_info (self);
-
-  g_object_freeze_notify (obj);
-
-  /* get the current scale center coordinates */
-  clutter_anchor_coord_get_units (self, &info->scale_center,
-                                  &center_x,
-                                  &center_y,
-                                  NULL);
-
-  /* we need to notify this too, because setting explicit coordinates will
-   * change the gravity as a side effect
-   */
-  if (info->scale_center.is_fractional)
-    g_object_notify_by_pspec (obj, obj_props[PROP_SCALE_GRAVITY]);
-
-  switch (axis)
-    {
-    case CLUTTER_X_AXIS:
-      clutter_anchor_coord_set_units (&info->scale_center, coord, center_y, 0);
-      g_object_notify_by_pspec (obj, obj_props[PROP_SCALE_CENTER_X]);
-      break;
-
-    case CLUTTER_Y_AXIS:
-      clutter_anchor_coord_set_units (&info->scale_center, center_x, coord, 0);
-      g_object_notify_by_pspec (obj, obj_props[PROP_SCALE_CENTER_Y]);
-      break;
-
-    default:
-      g_assert_not_reached ();
-    }
-
-  self->priv->transform_valid = FALSE;
-
-  clutter_actor_queue_redraw (self);
-
-  g_object_thaw_notify (obj);
-}
-
-static inline void
-clutter_actor_set_scale_gravity (ClutterActor   *self,
-                                 ClutterGravity  gravity)
-{
-  ClutterTransformInfo *info;
-  GObject *obj;
-
-  info = _clutter_actor_get_transform_info (self);
-  obj = G_OBJECT (self);
-
-  if (gravity == CLUTTER_GRAVITY_NONE)
-    clutter_anchor_coord_set_units (&info->scale_center, 0, 0, 0);
-  else
-    clutter_anchor_coord_set_gravity (&info->scale_center, gravity);
-
-  self->priv->transform_valid = FALSE;
-
-  g_object_notify_by_pspec (obj, obj_props[PROP_SCALE_CENTER_X]);
-  g_object_notify_by_pspec (obj, obj_props[PROP_SCALE_CENTER_Y]);
-  g_object_notify_by_pspec (obj, obj_props[PROP_SCALE_GRAVITY]);
-
-  clutter_actor_queue_redraw (self);
-}
-
-/* XXX:2.0 - remove */
-static inline void
-clutter_actor_set_anchor_coord (ClutterActor      *self,
-                                ClutterRotateAxis  axis,
-                                gfloat             coord)
-{
-  GObject *obj = G_OBJECT (self);
-  ClutterTransformInfo *info;
-  gfloat anchor_x, anchor_y;
-
-  info = _clutter_actor_get_transform_info (self);
-
-  g_object_freeze_notify (obj);
-
-  clutter_anchor_coord_get_units (self, &info->anchor,
-                                  &anchor_x,
-                                  &anchor_y,
-                                  NULL);
-
-  if (info->anchor.is_fractional)
-    g_object_notify_by_pspec (obj, obj_props[PROP_ANCHOR_GRAVITY]);
-
-  switch (axis)
-    {
-    case CLUTTER_X_AXIS:
-      clutter_anchor_coord_set_units (&info->anchor,
-                                      coord,
-                                      anchor_y,
-                                      0.0);
-      g_object_notify_by_pspec (obj, obj_props[PROP_ANCHOR_X]);
-      break;
-
-    case CLUTTER_Y_AXIS:
-      clutter_anchor_coord_set_units (&info->anchor,
-                                      anchor_x,
-                                      coord,
-                                      0.0);
-      g_object_notify_by_pspec (obj, obj_props[PROP_ANCHOR_Y]);
-      break;
-
-    default:
-      g_assert_not_reached ();
-    }
-
-  self->priv->transform_valid = FALSE;
-
-  clutter_actor_queue_redraw (self);
-
-  g_object_thaw_notify (obj);
+  if (*scale_p != factor)
+    _clutter_actor_create_transition (self, pspec, *scale_p, factor);
 }
 
 static void
-clutter_actor_set_clip_rect (ClutterActor      *self,
-                             const ClutterRect *clip)
+clutter_actor_set_clip_rect (ClutterActor          *self,
+                             const graphene_rect_t *clip)
 {
   ClutterActorPrivate *priv = self->priv;
   GObject *obj = G_OBJECT (self);
@@ -4984,7 +4870,6 @@ clutter_actor_set_clip_rect (ClutterActor      *self,
 
   clutter_actor_queue_redraw (self);
 
-  g_object_notify_by_pspec (obj, obj_props[PROP_CLIP]); /* XXX:2.0 - remove */
   g_object_notify_by_pspec (obj, obj_props[PROP_CLIP_RECT]);
   g_object_notify_by_pspec (obj, obj_props[PROP_HAS_CLIP]);
 }
@@ -5010,7 +4895,7 @@ clutter_actor_set_property (GObject      *object,
 
     case PROP_POSITION:
       {
-        const ClutterPoint *pos = g_value_get_boxed (value);
+        const graphene_point_t *pos = g_value_get_boxed (value);
 
         if (pos != NULL)
           clutter_actor_set_position (actor, pos->x, pos->y);
@@ -5029,7 +4914,7 @@ clutter_actor_set_property (GObject      *object,
 
     case PROP_SIZE:
       {
-        const ClutterSize *size = g_value_get_boxed (value);
+        const graphene_size_t *size = g_value_get_boxed (value);
 
         if (size != NULL)
           clutter_actor_set_size (actor, size->width, size->height);
@@ -5086,10 +4971,6 @@ clutter_actor_set_property (GObject      *object,
       clutter_actor_set_request_mode (actor, g_value_get_enum (value));
       break;
 
-    case PROP_DEPTH: /* XXX:2.0 - remove */
-      clutter_actor_set_depth (actor, g_value_get_float (value));
-      break;
-
     case PROP_Z_POSITION:
       clutter_actor_set_z_position (actor, g_value_get_float (value));
       break;
@@ -5099,7 +4980,7 @@ clutter_actor_set_property (GObject      *object,
       break;
 
     case PROP_OFFSCREEN_REDIRECT:
-      clutter_actor_set_offscreen_redirect (actor, g_value_get_enum (value));
+      clutter_actor_set_offscreen_redirect (actor, g_value_get_flags (value));
       break;
 
     case PROP_NAME:
@@ -5115,10 +4996,10 @@ clutter_actor_set_property (GObject      *object,
 
     case PROP_PIVOT_POINT:
       {
-        const ClutterPoint *pivot = g_value_get_boxed (value);
+        const graphene_point_t *pivot = g_value_get_boxed (value);
 
         if (pivot == NULL)
-          pivot = clutter_point_zero ();
+          pivot = graphene_point_zero ();
 
         clutter_actor_set_pivot_point (actor, pivot->x, pivot->y);
       }
@@ -5158,30 +5039,6 @@ clutter_actor_set_property (GObject      *object,
                                       g_value_get_double (value));
       break;
 
-    case PROP_SCALE_CENTER_X: /* XXX:2.0 - remove */
-      clutter_actor_set_scale_center (actor, CLUTTER_X_AXIS,
-                                      g_value_get_float (value));
-      break;
-
-    case PROP_SCALE_CENTER_Y: /* XXX:2.0 - remove */
-      clutter_actor_set_scale_center (actor, CLUTTER_Y_AXIS,
-                                      g_value_get_float (value));
-      break;
-
-    case PROP_SCALE_GRAVITY: /* XXX:2.0 - remove */
-      clutter_actor_set_scale_gravity (actor, g_value_get_enum (value));
-      break;
-
-    case PROP_CLIP: /* XXX:2.0 - remove */
-      {
-        const ClutterGeometry *geom = g_value_get_boxed (value);
-
-	clutter_actor_set_clip (actor,
-				geom->x, geom->y,
-				geom->width, geom->height);
-      }
-      break;
-
     case PROP_CLIP_RECT:
       clutter_actor_set_clip_rect (actor, g_value_get_boxed (value));
       break;
@@ -5210,49 +5067,6 @@ clutter_actor_set_property (GObject      *object,
       clutter_actor_set_rotation_angle (actor,
                                         CLUTTER_Z_AXIS,
                                         g_value_get_double (value));
-      break;
-
-    case PROP_ROTATION_CENTER_X: /* XXX:2.0 - remove */
-      clutter_actor_set_rotation_center_internal (actor,
-                                                  CLUTTER_X_AXIS,
-                                                  g_value_get_boxed (value));
-      break;
-
-    case PROP_ROTATION_CENTER_Y: /* XXX:2.0 - remove */
-      clutter_actor_set_rotation_center_internal (actor,
-                                                  CLUTTER_Y_AXIS,
-                                                  g_value_get_boxed (value));
-      break;
-
-    case PROP_ROTATION_CENTER_Z: /* XXX:2.0 - remove */
-      clutter_actor_set_rotation_center_internal (actor,
-                                                  CLUTTER_Z_AXIS,
-                                                  g_value_get_boxed (value));
-      break;
-
-    case PROP_ROTATION_CENTER_Z_GRAVITY: /* XXX:2.0 - remove */
-      {
-        const ClutterTransformInfo *info;
-
-        info = _clutter_actor_get_transform_info_or_defaults (actor);
-        clutter_actor_set_z_rotation_from_gravity (actor, info->rz_angle,
-                                                   g_value_get_enum (value));
-      }
-      break;
-
-    case PROP_ANCHOR_X: /* XXX:2.0 - remove */
-      clutter_actor_set_anchor_coord (actor, CLUTTER_X_AXIS,
-                                      g_value_get_float (value));
-      break;
-
-    case PROP_ANCHOR_Y: /* XXX:2.0 - remove */
-      clutter_actor_set_anchor_coord (actor, CLUTTER_Y_AXIS,
-                                      g_value_get_float (value));
-      break;
-
-    case PROP_ANCHOR_GRAVITY: /* XXX:2.0 - remove */
-      clutter_actor_set_anchor_point_from_gravity (actor,
-                                                   g_value_get_enum (value));
       break;
 
     case PROP_TRANSFORM:
@@ -5374,11 +5188,11 @@ clutter_actor_get_property (GObject    *object,
 
     case PROP_POSITION:
       {
-        ClutterPoint position;
+        graphene_point_t position;
 
-        clutter_point_init (&position,
-                            clutter_actor_get_x (actor),
-                            clutter_actor_get_y (actor));
+        graphene_point_init (&position,
+                             clutter_actor_get_x (actor),
+                             clutter_actor_get_y (actor));
         g_value_set_boxed (value, &position);
       }
       break;
@@ -5393,11 +5207,11 @@ clutter_actor_get_property (GObject    *object,
 
     case PROP_SIZE:
       {
-        ClutterSize size;
+        graphene_size_t size;
 
-        clutter_size_init (&size,
-                           clutter_actor_get_width (actor),
-                           clutter_actor_get_height (actor));
+        graphene_size_init (&size,
+                            clutter_actor_get_width (actor),
+                            clutter_actor_get_height (actor));
         g_value_set_boxed (value, &size);
       }
       break;
@@ -5484,10 +5298,6 @@ clutter_actor_get_property (GObject    *object,
       g_value_set_boxed (value, &priv->allocation);
       break;
 
-    case PROP_DEPTH: /* XXX:2.0 - remove */
-      g_value_set_float (value, clutter_actor_get_depth (actor));
-      break;
-
     case PROP_Z_POSITION:
       g_value_set_float (value, clutter_actor_get_z_position (actor));
       break;
@@ -5518,19 +5328,6 @@ clutter_actor_get_property (GObject    *object,
 
     case PROP_HAS_CLIP:
       g_value_set_boolean (value, priv->has_clip);
-      break;
-
-    case PROP_CLIP: /* XXX:2.0 - remove */
-      {
-        ClutterGeometry clip;
-
-        clip.x      = CLUTTER_NEARBYINT (priv->clip.origin.x);
-        clip.y      = CLUTTER_NEARBYINT (priv->clip.origin.y);
-        clip.width  = CLUTTER_NEARBYINT (priv->clip.size.width);
-        clip.height = CLUTTER_NEARBYINT (priv->clip.size.height);
-
-        g_value_set_boxed (value, &clip);
-      }
       break;
 
     case PROP_CLIP_RECT:
@@ -5613,30 +5410,6 @@ clutter_actor_get_property (GObject    *object,
       }
       break;
 
-    case PROP_SCALE_CENTER_X: /* XXX:2.0 - remove */
-      {
-        gfloat center;
-
-        clutter_actor_get_scale_center (actor, &center, NULL);
-
-        g_value_set_float (value, center);
-      }
-      break;
-
-    case PROP_SCALE_CENTER_Y: /* XXX:2.0 - remove */
-      {
-        gfloat center;
-
-        clutter_actor_get_scale_center (actor, NULL, &center);
-
-        g_value_set_float (value, center);
-      }
-      break;
-
-    case PROP_SCALE_GRAVITY: /* XXX:2.0 - remove */
-      g_value_set_enum (value, clutter_actor_get_scale_gravity (actor));
-      break;
-
     case PROP_REACTIVE:
       g_value_set_boolean (value, clutter_actor_get_reactive (actor));
       break;
@@ -5666,81 +5439,6 @@ clutter_actor_get_property (GObject    *object,
         info = _clutter_actor_get_transform_info_or_defaults (actor);
         g_value_set_double (value, info->rz_angle);
       }
-      break;
-
-    case PROP_ROTATION_CENTER_X: /* XXX:2.0 - remove */
-      {
-        ClutterVertex center;
-
-        clutter_actor_get_rotation (actor, CLUTTER_X_AXIS,
-                                    &center.x,
-                                    &center.y,
-                                    &center.z);
-
-        g_value_set_boxed (value, &center);
-      }
-      break;
-
-    case PROP_ROTATION_CENTER_Y: /* XXX:2.0 - remove */
-      {
-        ClutterVertex center;
-
-        clutter_actor_get_rotation (actor, CLUTTER_Y_AXIS,
-                                    &center.x,
-                                    &center.y,
-                                    &center.z);
-
-        g_value_set_boxed (value, &center);
-      }
-      break;
-
-    case PROP_ROTATION_CENTER_Z: /* XXX:2.0 - remove */
-      {
-        ClutterVertex center;
-
-        clutter_actor_get_rotation (actor, CLUTTER_Z_AXIS,
-                                    &center.x,
-                                    &center.y,
-                                    &center.z);
-
-        g_value_set_boxed (value, &center);
-      }
-      break;
-
-    case PROP_ROTATION_CENTER_Z_GRAVITY: /* XXX:2.0 - remove */
-      g_value_set_enum (value, clutter_actor_get_z_rotation_gravity (actor));
-      break;
-
-    case PROP_ANCHOR_X: /* XXX:2.0 - remove */
-      {
-        const ClutterTransformInfo *info;
-        gfloat anchor_x;
-
-        info = _clutter_actor_get_transform_info_or_defaults (actor);
-        clutter_anchor_coord_get_units (actor, &info->anchor,
-                                        &anchor_x,
-                                        NULL,
-                                        NULL);
-        g_value_set_float (value, anchor_x);
-      }
-      break;
-
-    case PROP_ANCHOR_Y: /* XXX:2.0 - remove */
-      {
-        const ClutterTransformInfo *info;
-        gfloat anchor_y;
-
-        info = _clutter_actor_get_transform_info_or_defaults (actor);
-        clutter_anchor_coord_get_units (actor, &info->anchor,
-                                        NULL,
-                                        &anchor_y,
-                                        NULL);
-        g_value_set_float (value, anchor_y);
-      }
-      break;
-
-    case PROP_ANCHOR_GRAVITY: /* XXX:2.0 - remove */
-      g_value_set_enum (value, clutter_actor_get_anchor_point_gravity (actor));
       break;
 
     case PROP_TRANSFORM:
@@ -5923,11 +5621,17 @@ clutter_actor_dispose (GObject *object)
 {
   ClutterActor *self = CLUTTER_ACTOR (object);
   ClutterActorPrivate *priv = self->priv;
+  ClutterBackend *backend = clutter_get_default_backend ();
 
   CLUTTER_NOTE (MISC, "Dispose actor (name='%s', ref_count:%d) of type '%s'",
 		_clutter_actor_get_debug_name (self),
                 object->ref_count,
 		g_type_name (G_OBJECT_TYPE (self)));
+
+  maybe_unset_key_focus (self);
+
+  /* Stop the emission of any property change */
+  g_object_freeze_notify (object);
 
   g_signal_emit (self, actor_signals[DESTROY], 0);
 
@@ -5935,18 +5639,7 @@ clutter_actor_dispose (GObject *object)
   if (priv->parent != NULL)
     {
       ClutterActor *parent = priv->parent;
-
-      /* go through the Container implementation unless this
-       * is an internal child and has been marked as such.
-       *
-       * removing the actor from its parent will reset the
-       * realized and mapped states.
-       */
-      if (!CLUTTER_ACTOR_IS_INTERNAL_CHILD (self))
-        clutter_container_remove_actor (CLUTTER_CONTAINER (parent), self);
-      else
-        clutter_actor_remove_child_internal (parent, self,
-                                             REMOVE_CHILD_LEGACY_FLAGS);
+      clutter_container_remove_actor (CLUTTER_CONTAINER (parent), self);
     }
 
   /* parent must be gone at this point */
@@ -5958,6 +5651,9 @@ clutter_actor_dispose (GObject *object)
       g_assert (!CLUTTER_ACTOR_IS_MAPPED (self));
       g_assert (!CLUTTER_ACTOR_IS_REALIZED (self));
     }
+
+  g_clear_signal_handler (&priv->resolution_changed_id, backend);
+  g_clear_signal_handler (&priv->font_changed_id, backend);
 
   g_clear_object (&priv->pango_context);
   g_clear_object (&priv->actions);
@@ -5979,6 +5675,7 @@ clutter_actor_dispose (GObject *object)
 
   if (priv->layout_manager != NULL)
     {
+      g_clear_signal_handler (&priv->layout_changed_id, priv->layout_manager);
       clutter_layout_manager_set_container (priv->layout_manager, NULL);
       g_clear_object (&priv->layout_manager);
     }
@@ -5994,6 +5691,8 @@ clutter_actor_dispose (GObject *object)
       g_hash_table_unref (priv->clones);
       priv->clones = NULL;
     }
+
+  g_clear_pointer (&priv->stage_views, g_list_free);
 
   G_OBJECT_CLASS (clutter_actor_parent_class)->dispose (object);
 }
@@ -6106,7 +5805,7 @@ clutter_actor_update_default_paint_volume (ClutterActor       *self,
           priv->clip.size.width >= 0 &&
           priv->clip.size.height >= 0)
         {
-          ClutterVertex origin;
+          graphene_point3d_t origin;
 
           origin.x = priv->clip.origin.x;
           origin.y = priv->clip.origin.y;
@@ -6252,6 +5951,25 @@ clutter_actor_real_has_overlaps (ClutterActor *self)
   return TRUE;
 }
 
+static float
+clutter_actor_real_calculate_resource_scale (ClutterActor *self,
+                                             int           phase)
+{
+  ClutterActorPrivate *priv = self->priv;
+  GList *l;
+  float new_resource_scale = -1.f;
+
+  for (l = priv->stage_views; l; l = l->next)
+    {
+      ClutterStageView *view = l->data;
+
+      new_resource_scale = MAX (clutter_stage_view_get_scale (view),
+                                new_resource_scale);
+    }
+
+  return new_resource_scale;
+}
+
 static void
 clutter_actor_real_destroy (ClutterActor *actor)
 {
@@ -6297,10 +6015,23 @@ clutter_actor_class_init (ClutterActorClass *klass)
 {
   GObjectClass *object_class = G_OBJECT_CLASS (klass);
 
-  quark_shader_data = g_quark_from_static_string ("-clutter-actor-shader-data");
   quark_actor_layout_info = g_quark_from_static_string ("-clutter-actor-layout-info");
   quark_actor_transform_info = g_quark_from_static_string ("-clutter-actor-transform-info");
   quark_actor_animation_info = g_quark_from_static_string ("-clutter-actor-animation-info");
+
+  quark_key = g_quark_from_static_string ("key");
+  quark_motion = g_quark_from_static_string ("motion");
+  quark_pointer_focus = g_quark_from_static_string ("pointer-focus");
+  quark_button = g_quark_from_static_string ("button");
+  quark_scroll = g_quark_from_static_string ("scroll");
+  quark_stage = g_quark_from_static_string ("stage");
+  quark_destroy = g_quark_from_static_string ("destroy");
+  quark_client = g_quark_from_static_string ("client");
+  quark_touch = g_quark_from_static_string ("touch");
+  quark_touchpad = g_quark_from_static_string ("touchpad");
+  quark_proximity = g_quark_from_static_string ("proximity");
+  quark_pad = g_quark_from_static_string ("pad");
+  quark_im = g_quark_from_static_string ("im");
 
   object_class->constructor = clutter_actor_constructor;
   object_class->set_property = clutter_actor_set_property;
@@ -6309,7 +6040,6 @@ clutter_actor_class_init (ClutterActorClass *klass)
   object_class->finalize = clutter_actor_finalize;
 
   klass->show = clutter_actor_real_show;
-  klass->show_all = clutter_actor_show;
   klass->hide = clutter_actor_real_hide;
   klass->hide_all = clutter_actor_hide;
   klass->map = clutter_actor_real_map;
@@ -6325,6 +6055,7 @@ clutter_actor_class_init (ClutterActorClass *klass)
   klass->get_accessible = clutter_actor_real_get_accessible;
   klass->get_paint_volume = clutter_actor_real_get_paint_volume;
   klass->has_overlaps = clutter_actor_real_has_overlaps;
+  klass->calculate_resource_scale = clutter_actor_real_calculate_resource_scale;
   klass->paint = clutter_actor_real_paint;
   klass->destroy = clutter_actor_real_destroy;
 
@@ -6383,7 +6114,7 @@ clutter_actor_class_init (ClutterActorClass *klass)
     g_param_spec_boxed ("position",
                         P_("Position"),
                         P_("The position of the origin of the actor"),
-                        CLUTTER_TYPE_POINT,
+                        GRAPHENE_TYPE_POINT,
                         G_PARAM_READWRITE |
                         G_PARAM_STATIC_STRINGS |
                         CLUTTER_PARAM_ANIMATABLE);
@@ -6401,7 +6132,7 @@ clutter_actor_class_init (ClutterActorClass *klass)
     g_param_spec_float ("width",
                         P_("Width"),
                         P_("Width of the actor"),
-                        0.0, G_MAXFLOAT,
+                        -1.0f, G_MAXFLOAT,
                         0.0,
                         G_PARAM_READWRITE |
                         G_PARAM_STATIC_STRINGS |
@@ -6420,7 +6151,7 @@ clutter_actor_class_init (ClutterActorClass *klass)
     g_param_spec_float ("height",
                         P_("Height"),
                         P_("Height of the actor"),
-                        0.0, G_MAXFLOAT,
+                        -1.0f, G_MAXFLOAT,
                         0.0,
                         G_PARAM_READWRITE |
                         G_PARAM_STATIC_STRINGS |
@@ -6442,7 +6173,7 @@ clutter_actor_class_init (ClutterActorClass *klass)
     g_param_spec_boxed ("size",
                         P_("Size"),
                         P_("The size of the actor"),
-                        CLUTTER_TYPE_SIZE,
+                        GRAPHENE_TYPE_SIZE,
                         G_PARAM_READWRITE |
                         G_PARAM_STATIC_STRINGS |
                         CLUTTER_PARAM_ANIMATABLE);
@@ -6722,34 +6453,6 @@ clutter_actor_class_init (ClutterActorClass *klass)
                        CLUTTER_PARAM_READWRITE);
 
   /**
-   * ClutterActor:depth:
-   *
-   * The position of the actor on the Z axis.
-   *
-   * The #ClutterActor:depth property is relative to the parent's
-   * modelview matrix.
-   *
-   * Setting this property will call #ClutterContainerIface.sort_depth_order()
-   * which is usually a no-op, and it's most likely not what you want.
-   *
-   * The #ClutterActor:depth property is animatable.
-   *
-   * Since: 0.6
-   *
-   * Deprecated: 1.12: Use #ClutterActor:z-position instead.
-   */
-  obj_props[PROP_DEPTH] =
-    g_param_spec_float ("depth",
-                        P_("Depth"),
-                        P_("Position on the Z axis"),
-                        -G_MAXFLOAT, G_MAXFLOAT,
-                        0.0,
-                        G_PARAM_READWRITE |
-                        G_PARAM_STATIC_STRINGS |
-                        G_PARAM_DEPRECATED |
-                        CLUTTER_PARAM_ANIMATABLE);
-
-  /**
    * ClutterActor:z-position:
    *
    * The actor's position on the Z axis, relative to the parent's
@@ -6885,24 +6588,10 @@ clutter_actor_class_init (ClutterActorClass *klass)
                           CLUTTER_PARAM_READABLE);
 
   /**
-   * ClutterActor:clip:
-   *
-   * The visible region of the actor, in actor-relative coordinates
-   *
-   * Deprecated: 1.12: Use #ClutterActor:clip-rect instead.
-   */
-  obj_props[PROP_CLIP] = /* XXX:2.0 - remove */
-    g_param_spec_boxed ("clip",
-                        P_("Clip"),
-                        P_("The clip region for the actor"),
-                        CLUTTER_TYPE_GEOMETRY,
-                        CLUTTER_PARAM_READWRITE);
-
-  /**
    * ClutterActor:clip-rect:
    *
    * The visible region of the actor, in actor-relative coordinates,
-   * expressed as a #ClutterRect.
+   * expressed as a #graphene_rect_t.
    *
    * Setting this property to %NULL will unset the existing clip.
    *
@@ -6915,7 +6604,7 @@ clutter_actor_class_init (ClutterActorClass *klass)
     g_param_spec_boxed ("clip-rect",
                         P_("Clip Rectangle"),
                         P_("The visible region of the actor"),
-                        CLUTTER_TYPE_RECT,
+                        GRAPHENE_TYPE_RECT,
                         G_PARAM_READWRITE |
                         G_PARAM_STATIC_STRINGS);
 
@@ -6952,7 +6641,7 @@ clutter_actor_class_init (ClutterActorClass *klass)
     g_param_spec_boxed ("pivot-point",
                         P_("Pivot Point"),
                         P_("The point around which the scaling and rotation occur"),
-                        CLUTTER_TYPE_POINT,
+                        GRAPHENE_TYPE_POINT,
                         G_PARAM_READWRITE |
                         G_PARAM_STATIC_STRINGS |
                         CLUTTER_PARAM_ANIMATABLE);
@@ -7035,63 +6724,6 @@ clutter_actor_class_init (ClutterActorClass *klass)
                          CLUTTER_PARAM_ANIMATABLE);
 
   /**
-   * ClutterActor:scale-center-x:
-   *
-   * The horizontal center point for scaling
-   *
-   * Since: 1.0
-   *
-   * Deprecated: 1.12: Use #ClutterActor:pivot-point instead
-   */
-  obj_props[PROP_SCALE_CENTER_X] = /* XXX:2.0 - remove */
-    g_param_spec_float ("scale-center-x",
-                        P_("Scale Center X"),
-                        P_("Horizontal scale center"),
-                        -G_MAXFLOAT, G_MAXFLOAT,
-                        0.0,
-                        G_PARAM_READWRITE |
-                        G_PARAM_STATIC_STRINGS |
-                        G_PARAM_DEPRECATED);
-
-  /**
-   * ClutterActor:scale-center-y:
-   *
-   * The vertical center point for scaling
-   *
-   * Since: 1.0
-   *
-   * Deprecated: 1.12: Use #ClutterActor:pivot-point instead
-   */
-  obj_props[PROP_SCALE_CENTER_Y] = /* XXX:2.0 - remove */
-    g_param_spec_float ("scale-center-y",
-                        P_("Scale Center Y"),
-                        P_("Vertical scale center"),
-                        -G_MAXFLOAT, G_MAXFLOAT,
-                        0.0,
-                        G_PARAM_READWRITE |
-                        G_PARAM_STATIC_STRINGS |
-                        G_PARAM_DEPRECATED);
-
-  /**
-   * ClutterActor:scale-gravity:
-   *
-   * The center point for scaling expressed as a #ClutterGravity
-   *
-   * Since: 1.0
-   *
-   * Deprecated: 1.12: Use #ClutterActor:pivot-point instead
-   */
-  obj_props[PROP_SCALE_GRAVITY] = /* XXX:2.0 - remove */
-    g_param_spec_enum ("scale-gravity",
-                       P_("Scale Gravity"),
-                       P_("The center of scaling"),
-                       CLUTTER_TYPE_GRAVITY,
-                       CLUTTER_GRAVITY_NONE,
-                       G_PARAM_READWRITE |
-                       G_PARAM_STATIC_STRINGS |
-                       G_PARAM_DEPRECATED);
-
-  /**
    * ClutterActor:rotation-angle-x:
    *
    * The rotation angle on the X axis.
@@ -7147,165 +6779,6 @@ clutter_actor_class_init (ClutterActorClass *klass)
                          G_PARAM_READWRITE |
                          G_PARAM_STATIC_STRINGS |
                          CLUTTER_PARAM_ANIMATABLE);
-
-  /**
-   * ClutterActor:rotation-center-x:
-   *
-   * The rotation center on the X axis.
-   *
-   * Since: 0.6
-   *
-   * Deprecated: 1.12: Use #ClutterActor:pivot-point instead
-   */
-  obj_props[PROP_ROTATION_CENTER_X] = /* XXX:2.0 - remove */
-    g_param_spec_boxed ("rotation-center-x",
-                        P_("Rotation Center X"),
-                        P_("The rotation center on the X axis"),
-                        CLUTTER_TYPE_VERTEX,
-                        G_PARAM_READWRITE |
-                        G_PARAM_STATIC_STRINGS |
-                        G_PARAM_DEPRECATED);
-
-  /**
-   * ClutterActor:rotation-center-y:
-   *
-   * The rotation center on the Y axis.
-   *
-   * Since: 0.6
-   *
-   * Deprecated: 1.12: Use #ClutterActor:pivot-point instead
-   */
-  obj_props[PROP_ROTATION_CENTER_Y] = /* XXX:2.0 - remove */
-    g_param_spec_boxed ("rotation-center-y",
-                        P_("Rotation Center Y"),
-                        P_("The rotation center on the Y axis"),
-                        CLUTTER_TYPE_VERTEX,
-                        G_PARAM_READWRITE |
-                        G_PARAM_STATIC_STRINGS |
-                        G_PARAM_DEPRECATED);
-
-  /**
-   * ClutterActor:rotation-center-z:
-   *
-   * The rotation center on the Z axis.
-   *
-   * Since: 0.6
-   *
-   * Deprecated: 1.12: Use #ClutterActor:pivot-point instead
-   */
-  obj_props[PROP_ROTATION_CENTER_Z] = /* XXX:2.0 - remove */
-    g_param_spec_boxed ("rotation-center-z",
-                        P_("Rotation Center Z"),
-                        P_("The rotation center on the Z axis"),
-                        CLUTTER_TYPE_VERTEX,
-                        G_PARAM_READWRITE |
-                        G_PARAM_STATIC_STRINGS |
-                        G_PARAM_DEPRECATED);
-
-  /**
-   * ClutterActor:rotation-center-z-gravity:
-   *
-   * The rotation center on the Z axis expressed as a #ClutterGravity.
-   *
-   * Since: 1.0
-   *
-   * Deprecated: 1.12: Use #ClutterActor:pivot-point instead
-   */
-  obj_props[PROP_ROTATION_CENTER_Z_GRAVITY] = /* XXX:2.0 - remove */
-    g_param_spec_enum ("rotation-center-z-gravity",
-                       P_("Rotation Center Z Gravity"),
-                       P_("Center point for rotation around the Z axis"),
-                       CLUTTER_TYPE_GRAVITY,
-                       CLUTTER_GRAVITY_NONE,
-                       G_PARAM_READWRITE |
-                       G_PARAM_STATIC_STRINGS |
-                       G_PARAM_DEPRECATED);
-
-  /**
-   * ClutterActor:anchor-x:
-   *
-   * The X coordinate of an actor's anchor point, relative to
-   * the actor coordinate space, in pixels.
-   *
-   * It is highly recommended not to use #ClutterActor:anchor-x,
-   * #ClutterActor:anchor-y, and #ClutterActor:anchor-gravity in newly
-   * written code; the anchor point adds an additional translation that
-   * will affect the actor's relative position with regards to its
-   * parent, as well as the position of its children. This change needs
-   * to always be taken into account when positioning the actor. It is
-   * recommended to use the #ClutterActor:pivot-point property instead,
-   * as it will affect only the transformations.
-   *
-   * Since: 0.8
-   *
-   * Deprecated: 1.12: Use #ClutterActor:pivot-point instead
-   */
-  obj_props[PROP_ANCHOR_X] = /* XXX:2.0 - remove */
-    g_param_spec_float ("anchor-x",
-                        P_("Anchor X"),
-                        P_("X coordinate of the anchor point"),
-                        -G_MAXFLOAT, G_MAXFLOAT,
-                        0,
-                        G_PARAM_READWRITE |
-                        G_PARAM_STATIC_STRINGS |
-                        G_PARAM_DEPRECATED);
-
-  /**
-   * ClutterActor:anchor-y:
-   *
-   * The Y coordinate of an actor's anchor point, relative to
-   * the actor coordinate space, in pixels
-   *
-   * It is highly recommended not to use #ClutterActor:anchor-x,
-   * #ClutterActor:anchor-y, and #ClutterActor:anchor-gravity in newly
-   * written code; the anchor point adds an additional translation that
-   * will affect the actor's relative position with regards to its
-   * parent, as well as the position of its children. This change needs
-   * to always be taken into account when positioning the actor. It is
-   * recommended to use the #ClutterActor:pivot-point property instead,
-   * as it will affect only the transformations.
-   *
-   * Since: 0.8
-   *
-   * Deprecated: 1.12: Use #ClutterActor:pivot-point instead
-   */
-  obj_props[PROP_ANCHOR_Y] = /* XXX:2.0 - remove */
-    g_param_spec_float ("anchor-y",
-                        P_("Anchor Y"),
-                        P_("Y coordinate of the anchor point"),
-                        -G_MAXFLOAT, G_MAXFLOAT,
-                        0,
-                        G_PARAM_READWRITE |
-                        G_PARAM_STATIC_STRINGS |
-                        G_PARAM_DEPRECATED);
-
-  /**
-   * ClutterActor:anchor-gravity:
-   *
-   * The anchor point expressed as a #ClutterGravity
-   *
-   * It is highly recommended not to use #ClutterActor:anchor-x,
-   * #ClutterActor:anchor-y, and #ClutterActor:anchor-gravity in newly
-   * written code; the anchor point adds an additional translation that
-   * will affect the actor's relative position with regards to its
-   * parent, as well as the position of its children. This change needs
-   * to always be taken into account when positioning the actor. It is
-   * recommended to use the #ClutterActor:pivot-point property instead,
-   * as it will affect only the transformations.
-   *
-   * Since: 1.0
-   *
-   * Deprecated: 1.12: Use #ClutterActor:pivot-point instead
-   */
-  obj_props[PROP_ANCHOR_GRAVITY] = /* XXX:2.0 - remove */
-    g_param_spec_enum ("anchor-gravity",
-                       P_("Anchor Gravity"),
-                       P_("The anchor point as a ClutterGravity"),
-                       CLUTTER_TYPE_GRAVITY,
-                       CLUTTER_GRAVITY_NONE,
-                       G_PARAM_READWRITE |
-                       G_PARAM_STATIC_STRINGS |
-                       G_PARAM_DEPRECATED);
 
   /**
    * ClutterActor:translation-x:
@@ -7910,8 +7383,7 @@ clutter_actor_class_init (ClutterActorClass *klass)
 		  G_TYPE_FROM_CLASS (object_class),
                   G_SIGNAL_RUN_CLEANUP | G_SIGNAL_NO_RECURSE | G_SIGNAL_NO_HOOKS,
 		  G_STRUCT_OFFSET (ClutterActorClass, destroy),
-		  NULL, NULL,
-		  _clutter_marshal_VOID__VOID,
+		  NULL, NULL, NULL,
 		  G_TYPE_NONE, 0);
   /**
    * ClutterActor::show:
@@ -7927,8 +7399,7 @@ clutter_actor_class_init (ClutterActorClass *klass)
 		  G_TYPE_FROM_CLASS (object_class),
 		  G_SIGNAL_RUN_FIRST,
 		  G_STRUCT_OFFSET (ClutterActorClass, show),
-		  NULL, NULL,
-		  _clutter_marshal_VOID__VOID,
+		  NULL, NULL, NULL,
 		  G_TYPE_NONE, 0);
   /**
    * ClutterActor::hide:
@@ -7944,8 +7415,7 @@ clutter_actor_class_init (ClutterActorClass *klass)
 		  G_TYPE_FROM_CLASS (object_class),
 		  G_SIGNAL_RUN_FIRST,
 		  G_STRUCT_OFFSET (ClutterActorClass, hide),
-		  NULL, NULL,
-		  _clutter_marshal_VOID__VOID,
+		  NULL, NULL, NULL,
 		  G_TYPE_NONE, 0);
   /**
    * ClutterActor::parent-set:
@@ -7961,8 +7431,7 @@ clutter_actor_class_init (ClutterActorClass *klass)
                   G_TYPE_FROM_CLASS (object_class),
                   G_SIGNAL_RUN_LAST,
                   G_STRUCT_OFFSET (ClutterActorClass, parent_set),
-                  NULL, NULL,
-                  _clutter_marshal_VOID__OBJECT,
+                  NULL, NULL, NULL,
                   G_TYPE_NONE, 1,
                   CLUTTER_TYPE_ACTOR);
 
@@ -7970,6 +7439,7 @@ clutter_actor_class_init (ClutterActorClass *klass)
    * ClutterActor::queue-redraw:
    * @actor: the actor we're bubbling the redraw request through
    * @origin: the actor which initiated the redraw request
+   * @volume: paint volume to redraw
    *
    * The ::queue_redraw signal is emitted when clutter_actor_queue_redraw()
    * is called on @origin.
@@ -8023,10 +7493,15 @@ clutter_actor_class_init (ClutterActorClass *klass)
 		  G_SIGNAL_RUN_LAST |
                   G_SIGNAL_NO_HOOKS,
 		  G_STRUCT_OFFSET (ClutterActorClass, queue_redraw),
-		  NULL, NULL,
-		  _clutter_marshal_VOID__OBJECT,
-		  G_TYPE_NONE, 1,
-                  CLUTTER_TYPE_ACTOR);
+                  g_signal_accumulator_true_handled,
+		  NULL,
+		  _clutter_marshal_BOOLEAN__OBJECT_BOXED,
+		  G_TYPE_BOOLEAN, 2,
+                  CLUTTER_TYPE_ACTOR,
+                  CLUTTER_TYPE_PAINT_VOLUME);
+  g_signal_set_va_marshaller (actor_signals[QUEUE_REDRAW],
+                              G_TYPE_FROM_CLASS (object_class),
+                              _clutter_marshal_BOOLEAN__OBJECT_BOXEDv);
 
   /**
    * ClutterActor::queue-relayout:
@@ -8051,8 +7526,7 @@ clutter_actor_class_init (ClutterActorClass *klass)
 		  G_SIGNAL_RUN_LAST |
                   G_SIGNAL_NO_HOOKS,
 		  G_STRUCT_OFFSET (ClutterActorClass, queue_relayout),
-		  NULL, NULL,
-		  _clutter_marshal_VOID__VOID,
+		  NULL, NULL, NULL,
 		  G_TYPE_NONE, 0);
 
   /**
@@ -8079,6 +7553,9 @@ clutter_actor_class_init (ClutterActorClass *klass)
 		  _clutter_marshal_BOOLEAN__BOXED,
 		  G_TYPE_BOOLEAN, 1,
 		  CLUTTER_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
+  g_signal_set_va_marshaller (actor_signals[EVENT],
+                              G_TYPE_FROM_CLASS (object_class),
+                              _clutter_marshal_BOOLEAN__BOXEDv);
   /**
    * ClutterActor::button-press-event:
    * @actor: the actor which received the event
@@ -8101,6 +7578,9 @@ clutter_actor_class_init (ClutterActorClass *klass)
 		  _clutter_marshal_BOOLEAN__BOXED,
 		  G_TYPE_BOOLEAN, 1,
 		  CLUTTER_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
+  g_signal_set_va_marshaller (actor_signals[BUTTON_PRESS_EVENT],
+                              G_TYPE_FROM_CLASS (object_class),
+                              _clutter_marshal_BOOLEAN__BOXEDv);
   /**
    * ClutterActor::button-release-event:
    * @actor: the actor which received the event
@@ -8123,6 +7603,9 @@ clutter_actor_class_init (ClutterActorClass *klass)
 		  _clutter_marshal_BOOLEAN__BOXED,
 		  G_TYPE_BOOLEAN, 1,
 		  CLUTTER_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
+  g_signal_set_va_marshaller (actor_signals[BUTTON_RELEASE_EVENT],
+                              G_TYPE_FROM_CLASS (object_class),
+                              _clutter_marshal_BOOLEAN__BOXEDv);
   /**
    * ClutterActor::scroll-event:
    * @actor: the actor which received the event
@@ -8145,6 +7628,9 @@ clutter_actor_class_init (ClutterActorClass *klass)
 		  _clutter_marshal_BOOLEAN__BOXED,
 		  G_TYPE_BOOLEAN, 1,
 		  CLUTTER_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
+  g_signal_set_va_marshaller (actor_signals[SCROLL_EVENT],
+                              G_TYPE_FROM_CLASS (object_class),
+                              _clutter_marshal_BOOLEAN__BOXEDv);
   /**
    * ClutterActor::key-press-event:
    * @actor: the actor which received the event
@@ -8167,6 +7653,9 @@ clutter_actor_class_init (ClutterActorClass *klass)
 		  _clutter_marshal_BOOLEAN__BOXED,
 		  G_TYPE_BOOLEAN, 1,
 		  CLUTTER_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
+  g_signal_set_va_marshaller (actor_signals[KEY_PRESS_EVENT],
+                              G_TYPE_FROM_CLASS (object_class),
+                              _clutter_marshal_BOOLEAN__BOXEDv);
   /**
    * ClutterActor::key-release-event:
    * @actor: the actor which received the event
@@ -8190,6 +7679,9 @@ clutter_actor_class_init (ClutterActorClass *klass)
 		  _clutter_marshal_BOOLEAN__BOXED,
 		  G_TYPE_BOOLEAN, 1,
 		  CLUTTER_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
+  g_signal_set_va_marshaller (actor_signals[KEY_RELEASE_EVENT],
+                              G_TYPE_FROM_CLASS (object_class),
+                              _clutter_marshal_BOOLEAN__BOXEDv);
   /**
    * ClutterActor::motion-event:
    * @actor: the actor which received the event
@@ -8212,6 +7704,9 @@ clutter_actor_class_init (ClutterActorClass *klass)
 		  _clutter_marshal_BOOLEAN__BOXED,
 		  G_TYPE_BOOLEAN, 1,
 		  CLUTTER_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
+  g_signal_set_va_marshaller (actor_signals[MOTION_EVENT],
+                              G_TYPE_FROM_CLASS (object_class),
+                              _clutter_marshal_BOOLEAN__BOXEDv);
 
   /**
    * ClutterActor::key-focus-in:
@@ -8226,8 +7721,7 @@ clutter_actor_class_init (ClutterActorClass *klass)
 		  G_TYPE_FROM_CLASS (object_class),
 		  G_SIGNAL_RUN_LAST,
 		  G_STRUCT_OFFSET (ClutterActorClass, key_focus_in),
-		  NULL, NULL,
-		  _clutter_marshal_VOID__VOID,
+		  NULL, NULL, NULL,
 		  G_TYPE_NONE, 0);
 
   /**
@@ -8243,8 +7737,7 @@ clutter_actor_class_init (ClutterActorClass *klass)
 		  G_TYPE_FROM_CLASS (object_class),
 		  G_SIGNAL_RUN_LAST,
 		  G_STRUCT_OFFSET (ClutterActorClass, key_focus_out),
-		  NULL, NULL,
-		  _clutter_marshal_VOID__VOID,
+		  NULL, NULL, NULL,
 		  G_TYPE_NONE, 0);
 
   /**
@@ -8268,6 +7761,9 @@ clutter_actor_class_init (ClutterActorClass *klass)
 		  _clutter_marshal_BOOLEAN__BOXED,
 		  G_TYPE_BOOLEAN, 1,
 		  CLUTTER_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
+  g_signal_set_va_marshaller (actor_signals[ENTER_EVENT],
+                              G_TYPE_FROM_CLASS (object_class),
+                              _clutter_marshal_BOOLEAN__BOXEDv);
 
   /**
    * ClutterActor::leave-event:
@@ -8290,6 +7786,9 @@ clutter_actor_class_init (ClutterActorClass *klass)
 		  _clutter_marshal_BOOLEAN__BOXED,
 		  G_TYPE_BOOLEAN, 1,
 		  CLUTTER_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
+  g_signal_set_va_marshaller (actor_signals[LEAVE_EVENT],
+                              G_TYPE_FROM_CLASS (object_class),
+                              _clutter_marshal_BOOLEAN__BOXEDv);
 
   /**
    * ClutterActor::captured-event:
@@ -8312,16 +7811,20 @@ clutter_actor_class_init (ClutterActorClass *klass)
   actor_signals[CAPTURED_EVENT] =
     g_signal_new (I_("captured-event"),
 		  G_TYPE_FROM_CLASS (object_class),
-		  G_SIGNAL_RUN_LAST,
+		  G_SIGNAL_RUN_LAST | G_SIGNAL_DETAILED,
 		  G_STRUCT_OFFSET (ClutterActorClass, captured_event),
 		  _clutter_boolean_handled_accumulator, NULL,
 		  _clutter_marshal_BOOLEAN__BOXED,
 		  G_TYPE_BOOLEAN, 1,
 		  CLUTTER_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
+  g_signal_set_va_marshaller (actor_signals[CAPTURED_EVENT],
+                              G_TYPE_FROM_CLASS (object_class),
+                              _clutter_marshal_BOOLEAN__BOXEDv);
 
   /**
    * ClutterActor::paint:
    * @actor: the #ClutterActor that received the signal
+   * @paint_context: a #ClutterPaintContext
    *
    * The ::paint signal is emitted each time an actor is being painted.
    *
@@ -8348,9 +7851,9 @@ clutter_actor_class_init (ClutterActorClass *klass)
                   G_SIGNAL_NO_HOOKS |
                   G_SIGNAL_DEPRECATED,
                   G_STRUCT_OFFSET (ClutterActorClass, paint),
-                  NULL, NULL,
-                  _clutter_marshal_VOID__VOID,
-                  G_TYPE_NONE, 0);
+                  NULL, NULL, NULL,
+                  G_TYPE_NONE, 1,
+                  CLUTTER_TYPE_PAINT_CONTEXT);
   /**
    * ClutterActor::realize:
    * @actor: the #ClutterActor that received the signal
@@ -8368,8 +7871,7 @@ clutter_actor_class_init (ClutterActorClass *klass)
                   G_TYPE_FROM_CLASS (object_class),
                   G_SIGNAL_RUN_LAST | G_SIGNAL_DEPRECATED,
                   G_STRUCT_OFFSET (ClutterActorClass, realize),
-                  NULL, NULL,
-                  _clutter_marshal_VOID__VOID,
+                  NULL, NULL, NULL,
                   G_TYPE_NONE, 0);
   /**
    * ClutterActor::unrealize:
@@ -8388,19 +7890,17 @@ clutter_actor_class_init (ClutterActorClass *klass)
                   G_TYPE_FROM_CLASS (object_class),
                   G_SIGNAL_RUN_LAST | G_SIGNAL_DEPRECATED,
                   G_STRUCT_OFFSET (ClutterActorClass, unrealize),
-                  NULL, NULL,
-                  _clutter_marshal_VOID__VOID,
+                  NULL, NULL, NULL,
                   G_TYPE_NONE, 0);
 
   /**
    * ClutterActor::pick:
    * @actor: the #ClutterActor that received the signal
-   * @color: the #ClutterColor to be used when picking
+   * @pick_context: a #ClutterPickContext
    *
    * The ::pick signal is emitted each time an actor is being painted
    * in "pick mode". The pick mode is used to identify the actor during
    * the event handling phase, or by clutter_stage_get_actor_at_pos().
-   * The actor should paint its shape using the passed @pick_color.
    *
    * Subclasses of #ClutterActor should override the class signal handler
    * and paint themselves in that function.
@@ -8417,36 +7917,9 @@ clutter_actor_class_init (ClutterActorClass *klass)
                   G_TYPE_FROM_CLASS (object_class),
                   G_SIGNAL_RUN_LAST | G_SIGNAL_DEPRECATED,
                   G_STRUCT_OFFSET (ClutterActorClass, pick),
-                  NULL, NULL,
-                  _clutter_marshal_VOID__BOXED,
+                  NULL, NULL, NULL,
                   G_TYPE_NONE, 1,
-                  CLUTTER_TYPE_COLOR | G_SIGNAL_TYPE_STATIC_SCOPE);
-
-  /**
-   * ClutterActor::allocation-changed:
-   * @actor: the #ClutterActor that emitted the signal
-   * @box: a #ClutterActorBox with the new allocation
-   * @flags: #ClutterAllocationFlags for the allocation
-   *
-   * The ::allocation-changed signal is emitted when the
-   * #ClutterActor:allocation property changes. Usually, application
-   * code should just use the notifications for the :allocation property
-   * but if you want to track the allocation flags as well, for instance
-   * to know whether the absolute origin of @actor changed, then you might
-   * want use this signal instead.
-   *
-   * Since: 1.0
-   */
-  actor_signals[ALLOCATION_CHANGED] =
-    g_signal_new (I_("allocation-changed"),
-                  G_TYPE_FROM_CLASS (object_class),
-                  G_SIGNAL_RUN_LAST,
-                  0,
-                  NULL, NULL,
-                  _clutter_marshal_VOID__BOXED_FLAGS,
-                  G_TYPE_NONE, 2,
-                  CLUTTER_TYPE_ACTOR_BOX | G_SIGNAL_TYPE_STATIC_SCOPE,
-                  CLUTTER_TYPE_ALLOCATION_FLAGS);
+                  CLUTTER_TYPE_PICK_CONTEXT);
 
   /**
    * ClutterActor::transitions-completed:
@@ -8462,8 +7935,7 @@ clutter_actor_class_init (ClutterActorClass *klass)
                   G_TYPE_FROM_CLASS (object_class),
                   G_SIGNAL_RUN_LAST,
                   0,
-                  NULL, NULL,
-                  _clutter_marshal_VOID__VOID,
+                  NULL, NULL, NULL,
                   G_TYPE_NONE, 0);
 
   /**
@@ -8491,6 +7963,9 @@ clutter_actor_class_init (ClutterActorClass *klass)
                   G_TYPE_NONE, 2,
                   G_TYPE_STRING,
                   G_TYPE_BOOLEAN);
+  g_signal_set_va_marshaller (actor_signals[TRANSITION_STOPPED],
+                              G_TYPE_FROM_CLASS (object_class),
+                              _clutter_marshal_VOID__STRING_BOOLEANv);
 
   /**
    * ClutterActor::touch-event:
@@ -8514,6 +7989,47 @@ clutter_actor_class_init (ClutterActorClass *klass)
 		  _clutter_marshal_BOOLEAN__BOXED,
 		  G_TYPE_BOOLEAN, 1,
 		  CLUTTER_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
+  g_signal_set_va_marshaller (actor_signals[TOUCH_EVENT],
+                              G_TYPE_FROM_CLASS (object_class),
+                              _clutter_marshal_BOOLEAN__BOXEDv);
+
+  /**
+   * ClutterActor::stage-views-changed:
+   * @actor: a #ClutterActor
+   *
+   * The ::stage-views-changed signal is emitted when the position or
+   * size an actor is being painted at have changed so that it's visible
+   * on different stage views.
+   *
+   * This signal is also emitted when the actor gets detached from the stage
+   * or when the views of the stage have been invalidated and will be
+   * replaced; it's not emitted when the actor gets hidden.
+   */
+  actor_signals[STAGE_VIEWS_CHANGED] =
+    g_signal_new (I_("stage-views-changed"),
+                  G_TYPE_FROM_CLASS (object_class),
+                  G_SIGNAL_RUN_LAST,
+                  0,
+                  NULL, NULL, NULL,
+                  G_TYPE_NONE, 0);
+
+  /**
+   * ClutterActor::resource-scale-changed:
+   * @actor: a #ClutterActor
+   *
+   * The ::resource-scale-changed signal is emitted when the resource scale
+   * value returned by clutter_actor_get_resource_scale() changes.
+   *
+   * This signal can be used to get notified about the correct resource scale
+   * when the scale had to be queried outside of the paint cycle.
+   */
+  actor_signals[RESOURCE_SCALE_CHANGED] =
+    g_signal_new (I_("resource-scale-changed"),
+                  G_TYPE_FROM_CLASS (object_class),
+                  G_SIGNAL_RUN_LAST,
+                  G_STRUCT_OFFSET (ClutterActorClass, resource_scale_changed),
+                  NULL, NULL, NULL,
+                  G_TYPE_NONE, 0);
 }
 
 static void
@@ -8523,15 +8039,17 @@ clutter_actor_init (ClutterActor *self)
 
   self->priv = priv = clutter_actor_get_instance_private (self);
 
-  priv->pick_id = -1;
+  priv->allocation = (ClutterActorBox) CLUTTER_ACTOR_BOX_UNINITIALIZED;
 
   priv->opacity = 0xff;
   priv->show_on_set_parent = TRUE;
+  priv->resource_scale = -1.0f;
 
   priv->needs_width_request = TRUE;
   priv->needs_height_request = TRUE;
   priv->needs_allocation = TRUE;
   priv->needs_paint_volume_update = TRUE;
+  priv->needs_update_stage_views = TRUE;
 
   priv->cached_width_age = 1;
   priv->cached_height_age = 1;
@@ -8596,9 +8114,6 @@ clutter_actor_new (void)
  * container, the actor will be removed.
  *
  * When you destroy a container, its children will be destroyed as well.
- *
- * Note: you cannot destroy the #ClutterStage returned by
- * clutter_stage_get_default().
  */
 void
 clutter_actor_destroy (ClutterActor *self)
@@ -8625,8 +8140,7 @@ _clutter_actor_finish_queue_redraw (ClutterActor *self,
                                     ClutterPaintVolume *clip)
 {
   ClutterActorPrivate *priv = self->priv;
-  ClutterPaintVolume *pv;
-  gboolean clipped;
+  ClutterPaintVolume *pv = NULL;
 
   /* Remove queue entry early in the process, otherwise a new
      queue_redraw() during signal handling could put back this
@@ -8653,8 +8167,7 @@ _clutter_actor_finish_queue_redraw (ClutterActor *self,
    */
   if (clip)
     {
-      _clutter_actor_set_queue_redraw_clip (self, clip);
-      clipped = TRUE;
+      pv = clip;
     }
   else if (G_LIKELY (priv->last_paint_volume_valid))
     {
@@ -8664,74 +8177,38 @@ _clutter_actor_finish_queue_redraw (ClutterActor *self,
           ClutterActor *stage = _clutter_actor_get_stage_internal (self);
 
           /* make sure we redraw the actors old position... */
-          _clutter_actor_set_queue_redraw_clip (stage,
-                                                &priv->last_paint_volume);
-          _clutter_actor_signal_queue_redraw (stage, stage);
-          _clutter_actor_set_queue_redraw_clip (stage, NULL);
-
-          /* XXX: Ideally the redraw signal would take a clip volume
-           * argument, but that would be an ABI break. Until we can
-           * break the ABI we pass the argument out-of-band
-           */
-
-          /* setup the clip for the actors new position... */
-          _clutter_actor_set_queue_redraw_clip (self, pv);
-          clipped = TRUE;
+          _clutter_actor_propagate_queue_redraw (stage, stage,
+                                                 &priv->last_paint_volume);
         }
-      else
-        clipped = FALSE;
     }
-  else
-    clipped = FALSE;
 
-  _clutter_actor_signal_queue_redraw (self, self);
-
-  /* Just in case anyone is manually firing redraw signals without
-   * using the public queue_redraw() API we are careful to ensure that
-   * our out-of-band clip member is cleared before returning...
-   *
-   * Note: A NULL clip denotes a full-stage, un-clipped redraw
-   */
-  if (G_LIKELY (clipped))
-    _clutter_actor_set_queue_redraw_clip (self, NULL);
+  _clutter_actor_propagate_queue_redraw (self, self, pv);
 }
 
 static void
 _clutter_actor_get_allocation_clip (ClutterActor *self,
                                     ClutterActorBox *clip)
 {
-  ClutterActorBox allocation;
-
-  /* XXX: we don't care if we get an out of date allocation here
-   * because clutter_actor_queue_redraw_with_clip knows to ignore
-   * the clip if the actor's allocation is invalid.
-   *
-   * This is noted because clutter_actor_get_allocation_box does some
-   * unnecessary work to support buggy code with a comment suggesting
-   * that it could be changed later which would be good for this use
-   * case!
-   */
-  clutter_actor_get_allocation_box (self, &allocation);
+  ClutterActorPrivate *priv = self->priv;
 
   /* NB: clutter_actor_queue_redraw_with_clip expects a box in the
    * actor's own coordinate space but the allocation is in parent
    * coordinates */
   clip->x1 = 0;
   clip->y1 = 0;
-  clip->x2 = allocation.x2 - allocation.x1;
-  clip->y2 = allocation.y2 - allocation.y1;
+  clip->x2 = priv->allocation.x2 - priv->allocation.x1;
+  clip->y2 = priv->allocation.y2 - priv->allocation.y1;
 }
 
 void
-_clutter_actor_queue_redraw_full (ClutterActor       *self,
-                                  ClutterRedrawFlags  flags,
-                                  ClutterPaintVolume *volume,
-                                  ClutterEffect      *effect)
+_clutter_actor_queue_redraw_full (ClutterActor             *self,
+                                  ClutterRedrawFlags        flags,
+                                  const ClutterPaintVolume *volume,
+                                  ClutterEffect            *effect)
 {
   ClutterActorPrivate *priv = self->priv;
   ClutterPaintVolume allocation_pv;
-  ClutterPaintVolume *pv;
-  gboolean should_free_pv;
+  ClutterPaintVolume *pv = NULL;
   ClutterActor *stage;
 
   /* Here's an outline of the actor queue redraw mechanism:
@@ -8783,9 +8260,9 @@ _clutter_actor_queue_redraw_full (ClutterActor       *self,
    *
    * later during _clutter_stage_do_update(), once relayouting is done
    * and the scenegraph has been updated we will call:
-   * _clutter_stage_finish_queue_redraws().
+   * clutter_stage_maybe_finish_queue_redraws().
    *
-   * _clutter_stage_finish_queue_redraws() will call
+   * clutter_stage_maybe_finish_queue_redraws() will call
    * _clutter_actor_finish_queue_redraw() for each listed actor.
    *
    * Note: actors *are* allowed to queue further redraws during this
@@ -8809,25 +8286,21 @@ _clutter_actor_queue_redraw_full (ClutterActor       *self,
   if (CLUTTER_ACTOR_IN_DESTRUCTION (self))
     return;
 
-  /* we can ignore unmapped actors, unless they have at least one
-   * mapped clone or they are inside a cloned branch of the scene
-   * graph, as unmapped actors will simply be left unpainted.
+  /* we can ignore unmapped actors, unless they are inside a cloned branch
+   * of the scene graph, as unmapped actors will simply be left unpainted.
    *
    * this allows us to ignore redraws queued on leaf nodes when one
    * of their parents has been hidden
    */
   if (!CLUTTER_ACTOR_IS_MAPPED (self) &&
-      self->priv->in_cloned_branch == 0 &&
       !clutter_actor_has_mapped_clones (self))
     {
       CLUTTER_NOTE (PAINT,
                     "Skipping queue_redraw('%s'): mapped=%s, "
-                    "mapped_clones=%s, "
-                    "in_cloned_branch=%s",
+                    "has_mapped_clones=%s",
                     _clutter_actor_get_debug_name (self),
                     CLUTTER_ACTOR_IS_MAPPED (self) ? "yes" : "no",
-                    clutter_actor_has_mapped_clones (self) ? "yes" : "no",
-                    self->priv->in_cloned_branch != 0 ? "yes" : "no");
+                    clutter_actor_has_mapped_clones (self) ? "yes" : "no");
       return;
     }
 
@@ -8846,7 +8319,7 @@ _clutter_actor_queue_redraw_full (ClutterActor       *self,
   if (flags & CLUTTER_REDRAW_CLIPPED_TO_ALLOCATION)
     {
       ClutterActorBox allocation_clip;
-      ClutterVertex origin;
+      graphene_point3d_t origin;
 
       /* If the actor doesn't have a valid allocation then we will
        * queue a full stage redraw. */
@@ -8854,8 +8327,7 @@ _clutter_actor_queue_redraw_full (ClutterActor       *self,
         {
           /* NB: NULL denotes an undefined clip which will result in a
            * full redraw... */
-          _clutter_actor_set_queue_redraw_clip (self, NULL);
-          _clutter_actor_signal_queue_redraw (self, self);
+          _clutter_actor_propagate_queue_redraw (self, self, NULL);
           return;
         }
 
@@ -8873,21 +8345,15 @@ _clutter_actor_queue_redraw_full (ClutterActor       *self,
       clutter_paint_volume_set_height (pv,
                                        allocation_clip.y2 -
                                        allocation_clip.y1);
-      should_free_pv = TRUE;
-    }
-  else
-    {
-      pv = volume;
-      should_free_pv = FALSE;
     }
 
   self->priv->queue_redraw_entry =
     _clutter_stage_queue_actor_redraw (CLUTTER_STAGE (stage),
                                        priv->queue_redraw_entry,
                                        self,
-                                       pv);
+                                       pv ? pv : volume);
 
-  if (should_free_pv)
+  if (pv)
     clutter_paint_volume_free (pv);
 
   /* If this is the first redraw queued then we can directly use the
@@ -9001,9 +8467,9 @@ clutter_actor_queue_redraw (ClutterActor *self)
  * picking of your actor.
  */
 void
-_clutter_actor_queue_redraw_with_clip (ClutterActor       *self,
-                                       ClutterRedrawFlags  flags,
-                                       ClutterPaintVolume *volume)
+_clutter_actor_queue_redraw_with_clip (ClutterActor             *self,
+                                       ClutterRedrawFlags        flags,
+                                       const ClutterPaintVolume *volume)
 {
   _clutter_actor_queue_redraw_full (self,
                                     flags, /* flags */
@@ -9024,7 +8490,7 @@ _clutter_actor_queue_only_relayout (ClutterActor *self)
       priv->needs_allocation)
     return; /* save some cpu cycles */
 
-#if CLUTTER_ENABLE_DEBUG
+#ifdef CLUTTER_ENABLE_DEBUG
   if (!CLUTTER_ACTOR_IS_TOPLEVEL (self) && CLUTTER_ACTOR_IN_RELAYOUT (self))
     {
       g_warning ("The actor '%s' is currently inside an allocation "
@@ -9057,7 +8523,7 @@ clutter_actor_queue_redraw_with_clip (ClutterActor                *self,
                                       const cairo_rectangle_int_t *clip)
 {
   ClutterPaintVolume volume;
-  ClutterVertex origin;
+  graphene_point3d_t origin;
 
   g_return_if_fail (CLUTTER_IS_ACTOR (self));
 
@@ -9490,7 +8956,7 @@ clutter_actor_update_preferred_size_for_constraints (ClutterActor *self,
  * An actor may not get its request - depending on the layout
  * manager that's in effect.
  *
- * A request should not incorporate the actor's scale or anchor point;
+ * A request should not incorporate the actor's scaleor translation;
  * those transformations do not affect layout, only rendering.
  *
  * Since: 0.8
@@ -9524,6 +8990,25 @@ clutter_actor_get_preferred_width (ClutterActor *self,
 
       return;
     }
+
+  /* if the request mode is CONTENT_SIZE we simply return the content width */
+  if (priv->request_mode == CLUTTER_REQUEST_CONTENT_SIZE)
+    {
+      float content_width = 0.f;
+
+      if (priv->content != NULL)
+        clutter_content_get_preferred_size (priv->content, &content_width, NULL);
+
+      if (min_width_p != NULL)
+        *min_width_p = content_width;
+
+      if (natural_width_p != NULL)
+        *natural_width_p = content_width;
+
+      return;
+    }
+
+  CLUTTER_SET_PRIVATE_FLAGS (self, CLUTTER_IN_PREF_WIDTH);
 
   /* the remaining cases are:
    *
@@ -9616,6 +9101,8 @@ clutter_actor_get_preferred_width (ClutterActor *self,
 
   if (natural_width_p)
     *natural_width_p = request_natural_width;
+
+  CLUTTER_UNSET_PRIVATE_FLAGS (self, CLUTTER_IN_PREF_WIDTH);
 }
 
 /**
@@ -9634,7 +9121,7 @@ clutter_actor_get_preferred_width (ClutterActor *self,
  * An actor may not get its request - depending on the layout
  * manager that's in effect.
  *
- * A request should not incorporate the actor's scale or anchor point;
+ * A request should not incorporate the actor's scale or translation;
  * those transformations do not affect layout, only rendering.
  *
  * Since: 0.8
@@ -9668,6 +9155,25 @@ clutter_actor_get_preferred_height (ClutterActor *self,
 
       return;
     }
+
+  /* if the request mode is CONTENT_SIZE we simply return the content height */
+  if (priv->request_mode == CLUTTER_REQUEST_CONTENT_SIZE)
+    {
+      float content_height = 0.f;
+
+      if (priv->content != NULL)
+        clutter_content_get_preferred_size (priv->content, NULL, &content_height);
+
+      if (min_height_p != NULL)
+        *min_height_p = content_height;
+
+      if (natural_height_p != NULL)
+        *natural_height_p = content_height;
+
+      return;
+    }
+
+  CLUTTER_SET_PRIVATE_FLAGS (self, CLUTTER_IN_PREF_HEIGHT);
 
   /* the remaining cases are:
    *
@@ -9759,6 +9265,8 @@ clutter_actor_get_preferred_height (ClutterActor *self,
 
   if (natural_height_p)
     *natural_height_p = request_natural_height;
+
+  CLUTTER_UNSET_PRIVATE_FLAGS (self, CLUTTER_IN_PREF_HEIGHT);
 }
 
 /**
@@ -9770,7 +9278,7 @@ clutter_actor_get_preferred_height (ClutterActor *self,
  * only be assumed valid inside a paint() method; anywhere else, it
  * may be out-of-date.
  *
- * An allocation does not incorporate the actor's scale or anchor point;
+ * An allocation does not incorporate the actor's scale or translation;
  * those transformations do not affect layout, only rendering.
  *
  * Do not call any of the clutter_actor_get_allocation_*() family
@@ -9804,10 +9312,10 @@ clutter_actor_get_allocation_box (ClutterActor    *self,
 
       /* do not queue a relayout on an unparented actor */
       if (stage)
-        _clutter_stage_maybe_relayout (stage);
+        clutter_stage_maybe_relayout (stage);
     }
 
-  /* commenting out the code above and just keeping this assigment
+  /* commenting out the code above and just keeping this assignment
    * implements 3)
    */
   *box = self->priv->allocation;
@@ -9972,8 +9480,7 @@ clutter_actor_adjust_allocation (ClutterActor    *self,
 
 static void
 clutter_actor_allocate_internal (ClutterActor           *self,
-                                 const ClutterActorBox  *allocation,
-                                 ClutterAllocationFlags  flags)
+                                 const ClutterActorBox  *allocation)
 {
   ClutterActorClass *klass;
 
@@ -9983,7 +9490,7 @@ clutter_actor_allocate_internal (ClutterActor           *self,
                 _clutter_actor_get_debug_name (self));
 
   klass = CLUTTER_ACTOR_GET_CLASS (self);
-  klass->allocate (self, allocation, flags);
+  klass->allocate (self, allocation);
 
   CLUTTER_UNSET_PRIVATE_FLAGS (self, CLUTTER_IN_RELAYOUT);
 
@@ -9996,7 +9503,6 @@ clutter_actor_allocate_internal (ClutterActor           *self,
  * clutter_actor_allocate:
  * @self: A #ClutterActor
  * @box: new allocation of the actor, in parent-relative coordinates
- * @flags: flags that control the allocation
  *
  * Assigns the size of a #ClutterActor from the given @box.
  *
@@ -10022,13 +9528,11 @@ clutter_actor_allocate_internal (ClutterActor           *self,
  * Since: 0.8
  */
 void
-clutter_actor_allocate (ClutterActor           *self,
-                        const ClutterActorBox  *box,
-                        ClutterAllocationFlags  flags)
+clutter_actor_allocate (ClutterActor          *self,
+                        const ClutterActorBox *box)
 {
   ClutterActorBox old_allocation, real_allocation;
-  gboolean origin_changed, child_moved, size_changed;
-  gboolean stage_allocation_changed;
+  gboolean origin_changed, size_changed;
   ClutterActorPrivate *priv;
 
   g_return_if_fail (CLUTTER_IS_ACTOR (self));
@@ -10042,8 +9546,33 @@ clutter_actor_allocate (ClutterActor           *self,
 
   priv = self->priv;
 
+  priv->absolute_origin_changed = priv->parent
+                                ? priv->parent->priv->absolute_origin_changed
+                                : FALSE;
+
+  if (!CLUTTER_ACTOR_IS_TOPLEVEL (self) &&
+      !CLUTTER_ACTOR_IS_MAPPED (self) &&
+      !clutter_actor_has_mapped_clones (self))
+    {
+      if (priv->absolute_origin_changed)
+        {
+          _clutter_actor_traverse (self,
+                                   CLUTTER_ACTOR_TRAVERSE_DEPTH_FIRST,
+                                   absolute_geometry_changed_cb,
+                                   NULL,
+                                   NULL);
+        }
+
+      goto out;
+    }
+
   old_allocation = priv->allocation;
   real_allocation = *box;
+
+  g_return_if_fail (!isnan (real_allocation.x1) &&
+                    !isnan (real_allocation.x2) &&
+                    !isnan (real_allocation.y1) &&
+                    !isnan (real_allocation.y2));
 
   /* constraints are allowed to modify the allocation only here; we do
    * this prior to all the other checks so that we can bail out if the
@@ -10067,85 +9596,67 @@ clutter_actor_allocate (ClutterActor           *self,
   real_allocation.x2 = MAX (real_allocation.x2, real_allocation.x1);
   real_allocation.y2 = MAX (real_allocation.y2, real_allocation.y1);
 
-  origin_changed = (flags & CLUTTER_ABSOLUTE_ORIGIN_CHANGED);
-
-  child_moved = (real_allocation.x1 != old_allocation.x1 ||
-                 real_allocation.y1 != old_allocation.y1);
+  origin_changed = (real_allocation.x1 != old_allocation.x1 ||
+                    real_allocation.y1 != old_allocation.y1);
 
   size_changed = (real_allocation.x2 != old_allocation.x2 ||
                   real_allocation.y2 != old_allocation.y2);
 
-  if (origin_changed || child_moved || size_changed)
-    stage_allocation_changed = TRUE;
-  else
-    stage_allocation_changed = FALSE;
-
-  /* If we get an allocation "out of the blue"
-   * (we did not queue relayout), then we want to
-   * ignore it. But if we have needs_allocation set,
-   * we want to guarantee that allocate() virtual
-   * method is always called, i.e. that queue_relayout()
-   * always results in an allocate() invocation on
-   * an actor.
+  /* When needs_allocation is set but we didn't move nor resize, we still
+   * want to call the allocate() vfunc because a child probably called
+   * queue_relayout() and needs a new allocation.
    *
-   * The optimization here is to avoid re-allocating
-   * actors that did not queue relayout and were
-   * not moved.
+   * In case needs_allocation isn't set and we didn't move nor resize, we
+   * can safely stop allocating, but we need to notify the sub-tree in case
+   * our absolute origin changed.
    */
-  if (!priv->needs_allocation && !stage_allocation_changed)
+  if (!priv->needs_allocation && !origin_changed && !size_changed)
     {
+      if (priv->absolute_origin_changed)
+        {
+          _clutter_actor_traverse (self,
+                                   CLUTTER_ACTOR_TRAVERSE_DEPTH_FIRST,
+                                   absolute_geometry_changed_cb,
+                                   NULL,
+                                   NULL);
+        }
+
       CLUTTER_NOTE (LAYOUT, "No allocation needed");
-      return;
+      goto out;
     }
 
   if (CLUTTER_ACTOR_IS_MAPPED (self))
     self->priv->needs_paint_volume_update = TRUE;
 
-  if (!stage_allocation_changed)
+  if (!origin_changed && !size_changed)
     {
       /* If the actor didn't move but needs_allocation is set, we just
-       * need to allocate the children */
-      clutter_actor_allocate_internal (self, &real_allocation, flags);
-      return;
+       * need to allocate the children (see comment above) */
+      clutter_actor_allocate_internal (self, &real_allocation);
+      goto out;
     }
 
-  /* When ABSOLUTE_ORIGIN_CHANGED is passed in to
-   * clutter_actor_allocate(), it indicates whether the parent has its
-   * absolute origin moved; when passed in to ClutterActor::allocate()
-   * virtual method though, it indicates whether the child has its
-   * absolute origin moved.  So we set it when child_moved is TRUE
-   */
-  if (child_moved)
-    flags |= CLUTTER_ABSOLUTE_ORIGIN_CHANGED;
+  if (_clutter_actor_create_transition (self, obj_props[PROP_ALLOCATION],
+                                        &priv->allocation,
+                                        &real_allocation))
+    clutter_actor_allocate_internal (self, &priv->allocation);
 
-  /* store the flags here, so that they can be propagated by the
-   * transition code
-   */
-  self->priv->allocation_flags = flags;
-
-  _clutter_actor_create_transition (self, obj_props[PROP_ALLOCATION],
-                                    &priv->allocation,
-                                    &real_allocation);
+out:
+  priv->absolute_origin_changed = FALSE;
 }
 
 /**
  * clutter_actor_set_allocation:
  * @self: a #ClutterActor
  * @box: a #ClutterActorBox
- * @flags: allocation flags
  *
  * Stores the allocation of @self as defined by @box.
  *
  * This function can only be called from within the implementation of
  * the #ClutterActorClass.allocate() virtual function.
  *
- * The allocation should have been adjusted to take into account constraints,
- * alignment, and margin properties. If you are implementing a #ClutterActor
- * subclass that provides its own layout management policy for its children
- * instead of using a #ClutterLayoutManager delegate, you should not call
- * this function on the children of @self; instead, you should call
- * clutter_actor_allocate(), which will adjust the allocation box for
- * you.
+ * The allocation @box should have been adjusted to take into account
+ * constraints, alignment, and margin properties.
  *
  * This function should only be used by subclasses of #ClutterActor
  * that wish to store their allocation but cannot chain up to the
@@ -10153,69 +9664,12 @@ clutter_actor_allocate (ClutterActor           *self,
  * #ClutterActorClass.allocate() virtual function will call this
  * function.
  *
- * It is important to note that, while chaining up was the recommended
- * behaviour for #ClutterActor subclasses prior to the introduction of
- * this function, it is recommended to call clutter_actor_set_allocation()
- * instead.
- *
- * If the #ClutterActor is using a #ClutterLayoutManager delegate object
- * to handle the allocation of its children, this function will call
- * the clutter_layout_manager_allocate() function only if the
- * %CLUTTER_DELEGATE_LAYOUT flag is set on @flags, otherwise it is
- * expected that the subclass will call clutter_layout_manager_allocate()
- * by itself. For instance, the following code:
- *
- * |[<!-- language="C" -->
- * static void
- * my_actor_allocate (ClutterActor *actor,
- *                    const ClutterActorBox *allocation,
- *                    ClutterAllocationFlags flags)
- * {
- *   ClutterActorBox new_alloc;
- *   ClutterAllocationFlags new_flags;
- *
- *   adjust_allocation (allocation, &new_alloc);
- *
- *   new_flags = flags | CLUTTER_DELEGATE_LAYOUT;
- *
- *   // this will use the layout manager set on the actor
- *   clutter_actor_set_allocation (actor, &new_alloc, new_flags);
- * }
- * ]|
- *
- * is equivalent to this:
- *
- * |[<!-- language="C" -->
- * static void
- * my_actor_allocate (ClutterActor *actor,
- *                    const ClutterActorBox *allocation,
- *                    ClutterAllocationFlags flags)
- * {
- *   ClutterLayoutManager *layout;
- *   ClutterActorBox new_alloc;
- *
- *   adjust_allocation (allocation, &new_alloc);
- *
- *   clutter_actor_set_allocation (actor, &new_alloc, flags);
- *
- *   layout = clutter_actor_get_layout_manager (actor);
- *   clutter_layout_manager_allocate (layout,
- *                                    CLUTTER_CONTAINER (actor),
- *                                    &new_alloc,
- *                                    flags);
- * }
- * ]|
- *
  * Since: 1.10
  */
 void
 clutter_actor_set_allocation (ClutterActor           *self,
-                              const ClutterActorBox  *box,
-                              ClutterAllocationFlags  flags)
+                              const ClutterActorBox  *box)
 {
-  ClutterActorPrivate *priv;
-  gboolean changed;
-
   g_return_if_fail (CLUTTER_IS_ACTOR (self));
   g_return_if_fail (box != NULL);
 
@@ -10227,28 +9681,9 @@ clutter_actor_set_allocation (ClutterActor           *self,
       return;
     }
 
-  priv = self->priv;
-
   g_object_freeze_notify (G_OBJECT (self));
 
-  changed = clutter_actor_set_allocation_internal (self, box, flags);
-
-  /* we allocate our children before we notify changes in our geometry,
-   * so that people connecting to properties will be able to get valid
-   * data out of the sub-tree of the scene graph that has this actor at
-   * the root.
-   */
-  clutter_actor_maybe_layout_children (self, box, flags);
-
-  if (changed)
-    {
-      ClutterActorBox signal_box = priv->allocation;
-      ClutterAllocationFlags signal_flags = priv->allocation_flags;
-
-      g_signal_emit (self, actor_signals[ALLOCATION_CHANGED], 0,
-                     &signal_box,
-                     signal_flags);
-    }
+  clutter_actor_set_allocation_internal (self, box);
 
   g_object_thaw_notify (G_OBJECT (self));
 }
@@ -10270,19 +9705,20 @@ clutter_actor_set_position (ClutterActor *self,
 			    gfloat        x,
 			    gfloat        y)
 {
-  ClutterPoint new_position;
-  ClutterPoint cur_position;
+  graphene_point_t new_position;
+  graphene_point_t cur_position;
 
   g_return_if_fail (CLUTTER_IS_ACTOR (self));
 
-  clutter_point_init (&new_position, x, y);
+  graphene_point_init (&new_position, x, y);
 
   cur_position.x = clutter_actor_get_x (self);
   cur_position.y = clutter_actor_get_y (self);
 
-  _clutter_actor_create_transition (self, obj_props[PROP_POSITION],
-                                    &cur_position,
-                                    &new_position);
+  if (!graphene_point_equal (&cur_position, &new_position))
+    _clutter_actor_create_transition (self, obj_props[PROP_POSITION],
+                                      &cur_position,
+                                      &new_position);
 }
 
 /**
@@ -10354,8 +9790,7 @@ clutter_actor_set_fixed_position_set (ClutterActor *self,
  *
  * This function modifies the fixed position of an actor and thus removes
  * it from any layout management. Another way to move an actor is with an
- * anchor point, see clutter_actor_set_anchor_point(), or with an additional
- * translation, using clutter_actor_set_translation().
+ * additional translation, using clutter_actor_set_translation().
  *
  * Since: 0.2
  */
@@ -10714,8 +10149,8 @@ clutter_actor_set_height_internal (ClutterActor *self,
 }
 
 static void
-clutter_actor_set_size_internal (ClutterActor      *self,
-                                 const ClutterSize *size)
+clutter_actor_set_size_internal (ClutterActor          *self,
+                                 const graphene_size_t *size)
 {
   if (size != NULL)
     {
@@ -10751,11 +10186,11 @@ clutter_actor_set_size (ClutterActor *self,
 			gfloat        width,
 			gfloat        height)
 {
-  ClutterSize new_size;
+  graphene_size_t new_size;
 
   g_return_if_fail (CLUTTER_IS_ACTOR (self));
 
-  clutter_size_init (&new_size, width, height);
+  graphene_size_init (&new_size, width, height);
 
   /* minor optimization: if we don't have a duration then we can
    * skip the get_size() below, to avoid the chance of going through
@@ -10774,11 +10209,11 @@ clutter_actor_set_size (ClutterActor *self,
     }
   else
     {
-      ClutterSize cur_size;
+      graphene_size_t cur_size;
 
-      clutter_size_init (&cur_size,
-                         clutter_actor_get_width (self),
-                         clutter_actor_get_height (self));
+      graphene_size_init (&cur_size,
+                          clutter_actor_get_width (self),
+                          clutter_actor_get_height (self));
 
       _clutter_actor_create_transition (self,
                                         obj_props[PROP_SIZE],
@@ -10850,6 +10285,75 @@ clutter_actor_get_position (ClutterActor *self,
 }
 
 /**
+ * clutter_actor_get_fixed_position:
+ * @self: a #ClutterActor
+ * @x: (out) (allow-none): return location for the X coordinate, or %NULL
+ * @y: (out) (allow-none): return location for the Y coordinate, or %NULL
+ *
+ * This function gets the fixed position of the actor, if set. If there
+ * is no fixed position set, this function returns %FALSE and doesn't set
+ * the x and y coordinates.
+ *
+ * Returns: %TRUE if the fixed position is set, %FALSE if it isn't
+ */
+gboolean
+clutter_actor_get_fixed_position (ClutterActor *self,
+                                  float        *x,
+                                  float        *y)
+{
+  g_return_val_if_fail (CLUTTER_IS_ACTOR (self), FALSE);
+
+  if (self->priv->position_set)
+    {
+      const ClutterLayoutInfo *info;
+
+      info = _clutter_actor_get_layout_info_or_defaults (self);
+
+      if (x)
+        *x = info->fixed_pos.x;
+
+      if (y)
+        *y = info->fixed_pos.y;
+
+      return TRUE;
+    }
+
+  return FALSE;
+}
+
+/**
+ * clutter_actor_get_transformed_extents:
+ * @self: A #ClutterActor
+ * @rect: (out): return location for the transformed bounding rect
+ *
+ * Gets the transformed bounding rect of an actor, in pixels relative to the stage.
+ */
+void
+clutter_actor_get_transformed_extents (ClutterActor    *self,
+                                       graphene_rect_t *rect)
+{
+  graphene_quad_t quad;
+  graphene_point3d_t v[4];
+  ClutterActorBox box;
+
+  box.x1 = 0;
+  box.y1 = 0;
+  box.x2 = clutter_actor_box_get_width (&self->priv->allocation);
+  box.y2 = clutter_actor_box_get_height (&self->priv->allocation);
+  if (_clutter_actor_transform_and_project_box (self, &box, v))
+    {
+      graphene_quad_init (&quad,
+                          (graphene_point_t *) &v[0],
+                          (graphene_point_t *) &v[1],
+                          (graphene_point_t *) &v[2],
+                          (graphene_point_t *) &v[3]);
+
+      if (rect)
+        graphene_quad_bounds (&quad, rect);
+    }
+}
+
+/**
  * clutter_actor_get_transformed_position:
  * @self: A #ClutterActor
  * @x: (out) (allow-none): return location for the X coordinate, or %NULL
@@ -10864,8 +10368,8 @@ clutter_actor_get_transformed_position (ClutterActor *self,
                                         gfloat       *x,
                                         gfloat       *y)
 {
-  ClutterVertex v1;
-  ClutterVertex v2;
+  graphene_point3d_t v1;
+  graphene_point3d_t v2;
 
   v1.x = v1.y = v1.z = 0;
   clutter_actor_apply_transform_to_point (self, &v1, &v2);
@@ -10911,7 +10415,7 @@ clutter_actor_get_transformed_size (ClutterActor *self,
                                     gfloat       *height)
 {
   ClutterActorPrivate *priv;
-  ClutterVertex v[4];
+  graphene_point3d_t v[4];
   gfloat x_min, x_max, y_min, y_max;
   gint i;
 
@@ -11233,8 +10737,8 @@ clutter_actor_set_y_internal (ClutterActor *self,
 }
 
 static void
-clutter_actor_set_position_internal (ClutterActor       *self,
-                                     const ClutterPoint *position)
+clutter_actor_set_position_internal (ClutterActor           *self,
+                                     const graphene_point_t *position)
 {
   ClutterActorPrivate *priv = self->priv;
   ClutterLayoutInfo *linfo;
@@ -11243,7 +10747,7 @@ clutter_actor_set_position_internal (ClutterActor       *self,
   linfo = _clutter_actor_get_layout_info (self);
 
   if (priv->position_set &&
-      clutter_point_equals (position, &linfo->fixed_pos))
+      graphene_point_equal (position, &linfo->fixed_pos))
     return;
 
   clutter_actor_store_old_geometry (self, &old);
@@ -11328,8 +10832,7 @@ clutter_actor_set_y (ClutterActor *self,
  * the X coordinate of the origin of the allocation box.
  *
  * If the actor has any fixed coordinate set using clutter_actor_set_x(),
- * clutter_actor_set_position() or clutter_actor_set_geometry(), this
- * function will return that coordinate.
+ * clutter_actor_set_position(), this function will return that coordinate.
  *
  * If both the allocation and a fixed position are missing, this function
  * will return 0.
@@ -11376,8 +10879,7 @@ clutter_actor_get_x (ClutterActor *self)
  * the Y coordinate of the origin of the allocation box.
  *
  * If the actor has any fixed coordinate set using clutter_actor_set_y(),
- * clutter_actor_set_position() or clutter_actor_set_geometry(), this
- * function will return that coordinate.
+ * clutter_actor_set_position(), this function will return that coordinate.
  *
  * If both the allocation and a fixed position are missing, this function
  * will return 0.
@@ -11464,87 +10966,9 @@ clutter_actor_set_scale_z (ClutterActor *self,
 }
 
 /**
- * clutter_actor_set_scale_full:
- * @self: A #ClutterActor
- * @scale_x: double factor to scale actor by horizontally.
- * @scale_y: double factor to scale actor by vertically.
- * @center_x: X coordinate of the center of the scaling
- * @center_y: Y coordinate of the center of the scaling
- *
- * Scales an actor with the given factors around the given center
- * point. The center point is specified in pixels relative to the
- * anchor point (usually the top left corner of the actor).
- *
- * The #ClutterActor:scale-x and #ClutterActor:scale-y properties
- * are animatable.
- *
- * Since: 1.0
- *
- * Deprecated: 1.12: Use clutter_actor_set_pivot_point() to control
- *   the scale center
- */
-void
-clutter_actor_set_scale_full (ClutterActor *self,
-                              gdouble       scale_x,
-                              gdouble       scale_y,
-                              gfloat        center_x,
-                              gfloat        center_y)
-{
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-
-  g_object_freeze_notify (G_OBJECT (self));
-
-  clutter_actor_set_scale_factor (self, CLUTTER_X_AXIS, scale_x);
-  clutter_actor_set_scale_factor (self, CLUTTER_Y_AXIS, scale_y);
-  clutter_actor_set_scale_center (self, CLUTTER_X_AXIS, center_x);
-  clutter_actor_set_scale_center (self, CLUTTER_Y_AXIS, center_y);
-
-  g_object_thaw_notify (G_OBJECT (self));
-}
-
-/**
- * clutter_actor_set_scale_with_gravity:
- * @self: A #ClutterActor
- * @scale_x: double factor to scale actor by horizontally.
- * @scale_y: double factor to scale actor by vertically.
- * @gravity: the location of the scale center expressed as a compass
- *   direction.
- *
- * Scales an actor with the given factors around the given
- * center point. The center point is specified as one of the compass
- * directions in #ClutterGravity. For example, setting it to north
- * will cause the top of the actor to remain unchanged and the rest of
- * the actor to expand left, right and downwards.
- *
- * The #ClutterActor:scale-x and #ClutterActor:scale-y properties are
- * animatable.
- *
- * Since: 1.0
- *
- * Deprecated: 1.12: Use clutter_actor_set_pivot_point() to set the
- *   scale center using normalized coordinates instead.
- */
-void
-clutter_actor_set_scale_with_gravity (ClutterActor   *self,
-                                      gdouble         scale_x,
-                                      gdouble         scale_y,
-                                      ClutterGravity  gravity)
-{
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-
-  g_object_freeze_notify (G_OBJECT (self));
-
-  clutter_actor_set_scale_factor (self, CLUTTER_X_AXIS, scale_x);
-  clutter_actor_set_scale_factor (self, CLUTTER_Y_AXIS, scale_y);
-  clutter_actor_set_scale_gravity (self, gravity);
-
-  g_object_thaw_notify (G_OBJECT (self));
-}
-
-/**
  * clutter_actor_get_scale:
  * @self: A #ClutterActor
- * @scale_x: (out) (allow-none): Location to store horizonal
+ * @scale_x: (out) (allow-none): Location to store horizontal
  *   scale factor, or %NULL.
  * @scale_y: (out) (allow-none): Location to store vertical
  *   scale factor, or %NULL.
@@ -11588,66 +11012,6 @@ clutter_actor_get_scale_z (ClutterActor *self)
   g_return_val_if_fail (CLUTTER_IS_ACTOR (self), 1.0);
 
   return _clutter_actor_get_transform_info_or_defaults (self)->scale_z;
-}
-
-/**
- * clutter_actor_get_scale_center:
- * @self: A #ClutterActor
- * @center_x: (out) (allow-none): Location to store the X position
- *   of the scale center, or %NULL.
- * @center_y: (out) (allow-none): Location to store the Y position
- *   of the scale center, or %NULL.
- *
- * Retrieves the scale center coordinate in pixels relative to the top
- * left corner of the actor. If the scale center was specified using a
- * #ClutterGravity this will calculate the pixel offset using the
- * current size of the actor.
- *
- * Since: 1.0
- *
- * Deprecated: 1.12: Use clutter_actor_get_pivot_point() instead.
- */
-void
-clutter_actor_get_scale_center (ClutterActor *self,
-                                gfloat       *center_x,
-                                gfloat       *center_y)
-{
-  const ClutterTransformInfo *info;
-
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-
-  info = _clutter_actor_get_transform_info_or_defaults (self);
-
-  clutter_anchor_coord_get_units (self, &info->scale_center,
-                                  center_x,
-                                  center_y,
-                                  NULL);
-}
-
-/**
- * clutter_actor_get_scale_gravity:
- * @self: A #ClutterActor
- *
- * Retrieves the scale center as a compass direction. If the scale
- * center was specified in pixels or units this will return
- * %CLUTTER_GRAVITY_NONE.
- *
- * Return value: the scale gravity
- *
- * Since: 1.0
- *
- * Deprecated: 1.12: Use clutter_actor_get_pivot_point() instead.
- */
-ClutterGravity
-clutter_actor_get_scale_gravity (ClutterActor *self)
-{
-  const ClutterTransformInfo *info;
-
-  g_return_val_if_fail (CLUTTER_IS_ACTOR (self), CLUTTER_GRAVITY_NONE);
-
-  info = _clutter_actor_get_transform_info_or_defaults (self);
-
-  return clutter_anchor_coord_get_gravity (&info->scale_center);
 }
 
 static inline void
@@ -11931,53 +11295,6 @@ clutter_actor_get_name (ClutterActor *self)
   return self->priv->name;
 }
 
-/**
- * clutter_actor_get_gid:
- * @self: A #ClutterActor
- *
- * Retrieves the unique id for @self.
- *
- * Return value: Globally unique value for this object instance.
- *
- * Since: 0.6
- *
- * Deprecated: 1.8: The id is not used any longer, and this function
- *   always returns 0.
- */
-guint32
-clutter_actor_get_gid (ClutterActor *self)
-{
-  g_return_val_if_fail (CLUTTER_IS_ACTOR (self), 0);
-
-  return 0;
-}
-
-static inline void
-clutter_actor_set_depth_internal (ClutterActor *self,
-                                  float         depth)
-{
-  ClutterTransformInfo *info;
-
-  info = _clutter_actor_get_transform_info (self);
-
-  if (info->z_position != depth)
-    {
-      /* Sets Z value - XXX 2.0: should we invert? */
-      info->z_position = depth;
-
-      self->priv->transform_valid = FALSE;
-
-      /* FIXME - remove this crap; sadly, there are still containers
-       * in Clutter that depend on this utter brain damage
-       */
-      clutter_container_sort_depth_order (CLUTTER_CONTAINER (self));
-
-      clutter_actor_queue_redraw (self);
-
-      g_object_notify_by_pspec (G_OBJECT (self), obj_props[PROP_DEPTH]);
-    }
-}
-
 static inline void
 clutter_actor_set_z_position_internal (ClutterActor *self,
                                        float         z_position)
@@ -11990,7 +11307,7 @@ clutter_actor_set_z_position_internal (ClutterActor *self,
     {
       info->z_position = z_position;
 
-      self->priv->transform_valid = FALSE;
+      transform_changed (self);
 
       clutter_actor_queue_redraw (self);
 
@@ -12062,7 +11379,7 @@ clutter_actor_set_pivot_point (ClutterActor *self,
                                gfloat        pivot_x,
                                gfloat        pivot_y)
 {
-  ClutterPoint pivot = CLUTTER_POINT_INIT (pivot_x, pivot_y);
+  graphene_point_t pivot = GRAPHENE_POINT_INIT (pivot_x, pivot_y);
   const ClutterTransformInfo *info;
 
   g_return_if_fail (CLUTTER_IS_ACTOR (self));
@@ -12146,235 +11463,6 @@ clutter_actor_get_pivot_point_z (ClutterActor *self)
 }
 
 /**
- * clutter_actor_set_depth:
- * @self: a #ClutterActor
- * @depth: Z co-ord
- *
- * Sets the Z coordinate of @self to @depth.
- *
- * The unit used by @depth is dependant on the perspective setup. See
- * also clutter_stage_set_perspective().
- *
- * Deprecated: 1.12: Use clutter_actor_set_z_position() instead.
- */
-void
-clutter_actor_set_depth (ClutterActor *self,
-                         gfloat        depth)
-{
-  const ClutterTransformInfo *info;
-
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-
-  info = _clutter_actor_get_transform_info_or_defaults (self);
-  _clutter_actor_create_transition (self, obj_props[PROP_DEPTH],
-                                    info->z_position,
-                                    depth);
-}
-
-/**
- * clutter_actor_get_depth:
- * @self: a #ClutterActor
- *
- * Retrieves the depth of @self.
- *
- * Return value: the depth of the actor
- *
- * Deprecated: 1.12: Use clutter_actor_get_z_position() instead.
- */
-gfloat
-clutter_actor_get_depth (ClutterActor *self)
-{
-  g_return_val_if_fail (CLUTTER_IS_ACTOR (self), 0.0);
-
-  return _clutter_actor_get_transform_info_or_defaults (self)->z_position;
-}
-
-/**
- * clutter_actor_set_rotation:
- * @self: a #ClutterActor
- * @axis: the axis of rotation
- * @angle: the angle of rotation
- * @x: X coordinate of the rotation center
- * @y: Y coordinate of the rotation center
- * @z: Z coordinate of the rotation center
- *
- * Sets the rotation angle of @self around the given axis.
- *
- * The rotation center coordinates used depend on the value of @axis:
- *
- *  - %CLUTTER_X_AXIS requires @y and @z
- *  - %CLUTTER_Y_AXIS requires @x and @z
- *  - %CLUTTER_Z_AXIS requires @x and @y
- *
- * The rotation coordinates are relative to the anchor point of the
- * actor, set using clutter_actor_set_anchor_point(). If no anchor
- * point is set, the upper left corner is assumed as the origin.
- *
- * Since: 0.8
- *
- * Deprecated: 1.12: Use clutter_actor_set_rotation_angle() and
- *   clutter_actor_set_pivot_point() instead.
- */
-void
-clutter_actor_set_rotation (ClutterActor      *self,
-                            ClutterRotateAxis  axis,
-                            gdouble            angle,
-                            gfloat             x,
-                            gfloat             y,
-                            gfloat             z)
-{
-  ClutterVertex v;
-
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-
-  v.x = x;
-  v.y = y;
-  v.z = z;
-
-  g_object_freeze_notify (G_OBJECT (self));
-
-  clutter_actor_set_rotation_angle (self, axis, angle);
-  clutter_actor_set_rotation_center_internal (self, axis, &v);
-
-  g_object_thaw_notify (G_OBJECT (self));
-}
-
-/**
- * clutter_actor_set_z_rotation_from_gravity:
- * @self: a #ClutterActor
- * @angle: the angle of rotation
- * @gravity: the center point of the rotation
- *
- * Sets the rotation angle of @self around the Z axis using the center
- * point specified as a compass point. For example to rotate such that
- * the center of the actor remains static you can use
- * %CLUTTER_GRAVITY_CENTER. If the actor changes size the center point
- * will move accordingly.
- *
- * Since: 1.0
- *
- * Deprecated: 1.12: Use clutter_actor_set_rotation_angle() and
- *   clutter_actor_set_pivot_point() instead.
- */
-void
-clutter_actor_set_z_rotation_from_gravity (ClutterActor   *self,
-                                           gdouble         angle,
-                                           ClutterGravity  gravity)
-{
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-
-  if (gravity == CLUTTER_GRAVITY_NONE)
-    clutter_actor_set_rotation (self, CLUTTER_Z_AXIS, angle, 0, 0, 0);
-  else
-    {
-      GObject *obj = G_OBJECT (self);
-      ClutterTransformInfo *info;
-      GParamSpec *pspec;
-
-      pspec = obj_props[PROP_ROTATION_ANGLE_Z];
-      info = _clutter_actor_get_transform_info (self);
-
-      g_object_freeze_notify (obj);
-
-      clutter_actor_set_rotation_angle_internal (self, angle, pspec);
-
-      clutter_anchor_coord_set_gravity (&info->rz_center, gravity);
-      g_object_notify_by_pspec (obj, obj_props[PROP_ROTATION_CENTER_Z_GRAVITY]);
-      g_object_notify_by_pspec (obj, obj_props[PROP_ROTATION_CENTER_Z]);
-
-      g_object_thaw_notify (obj);
-    }
-}
-
-/**
- * clutter_actor_get_rotation:
- * @self: a #ClutterActor
- * @axis: the axis of rotation
- * @x: (out): return value for the X coordinate of the center of rotation
- * @y: (out): return value for the Y coordinate of the center of rotation
- * @z: (out): return value for the Z coordinate of the center of rotation
- *
- * Retrieves the angle and center of rotation on the given axis,
- * set using clutter_actor_set_rotation().
- *
- * Return value: the angle of rotation
- *
- * Since: 0.8
- *
- * Deprecated: 1.12: Use clutter_actor_get_rotation_angle() and
- *   clutter_actor_get_pivot_point() instead.
- */
-gdouble
-clutter_actor_get_rotation (ClutterActor      *self,
-                            ClutterRotateAxis  axis,
-                            gfloat            *x,
-                            gfloat            *y,
-                            gfloat            *z)
-{
-  const ClutterTransformInfo *info;
-  const AnchorCoord *anchor_coord;
-  gdouble retval = 0;
-
-  g_return_val_if_fail (CLUTTER_IS_ACTOR (self), 0);
-
-  info = _clutter_actor_get_transform_info_or_defaults (self);
-
-  switch (axis)
-    {
-    case CLUTTER_X_AXIS:
-      anchor_coord = &info->rx_center;
-      retval = info->rx_angle;
-      break;
-
-    case CLUTTER_Y_AXIS:
-      anchor_coord = &info->ry_center;
-      retval = info->ry_angle;
-      break;
-
-    case CLUTTER_Z_AXIS:
-      anchor_coord = &info->rz_center;
-      retval = info->rz_angle;
-      break;
-
-    default:
-      anchor_coord = NULL;
-      retval = 0.0;
-      break;
-    }
-
-  clutter_anchor_coord_get_units (self, anchor_coord, x, y, z);
-
-  return retval;
-}
-
-/**
- * clutter_actor_get_z_rotation_gravity:
- * @self: A #ClutterActor
- *
- * Retrieves the center for the rotation around the Z axis as a
- * compass direction. If the center was specified in pixels or units
- * this will return %CLUTTER_GRAVITY_NONE.
- *
- * Return value: the Z rotation center
- *
- * Since: 1.0
- *
- * Deprecated: 1.12: Use the #ClutterActor:pivot-point instead of
- *   a #ClutterGravity
- */
-ClutterGravity
-clutter_actor_get_z_rotation_gravity (ClutterActor *self)
-{
-  const ClutterTransformInfo *info;
-
-  g_return_val_if_fail (CLUTTER_IS_ACTOR (self), CLUTTER_GRAVITY_NONE);
-
-  info = _clutter_actor_get_transform_info_or_defaults (self);
-
-  return clutter_anchor_coord_get_gravity (&info->rz_center);
-}
-
-/**
  * clutter_actor_set_clip:
  * @self: A #ClutterActor
  * @xoff: X offset of the clip rectangle
@@ -12383,8 +11471,7 @@ clutter_actor_get_z_rotation_gravity (ClutterActor *self)
  * @height: Height of the clip rectangle
  *
  * Sets clip area for @self. The clip area is always computed from the
- * upper left corner of the actor, even if the anchor point is set
- * otherwise.
+ * upper left corner of the actor.
  *
  * Since: 0.6
  */
@@ -12420,7 +11507,6 @@ clutter_actor_set_clip (ClutterActor *self,
 
   clutter_actor_queue_redraw (self);
 
-  g_object_notify_by_pspec (obj, obj_props[PROP_CLIP]);
   g_object_notify_by_pspec (obj, obj_props[PROP_CLIP_RECT]);
   g_object_notify_by_pspec (obj, obj_props[PROP_HAS_CLIP]);
 }
@@ -12762,7 +11848,8 @@ typedef void (* ClutterActorAddChildFunc) (ClutterActor *parent,
                                            ClutterActor *child,
                                            gpointer      data);
 
-typedef enum {
+typedef enum
+{
   ADD_CHILD_CREATE_META        = 1 << 0,
   ADD_CHILD_EMIT_PARENT_SET    = 1 << 1,
   ADD_CHILD_EMIT_ACTOR_ADDED   = 1 << 2,
@@ -12777,12 +11864,6 @@ typedef enum {
                                ADD_CHILD_CHECK_STATE |
                                ADD_CHILD_NOTIFY_FIRST_LAST |
                                ADD_CHILD_SHOW_ON_SET_PARENT,
-
-  /* flags for legacy/deprecated API */
-  ADD_CHILD_LEGACY_FLAGS     = ADD_CHILD_EMIT_PARENT_SET |
-                               ADD_CHILD_CHECK_STATE |
-                               ADD_CHILD_NOTIFY_FIRST_LAST |
-                               ADD_CHILD_SHOW_ON_SET_PARENT
 } ClutterActorAddChildFlags;
 
 /*< private >
@@ -12922,11 +12003,8 @@ clutter_actor_add_child_internal (ClutterActor              *self,
   if (self->priv->in_cloned_branch)
     clutter_actor_push_in_cloned_branch (child, self->priv->in_cloned_branch);
 
-  /* if push_internal() has been called then we automatically set
-   * the flag on the actor
-   */
-  if (self->priv->internal_child)
-    CLUTTER_SET_PRIVATE_FLAGS (child, CLUTTER_INTERNAL_CHILD);
+  if (self->priv->unmapped_paint_branch_counter)
+    push_in_paint_unmapped_branch (child, self->priv->unmapped_paint_branch_counter);
 
   /* children may cause their parent to expand, if they are set
    * to expand; if a child is not expanded then it cannot change
@@ -12945,8 +12023,7 @@ clutter_actor_add_child_internal (ClutterActor              *self,
       clutter_actor_queue_compute_expand (self);
     }
 
-  /* clutter_actor_reparent() will emit ::parent-set for us */
-  if (emit_parent_set && !CLUTTER_ACTOR_IN_REPARENT (child))
+  if (emit_parent_set)
     g_signal_emit (child, actor_signals[PARENT_SET], 0, NULL);
 
   if (check_state)
@@ -12977,33 +12054,8 @@ clutter_actor_add_child_internal (ClutterActor              *self,
   if (CLUTTER_ACTOR_IS_MAPPED (child))
     clutter_actor_queue_redraw (child);
 
-  /* maintain the invariant that if an actor needs layout,
-   * its parents do as well
-   */
-  if (child->priv->needs_width_request ||
-      child->priv->needs_height_request ||
-      child->priv->needs_allocation)
-    {
-      /* we work around the short-circuiting we do
-       * in clutter_actor_queue_relayout() since we
-       * want to force a relayout
-       */
-      child->priv->needs_width_request = TRUE;
-      child->priv->needs_height_request = TRUE;
-      child->priv->needs_allocation = TRUE;
-
-      if (CLUTTER_ACTOR_IS_MAPPED (child))
-        child->priv->needs_paint_volume_update = TRUE;
-
-      /* we only queue a relayout here, because any possible
-       * redraw has already been queued either by show() or
-       * by our call to queue_redraw() above
-       */
-      _clutter_actor_queue_only_relayout (child->priv->parent);
-    }
-
   if (emit_actor_added)
-    g_signal_emit_by_name (self, "actor-added", child);
+    _clutter_container_emit_actor_added (CLUTTER_CONTAINER (self), child);
 
   if (notify_first_last)
     {
@@ -13170,43 +12222,6 @@ clutter_actor_insert_child_below (ClutterActor *self,
 }
 
 /**
- * clutter_actor_set_parent:
- * @self: A #ClutterActor
- * @parent: A new #ClutterActor parent
- *
- * Sets the parent of @self to @parent.
- *
- * This function will result in @parent acquiring a reference on @self,
- * eventually by sinking its floating reference first. The reference
- * will be released by clutter_actor_unparent().
- *
- * This function should only be called by legacy #ClutterActor<!-- -->s
- * implementing the #ClutterContainer interface.
- *
- * Deprecated: 1.10: Use clutter_actor_add_child() instead.
- */
-void
-clutter_actor_set_parent (ClutterActor *self,
-		          ClutterActor *parent)
-{
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-  g_return_if_fail (CLUTTER_IS_ACTOR (parent));
-  g_return_if_fail (self != parent);
-  g_return_if_fail (self->priv->parent == NULL);
-
-  /* as this function will be called inside ClutterContainer::add
-   * implementations or when building up a composite actor, we have
-   * to preserve the old behaviour, and not create child meta or
-   * emit the ::actor-added signal, to avoid recursion or double
-   * emissions
-   */
-  clutter_actor_add_child_internal (parent, self,
-                                    ADD_CHILD_LEGACY_FLAGS,
-                                    insert_child_at_depth,
-                                    NULL);
-}
-
-/**
  * clutter_actor_get_parent:
  * @self: A #ClutterActor
  *
@@ -13232,7 +12247,7 @@ clutter_actor_get_parent (ClutterActor *self)
  *
  * This is by definition the same as %CLUTTER_ACTOR_IS_MAPPED.
  *
- * Return Value: %TRUE if the actor is visibile and will be painted.
+ * Return Value: %TRUE if the actor is visible and will be painted.
  *
  * Since: 0.8
  */
@@ -13436,134 +12451,6 @@ clutter_actor_replace_child (ClutterActor *self,
 }
 
 /**
- * clutter_actor_unparent:
- * @self: a #ClutterActor
- *
- * Removes the parent of @self.
- *
- * This will cause the parent of @self to release the reference
- * acquired when calling clutter_actor_set_parent(), so if you
- * want to keep @self you will have to acquire a reference of
- * your own, through g_object_ref().
- *
- * This function should only be called by legacy #ClutterActor<!-- -->s
- * implementing the #ClutterContainer interface.
- *
- * Since: 0.2
- *
- * Deprecated: 1.10: Use clutter_actor_remove_child() instead.
- */
-void
-clutter_actor_unparent (ClutterActor *self)
-{
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-
-  if (self->priv->parent == NULL)
-    return;
-
-  clutter_actor_remove_child_internal (self->priv->parent, self,
-                                       REMOVE_CHILD_LEGACY_FLAGS);
-}
-
-/**
- * clutter_actor_reparent:
- * @self: a #ClutterActor
- * @new_parent: the new #ClutterActor parent
- *
- * Resets the parent actor of @self.
- *
- * This function is logically equivalent to calling clutter_actor_unparent()
- * and clutter_actor_set_parent(), but more efficiently implemented, as it
- * ensures the child is not finalized when unparented, and emits the
- * #ClutterActor::parent-set signal only once.
- *
- * In reality, calling this function is less useful than it sounds, as some
- * application code may rely on changes in the intermediate state between
- * removal and addition of the actor from its old parent to the @new_parent.
- * Thus, it is strongly encouraged to avoid using this function in application
- * code.
- *
- * Since: 0.2
- *
- * Deprecated: 1.10: Use clutter_actor_remove_child() and
- *   clutter_actor_add_child() instead; remember to take a reference on
- *   the actor being removed before calling clutter_actor_remove_child()
- *   to avoid the reference count dropping to zero and the actor being
- *   destroyed.
- */
-void
-clutter_actor_reparent (ClutterActor *self,
-                        ClutterActor *new_parent)
-{
-  ClutterActorPrivate *priv;
-
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-  g_return_if_fail (CLUTTER_IS_ACTOR (new_parent));
-  g_return_if_fail (self != new_parent);
-
-  if (CLUTTER_ACTOR_IS_TOPLEVEL (self))
-    {
-      g_warning ("Cannot set a parent on a toplevel actor");
-      return;
-    }
-
-  if (CLUTTER_ACTOR_IN_DESTRUCTION (self))
-    {
-      g_warning ("Cannot set a parent currently being destroyed");
-      return;
-    }
-
-  priv = self->priv;
-
-  if (priv->parent != new_parent)
-    {
-      ClutterActor *old_parent;
-
-      CLUTTER_SET_PRIVATE_FLAGS (self, CLUTTER_IN_REPARENT);
-
-      old_parent = priv->parent;
-
-      g_object_ref (self);
-
-      if (old_parent != NULL)
-        {
-         /* go through the Container implementation if this is a regular
-          * child and not an internal one
-          */
-         if (!CLUTTER_ACTOR_IS_INTERNAL_CHILD (self))
-           {
-             ClutterContainer *parent = CLUTTER_CONTAINER (old_parent);
-
-             /* this will have to call unparent() */
-             clutter_container_remove_actor (parent, self);
-           }
-         else
-           clutter_actor_remove_child_internal (old_parent, self,
-                                                REMOVE_CHILD_LEGACY_FLAGS);
-        }
-
-      /* Note, will call set_parent() */
-      if (!CLUTTER_ACTOR_IS_INTERNAL_CHILD (self))
-        clutter_container_add_actor (CLUTTER_CONTAINER (new_parent), self);
-      else
-        clutter_actor_add_child_internal (new_parent, self,
-                                          ADD_CHILD_LEGACY_FLAGS,
-                                          insert_child_at_depth,
-                                          NULL);
-
-      /* we emit the ::parent-set signal once */
-      g_signal_emit (self, actor_signals[PARENT_SET], 0, old_parent);
-
-      CLUTTER_UNSET_PRIVATE_FLAGS (self, CLUTTER_IN_REPARENT);
-
-      /* the IN_REPARENT flag suspends state updates */
-      clutter_actor_update_map_state (self, MAP_STATE_CHECK);
-
-      g_object_unref (self);
-   }
-}
-
-/**
  * clutter_actor_contains:
  * @self: A #ClutterActor
  * @descendant: A #ClutterActor, possibly contained in @self
@@ -13730,134 +12617,6 @@ clutter_actor_set_child_at_index (ClutterActor *self,
   clutter_actor_queue_relayout (self);
 }
 
-/**
- * clutter_actor_raise:
- * @self: A #ClutterActor
- * @below: (allow-none): A #ClutterActor to raise above.
- *
- * Puts @self above @below.
- *
- * Both actors must have the same parent, and the parent must implement
- * the #ClutterContainer interface
- *
- * This function calls clutter_container_raise_child() internally.
- *
- * Deprecated: 1.10: Use clutter_actor_set_child_above_sibling() instead.
- */
-void
-clutter_actor_raise (ClutterActor *self,
-                     ClutterActor *below)
-{
-  ClutterActor *parent;
-
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-
-  parent = clutter_actor_get_parent (self);
-  if (parent == NULL)
-    {
-      g_warning ("%s: Actor '%s' is not inside a container",
-                 G_STRFUNC,
-                 _clutter_actor_get_debug_name (self));
-      return;
-    }
-
-  if (below != NULL)
-    {
-      if (parent != clutter_actor_get_parent (below))
-        {
-          g_warning ("%s Actor '%s' is not in the same container as "
-                     "actor '%s'",
-                     G_STRFUNC,
-                     _clutter_actor_get_debug_name (self),
-                     _clutter_actor_get_debug_name (below));
-          return;
-        }
-    }
-
-  clutter_container_raise_child (CLUTTER_CONTAINER (parent), self, below);
-}
-
-/**
- * clutter_actor_lower:
- * @self: A #ClutterActor
- * @above: (allow-none): A #ClutterActor to lower below
- *
- * Puts @self below @above.
- *
- * Both actors must have the same parent, and the parent must implement
- * the #ClutterContainer interface.
- *
- * This function calls clutter_container_lower_child() internally.
- *
- * Deprecated: 1.10: Use clutter_actor_set_child_below_sibling() instead.
- */
-void
-clutter_actor_lower (ClutterActor *self,
-                     ClutterActor *above)
-{
-  ClutterActor *parent;
-
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-
-  parent = clutter_actor_get_parent (self);
-  if (parent == NULL)
-    {
-      g_warning ("%s: Actor of type %s is not inside a container",
-                 G_STRFUNC,
-                 _clutter_actor_get_debug_name (self));
-      return;
-    }
-
-  if (above)
-    {
-      if (parent != clutter_actor_get_parent (above))
-        {
-          g_warning ("%s: Actor '%s' is not in the same container as "
-                     "actor '%s'",
-                     G_STRFUNC,
-                     _clutter_actor_get_debug_name (self),
-                     _clutter_actor_get_debug_name (above));
-          return;
-        }
-    }
-
-  clutter_container_lower_child (CLUTTER_CONTAINER (parent), self, above);
-}
-
-/**
- * clutter_actor_raise_top:
- * @self: A #ClutterActor
- *
- * Raises @self to the top.
- *
- * This function calls clutter_actor_raise() internally.
- *
- * Deprecated: 1.10: Use clutter_actor_set_child_above_sibling() with
- *   a %NULL sibling, instead.
- */
-void
-clutter_actor_raise_top (ClutterActor *self)
-{
-  clutter_actor_raise (self, NULL);
-}
-
-/**
- * clutter_actor_lower_bottom:
- * @self: A #ClutterActor
- *
- * Lowers @self to the bottom.
- *
- * This function calls clutter_actor_lower() internally.
- *
- * Deprecated: 1.10: Use clutter_actor_set_child_below_sibling() with
- *   a %NULL sibling, instead.
- */
-void
-clutter_actor_lower_bottom (ClutterActor *self)
-{
-  clutter_actor_lower (self, NULL);
-}
-
 /*
  * Event handling
  */
@@ -13881,76 +12640,111 @@ clutter_actor_lower_bottom (ClutterActor *self)
 gboolean
 clutter_actor_event (ClutterActor       *actor,
                      const ClutterEvent *event,
-		     gboolean            capture)
+                     gboolean            capture)
 {
   gboolean retval = FALSE;
   gint signal_num = -1;
+  GQuark detail = 0;
 
   g_return_val_if_fail (CLUTTER_IS_ACTOR (actor), FALSE);
   g_return_val_if_fail (event != NULL, FALSE);
 
   g_object_ref (actor);
 
+  switch (event->type)
+    {
+    case CLUTTER_NOTHING:
+      break;
+    case CLUTTER_BUTTON_PRESS:
+      signal_num = BUTTON_PRESS_EVENT;
+      detail = quark_button;
+      break;
+    case CLUTTER_BUTTON_RELEASE:
+      signal_num = BUTTON_RELEASE_EVENT;
+      detail = quark_button;
+      break;
+    case CLUTTER_SCROLL:
+      signal_num = SCROLL_EVENT;
+      detail = quark_scroll;
+      break;
+    case CLUTTER_KEY_PRESS:
+      signal_num = KEY_PRESS_EVENT;
+      detail = quark_key;
+      break;
+    case CLUTTER_KEY_RELEASE:
+      signal_num = KEY_RELEASE_EVENT;
+      detail = quark_key;
+      break;
+    case CLUTTER_MOTION:
+      signal_num = MOTION_EVENT;
+      detail = quark_motion;
+      break;
+    case CLUTTER_ENTER:
+      signal_num = ENTER_EVENT;
+      detail = quark_pointer_focus;
+      break;
+    case CLUTTER_LEAVE:
+      signal_num = LEAVE_EVENT;
+      detail = quark_pointer_focus;
+      break;
+    case CLUTTER_TOUCH_BEGIN:
+    case CLUTTER_TOUCH_END:
+    case CLUTTER_TOUCH_UPDATE:
+    case CLUTTER_TOUCH_CANCEL:
+      signal_num = TOUCH_EVENT;
+      detail = quark_touch;
+      break;
+    case CLUTTER_TOUCHPAD_PINCH:
+    case CLUTTER_TOUCHPAD_SWIPE:
+      signal_num = -1;
+      detail = quark_touchpad;
+      break;
+    case CLUTTER_PROXIMITY_IN:
+    case CLUTTER_PROXIMITY_OUT:
+      signal_num = -1;
+      detail = quark_proximity;
+      break;
+    case CLUTTER_PAD_BUTTON_PRESS:
+    case CLUTTER_PAD_BUTTON_RELEASE:
+    case CLUTTER_PAD_STRIP:
+    case CLUTTER_PAD_RING:
+      signal_num = -1;
+      detail = quark_pad;
+      break;
+    case CLUTTER_DESTROY_NOTIFY:
+      signal_num = -1;
+      detail = quark_destroy;
+      break;
+    case CLUTTER_CLIENT_MESSAGE:
+      signal_num = -1;
+      detail = quark_client;
+      break;
+    case CLUTTER_STAGE_STATE:
+      signal_num = -1;
+      detail = quark_stage;
+      break;
+    case CLUTTER_IM_COMMIT:
+    case CLUTTER_IM_DELETE:
+    case CLUTTER_IM_PREEDIT:
+      signal_num = -1;
+      detail = quark_im;
+    case CLUTTER_DEVICE_ADDED:
+    case CLUTTER_DEVICE_REMOVED:
+      break;
+    case CLUTTER_EVENT_LAST:  /* Just keep compiler warnings quiet */
+      break;
+    }
+
   if (capture)
+    g_signal_emit (actor, actor_signals[CAPTURED_EVENT], detail, event, &retval);
+  else
     {
-      g_signal_emit (actor, actor_signals[CAPTURED_EVENT], 0,
-		     event,
-                     &retval);
-      goto out;
+      g_signal_emit (actor, actor_signals[EVENT], 0, event, &retval);
+
+      if (!retval && signal_num != -1)
+        g_signal_emit (actor, actor_signals[signal_num], 0, event, &retval);
     }
 
-  g_signal_emit (actor, actor_signals[EVENT], 0, event, &retval);
-
-  if (!retval)
-    {
-      switch (event->type)
-	{
-	case CLUTTER_NOTHING:
-	  break;
-	case CLUTTER_BUTTON_PRESS:
-	  signal_num = BUTTON_PRESS_EVENT;
-	  break;
-	case CLUTTER_BUTTON_RELEASE:
-	  signal_num = BUTTON_RELEASE_EVENT;
-	  break;
-	case CLUTTER_SCROLL:
-	  signal_num = SCROLL_EVENT;
-	  break;
-	case CLUTTER_KEY_PRESS:
-	  signal_num = KEY_PRESS_EVENT;
-	  break;
-	case CLUTTER_KEY_RELEASE:
-	  signal_num = KEY_RELEASE_EVENT;
-	  break;
-	case CLUTTER_MOTION:
-	  signal_num = MOTION_EVENT;
-	  break;
-	case CLUTTER_ENTER:
-	  signal_num = ENTER_EVENT;
-	  break;
-	case CLUTTER_LEAVE:
-	  signal_num = LEAVE_EVENT;
-	  break;
-        case CLUTTER_TOUCH_BEGIN:
-        case CLUTTER_TOUCH_END:
-        case CLUTTER_TOUCH_UPDATE:
-        case CLUTTER_TOUCH_CANCEL:
-          signal_num = TOUCH_EVENT;
-          break;
-	case CLUTTER_DELETE:
-	case CLUTTER_DESTROY_NOTIFY:
-	case CLUTTER_CLIENT_MESSAGE:
-	default:
-	  signal_num = -1;
-	  break;
-	}
-
-      if (signal_num != -1)
-	g_signal_emit (actor, actor_signals[signal_num], 0,
-		       event, &retval);
-    }
-
-out:
   g_object_unref (actor);
 
   return retval;
@@ -14000,270 +12794,6 @@ clutter_actor_get_reactive (ClutterActor *actor)
   return CLUTTER_ACTOR_IS_REACTIVE (actor) ? TRUE : FALSE;
 }
 
-/**
- * clutter_actor_get_anchor_point:
- * @self: a #ClutterActor
- * @anchor_x: (out): return location for the X coordinate of the anchor point
- * @anchor_y: (out): return location for the Y coordinate of the anchor point
- *
- * Gets the current anchor point of the @actor in pixels.
- *
- * Since: 0.6
- *
- * Deprecated: 1.12: Use #ClutterActor:pivot-point instead
- */
-void
-clutter_actor_get_anchor_point (ClutterActor *self,
-				gfloat       *anchor_x,
-                                gfloat       *anchor_y)
-{
-  const ClutterTransformInfo *info;
-
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-
-  info = _clutter_actor_get_transform_info_or_defaults (self);
-  clutter_anchor_coord_get_units (self, &info->anchor,
-                                  anchor_x,
-                                  anchor_y,
-                                  NULL);
-}
-
-/**
- * clutter_actor_set_anchor_point:
- * @self: a #ClutterActor
- * @anchor_x: X coordinate of the anchor point
- * @anchor_y: Y coordinate of the anchor point
- *
- * Sets an anchor point for @self. The anchor point is a point in the
- * coordinate space of an actor to which the actor position within its
- * parent is relative; the default is (0, 0), i.e. the top-left corner
- * of the actor.
- *
- * Since: 0.6
- *
- * Deprecated: 1.12: Use #ClutterActor:pivot-point instead.
- */
-void
-clutter_actor_set_anchor_point (ClutterActor *self,
-                                gfloat        anchor_x,
-                                gfloat        anchor_y)
-{
-  ClutterTransformInfo *info;
-  ClutterActorPrivate *priv;
-  gboolean changed = FALSE;
-  gfloat old_anchor_x, old_anchor_y;
-  GObject *obj;
-
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-
-  obj = G_OBJECT (self);
-  priv = self->priv;
-  info = _clutter_actor_get_transform_info (self);
-
-  g_object_freeze_notify (obj);
-
-  clutter_anchor_coord_get_units (self, &info->anchor,
-                                  &old_anchor_x,
-                                  &old_anchor_y,
-                                  NULL);
-
-  if (info->anchor.is_fractional)
-    g_object_notify_by_pspec (obj, obj_props[PROP_ANCHOR_GRAVITY]);
-
-  if (old_anchor_x != anchor_x)
-    {
-      g_object_notify_by_pspec (obj, obj_props[PROP_ANCHOR_X]);
-      changed = TRUE;
-    }
-
-  if (old_anchor_y != anchor_y)
-    {
-      g_object_notify_by_pspec (obj, obj_props[PROP_ANCHOR_Y]);
-      changed = TRUE;
-    }
-
-  clutter_anchor_coord_set_units (&info->anchor, anchor_x, anchor_y, 0);
-
-  if (changed)
-    {
-      priv->transform_valid = FALSE;
-      clutter_actor_queue_redraw (self);
-    }
-
-  g_object_thaw_notify (obj);
-}
-
-/**
- * clutter_actor_get_anchor_point_gravity:
- * @self: a #ClutterActor
- *
- * Retrieves the anchor position expressed as a #ClutterGravity. If
- * the anchor point was specified using pixels or units this will
- * return %CLUTTER_GRAVITY_NONE.
- *
- * Return value: the #ClutterGravity used by the anchor point
- *
- * Since: 1.0
- *
- * Deprecated: 1.12: Use #ClutterActor:pivot-point instead.
- */
-ClutterGravity
-clutter_actor_get_anchor_point_gravity (ClutterActor *self)
-{
-  const ClutterTransformInfo *info;
-
-  g_return_val_if_fail (CLUTTER_IS_ACTOR (self), CLUTTER_GRAVITY_NONE);
-
-  info = _clutter_actor_get_transform_info_or_defaults (self);
-
-  return clutter_anchor_coord_get_gravity (&info->anchor);
-}
-
-/**
- * clutter_actor_move_anchor_point:
- * @self: a #ClutterActor
- * @anchor_x: X coordinate of the anchor point
- * @anchor_y: Y coordinate of the anchor point
- *
- * Sets an anchor point for the actor, and adjusts the actor postion so that
- * the relative position of the actor toward its parent remains the same.
- *
- * Since: 0.6
- *
- * Deprecated: 1.12: Use #ClutterActor:pivot-point and 
- * clutter_actor_set_translation() instead.
- */
-void
-clutter_actor_move_anchor_point (ClutterActor *self,
-                                 gfloat        anchor_x,
-                                 gfloat        anchor_y)
-{
-  gfloat old_anchor_x, old_anchor_y;
-  const ClutterTransformInfo *info;
-
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-
-  info = _clutter_actor_get_transform_info (self);
-  clutter_anchor_coord_get_units (self, &info->anchor,
-                                  &old_anchor_x,
-                                  &old_anchor_y,
-                                  NULL);
-
-  g_object_freeze_notify (G_OBJECT (self));
-
-  clutter_actor_set_anchor_point (self, anchor_x, anchor_y);
-
-  if (self->priv->position_set)
-    clutter_actor_move_by (self,
-                           anchor_x - old_anchor_x,
-                           anchor_y - old_anchor_y);
-
-  g_object_thaw_notify (G_OBJECT (self));
-}
-
-/**
- * clutter_actor_move_anchor_point_from_gravity:
- * @self: a #ClutterActor
- * @gravity: #ClutterGravity.
- *
- * Sets an anchor point on the actor based on the given gravity, adjusting the
- * actor postion so that its relative position within its parent remains
- * unchanged.
- *
- * Since version 1.0 the anchor point will be stored as a gravity so
- * that if the actor changes size then the anchor point will move. For
- * example, if you set the anchor point to %CLUTTER_GRAVITY_SOUTH_EAST
- * and later double the size of the actor, the anchor point will move
- * to the bottom right.
- *
- * Since: 0.6
- *
- * Deprecated: 1.12: Use #ClutterActor:pivot-point and 
- * clutter_actor_set_translation() instead.
- */
-void
-clutter_actor_move_anchor_point_from_gravity (ClutterActor   *self,
-					      ClutterGravity  gravity)
-{
-  gfloat old_anchor_x, old_anchor_y, new_anchor_x, new_anchor_y;
-  const ClutterTransformInfo *info;
-  ClutterActorPrivate *priv;
-
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-
-  priv = self->priv;
-  info = _clutter_actor_get_transform_info (self);
-
-  g_object_freeze_notify (G_OBJECT (self));
-
-  clutter_anchor_coord_get_units (self, &info->anchor,
-                                  &old_anchor_x,
-                                  &old_anchor_y,
-                                  NULL);
-  clutter_actor_set_anchor_point_from_gravity (self, gravity);
-  clutter_anchor_coord_get_units (self, &info->anchor,
-                                  &new_anchor_x,
-                                  &new_anchor_y,
-                                  NULL);
-
-  if (priv->position_set)
-    clutter_actor_move_by (self,
-                           new_anchor_x - old_anchor_x,
-                           new_anchor_y - old_anchor_y);
-
-  g_object_thaw_notify (G_OBJECT (self));
-}
-
-/**
- * clutter_actor_set_anchor_point_from_gravity:
- * @self: a #ClutterActor
- * @gravity: #ClutterGravity.
- *
- * Sets an anchor point on the actor, based on the given gravity (this is a
- * convenience function wrapping clutter_actor_set_anchor_point()).
- *
- * Since version 1.0 the anchor point will be stored as a gravity so
- * that if the actor changes size then the anchor point will move. For
- * example, if you set the anchor point to %CLUTTER_GRAVITY_SOUTH_EAST
- * and later double the size of the actor, the anchor point will move
- * to the bottom right.
- *
- * Since: 0.6
- *
- * Deprecated: 1.12: Use #ClutterActor:pivot-point and 
- * clutter_actor_set_translation() instead. E.g. For %CLUTTER_GRAVITY_CENTER set
- * pivot_point to (0.5,0.5) and the translation to (width/2,height/2).
- */
-void
-clutter_actor_set_anchor_point_from_gravity (ClutterActor   *self,
-					     ClutterGravity  gravity)
-{
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-
-  if (gravity == CLUTTER_GRAVITY_NONE)
-    clutter_actor_set_anchor_point (self, 0, 0);
-  else
-    {
-      GObject *obj = G_OBJECT (self);
-      ClutterTransformInfo *info;
-
-      g_object_freeze_notify (obj);
-
-      info = _clutter_actor_get_transform_info (self);
-      clutter_anchor_coord_set_gravity (&info->anchor, gravity);
-
-      g_object_notify_by_pspec (obj, obj_props[PROP_ANCHOR_GRAVITY]);
-      g_object_notify_by_pspec (obj, obj_props[PROP_ANCHOR_X]);
-      g_object_notify_by_pspec (obj, obj_props[PROP_ANCHOR_Y]);
-
-      self->priv->transform_valid = FALSE;
-
-      clutter_actor_queue_redraw (self);
-
-      g_object_thaw_notify (obj);
-    }
-}
-
 static void
 clutter_actor_store_content_box (ClutterActor *self,
                                  const ClutterActorBox *box)
@@ -14295,8 +12825,6 @@ typedef enum
   PARSE_Y,
   PARSE_WIDTH,
   PARSE_HEIGHT,
-  PARSE_ANCHOR_X,
-  PARSE_ANCHOR_Y
 } ParseDimension;
 
 static gfloat
@@ -14341,8 +12869,8 @@ parse_units (ClutterActor   *self,
   else
     {
       g_warning ("Invalid value of type '%s': integers, strings of floating "
-                 "point values can be used for the x, y, width, height "
-                 "anchor-x and anchor-y properties.",
+                 "point values can be used for the x, y, width, and height "
+                 "properties.",
                  g_type_name (G_VALUE_TYPE (&value)));
     }
 
@@ -14542,40 +13070,6 @@ parse_actor_metas (ClutterScript *script,
   return g_slist_reverse (retval);
 }
 
-static GSList *
-parse_behaviours (ClutterScript *script,
-                  ClutterActor  *actor,
-                  JsonNode      *node)
-{
-  GList *elements, *l;
-  GSList *retval = NULL;
-
-  if (!JSON_NODE_HOLDS_ARRAY (node))
-    return NULL;
-
-  elements = json_array_get_elements (json_node_get_array (node));
-
-  for (l = elements; l != NULL; l = l->next)
-    {
-      JsonNode *element = l->data;
-      const gchar *id_ = _clutter_script_get_id_from_node (element);
-      GObject *behaviour;
-
-      if (id_ == NULL || *id_ == '\0')
-        continue;
-
-      behaviour = clutter_script_get_object (script, id_);
-      if (behaviour == NULL)
-        continue;
-
-      retval = g_slist_prepend (retval, behaviour);
-    }
-
-  g_list_free (elements);
-
-  return g_slist_reverse (retval);
-}
-
 static ClutterMargin *
 parse_margin (ClutterActor *self,
               JsonNode     *node)
@@ -14646,9 +13140,7 @@ clutter_actor_parse_custom_node (ClutterScriptable *scriptable,
   if ((name[0] == 'x' && name[1] == '\0') ||
       (name[0] == 'y' && name[1] == '\0') ||
       (strcmp (name, "width") == 0) ||
-      (strcmp (name, "height") == 0) ||
-      (strcmp (name, "anchor_x") == 0) ||
-      (strcmp (name, "anchor_y") == 0))
+      (strcmp (name, "height") == 0))
     {
       ParseDimension dimension;
       gfloat units;
@@ -14661,10 +13153,6 @@ clutter_actor_parse_custom_node (ClutterScriptable *scriptable,
         dimension = PARSE_WIDTH;
       else if (name[0] == 'h')
         dimension = PARSE_HEIGHT;
-      else if (name[0] == 'a' && name[7] == 'x')
-        dimension = PARSE_ANCHOR_X;
-      else if (name[0] == 'a' && name[7] == 'y')
-        dimension = PARSE_ANCHOR_Y;
       else
         return FALSE;
 
@@ -14690,24 +13178,6 @@ clutter_actor_parse_custom_node (ClutterScriptable *scriptable,
         }
       else
         g_slice_free (RotationInfo, info);
-    }
-  else if (strcmp (name, "behaviours") == 0)
-    {
-      GSList *l;
-
-#ifdef CLUTTER_ENABLE_DEBUG
-      if (G_UNLIKELY (_clutter_diagnostic_enabled ()))
-        _clutter_diagnostic_message ("The 'behaviours' key is deprecated "
-                                     "and it should not be used in newly "
-                                     "written ClutterScript definitions.");
-#endif
-
-      l = parse_behaviours (script, actor, node);
-
-      g_value_init (value, G_TYPE_POINTER);
-      g_value_set_pointer (value, l);
-
-      retval = TRUE;
     }
   else if (strcmp (name, "actions") == 0 ||
            strcmp (name, "constraints") == 0 ||
@@ -14768,33 +13238,9 @@ clutter_actor_set_custom_property (ClutterScriptable *scriptable,
 
       info = g_value_get_pointer (value);
 
-      clutter_actor_set_rotation (actor,
-                                  info->axis, info->angle,
-                                  info->center_x,
-                                  info->center_y,
-                                  info->center_z);
+      clutter_actor_set_rotation_angle (actor, info->axis, info->angle);
 
       g_slice_free (RotationInfo, info);
-
-      return;
-    }
-
-  if (strcmp (name, "behaviours") == 0)
-    {
-      GSList *behaviours, *l;
-
-      if (!G_VALUE_HOLDS (value, G_TYPE_POINTER))
-        return;
-
-      behaviours = g_value_get_pointer (value);
-      for (l = behaviours; l != NULL; l = l->next)
-        {
-          ClutterBehaviour *behaviour = l->data;
-
-          clutter_behaviour_apply (behaviour, actor);
-        }
-
-      g_slist_free (behaviours);
 
       return;
     }
@@ -14839,6 +13285,61 @@ clutter_scriptable_iface_init (ClutterScriptableIface *iface)
 {
   iface->parse_custom_node = clutter_actor_parse_custom_node;
   iface->set_custom_property = clutter_actor_set_custom_property;
+}
+
+static gboolean
+get_layout_from_animation_property (ClutterActor  *actor,
+                                    const gchar   *name,
+                                    gchar        **name_p)
+{
+  g_auto (GStrv) tokens = NULL;
+
+  if (!g_str_has_prefix (name, "@layout"))
+    return FALSE;
+
+  tokens = g_strsplit (name, ".", -1);
+  if (tokens == NULL || g_strv_length (tokens) != 2)
+    {
+      CLUTTER_NOTE (ANIMATION, "Invalid property name '%s'",
+                    name + 1);
+      return FALSE;
+    }
+
+  if (name_p != NULL)
+    *name_p = g_strdup (tokens[1]);
+
+  return TRUE;
+}
+
+static gboolean
+get_content_from_animation_property (ClutterActor  *actor,
+                                     const gchar   *name,
+                                     gchar        **name_p)
+{
+  g_auto (GStrv) tokens = NULL;
+
+  if (!g_str_has_prefix (name, "@content"))
+    return FALSE;
+
+  if (!actor->priv->content)
+    {
+      CLUTTER_NOTE (ANIMATION, "No ClutterContent available for '%s'",
+                    name + 1);
+      return FALSE;
+    }
+
+  tokens = g_strsplit (name, ".", -1);
+  if (tokens == NULL || g_strv_length (tokens) != 2)
+    {
+      CLUTTER_NOTE (ANIMATION, "Invalid property name '%s'",
+                    name + 1);
+      return FALSE;
+    }
+
+  if (name_p != NULL)
+    *name_p = g_strdup (tokens[1]);
+
+  return TRUE;
 }
 
 static ClutterActorMeta *
@@ -14903,18 +13404,43 @@ static GParamSpec *
 clutter_actor_find_property (ClutterAnimatable *animatable,
                              const gchar       *property_name)
 {
+  ClutterActor *actor = CLUTTER_ACTOR (animatable);
   ClutterActorMeta *meta = NULL;
   GObjectClass *klass = NULL;
   GParamSpec *pspec = NULL;
   gchar *p_name = NULL;
+  gboolean use_content = FALSE;
+  gboolean use_layout;
 
-  meta = get_meta_from_animation_property (CLUTTER_ACTOR (animatable),
-                                           property_name,
-                                           &p_name);
+  use_layout = get_layout_from_animation_property (actor,
+                                                   property_name,
+                                                   &p_name);
+
+  if (!use_layout)
+    use_content = get_content_from_animation_property (actor,
+                                                       property_name,
+                                                       &p_name);
+
+  if (!use_layout && !use_content)
+    meta = get_meta_from_animation_property (actor,
+                                             property_name,
+                                             &p_name);
 
   if (meta != NULL)
     {
       klass = G_OBJECT_GET_CLASS (meta);
+
+      pspec = g_object_class_find_property (klass, p_name);
+    }
+  else if (use_layout)
+    {
+      klass = G_OBJECT_GET_CLASS (actor->priv->layout_manager);
+
+      pspec = g_object_class_find_property (klass, p_name);
+    }
+  else if (use_content)
+    {
+      klass = G_OBJECT_GET_CLASS (actor->priv->content);
 
       pspec = g_object_class_find_property (klass, p_name);
     }
@@ -14935,15 +13461,32 @@ clutter_actor_get_initial_state (ClutterAnimatable *animatable,
                                  const gchar       *property_name,
                                  GValue            *initial)
 {
+  ClutterActor *actor = CLUTTER_ACTOR (animatable);
   ClutterActorMeta *meta = NULL;
   gchar *p_name = NULL;
+  gboolean use_content = FALSE;
+  gboolean use_layout;
 
-  meta = get_meta_from_animation_property (CLUTTER_ACTOR (animatable),
-                                           property_name,
-                                           &p_name);
+  use_layout = get_layout_from_animation_property (actor,
+                                                   property_name,
+                                                   &p_name);
+
+  if (!use_layout)
+    use_content = get_content_from_animation_property (actor,
+                                                       property_name,
+                                                       &p_name);
+
+  if (!use_layout && !use_content)
+    meta = get_meta_from_animation_property (actor,
+                                             property_name,
+                                             &p_name);
 
   if (meta != NULL)
     g_object_get_property (G_OBJECT (meta), p_name, initial);
+  else if (use_layout)
+    g_object_get_property (G_OBJECT (actor->priv->layout_manager), p_name, initial);
+  else if (use_content)
+    g_object_get_property (G_OBJECT (actor->priv->content), p_name, initial);
   else
     g_object_get_property (G_OBJECT (animatable), property_name, initial);
 
@@ -15006,14 +13549,8 @@ clutter_actor_set_animatable_property (ClutterActor *actor,
       break;
 
     case PROP_ALLOCATION:
-      clutter_actor_allocate_internal (actor,
-                                       g_value_get_boxed (value),
-                                       actor->priv->allocation_flags);
+      clutter_actor_allocate_internal (actor, g_value_get_boxed (value));
       clutter_actor_queue_redraw (actor);
-      break;
-
-    case PROP_DEPTH:
-      clutter_actor_set_depth_internal (actor, g_value_get_float (value));
       break;
 
     case PROP_Z_POSITION:
@@ -15096,12 +13633,29 @@ clutter_actor_set_final_state (ClutterAnimatable *animatable,
   ClutterActor *actor = CLUTTER_ACTOR (animatable);
   ClutterActorMeta *meta = NULL;
   gchar *p_name = NULL;
+  gboolean use_content = FALSE;
+  gboolean use_layout;
 
-  meta = get_meta_from_animation_property (actor,
-                                           property_name,
-                                           &p_name);
+  use_layout = get_layout_from_animation_property (actor,
+                                                   property_name,
+                                                   &p_name);
+
+  if (!use_layout)
+    use_content = get_content_from_animation_property (actor,
+                                                       property_name,
+                                                       &p_name);
+
+  if (!use_layout && !use_content)
+    meta = get_meta_from_animation_property (actor,
+                                             property_name,
+                                             &p_name);
+
   if (meta != NULL)
     g_object_set_property (G_OBJECT (meta), p_name, final);
+  else if (use_layout)
+    g_object_set_property (G_OBJECT (actor->priv->layout_manager), p_name, final);
+  else if (use_content)
+    g_object_set_property (G_OBJECT (actor->priv->content), p_name, final);
   else
     {
       GObjectClass *obj_class = G_OBJECT_GET_CLASS (animatable);
@@ -15124,12 +13678,19 @@ clutter_actor_set_final_state (ClutterAnimatable *animatable,
   g_free (p_name);
 }
 
+static ClutterActor *
+clutter_actor_get_actor (ClutterAnimatable *animatable)
+{
+  return CLUTTER_ACTOR (animatable);
+}
+
 static void
-clutter_animatable_iface_init (ClutterAnimatableIface *iface)
+clutter_animatable_iface_init (ClutterAnimatableInterface *iface)
 {
   iface->find_property = clutter_actor_find_property;
   iface->get_initial_state = clutter_actor_get_initial_state;
   iface->set_final_state = clutter_actor_set_final_state;
+  iface->get_actor = clutter_actor_get_actor;
 }
 
 /**
@@ -15167,7 +13728,7 @@ clutter_actor_transform_stage_point (ClutterActor *self,
 				     gfloat       *x_out,
 				     gfloat       *y_out)
 {
-  ClutterVertex v[4];
+  graphene_point3d_t v[4];
   double ST[3][3];
   double RQ[3][3];
   int du, dv;
@@ -15190,9 +13751,8 @@ clutter_actor_transform_stage_point (ClutterActor *self,
    *   http://www.cs.cmu.edu/~ph/src/texfund/
    *
    * Our texture is a rectangle with origin [0, 0], so we are mapping from
-   * quad to rectangle only, which significantly simplifies things; the
-   * function calls have been unrolled, and most of the math is done in fixed
-   * point.
+   * quad to rectangle only, which significantly simplifies things.
+   * Function calls have been unrolled.
    */
   clutter_actor_get_abs_allocation_vertices (self, v);
 
@@ -15394,7 +13954,6 @@ clutter_actor_get_stage (ClutterActor *actor)
  *   actor's natural width
  * @available_height: the maximum available height, or -1 to use the
  *   actor's natural height
- * @flags: flags controlling the allocation
  *
  * Allocates @self taking into account the #ClutterActor's
  * preferred size, but limiting it to the maximum available width
@@ -15441,7 +14000,7 @@ clutter_actor_get_stage (ClutterActor *actor)
  *   box.x1 = x; box.y1 = y;
  *   box.x2 = box.x1 + available_width;
  *   box.y2 = box.y1 + available_height;
- *   clutter_actor_allocate (self, &box, flags);
+ *   clutter_actor_allocate (self, &box);
  * ]|
  *
  * This function can be used by fluid layout managers to allocate
@@ -15455,8 +14014,7 @@ clutter_actor_allocate_available_size (ClutterActor           *self,
                                        gfloat                  x,
                                        gfloat                  y,
                                        gfloat                  available_width,
-                                       gfloat                  available_height,
-                                       ClutterAllocationFlags  flags)
+                                       gfloat                  available_height)
 {
   ClutterActorPrivate *priv;
   gfloat width, height;
@@ -15512,13 +14070,14 @@ clutter_actor_allocate_available_size (ClutterActor           *self,
   box.y1 = y;
   box.x2 = box.x1 + width;
   box.y2 = box.y1 + height;
-  clutter_actor_allocate (self, &box, flags);
+  clutter_actor_allocate (self, &box);
 }
 
 /**
  * clutter_actor_allocate_preferred_size:
  * @self: a #ClutterActor
- * @flags: flags controlling the allocation
+ * @x: the actor's X coordinate
+ * @y: the actor's Y coordinate
  *
  * Allocates the natural size of @self.
  *
@@ -15536,42 +14095,26 @@ clutter_actor_allocate_available_size (ClutterActor           *self,
  * Since: 0.8
  */
 void
-clutter_actor_allocate_preferred_size (ClutterActor           *self,
-                                       ClutterAllocationFlags  flags)
+clutter_actor_allocate_preferred_size (ClutterActor *self,
+                                       float         x,
+                                       float         y)
 {
-  gfloat actor_x, actor_y;
   gfloat natural_width, natural_height;
   ClutterActorBox actor_box;
-  ClutterActorPrivate *priv;
-  const ClutterLayoutInfo *info;
 
   g_return_if_fail (CLUTTER_IS_ACTOR (self));
-
-  priv = self->priv;
-
-  if (priv->position_set)
-    {
-      info = _clutter_actor_get_layout_info_or_defaults (self);
-      actor_x = info->fixed_pos.x;
-      actor_y = info->fixed_pos.y;
-    }
-  else
-    {
-      actor_x = 0;
-      actor_y = 0;
-    }
 
   clutter_actor_get_preferred_size (self,
                                     NULL, NULL,
                                     &natural_width,
                                     &natural_height);
 
-  actor_box.x1 = actor_x;
-  actor_box.y1 = actor_y;
+  actor_box.x1 = x;
+  actor_box.y1 = y;
   actor_box.x2 = actor_box.x1 + natural_width;
   actor_box.y2 = actor_box.y1 + natural_height;
 
-  clutter_actor_allocate (self, &actor_box, flags);
+  clutter_actor_allocate (self, &actor_box);
 }
 
 /**
@@ -15582,7 +14125,6 @@ clutter_actor_allocate_preferred_size (ClutterActor           *self,
  * @y_align: the vertical alignment, between 0 and 1
  * @x_fill: whether the actor should fill horizontally
  * @y_fill: whether the actor should fill vertically
- * @flags: allocation flags to be passed to clutter_actor_allocate()
  *
  * Allocates @self by taking into consideration the available allocation
  * area; an alignment factor on either axis; and whether the actor should
@@ -15609,8 +14151,7 @@ clutter_actor_allocate_align_fill (ClutterActor           *self,
                                    gdouble                 x_align,
                                    gdouble                 y_align,
                                    gboolean                x_fill,
-                                   gboolean                y_fill,
-                                   ClutterAllocationFlags  flags)
+                                   gboolean                y_fill)
 {
   ClutterActorPrivate *priv;
   ClutterActorBox allocation = CLUTTER_ACTOR_BOX_INIT_ZERO;
@@ -15726,7 +14267,7 @@ out:
   allocation.x2 = ceilf (allocation.x1 + MAX (child_width, 0));
   allocation.y2 = ceilf (allocation.y1 + MAX (child_height, 0));
 
-  clutter_actor_allocate (self, &allocation, flags);
+  clutter_actor_allocate (self, &allocation);
 }
 
 /**
@@ -15744,6 +14285,9 @@ clutter_actor_grab_key_focus (ClutterActor *self)
   ClutterActor *stage;
 
   g_return_if_fail (CLUTTER_IS_ACTOR (self));
+
+  if (self->priv->has_key_focus)
+    return;
 
   stage = _clutter_actor_get_stage_internal (self);
   if (stage != NULL)
@@ -15803,7 +14347,7 @@ update_pango_context (ClutterBackend *backend,
  * stored by the #ClutterBackend change.
  *
  * You can use the returned #PangoContext to create a #PangoLayout
- * and render text using cogl_pango_render_layout() to reuse the
+ * and render text using cogl_pango_show_layout() to reuse the
  * glyphs cache also used by Clutter.
  *
  * Return value: (transfer none): the #PangoContext for a #ClutterActor.
@@ -15826,10 +14370,12 @@ clutter_actor_get_pango_context (ClutterActor *self)
     {
       priv->pango_context = clutter_actor_create_pango_context (self);
 
-      g_signal_connect_object (backend, "resolution-changed",
-                               G_CALLBACK (update_pango_context), priv->pango_context, 0);
-      g_signal_connect_object (backend, "font-changed",
-                               G_CALLBACK (update_pango_context), priv->pango_context, 0);
+      priv->resolution_changed_id =
+        g_signal_connect_object (backend, "resolution-changed",
+                                 G_CALLBACK (update_pango_context), priv->pango_context, 0);
+      priv->font_changed_id =
+        g_signal_connect_object (backend, "font-changed",
+                                 G_CALLBACK (update_pango_context), priv->pango_context, 0);
     }
   else
     update_pango_context (backend, priv->pango_context);
@@ -15914,7 +14460,7 @@ clutter_actor_create_pango_layout (ClutterActor *self,
  * Allows overriding the calculated paint opacity (as returned by
  * clutter_actor_get_paint_opacity()). This is used internally by
  * ClutterClone and ClutterOffscreenEffect, and should be used by
- * actors that need to mimick those.
+ * actors that need to mimic those.
  *
  * In almost all cases this should not used by applications.
  *
@@ -15956,6 +14502,63 @@ clutter_actor_get_opacity_override (ClutterActor *self)
   return self->priv->opacity_override;
 }
 
+/**
+ * clutter_actor_inhibit_culling:
+ * @actor: a #ClutterActor
+ *
+ * Increases the culling inhibitor counter. Inhibiting culling
+ * forces the actor to be painted even when outside the visible
+ * bounds of the stage view.
+ *
+ * This is usually necessary when an actor is being painted on
+ * another paint context.
+ *
+ * Pair with clutter_actor_uninhibit_culling() when the actor doesn't
+ * need to be painted anymore.
+ */
+void
+clutter_actor_inhibit_culling (ClutterActor *actor)
+{
+  ClutterActorPrivate *priv;
+
+  g_return_if_fail (CLUTTER_IS_ACTOR (actor));
+
+  priv = actor->priv;
+
+  priv->inhibit_culling_counter++;
+  _clutter_actor_set_enable_paint_unmapped (actor, TRUE);
+}
+
+/**
+ * clutter_actor_uninhibit_culling:
+ * @actor: a #ClutterActor
+ *
+ * Decreases the culling inhibitor counter. See clutter_actor_inhibit_culling()
+ * for when inhibit culling is necessary.
+ *
+ * Calling this function without a matching call to
+ * clutter_actor_inhibit_culling() is a programming error.
+ */
+void
+clutter_actor_uninhibit_culling (ClutterActor *actor)
+{
+  ClutterActorPrivate *priv;
+
+  g_return_if_fail (CLUTTER_IS_ACTOR (actor));
+
+  priv = actor->priv;
+
+  if (priv->inhibit_culling_counter == 0)
+    {
+      g_critical ("Unpaired call to clutter_actor_uninhibit_culling");
+      return;
+    }
+
+  priv->inhibit_culling_counter--;
+  if (priv->inhibit_culling_counter == 0)
+    _clutter_actor_set_enable_paint_unmapped (actor, FALSE);
+}
+
 /* Allows you to disable applying the actors model view transform during
  * a paint. Used by ClutterClone. */
 void
@@ -15977,10 +14580,15 @@ _clutter_actor_set_enable_paint_unmapped (ClutterActor *self,
 
   priv = self->priv;
 
+  if (priv->enable_paint_unmapped == enable)
+    return;
+
   priv->enable_paint_unmapped = enable;
 
-  if (priv->enable_paint_unmapped)
+  if (enable)
     {
+      push_in_paint_unmapped_branch (self, 1);
+
       /* Make sure that the parents of the widget are realized first;
        * otherwise checks in clutter_actor_update_map_state() will
        * fail.
@@ -15996,170 +14604,8 @@ _clutter_actor_set_enable_paint_unmapped (ClutterActor *self,
   else
     {
       clutter_actor_update_map_state (self, MAP_STATE_CHECK);
+      pop_in_paint_unmapped_branch (self, 1);
     }
-}
-
-static void
-clutter_anchor_coord_get_units (ClutterActor      *self,
-                                const AnchorCoord *coord,
-                                gfloat            *x,
-                                gfloat            *y,
-                                gfloat            *z)
-{
-  if (coord->is_fractional)
-    {
-      gfloat actor_width, actor_height;
-
-      clutter_actor_get_size (self, &actor_width, &actor_height);
-
-      if (x)
-        *x = actor_width * coord->v.fraction.x;
-
-      if (y)
-        *y = actor_height * coord->v.fraction.y;
-
-      if (z)
-        *z = 0;
-    }
-  else
-    {
-      if (x)
-        *x = coord->v.units.x;
-
-      if (y)
-        *y = coord->v.units.y;
-
-      if (z)
-        *z = coord->v.units.z;
-    }
-}
-
-static void
-clutter_anchor_coord_set_units (AnchorCoord *coord,
-                                gfloat       x,
-                                gfloat       y,
-                                gfloat       z)
-{
-  coord->is_fractional = FALSE;
-  coord->v.units.x = x;
-  coord->v.units.y = y;
-  coord->v.units.z = z;
-}
-
-static ClutterGravity
-clutter_anchor_coord_get_gravity (const AnchorCoord *coord)
-{
-  if (coord->is_fractional)
-    {
-      if (coord->v.fraction.x == 0.0)
-        {
-          if (coord->v.fraction.y == 0.0)
-            return CLUTTER_GRAVITY_NORTH_WEST;
-          else if (coord->v.fraction.y == 0.5)
-            return CLUTTER_GRAVITY_WEST;
-          else if (coord->v.fraction.y == 1.0)
-            return CLUTTER_GRAVITY_SOUTH_WEST;
-          else
-            return CLUTTER_GRAVITY_NONE;
-        }
-      else if (coord->v.fraction.x == 0.5)
-        {
-          if (coord->v.fraction.y == 0.0)
-            return CLUTTER_GRAVITY_NORTH;
-          else if (coord->v.fraction.y == 0.5)
-            return CLUTTER_GRAVITY_CENTER;
-          else if (coord->v.fraction.y == 1.0)
-            return CLUTTER_GRAVITY_SOUTH;
-          else
-            return CLUTTER_GRAVITY_NONE;
-        }
-      else if (coord->v.fraction.x == 1.0)
-        {
-          if (coord->v.fraction.y == 0.0)
-            return CLUTTER_GRAVITY_NORTH_EAST;
-          else if (coord->v.fraction.y == 0.5)
-            return CLUTTER_GRAVITY_EAST;
-          else if (coord->v.fraction.y == 1.0)
-            return CLUTTER_GRAVITY_SOUTH_EAST;
-          else
-            return CLUTTER_GRAVITY_NONE;
-        }
-      else
-        return CLUTTER_GRAVITY_NONE;
-    }
-  else
-    return CLUTTER_GRAVITY_NONE;
-}
-
-static void
-clutter_anchor_coord_set_gravity (AnchorCoord    *coord,
-                                  ClutterGravity  gravity)
-{
-  switch (gravity)
-    {
-    case CLUTTER_GRAVITY_NORTH:
-      coord->v.fraction.x = 0.5;
-      coord->v.fraction.y = 0.0;
-      break;
-
-    case CLUTTER_GRAVITY_NORTH_EAST:
-      coord->v.fraction.x = 1.0;
-      coord->v.fraction.y = 0.0;
-      break;
-
-    case CLUTTER_GRAVITY_EAST:
-      coord->v.fraction.x = 1.0;
-      coord->v.fraction.y = 0.5;
-      break;
-
-    case CLUTTER_GRAVITY_SOUTH_EAST:
-      coord->v.fraction.x = 1.0;
-      coord->v.fraction.y = 1.0;
-      break;
-
-    case CLUTTER_GRAVITY_SOUTH:
-      coord->v.fraction.x = 0.5;
-      coord->v.fraction.y = 1.0;
-      break;
-
-    case CLUTTER_GRAVITY_SOUTH_WEST:
-      coord->v.fraction.x = 0.0;
-      coord->v.fraction.y = 1.0;
-      break;
-
-    case CLUTTER_GRAVITY_WEST:
-      coord->v.fraction.x = 0.0;
-      coord->v.fraction.y = 0.5;
-      break;
-
-    case CLUTTER_GRAVITY_NORTH_WEST:
-      coord->v.fraction.x = 0.0;
-      coord->v.fraction.y = 0.0;
-      break;
-
-    case CLUTTER_GRAVITY_CENTER:
-      coord->v.fraction.x = 0.5;
-      coord->v.fraction.y = 0.5;
-      break;
-
-    default:
-      coord->v.fraction.x = 0.0;
-      coord->v.fraction.y = 0.0;
-      break;
-    }
-
-  coord->is_fractional = TRUE;
-}
-
-static gboolean
-clutter_anchor_coord_is_zero (const AnchorCoord *coord)
-{
-  if (coord->is_fractional)
-    return coord->v.fraction.x == 0.0 && coord->v.fraction.y == 0.0;
-  else
-    return (coord->v.units.x == 0.0
-            && coord->v.units.y == 0.0
-            && coord->v.units.z == 0.0);
 }
 
 /**
@@ -16300,25 +14746,6 @@ clutter_actor_unset_flags (ClutterActor      *self,
   g_object_thaw_notify (obj);
 }
 
-/**
- * clutter_actor_get_transformation_matrix:
- * @self: a #ClutterActor
- * @matrix: (out caller-allocates): the return location for a #ClutterMatrix
- *
- * Retrieves the transformations applied to @self relative to its
- * parent.
- *
- * Since: 1.0
- *
- * Deprecated: 1.12: Use clutter_actor_get_transform() instead
- */
-void
-clutter_actor_get_transformation_matrix (ClutterActor  *self,
-                                         ClutterMatrix *matrix)
-{
-  clutter_actor_get_transform (self, matrix);
-}
-
 static void
 clutter_actor_set_transform_internal (ClutterActor        *self,
                                       const ClutterMatrix *transform)
@@ -16336,7 +14763,7 @@ clutter_actor_set_transform_internal (ClutterActor        *self,
   info->transform = *transform;
   info->transform_set = !cogl_matrix_is_identity (&info->transform);
 
-  self->priv->transform_valid = FALSE;
+  transform_changed (self);
 
   clutter_actor_queue_redraw (self);
 
@@ -16454,6 +14881,20 @@ clutter_actor_is_in_clone_paint (ClutterActor *self)
   return FALSE;
 }
 
+gboolean
+clutter_actor_is_painting_unmapped (ClutterActor *self)
+{
+  g_return_val_if_fail (CLUTTER_IS_ACTOR (self), FALSE);
+
+  return self->priv->unmapped_paint_branch_counter > 0;
+}
+
+gboolean
+clutter_actor_has_damage (ClutterActor *actor)
+{
+  return actor->priv->is_dirty;
+}
+
 static gboolean
 set_direction_recursive (ClutterActor *actor,
                          gpointer      user_data)
@@ -16526,6 +14967,23 @@ _clutter_actor_set_has_pointer (ClutterActor *self,
     }
 }
 
+void
+_clutter_actor_set_has_key_focus (ClutterActor *self,
+                                  gboolean      has_key_focus)
+{
+  ClutterActorPrivate *priv = self->priv;
+
+  if (priv->has_key_focus != has_key_focus)
+    {
+      priv->has_key_focus = has_key_focus;
+
+      if (has_key_focus)
+        g_signal_emit (self, actor_signals[KEY_FOCUS_IN], 0);
+      else
+        g_signal_emit (self, actor_signals[KEY_FOCUS_OUT], 0);
+    }
+}
+
 /**
  * clutter_actor_get_text_direction:
  * @self: a #ClutterActor
@@ -16558,100 +15016,6 @@ clutter_actor_get_text_direction (ClutterActor *self)
 }
 
 /**
- * clutter_actor_push_internal:
- * @self: a #ClutterActor
- *
- * Should be used by actors implementing the #ClutterContainer and with
- * internal children added through clutter_actor_set_parent(), for instance:
- *
- * |[<!-- language="C" -->
- *   static void
- *   my_actor_init (MyActor *self)
- *   {
- *     self->priv = my_actor_get_instance_private (self);
- *
- *     clutter_actor_push_internal (CLUTTER_ACTOR (self));
- *
- *     // calling clutter_actor_set_parent() now will result in
- *     // the internal flag being set on a child of MyActor
- *
- *     // internal child - a background texture
- *     self->priv->background_tex = clutter_texture_new ();
- *     clutter_actor_set_parent (self->priv->background_tex,
- *                               CLUTTER_ACTOR (self));
- *
- *     // internal child - a label
- *     self->priv->label = clutter_text_new ();
- *     clutter_actor_set_parent (self->priv->label,
- *                               CLUTTER_ACTOR (self));
- *
- *     clutter_actor_pop_internal (CLUTTER_ACTOR (self));
- *
- *     // calling clutter_actor_set_parent() now will not result in
- *     // the internal flag being set on a child of MyActor
- *   }
- * ]|
- *
- * This function will be used by Clutter to toggle an "internal child"
- * flag whenever clutter_actor_set_parent() is called; internal children
- * are handled differently by Clutter, specifically when destroying their
- * parent.
- *
- * Call clutter_actor_pop_internal() when you finished adding internal
- * children.
- *
- * Nested calls to clutter_actor_push_internal() are allowed, but each
- * one must by followed by a clutter_actor_pop_internal() call.
- *
- * Since: 1.2
- *
- * Deprecated: 1.10: All children of an actor are accessible through
- *   the #ClutterActor API, and #ClutterActor implements the
- *   #ClutterContainer interface, so this function is only useful
- *   for legacy containers overriding the default implementation.
- */
-void
-clutter_actor_push_internal (ClutterActor *self)
-{
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-
-  self->priv->internal_child += 1;
-}
-
-/**
- * clutter_actor_pop_internal:
- * @self: a #ClutterActor
- *
- * Disables the effects of clutter_actor_push_internal().
- *
- * Since: 1.2
- *
- * Deprecated: 1.10: All children of an actor are accessible through
- *   the #ClutterActor API. This function is only useful for legacy
- *   containers overriding the default implementation of the
- *   #ClutterContainer interface.
- */
-void
-clutter_actor_pop_internal (ClutterActor *self)
-{
-  ClutterActorPrivate *priv;
-
-  g_return_if_fail (CLUTTER_IS_ACTOR (self));
-
-  priv = self->priv;
-
-  if (priv->internal_child == 0)
-    {
-      g_warning ("Mismatched %s: you need to call "
-                 "clutter_actor_push_composite() at least once before "
-                 "calling this function", G_STRFUNC);
-      return;
-    }
-
-  priv->internal_child -= 1;
-}
-
-/**
  * clutter_actor_has_pointer:
  * @self: a #ClutterActor
  *
@@ -16669,26 +15033,6 @@ clutter_actor_has_pointer (ClutterActor *self)
   g_return_val_if_fail (CLUTTER_IS_ACTOR (self), FALSE);
 
   return self->priv->has_pointer;
-}
-
-/* XXX: This is a workaround for not being able to break the ABI of
- * the QUEUE_REDRAW signal. It is an out-of-band argument.  See
- * clutter_actor_queue_clipped_redraw() for details.
- */
-ClutterPaintVolume *
-_clutter_actor_get_queue_redraw_clip (ClutterActor *self)
-{
-  return g_object_get_data (G_OBJECT (self),
-                            "-clutter-actor-queue-redraw-clip");
-}
-
-void
-_clutter_actor_set_queue_redraw_clip (ClutterActor       *self,
-                                      ClutterPaintVolume *clip)
-{
-  g_object_set_data (G_OBJECT (self),
-                     "-clutter-actor-queue-redraw-clip",
-                     clip);
 }
 
 /**
@@ -17394,15 +15738,9 @@ clutter_actor_clear_effects (ClutterActor *self)
 gboolean
 clutter_actor_has_key_focus (ClutterActor *self)
 {
-  ClutterActor *stage;
-
   g_return_val_if_fail (CLUTTER_IS_ACTOR (self), FALSE);
 
-  stage = _clutter_actor_get_stage_internal (self);
-  if (stage == NULL)
-    return FALSE;
-
-  return clutter_stage_get_key_focus (CLUTTER_STAGE (stage)) == self;
+  return self->priv->has_key_focus;
 }
 
 static gboolean
@@ -17489,7 +15827,7 @@ _clutter_actor_get_paint_volume_real (ClutterActor *self,
                l != NULL && l->data != priv->current_effect;
                l = l->next)
             {
-              if (!_clutter_effect_get_paint_volume (l->data, pv))
+              if (!_clutter_effect_modify_paint_volume (l->data, pv))
                 {
                   clutter_paint_volume_free (pv);
                   CLUTTER_NOTE (CLIPPING, "Bail from get_paint_volume (%s): "
@@ -17507,7 +15845,7 @@ _clutter_actor_get_paint_volume_real (ClutterActor *self,
           /* otherwise, get the cumulative volume */
           effects = _clutter_meta_group_peek_metas (priv->effects);
           for (l = effects; l != NULL; l = l->next)
-            if (!_clutter_effect_get_paint_volume (l->data, pv))
+            if (!_clutter_effect_modify_paint_volume (l->data, pv))
               {
                 clutter_paint_volume_free (pv);
                 CLUTTER_NOTE (CLIPPING, "Bail from get_paint_volume (%s): "
@@ -17735,6 +16073,363 @@ clutter_actor_get_paint_box (ClutterActor    *self,
   return TRUE;
 }
 
+static ClutterActorTraverseVisitFlags
+clear_stage_views_cb (ClutterActor *actor,
+                      int           depth,
+                      gpointer      user_data)
+{
+  g_autoptr (GList) old_stage_views = NULL;
+
+  actor->priv->needs_update_stage_views = TRUE;
+
+  old_stage_views = g_steal_pointer (&actor->priv->stage_views);
+
+  if (old_stage_views)
+    g_signal_emit (actor, actor_signals[STAGE_VIEWS_CHANGED], 0);
+
+  return CLUTTER_ACTOR_TRAVERSE_VISIT_CONTINUE;
+}
+
+void
+clutter_actor_clear_stage_views_recursive (ClutterActor *self)
+{
+  _clutter_actor_traverse (self,
+                           CLUTTER_ACTOR_TRAVERSE_DEPTH_FIRST,
+                           clear_stage_views_cb,
+                           NULL,
+                           NULL);
+}
+
+float
+clutter_actor_get_real_resource_scale (ClutterActor *self)
+{
+  ClutterActorPrivate *priv = self->priv;
+  float guessed_scale;
+
+  if (priv->resource_scale != -1.f)
+    return priv->resource_scale;
+
+  /* If the scale hasn't been computed yet, we return a best guess */
+
+  if (priv->parent != NULL)
+    {
+      /* If the scale hasn't been calculated yet, assume this actor is located
+       * inside its parents box and go up the hierarchy.
+       */
+      guessed_scale = clutter_actor_get_real_resource_scale (priv->parent);
+    }
+  else if (CLUTTER_ACTOR_IS_TOPLEVEL (self))
+    {
+      /* This must be the first allocation cycle and the resource scale of
+       * the stage has not been updated yet, so return it manually.
+       */
+      GList *l;
+      ClutterStage *stage = CLUTTER_STAGE (self);
+      float max_scale = -1.f;
+
+      for (l = clutter_stage_peek_stage_views (stage); l; l = l->next)
+        {
+          ClutterStageView *view = l->data;
+
+          max_scale = MAX (clutter_stage_view_get_scale (view), max_scale);
+        }
+
+      guessed_scale = max_scale;
+    }
+  else
+    {
+      ClutterBackend *backend = clutter_get_default_backend ();
+
+      guessed_scale = clutter_backend_get_fallback_resource_scale (backend);
+    }
+
+  g_assert (guessed_scale >= 1.f);
+
+  /* Always return this value until we compute the correct one later.
+   * If our guess turns out to be wrong, we'll emit "resource-scale-changed"
+   * and correct it before painting.
+   */
+  priv->resource_scale = guessed_scale;
+
+  return priv->resource_scale;
+}
+
+/**
+ * clutter_actor_get_resource_scale:
+ * @self: A #ClutterActor
+ *
+ * Retrieves the resource scale for this actor.
+ *
+ * The resource scale refers to the scale the actor should use for its resources.
+ * For example if an actor draws a a picture of size 100 x 100 in the stage
+ * coordinate space, it should use a texture of twice the size (i.e. 200 x 200)
+ * if the resource scale is 2.
+ *
+ * The resource scale is determined by calculating the highest #ClutterStageView
+ * scale the actor will get painted on.
+ *
+ * Note that the scale returned by this function is only guaranteed to be
+ * correct when queried during the paint cycle, in all other cases this
+ * function will only return a best guess. If your implementation really
+ * needs to get a resource scale outside of the paint cycle, make sure to
+ * subscribe to the "resource-scale-changed" signal to get notified about
+ * the new, correct resource scale before painting.
+ *
+ * Also avoid getting the resource scale for actors that are not attached
+ * to a stage. There's no sane way for Clutter to guess which #ClutterStageView
+ * the actor is going to be painted on, so you'll probably end up receiving
+ * the "resource-scale-changed" signal and having to rebuild your resources.
+ *
+ * The best guess this function may return is usually just the last resource
+ * scale the actor got painted with. If this resource scale couldn't be found
+ * because the actor was never painted so far or Clutter was unable to
+ * determine its position and size, this function will return the resource
+ * scale of a parent.
+ *
+ * Returns: The resource scale the actor should use for its textures
+ */
+float
+clutter_actor_get_resource_scale (ClutterActor *self)
+{
+  g_return_val_if_fail (CLUTTER_IS_ACTOR (self), 1.f);
+
+  return ceilf (clutter_actor_get_real_resource_scale (self));
+}
+
+static gboolean
+sorted_lists_equal (GList *list_a,
+                    GList *list_b)
+{
+  GList *a, *b;
+
+  if (!list_a && !list_b)
+    return TRUE;
+
+  for (a = list_a, b = list_b;
+       a && b;
+       a = a->next, b = b->next)
+    {
+      if (a->data != b->data)
+        break;
+
+      if (!a->next && !b->next)
+        return TRUE;
+    }
+
+  return FALSE;
+}
+
+static void
+update_stage_views (ClutterActor *self)
+{
+  ClutterActorPrivate *priv = self->priv;
+  g_autoptr (GList) old_stage_views = NULL;
+  ClutterStage *stage;
+  graphene_rect_t bounding_rect;
+
+  old_stage_views = g_steal_pointer (&priv->stage_views);
+
+  if (priv->needs_allocation)
+    {
+      g_warning ("Can't update stage views actor %s is on because it needs an "
+                 "allocation.", _clutter_actor_get_debug_name (self));
+      goto out;
+    }
+
+  stage = CLUTTER_STAGE (_clutter_actor_get_stage_internal (self));
+  g_return_if_fail (stage);
+
+  clutter_actor_get_transformed_extents (self, &bounding_rect);
+
+  if (bounding_rect.size.width == 0.0 ||
+      bounding_rect.size.height == 0.0)
+    goto out;
+
+  priv->stage_views = clutter_stage_get_views_for_rect (stage,
+                                                        &bounding_rect);
+
+out:
+  if (g_signal_has_handler_pending (self, actor_signals[STAGE_VIEWS_CHANGED],
+                                    0, TRUE))
+    {
+      if (!sorted_lists_equal (old_stage_views, priv->stage_views))
+        g_signal_emit (self, actor_signals[STAGE_VIEWS_CHANGED], 0);
+    }
+}
+
+static void
+update_resource_scale (ClutterActor *self,
+                       int           phase)
+{
+  ClutterActorPrivate *priv = self->priv;
+  float new_resource_scale, old_resource_scale;
+
+  new_resource_scale =
+    CLUTTER_ACTOR_GET_CLASS (self)->calculate_resource_scale (self, phase);
+
+  if (priv->resource_scale == new_resource_scale)
+    return;
+
+  /* If the actor moved out of the stage, simply keep the last scale */
+  if (new_resource_scale == -1.f)
+    return;
+
+  old_resource_scale = priv->resource_scale;
+  priv->resource_scale = new_resource_scale;
+
+  /* Never notify the initial change, otherwise, to be consistent,
+   * we'd also have to notify if we guessed correctly in
+   * clutter_actor_get_real_resource_scale().
+   */
+  if (old_resource_scale == -1.f)
+    return;
+
+  if (ceilf (old_resource_scale) != ceilf (priv->resource_scale))
+    g_signal_emit (self, actor_signals[RESOURCE_SCALE_CHANGED], 0);
+}
+
+void
+clutter_actor_update_stage_views (ClutterActor *self,
+                                  gboolean      use_max_scale)
+{
+  ClutterActorPrivate *priv = self->priv;
+  ClutterActor *child;
+
+  if (!CLUTTER_ACTOR_IS_MAPPED (self) ||
+      CLUTTER_ACTOR_IN_DESTRUCTION (self))
+    return;
+
+  if (!priv->needs_update_stage_views)
+    return;
+
+  update_stage_views (self);
+  update_resource_scale (self, use_max_scale);
+
+  priv->needs_update_stage_views = FALSE;
+
+  for (child = priv->first_child; child; child = child->priv->next_sibling)
+    clutter_actor_update_stage_views (child, use_max_scale);
+}
+
+/**
+ * clutter_actor_peek_stage_views:
+ * @self: A #ClutterActor
+ *
+ * Retrieves the list of #ClutterStageView<!-- -->s the actor is being
+ * painted on.
+ *
+ * If this function is called during the paint cycle, the list is guaranteed
+ * to be up-to-date, if called outside the paint cycle, the list will
+ * contain the views the actor was painted on last.
+ *
+ * The list returned by this function is not updated when the actors
+ * visibility changes: If an actor gets hidden and is not being painted
+ * anymore, this function will return the list of views the actor was
+ * painted on last.
+ *
+ * If an actor is not attached to a stage (realized), this function will
+ * always return an empty list.
+ *
+ * Returns: (transfer none) (element-type Clutter.StageView): The list of
+ *   #ClutterStageView<!-- -->s the actor is being painted on. The list and
+ *   its contents are owned by the #ClutterActor and the list may not be
+ *   freed or modified.
+ */
+GList *
+clutter_actor_peek_stage_views (ClutterActor *self)
+{
+  g_return_val_if_fail (CLUTTER_IS_ACTOR (self), FALSE);
+
+  return self->priv->stage_views;
+}
+
+gboolean
+clutter_actor_is_effectively_on_stage_view (ClutterActor     *self,
+                                            ClutterStageView *view)
+{
+  ClutterActor *actor;
+
+  g_return_val_if_fail (CLUTTER_IS_ACTOR (self), FALSE);
+
+  if (g_list_find (self->priv->stage_views, view))
+    return TRUE;
+
+  for (actor = self; actor; actor = actor->priv->parent)
+    {
+      if (actor->priv->clones)
+        {
+          GHashTableIter iter;
+          gpointer key;
+
+          g_hash_table_iter_init (&iter, actor->priv->clones);
+          while (g_hash_table_iter_next (&iter, &key, NULL))
+            {
+              ClutterActor *clone = key;
+              GList *clone_views;
+
+              clone_views = clutter_actor_peek_stage_views (clone);
+              if (g_list_find (clone_views, view))
+                return TRUE;
+            }
+        }
+    }
+
+  return FALSE;
+}
+
+/**
+ * clutter_actor_pick_frame_clock: (skip)
+ * @self: a #ClutterActor
+ * @out_actor: (nullable): a pointer to an #ClutterActor
+ *
+ * Pick the most suitable frame clock for driving animations for this actor.
+ *
+ * The #ClutterActor used for picking the frame clock is written @out_actor.
+ *
+ * Returns: (transfer none): a #ClutterFrameClock
+ */
+ClutterFrameClock *
+clutter_actor_pick_frame_clock (ClutterActor  *self,
+                                ClutterActor **out_actor)
+{
+  ClutterActorPrivate *priv = self->priv;
+  float max_refresh_rate = 0.0;
+  ClutterStageView *best_view = NULL;
+  GList *l;
+
+  if (!priv->stage_views)
+    {
+     if (priv->parent)
+       return clutter_actor_pick_frame_clock (priv->parent, out_actor);
+     else
+       return NULL;
+    }
+
+  for (l = priv->stage_views; l; l = l->next)
+    {
+      ClutterStageView *view = l->data;
+      float refresh_rate;
+
+      refresh_rate = clutter_stage_view_get_refresh_rate (view);
+      if (refresh_rate > max_refresh_rate)
+        {
+          best_view = view;
+          max_refresh_rate = refresh_rate;
+        }
+    }
+
+  if (best_view)
+    {
+      if (out_actor)
+        *out_actor = self;
+      return clutter_stage_view_get_frame_clock (best_view);
+    }
+  else
+    {
+      return NULL;
+    }
+}
+
 /**
  * clutter_actor_has_overlaps:
  * @self: A #ClutterActor
@@ -17879,7 +16574,7 @@ clutter_actor_get_child_at_index (ClutterActor *self,
 
 /*< private >
  * _clutter_actor_foreach_child:
- * @actor: The actor whos children you want to iterate
+ * @actor: The actor whose children you want to iterate
  * @callback: The function to call for each child
  * @user_data: Private data to pass to @callback
  *
@@ -18096,9 +16791,7 @@ clutter_actor_set_layout_manager (ClutterActor         *self,
 
   if (priv->layout_manager != NULL)
     {
-      g_signal_handlers_disconnect_by_func (priv->layout_manager,
-                                            G_CALLBACK (on_layout_manager_changed),
-                                            self);
+      g_clear_signal_handler (&priv->layout_changed_id, priv->layout_manager);
       clutter_layout_manager_set_container (priv->layout_manager, NULL);
       g_clear_object (&priv->layout_manager);
     }
@@ -18110,9 +16803,10 @@ clutter_actor_set_layout_manager (ClutterActor         *self,
       g_object_ref_sink (priv->layout_manager);
       clutter_layout_manager_set_container (priv->layout_manager,
                                             CLUTTER_CONTAINER (self));
-      g_signal_connect (priv->layout_manager, "layout-changed",
-                        G_CALLBACK (on_layout_manager_changed),
-                        self);
+      priv->layout_changed_id =
+        g_signal_connect (priv->layout_manager, "layout-changed",
+                          G_CALLBACK (on_layout_manager_changed),
+                          self);
     }
 
   clutter_actor_queue_relayout (self);
@@ -18140,13 +16834,13 @@ clutter_actor_get_layout_manager (ClutterActor *self)
 }
 
 static const ClutterLayoutInfo default_layout_info = {
-  CLUTTER_POINT_INIT_ZERO,      /* fixed-pos */
+  GRAPHENE_POINT_INIT_ZERO,     /* fixed-pos */
   { 0, 0, 0, 0 },               /* margin */
   CLUTTER_ACTOR_ALIGN_FILL,     /* x-align */
   CLUTTER_ACTOR_ALIGN_FILL,     /* y-align */
   FALSE, FALSE,                 /* expand */
-  CLUTTER_SIZE_INIT_ZERO,       /* minimum */
-  CLUTTER_SIZE_INIT_ZERO,       /* natural */
+  GRAPHENE_SIZE_INIT_ZERO,       /* minimum */
+  GRAPHENE_SIZE_INIT_ZERO,       /* natural */
 };
 
 static void
@@ -18434,6 +17128,10 @@ clutter_actor_set_margin_top (ClutterActor *self,
   g_return_if_fail (margin >= 0.f);
 
   info = _clutter_actor_get_layout_info_or_defaults (self);
+
+  if (info->margin.top == margin)
+    return;
+
   _clutter_actor_create_transition (self, obj_props[PROP_MARGIN_TOP],
                                     info->margin.top,
                                     margin);
@@ -18478,6 +17176,10 @@ clutter_actor_set_margin_bottom (ClutterActor *self,
   g_return_if_fail (margin >= 0.f);
 
   info = _clutter_actor_get_layout_info_or_defaults (self);
+
+  if (info->margin.bottom == margin)
+    return;
+
   _clutter_actor_create_transition (self, obj_props[PROP_MARGIN_BOTTOM],
                                     info->margin.bottom,
                                     margin);
@@ -18522,6 +17224,10 @@ clutter_actor_set_margin_left (ClutterActor *self,
   g_return_if_fail (margin >= 0.f);
 
   info = _clutter_actor_get_layout_info_or_defaults (self);
+
+  if (info->margin.left == margin)
+    return;
+
   _clutter_actor_create_transition (self, obj_props[PROP_MARGIN_LEFT],
                                     info->margin.left,
                                     margin);
@@ -18566,6 +17272,10 @@ clutter_actor_set_margin_right (ClutterActor *self,
   g_return_if_fail (margin >= 0.f);
 
   info = _clutter_actor_get_layout_info_or_defaults (self);
+
+  if (info->margin.right == margin)
+    return;
+
   _clutter_actor_create_transition (self, obj_props[PROP_MARGIN_RIGHT],
                                     info->margin.right,
                                     margin);
@@ -19006,9 +17716,9 @@ clutter_actor_iter_destroy (ClutterActorIter *iter)
 }
 
 static const ClutterAnimationInfo default_animation_info = {
-  NULL,         /* transitions */
   NULL,         /* states */
   NULL,         /* cur_state */
+  NULL,         /* transitions */
 };
 
 static void
@@ -19062,20 +17772,6 @@ _clutter_actor_get_animation_info (ClutterActor *self)
   return res;
 }
 
-ClutterTransition *
-_clutter_actor_get_transition (ClutterActor *actor,
-                               GParamSpec   *pspec)
-{
-  const ClutterAnimationInfo *info;
-
-  info = _clutter_actor_get_animation_info_or_defaults (actor);
-
-  if (info->transitions == NULL)
-    return NULL;
-
-  return g_hash_table_lookup (info->transitions, pspec->name);
-}
-
 static void
 transition_closure_free (gpointer data)
 {
@@ -19090,10 +17786,12 @@ transition_closure_free (gpointer data)
        * so that we don't end up inside on_transition_stopped() from
        * a call to g_hash_table_remove().
        */
-      g_signal_handler_disconnect (clos->transition, clos->completed_id);
+      g_clear_signal_handler (&clos->completed_id, clos->transition);
 
       if (clutter_timeline_is_playing (timeline))
         clutter_timeline_stop (timeline);
+      else if (clutter_timeline_get_delay (timeline) > 0)
+        clutter_timeline_cancel_delay (timeline);
 
       /* remove the reference added in add_transition_internal() */
       g_object_unref (clos->transition);
@@ -19128,15 +17826,8 @@ on_transition_stopped (ClutterTransition *transition,
   t_quark = g_quark_from_string (clos->name);
   t_name = g_strdup (clos->name);
 
-  if (clos->is_implicit ||
-      clutter_transition_get_remove_on_complete (transition))
+  if (clutter_transition_get_remove_on_complete (transition))
     {
-      /* we take a reference here because removing the closure
-       * will release the reference on the transition, and we
-       * want the transition to survive the signal emission
-       */
-      g_object_ref (transition);
-
       /* this is safe, because the timeline has now stopped,
        * so we won't recurse; the reference on the Animatable
        * will be dropped by the ::stopped signal closure in
@@ -19172,8 +17863,7 @@ on_transition_stopped (ClutterTransition *transition,
 static void
 clutter_actor_add_transition_internal (ClutterActor *self,
                                        const gchar  *name,
-                                       ClutterTransition *transition,
-                                       gboolean           is_implicit)
+                                       ClutterTransition *transition)
 {
   ClutterTimeline *timeline;
   TransitionClosure *clos;
@@ -19203,7 +17893,6 @@ clutter_actor_add_transition_internal (ClutterActor *self,
   clos->actor = self;
   clos->transition = g_object_ref (transition);
   clos->name = g_strdup (name);
-  clos->is_implicit = is_implicit;
   clos->completed_id = g_signal_connect (timeline, "stopped",
                                          G_CALLBACK (on_transition_stopped),
                                          clos);
@@ -19241,7 +17930,8 @@ should_skip_implicit_transition (ClutterActor *self,
    * skip all transitions on the :allocation, to avoid actors "flying in"
    * into their new position and size
    */
-  if (pspec == obj_props[PROP_ALLOCATION] && priv->needs_allocation)
+  if (pspec == obj_props[PROP_ALLOCATION] &&
+      !clutter_actor_box_is_initialized (&priv->allocation))
     return TRUE;
 
   /* if the actor is not mapped and is not part of a branch of the scene
@@ -19250,7 +17940,6 @@ should_skip_implicit_transition (ClutterActor *self,
    * when those transitions happen
    */
   if (!CLUTTER_ACTOR_IS_MAPPED (self) &&
-      priv->in_cloned_branch == 0 &&
       !clutter_actor_has_mapped_clones (self))
     return TRUE;
 
@@ -19279,8 +17968,8 @@ _clutter_actor_create_transition (ClutterActor *actor,
   gboolean call_restore = FALSE;
   TransitionClosure *clos;
   va_list var_args;
-  GValue initial = G_VALUE_INIT;
-  GValue final = G_VALUE_INIT;
+  g_auto (GValue) initial = G_VALUE_INIT;
+  g_auto (GValue) final = G_VALUE_INIT;
   GType ptype;
   char *error;
 
@@ -19329,7 +18018,6 @@ _clutter_actor_create_transition (ClutterActor *actor,
   if (error != NULL)
     {
       g_critical ("%s: %s", G_STRLOC, error);
-      g_value_unset (&initial);
       g_free (error);
       goto out;
     }
@@ -19351,9 +18039,6 @@ _clutter_actor_create_transition (ClutterActor *actor,
                                              &final,
                                              pspec);
 
-      g_value_unset (&initial);
-      g_value_unset (&final);
-
       goto out;
     }
 
@@ -19361,6 +18046,8 @@ _clutter_actor_create_transition (ClutterActor *actor,
   if (clos == NULL)
     {
       res = clutter_property_transition_new (pspec->name);
+
+      clutter_transition_set_remove_on_complete (res, TRUE);
 
       interval = clutter_interval_new_with_values (ptype, &initial, &final);
       clutter_transition_set_interval (res, interval);
@@ -19395,13 +18082,10 @@ _clutter_actor_create_transition (ClutterActor *actor,
 #endif /* CLUTTER_ENABLE_DEBUG */
 
       /* this will start the transition as well */
-      clutter_actor_add_transition_internal (actor, pspec->name, res, TRUE);
+      clutter_actor_add_transition_internal (actor, pspec->name, res);
 
       /* the actor now owns the transition */
       g_object_unref (res);
-
-      g_value_unset (&initial);
-      g_value_unset (&final);
     }
   else
     {
@@ -19469,7 +18153,7 @@ clutter_actor_add_transition (ClutterActor      *self,
   g_return_if_fail (name != NULL);
   g_return_if_fail (CLUTTER_IS_TRANSITION (transition));
 
-  clutter_actor_add_transition_internal (self, name, transition, FALSE);
+  clutter_actor_add_transition_internal (self, name, transition);
 }
 
 /**
@@ -19747,7 +18431,7 @@ clutter_actor_get_easing_delay (ClutterActor *self)
  *
  * |[<!-- language="C" -->
  *   clutter_actor_set_easing_duration (actor, 1000);
- *   clutter_actor_set_rotation (actor, CLUTTER_Y_AXIS, 360.0, x, y, z);
+ *   clutter_actor_set_rotation_angle (actor, CLUTTER_Y_AXIS, 360.0);
  *
  *   transition = clutter_actor_get_transition (actor, "rotation-angle-y");
  *   g_signal_connect (transition, "stopped",
@@ -19787,6 +18471,23 @@ clutter_actor_get_transition (ClutterActor *self,
     return NULL;
 
   return clos->transition;
+}
+
+/**
+ * clutter_actor_has_transitions: (skip)
+ */
+gboolean
+clutter_actor_has_transitions (ClutterActor *self)
+{
+  const ClutterAnimationInfo *info;
+
+  g_return_val_if_fail (CLUTTER_IS_ACTOR (self), FALSE);
+
+  info = _clutter_actor_get_animation_info_or_defaults (self);
+  if (info->transitions == NULL)
+    return FALSE;
+
+  return g_hash_table_size (info->transitions) > 0;
 }
 
 /**
@@ -20682,7 +19383,7 @@ clutter_actor_set_child_transform_internal (ClutterActor        *self,
   /* we need to reset the transform_valid flag on each child */
   clutter_actor_iter_init (&iter, self);
   while (clutter_actor_iter_next (&iter, &child))
-    child->priv->transform_valid = FALSE;
+    transform_changed (child);
 
   clutter_actor_queue_redraw (self);
 
@@ -20858,60 +19559,72 @@ _clutter_actor_queue_relayout_on_clones (ClutterActor *self)
  * clutter_actor_has_mapped_clones:
  * @self: a #ClutterActor
  *
- * Returns whether a #ClutterActor has any mapped clones.
+ * Returns whether a #ClutterActor or any parent actors have mapped clones
+ * that are clone-painting @self.
  *
- * Return: %TRUE if the actor has mapped clones, and %FALSE otherwise
- *
- * Since: 1.16
+ * Returns: %TRUE if the actor has mapped clones, %FALSE otherwise
  */
 gboolean
 clutter_actor_has_mapped_clones (ClutterActor *self)
 {
-  ClutterActorPrivate *priv;
+  ClutterActor *actor;
   GHashTableIter iter;
   gpointer key;
 
   g_return_val_if_fail (CLUTTER_IS_ACTOR (self), FALSE);
 
-  priv = self->priv;
-
-  if (priv->clones == NULL)
+  if (self->priv->in_cloned_branch == 0)
     return FALSE;
 
-  g_hash_table_iter_init (&iter, priv->clones);
-  while (g_hash_table_iter_next (&iter, &key, NULL))
+  for (actor = self; actor; actor = actor->priv->parent)
     {
-      if (CLUTTER_ACTOR_IS_MAPPED (key))
-        return TRUE;
+      if (actor->priv->clones)
+        {
+          g_hash_table_iter_init (&iter, actor->priv->clones);
+          while (g_hash_table_iter_next (&iter, &key, NULL))
+            {
+              if (CLUTTER_ACTOR_IS_MAPPED (key))
+                return TRUE;
+            }
+        }
+
+      /* Clones will force-show their own source actor but not children of
+       * it, so if we're hidden and an actor up the hierarchy has a clone,
+       * we won't be visible.
+       */
+      if (!CLUTTER_ACTOR_IS_VISIBLE (actor))
+        return FALSE;
     }
 
   return FALSE;
 }
 
-CoglFramebuffer *
-_clutter_actor_get_active_framebuffer (ClutterActor *self)
+static void
+push_in_paint_unmapped_branch (ClutterActor *self,
+                               guint         count)
 {
-  ClutterStage *stage;
+  ClutterActor *iter;
 
-  if (!CLUTTER_ACTOR_IN_PAINT (self))
-    {
-      g_critical ("The active framebuffer of actor '%s' can only be "
-                  "retrieved during the paint sequence. Please, check "
-                  "your code.",
-                  _clutter_actor_get_debug_name (self));
-      return NULL;
-    }
+  for (iter = self->priv->first_child;
+       iter != NULL;
+       iter = iter->priv->next_sibling)
+    push_in_paint_unmapped_branch (iter, count);
 
-  stage = (ClutterStage *) _clutter_actor_get_stage_internal (self);
-  if (stage == NULL)
-    {
-      g_critical ("The active framebuffer of actor '%s' is only available "
-                  "if the actor is associated to a ClutterStage.",
-                  _clutter_actor_get_debug_name (self));
-      return NULL;
-    }
+  self->priv->unmapped_paint_branch_counter += count;
+}
 
-  return _clutter_stage_get_active_framebuffer (stage);
+static void
+pop_in_paint_unmapped_branch (ClutterActor *self,
+                              guint         count)
+{
+  ClutterActor *iter;
+
+  self->priv->unmapped_paint_branch_counter -= count;
+
+  for (iter = self->priv->first_child;
+       iter != NULL;
+       iter = iter->priv->next_sibling)
+    pop_in_paint_unmapped_branch (iter, count);
 }
 
 static void
@@ -21156,6 +19869,7 @@ clutter_actor_bind_model_with_properties (ClutterActor *self,
 
       model_property = va_arg (args, char *);
     }
+  va_end (args);
 
   clutter_actor_bind_model (self, model, bind_child_with_properties, clos, bind_closure_free);
 }
@@ -21201,7 +19915,7 @@ clutter_actor_create_texture_paint_node (ClutterActor *self,
   color.alpha = clutter_actor_get_paint_opacity_internal (self);
 
   node = clutter_texture_node_new (texture, &color, priv->min_filter, priv->mag_filter);
-  clutter_paint_node_set_name (node, "Texture");
+  clutter_paint_node_set_static_name (node, "Texture");
 
   if (priv->content_repeat == CLUTTER_REPEAT_NONE)
     clutter_paint_node_add_rectangle (node, &box);
@@ -21221,4 +19935,46 @@ clutter_actor_create_texture_paint_node (ClutterActor *self,
     }
 
   return node;
+}
+
+gboolean
+clutter_actor_has_accessible (ClutterActor *actor)
+{
+  g_return_val_if_fail (CLUTTER_IS_ACTOR (actor), FALSE);
+
+  if (CLUTTER_ACTOR_GET_CLASS (actor)->has_accessible)
+    return CLUTTER_ACTOR_GET_CLASS (actor)->has_accessible (actor);
+
+  return TRUE;
+}
+
+void
+clutter_actor_queue_immediate_relayout (ClutterActor *self)
+{
+  ClutterStage *stage;
+
+  g_return_if_fail (CLUTTER_IS_ACTOR (self));
+
+  clutter_actor_queue_relayout (self);
+
+  stage = CLUTTER_STAGE (_clutter_actor_get_stage_internal (self));
+  if (stage)
+    clutter_stage_set_actor_needs_immediate_relayout (stage);
+}
+
+/**
+ * clutter_actor_invalidate_transform:
+ * @self: A #ClutterActor
+ *
+ * Invalidate the cached transformation matrix of @self.
+ * This is needed for implementations overriding the apply_transform()
+ * vfunc and has to be called if the matrix returned by apply_transform()
+ * would change.
+ */
+void
+clutter_actor_invalidate_transform (ClutterActor *self)
+{
+  g_return_if_fail (CLUTTER_IS_ACTOR (self));
+
+  transform_changed (self);
 }

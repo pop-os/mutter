@@ -19,32 +19,31 @@
 
 #include "config.h"
 
-#include "meta-launcher.h"
+#include "backends/native/meta-launcher.h"
 
 #include <gio/gunixfdlist.h>
-
-#include <clutter/clutter.h>
-#include <clutter/evdev/clutter-evdev.h>
-
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <malloc.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
 #include <systemd/sd-login.h>
 #include <gudev/gudev.h>
 
-#include "dbus-utils.h"
-#include "meta-dbus-login1.h"
-
 #include "backends/meta-backend-private.h"
+#include "backends/native/dbus-utils.h"
 #include "backends/native/meta-backend-native.h"
-#include "meta-cursor-renderer-native.h"
-#include "meta-renderer-native.h"
+#include "backends/native/meta-clutter-backend-native.h"
+#include "backends/native/meta-cursor-renderer-native.h"
+#include "backends/native/meta-renderer-native.h"
+#include "backends/native/meta-seat-native.h"
+#include "clutter/clutter.h"
+
+#include "meta-dbus-login1.h"
 
 struct _MetaLauncher
 {
@@ -234,7 +233,9 @@ get_session_proxy (GCancellable *cancellable,
 
   if (!find_systemd_session (&session_id, &local_error))
     {
-      g_propagate_prefixed_error (error, local_error, "Could not get session ID: ");
+      g_propagate_prefixed_error (error,
+                                  g_steal_pointer (&local_error),
+                                  "Could not get session ID: ");
       return NULL;
     }
 
@@ -252,13 +253,15 @@ get_session_proxy (GCancellable *cancellable,
 }
 
 static Login1Seat *
-get_seat_proxy (GCancellable *cancellable,
+get_seat_proxy (gchar        *seat_id,
+                GCancellable *cancellable,
                 GError      **error)
 {
+  g_autofree char *seat_proxy_path = get_escaped_dbus_path ("/org/freedesktop/login1/seat", seat_id);
   Login1Seat *seat = login1_seat_proxy_new_for_bus_sync (G_BUS_TYPE_SYSTEM,
                                                          G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
                                                          "org.freedesktop.login1",
-                                                         "/org/freedesktop/login1/seat/self",
+                                                         seat_proxy_path,
                                                          cancellable, error);
   if (!seat)
     g_prefix_error(error, "Could not get seat proxy: ");
@@ -468,7 +471,9 @@ get_seat_id (GError **error)
 
   if (!find_systemd_session (&session_id, &local_error))
     {
-      g_propagate_prefixed_error (error, local_error, "Could not get session ID: ");
+      g_propagate_prefixed_error (error,
+                                  g_steal_pointer (&local_error),
+                                  "Could not get session ID: ");
       return NULL;
     }
 
@@ -510,7 +515,7 @@ meta_launcher_new (GError **error)
   if (!seat_id)
     goto fail;
 
-  seat_proxy = get_seat_proxy (NULL, error);
+  seat_proxy = get_seat_proxy (seat_id, NULL, error);
   if (!seat_proxy)
     goto fail;
 
@@ -521,11 +526,11 @@ meta_launcher_new (GError **error)
   self->sysfs_fds = g_hash_table_new (NULL, NULL);
   self->session_active = TRUE;
 
-  clutter_evdev_set_seat_id (self->seat_id);
+  meta_clutter_backend_native_set_seat_id (self->seat_id);
 
-  clutter_evdev_set_device_callbacks (on_evdev_device_open,
-                                      on_evdev_device_close,
-                                      self);
+  meta_seat_native_set_device_callbacks (on_evdev_device_open,
+                                         on_evdev_device_close,
+                                         self);
 
   g_signal_connect (self->session_proxy, "notify::active", G_CALLBACK (on_active_changed), self);
 

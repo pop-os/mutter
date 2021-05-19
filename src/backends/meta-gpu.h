@@ -27,6 +27,7 @@
 #include "backends/meta-monitor-manager-private.h"
 
 #define META_TYPE_GPU (meta_gpu_get_type ())
+META_EXPORT_TEST
 G_DECLARE_DERIVABLE_TYPE (MetaGpu, meta_gpu, META, GPU, GObject)
 
 struct _MetaGpuClass
@@ -37,29 +38,34 @@ struct _MetaGpuClass
                              GError  **error);
 };
 
-int meta_gpu_get_kms_fd (MetaGpu *gpu);
-
-const char * meta_gpu_get_kms_file_path (MetaGpu *gpu);
-
+META_EXPORT_TEST
 gboolean meta_gpu_read_current (MetaGpu  *gpu,
                                 GError  **error);
 
+META_EXPORT_TEST
 gboolean meta_gpu_has_hotplug_mode_update (MetaGpu *gpu);
 
-MetaMonitorManager * meta_gpu_get_monitor_manager (MetaGpu *gpu);
+META_EXPORT_TEST
+MetaBackend * meta_gpu_get_backend (MetaGpu *gpu);
 
+META_EXPORT_TEST
 GList * meta_gpu_get_outputs (MetaGpu *gpu);
 
+META_EXPORT_TEST
 GList * meta_gpu_get_crtcs (MetaGpu *gpu);
 
+META_EXPORT_TEST
 GList * meta_gpu_get_modes (MetaGpu *gpu);
 
+META_EXPORT_TEST
 void meta_gpu_take_outputs (MetaGpu *gpu,
                             GList   *outputs);
 
+META_EXPORT_TEST
 void meta_gpu_take_crtcs (MetaGpu *gpu,
                           GList   *crtcs);
 
+META_EXPORT_TEST
 void meta_gpu_take_modes (MetaGpu *gpu,
                           GList   *modes);
 

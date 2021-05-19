@@ -31,20 +31,18 @@
  * its contents are usually defined by the Clutter backend in use.
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #include "clutter-input-device.h"
 
 #include "clutter-actor-private.h"
 #include "clutter-debug.h"
-#include "clutter-device-manager-private.h"
 #include "clutter-enum-types.h"
 #include "clutter-event-private.h"
 #include "clutter-marshal.h"
 #include "clutter-private.h"
 #include "clutter-stage-private.h"
+#include "clutter-input-device-private.h"
 #include "clutter-input-device-tool.h"
 
 #include <math.h>
@@ -59,7 +57,7 @@ enum
   PROP_NAME,
 
   PROP_DEVICE_TYPE,
-  PROP_DEVICE_MANAGER,
+  PROP_SEAT,
   PROP_DEVICE_MODE,
 
   PROP_HAS_CURSOR,
@@ -98,16 +96,20 @@ clutter_input_device_dispose (GObject *gobject)
   g_clear_pointer (&device->device_name, g_free);
   g_clear_pointer (&device->vendor_id, g_free);
   g_clear_pointer (&device->product_id, g_free);
+  g_clear_pointer (&device->node_path, g_free);
 
   if (device->associated != NULL)
     {
-      if (device->device_mode == CLUTTER_INPUT_MODE_SLAVE)
-        _clutter_input_device_remove_slave (device->associated, device);
+      if (device->device_mode == CLUTTER_INPUT_MODE_PHYSICAL)
+        _clutter_input_device_remove_physical_device (device->associated, device);
 
       _clutter_input_device_set_associated_device (device->associated, NULL);
       g_object_unref (device->associated);
       device->associated = NULL;
     }
+
+  if (device->accessibility_virtual_device)
+    g_clear_object (&device->accessibility_virtual_device);
 
   g_clear_pointer (&device->axes, g_array_unref);
   g_clear_pointer (&device->keys, g_array_unref);
@@ -169,8 +171,8 @@ clutter_input_device_set_property (GObject      *gobject,
       self->device_type = g_value_get_enum (value);
       break;
 
-    case PROP_DEVICE_MANAGER:
-      self->device_manager = g_value_get_object (value);
+    case PROP_SEAT:
+      self->seat = g_value_get_object (value);
       break;
 
     case PROP_DEVICE_MODE:
@@ -245,8 +247,8 @@ clutter_input_device_get_property (GObject    *gobject,
       g_value_set_enum (value, self->device_type);
       break;
 
-    case PROP_DEVICE_MANAGER:
-      g_value_set_object (value, self->device_manager);
+    case PROP_SEAT:
+      g_value_set_object (value, self->seat);
       break;
 
     case PROP_DEVICE_MODE:
@@ -360,17 +362,15 @@ clutter_input_device_class_init (ClutterInputDeviceClass *klass)
                        G_PARAM_CONSTRUCT_ONLY);
 
   /**
-   * ClutterInputDevice:device-manager:
+   * ClutterInputDevice:seat:
    *
-   * The #ClutterDeviceManager instance which owns the device
-   *
-   * Since: 1.6
+   * The #ClutterSeat instance which owns the device
    */
-  obj_props[PROP_DEVICE_MANAGER] =
-    g_param_spec_object ("device-manager",
-                         P_("Device Manager"),
-                         P_("The device manager instance"),
-                         CLUTTER_TYPE_DEVICE_MANAGER,
+  obj_props[PROP_SEAT] =
+    g_param_spec_object ("seat",
+                         P_("Seat"),
+                         P_("Seat"),
+                         CLUTTER_TYPE_SEAT,
                          CLUTTER_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY);
 
   /**
@@ -408,7 +408,7 @@ clutter_input_device_class_init (ClutterInputDeviceClass *klass)
    * Whether the device is enabled.
    *
    * A device with the #ClutterInputDevice:device-mode property set
-   * to %CLUTTER_INPUT_MODE_MASTER cannot be disabled.
+   * to %CLUTTER_INPUT_MODE_LOGICAL cannot be disabled.
    *
    * A device must be enabled in order to receive events from it.
    *
@@ -692,20 +692,6 @@ _clutter_input_device_free_touch_info (gpointer data)
   g_slice_free (ClutterTouchInfo, data);
 }
 
-static ClutterActor *
-_clutter_input_device_get_actor (ClutterInputDevice   *device,
-                                 ClutterEventSequence *sequence)
-{
-  ClutterTouchInfo *info;
-
-  if (sequence == NULL)
-    return device->cursor_actor;
-
-  info = g_hash_table_lookup (device->touch_sequences_info, sequence);
-
-  return info->actor;
-}
-
 static void
 _clutter_input_device_associate_actor (ClutterInputDevice   *device,
                                        ClutterEventSequence *sequence,
@@ -798,7 +784,7 @@ on_cursor_actor_reactive_changed (ClutterActor       *actor,
  *
  * Sets the actor under the pointer coordinates of @device
  *
- * This function is called by _clutter_input_device_update()
+ * This function is called by clutter_input_device_update()
  * and it will:
  *
  *   - queue a %CLUTTER_LEAVE event on the previous pointer actor
@@ -815,7 +801,7 @@ _clutter_input_device_set_actor (ClutterInputDevice   *device,
                                  ClutterActor         *actor,
                                  gboolean              emit_crossing)
 {
-  ClutterActor *old_actor = _clutter_input_device_get_actor (device, sequence);
+  ClutterActor *old_actor = clutter_input_device_get_actor (device, sequence);
 
   if (old_actor == actor)
     return;
@@ -836,6 +822,7 @@ _clutter_input_device_set_actor (ClutterInputDevice   *device,
           event->crossing.x = device->current_x;
           event->crossing.y = device->current_y;
           event->crossing.related = actor;
+          event->crossing.sequence = sequence;
           clutter_event_set_device (event, device);
 
           /* we need to make sure that this event is processed
@@ -849,7 +836,7 @@ _clutter_input_device_set_actor (ClutterInputDevice   *device,
         }
 
       /* processing the event might have destroyed the actor */
-      tmp_old_actor = _clutter_input_device_get_actor (device, sequence);
+      tmp_old_actor = clutter_input_device_get_actor (device, sequence);
       _clutter_input_device_unassociate_actor (device,
                                                old_actor,
                                                tmp_old_actor == NULL);
@@ -872,6 +859,7 @@ _clutter_input_device_set_actor (ClutterInputDevice   *device,
           event->crossing.y = device->current_y;
           event->crossing.source = actor;
           event->crossing.related = old_actor;
+          event->crossing.sequence = sequence;
           clutter_event_set_device (event, device);
 
           /* see above */
@@ -927,7 +915,7 @@ clutter_input_device_get_device_id (ClutterInputDevice *device)
  * Enables or disables a #ClutterInputDevice.
  *
  * Only devices with a #ClutterInputDevice:device-mode property set
- * to %CLUTTER_INPUT_MODE_SLAVE or %CLUTTER_INPUT_MODE_FLOATING can
+ * to %CLUTTER_INPUT_MODE_PHYSICAL or %CLUTTER_INPUT_MODE_FLOATING can
  * be disabled.
  *
  * Since: 1.6
@@ -940,7 +928,7 @@ clutter_input_device_set_enabled (ClutterInputDevice *device,
 
   enabled = !!enabled;
 
-  if (!enabled && device->device_mode == CLUTTER_INPUT_MODE_MASTER)
+  if (!enabled && device->device_mode == CLUTTER_INPUT_MODE_LOGICAL)
     return;
 
   if (device->is_enabled == enabled)
@@ -988,7 +976,7 @@ clutter_input_device_get_enabled (ClutterInputDevice *device)
 gboolean
 clutter_input_device_get_coords (ClutterInputDevice   *device,
                                  ClutterEventSequence *sequence,
-                                 ClutterPoint         *point)
+                                 graphene_point_t     *point)
 {
   g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), FALSE);
   g_return_val_if_fail (point != NULL, FALSE);
@@ -1014,7 +1002,7 @@ clutter_input_device_get_coords (ClutterInputDevice   *device,
 }
 
 /*
- * _clutter_input_device_update:
+ * clutter_input_device_update:
  * @device: a #ClutterInputDevice
  *
  * Updates the input @device by determining the #ClutterActor underneath the
@@ -1028,17 +1016,18 @@ clutter_input_device_get_coords (ClutterInputDevice   *device,
  * Since: 1.2
  */
 ClutterActor *
-_clutter_input_device_update (ClutterInputDevice   *device,
-                              ClutterEventSequence *sequence,
-                              gboolean              emit_crossing)
+clutter_input_device_update (ClutterInputDevice   *device,
+                             ClutterEventSequence *sequence,
+                             gboolean              emit_crossing)
 {
   ClutterStage *stage;
   ClutterActor *new_cursor_actor;
   ClutterActor *old_cursor_actor;
-  ClutterPoint point = { -1, -1 };
+  graphene_point_t point = GRAPHENE_POINT_INIT (-1.0f, -1.0f);
+  ClutterInputDeviceType device_type = device->device_type;
 
-  if (device->device_type == CLUTTER_KEYBOARD_DEVICE)
-    return NULL;
+  g_assert (device_type != CLUTTER_KEYBOARD_DEVICE &&
+            device_type != CLUTTER_PAD_DEVICE);
 
   stage = device->stage;
   if (G_UNLIKELY (stage == NULL))
@@ -1051,7 +1040,7 @@ _clutter_input_device_update (ClutterInputDevice   *device,
 
   clutter_input_device_get_coords (device, sequence, &point);
 
-  old_cursor_actor = _clutter_input_device_get_actor (device, sequence);
+  old_cursor_actor = clutter_input_device_get_actor (device, sequence);
   new_cursor_actor =
     _clutter_stage_do_pick (stage, point.x, point.y, CLUTTER_PICK_REACTIVE);
 
@@ -1082,22 +1071,33 @@ _clutter_input_device_update (ClutterInputDevice   *device,
 }
 
 /**
- * clutter_input_device_get_pointer_actor:
- * @device: a #ClutterInputDevice of type %CLUTTER_POINTER_DEVICE
+ * clutter_input_device_get_actor:
+ * @device: a #ClutterInputDevice
+ * @sequence: (allow-none): an optional #ClutterEventSequence
  *
- * Retrieves the #ClutterActor underneath the pointer of @device
+ * Retrieves the #ClutterActor underneath the pointer or touchpoint
+ * of @device and @sequence.
  *
  * Return value: (transfer none): a pointer to the #ClutterActor or %NULL
  *
  * Since: 1.2
  */
 ClutterActor *
-clutter_input_device_get_pointer_actor (ClutterInputDevice *device)
+clutter_input_device_get_actor (ClutterInputDevice   *device,
+                                ClutterEventSequence *sequence)
 {
-  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), NULL);
-  g_return_val_if_fail (device->device_type == CLUTTER_POINTER_DEVICE, NULL);
+  ClutterTouchInfo *info;
 
-  return device->cursor_actor;
+  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), NULL);
+
+  if (sequence == NULL)
+    return device->cursor_actor;
+
+  info = g_hash_table_lookup (device->touch_sequences_info, sequence);
+
+  g_return_val_if_fail (info != NULL, NULL);
+
+  return info->actor;
 }
 
 /**
@@ -1220,11 +1220,11 @@ clutter_input_device_get_device_mode (ClutterInputDevice *device)
  *
  *   translate_native_event_to_clutter (native_event, &c_event);
  *
- *   // get the device manager
- *   manager = clutter_device_manager_get_default ();
+ *   // get the seat
+ *   seat = clutter_backend_get_deafult_seat (clutter_get_default_backend ());
  *
  *   // use the default Core Pointer that Clutter backends register by default
- *   device = clutter_device_manager_get_core_device (manager, %CLUTTER_POINTER_DEVICE);
+ *   device = clutter_seat_get_pointer (seat);
  *
  *   // update the state of the input device
  *   clutter_input_device_update_from_event (device, &c_event, FALSE);
@@ -1611,39 +1611,39 @@ clutter_input_device_get_key (ClutterInputDevice  *device,
 }
 
 /*< private >
- * clutter_input_device_add_slave:
- * @master: a #ClutterInputDevice
- * @slave: a #ClutterInputDevice
+ * clutter_input_device_add_physical_device:
+ * @logical: a #ClutterInputDevice
+ * @physical: a #ClutterInputDevice
  *
- * Adds @slave to the list of slave devices of @master
+ * Adds @physical to the list of physical devices of @logical
  *
- * This function does not increase the reference count of either @master
- * or @slave.
+ * This function does not increase the reference count of either @logical
+ * or @physical.
  */
 void
-_clutter_input_device_add_slave (ClutterInputDevice *master,
-                                 ClutterInputDevice *slave)
+_clutter_input_device_add_physical_device (ClutterInputDevice *logical,
+                                           ClutterInputDevice *physical)
 {
-  if (g_list_find (master->slaves, slave) == NULL)
-    master->slaves = g_list_prepend (master->slaves, slave);
+  if (g_list_find (logical->physical_devices, physical) == NULL)
+    logical->physical_devices = g_list_prepend (logical->physical_devices, physical);
 }
 
 /*< private >
- * clutter_input_device_remove_slave:
- * @master: a #ClutterInputDevice
- * @slave: a #ClutterInputDevice
+ * clutter_input_device_remove_physical_device:
+ * @logical: a #ClutterInputDevice
+ * @physical: a #ClutterInputDevice
  *
- * Removes @slave from the list of slave devices of @master.
+ * Removes @physical from the list of physical devices of @logical.
  *
- * This function does not decrease the reference count of either @master
- * or @slave.
+ * This function does not decrease the reference count of either @logical
+ * or @physical.
  */
 void
-_clutter_input_device_remove_slave (ClutterInputDevice *master,
-                                    ClutterInputDevice *slave)
+_clutter_input_device_remove_physical_device (ClutterInputDevice *logical,
+                                              ClutterInputDevice *physical)
 {
-  if (g_list_find (master->slaves, slave) != NULL)
-    master->slaves = g_list_remove (master->slaves, slave);
+  if (g_list_find (logical->physical_devices, physical) != NULL)
+    logical->physical_devices = g_list_remove (logical->physical_devices, physical);
 }
 
 /*< private >
@@ -1651,7 +1651,7 @@ _clutter_input_device_remove_slave (ClutterInputDevice *master,
  * @device: a #ClutterInputDevice
  * @sequence: a #ClutterEventSequence
  *
- * Start tracking informations related to a touch point (position,
+ * Start tracking information related to a touch point (position,
  * actor underneath the touch point).
  */
 void
@@ -1676,7 +1676,7 @@ _clutter_input_device_add_event_sequence (ClutterInputDevice *device,
  * @device: a #ClutterInputDevice
  * @sequence: a #ClutterEventSequence
  *
- * Stop tracking informations related to a touch point.
+ * Stop tracking information related to a touch point.
  */
 void
 _clutter_input_device_remove_event_sequence (ClutterInputDevice *device,
@@ -1705,10 +1705,10 @@ _clutter_input_device_remove_event_sequence (ClutterInputDevice *device,
 }
 
 /**
- * clutter_input_device_get_slave_devices:
+ * clutter_input_device_get_physical_devices:
  * @device: a #ClutterInputDevice
  *
- * Retrieves the slave devices attached to @device.
+ * Retrieves the physical devices attached to @device.
  *
  * Return value: (transfer container) (element-type Clutter.InputDevice): a
  *   list of #ClutterInputDevice, or %NULL. The contents of the list are
@@ -1717,11 +1717,11 @@ _clutter_input_device_remove_event_sequence (ClutterInputDevice *device,
  * Since: 1.6
  */
 GList *
-clutter_input_device_get_slave_devices (ClutterInputDevice *device)
+clutter_input_device_get_physical_devices (ClutterInputDevice *device)
 {
   g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), NULL);
 
-  return g_list_copy (device->slaves);
+  return g_list_copy (device->physical_devices);
 }
 
 /*< internal >
@@ -1757,10 +1757,10 @@ _clutter_input_device_set_associated_device (ClutterInputDevice *device,
                   ? clutter_input_device_get_device_name (device->associated)
                   : "(none)");
 
-  if (device->device_mode != CLUTTER_INPUT_MODE_MASTER)
+  if (device->device_mode != CLUTTER_INPUT_MODE_LOGICAL)
     {
       if (device->associated != NULL)
-        device->device_mode = CLUTTER_INPUT_MODE_SLAVE;
+        device->device_mode = CLUTTER_INPUT_MODE_PHYSICAL;
       else
         device->device_mode = CLUTTER_INPUT_MODE_FLOATING;
 
@@ -1776,7 +1776,7 @@ _clutter_input_device_set_associated_device (ClutterInputDevice *device,
  * associated to @device.
  *
  * If the #ClutterInputDevice:device-mode property of @device is
- * set to %CLUTTER_INPUT_MODE_MASTER, this function will return
+ * set to %CLUTTER_INPUT_MODE_LOGICAL, this function will return
  * %NULL.
  *
  * Return value: (transfer none): a #ClutterInputDevice, or %NULL
@@ -1922,6 +1922,157 @@ _clutter_input_device_reset_scroll_info (ClutterInputDevice *device)
 }
 
 static void
+on_grab_actor_destroy (ClutterActor       *actor,
+                       ClutterInputDevice *device)
+{
+  switch (device->device_type)
+    {
+    case CLUTTER_POINTER_DEVICE:
+    case CLUTTER_TABLET_DEVICE:
+      device->pointer_grab_actor = NULL;
+      break;
+
+    case CLUTTER_KEYBOARD_DEVICE:
+      device->keyboard_grab_actor = NULL;
+      break;
+
+    default:
+      g_assert_not_reached ();
+    }
+}
+
+/**
+ * clutter_input_device_grab:
+ * @device: a #ClutterInputDevice
+ * @actor: a #ClutterActor
+ *
+ * Acquires a grab on @actor for the given @device.
+ *
+ * Any event coming from @device will be delivered to @actor, bypassing
+ * the usual event delivery mechanism, until the grab is released by
+ * calling clutter_input_device_ungrab().
+ *
+ * The grab is client-side: even if the windowing system used by the Clutter
+ * backend has the concept of "device grabs", Clutter will not use them.
+ *
+ * Only #ClutterInputDevice of types %CLUTTER_POINTER_DEVICE,
+ * %CLUTTER_TABLET_DEVICE and %CLUTTER_KEYBOARD_DEVICE can hold a grab.
+ *
+ * Since: 1.10
+ */
+void
+clutter_input_device_grab (ClutterInputDevice *device,
+                           ClutterActor       *actor)
+{
+  ClutterActor **grab_actor;
+
+  g_return_if_fail (CLUTTER_IS_INPUT_DEVICE (device));
+  g_return_if_fail (CLUTTER_IS_ACTOR (actor));
+
+  switch (device->device_type)
+    {
+    case CLUTTER_POINTER_DEVICE:
+    case CLUTTER_TABLET_DEVICE:
+      grab_actor = &device->pointer_grab_actor;
+      break;
+
+    case CLUTTER_KEYBOARD_DEVICE:
+      grab_actor = &device->keyboard_grab_actor;
+      break;
+
+    default:
+      g_critical ("Only pointer and keyboard devices can grab an actor");
+      return;
+    }
+
+  if (*grab_actor != NULL)
+    {
+      g_signal_handlers_disconnect_by_func (*grab_actor,
+                                            G_CALLBACK (on_grab_actor_destroy),
+                                            device);
+    }
+
+  *grab_actor = actor;
+
+  g_signal_connect (*grab_actor,
+                    "destroy",
+                    G_CALLBACK (on_grab_actor_destroy),
+                    device);
+}
+
+/**
+ * clutter_input_device_ungrab:
+ * @device: a #ClutterInputDevice
+ *
+ * Releases the grab on the @device, if one is in place.
+ *
+ * Since: 1.10
+ */
+void
+clutter_input_device_ungrab (ClutterInputDevice *device)
+{
+  ClutterActor **grab_actor;
+
+  g_return_if_fail (CLUTTER_IS_INPUT_DEVICE (device));
+
+  switch (device->device_type)
+    {
+    case CLUTTER_POINTER_DEVICE:
+    case CLUTTER_TABLET_DEVICE:
+      grab_actor = &device->pointer_grab_actor;
+      break;
+
+    case CLUTTER_KEYBOARD_DEVICE:
+      grab_actor = &device->keyboard_grab_actor;
+      break;
+
+    default:
+      return;
+    }
+
+  if (*grab_actor == NULL)
+    return;
+
+  g_signal_handlers_disconnect_by_func (*grab_actor,
+                                        G_CALLBACK (on_grab_actor_destroy),
+                                        device);
+
+  *grab_actor = NULL;
+}
+
+/**
+ * clutter_input_device_get_grabbed_actor:
+ * @device: a #ClutterInputDevice
+ *
+ * Retrieves a pointer to the #ClutterActor currently grabbing all
+ * the events coming from @device.
+ *
+ * Return value: (transfer none): a #ClutterActor, or %NULL
+ *
+ * Since: 1.10
+ */
+ClutterActor *
+clutter_input_device_get_grabbed_actor (ClutterInputDevice *device)
+{
+  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), NULL);
+
+  switch (device->device_type)
+    {
+    case CLUTTER_POINTER_DEVICE:
+    case CLUTTER_TABLET_DEVICE:
+      return device->pointer_grab_actor;
+
+    case CLUTTER_KEYBOARD_DEVICE:
+      return device->keyboard_grab_actor;
+
+    default:
+      g_critical ("Only pointer and keyboard devices can grab an actor");
+    }
+
+  return NULL;
+}
+
+static void
 on_grab_sequence_actor_destroy (ClutterActor       *actor,
                                 ClutterInputDevice *device)
 {
@@ -2059,7 +2210,7 @@ clutter_input_device_sequence_get_grabbed_actor (ClutterInputDevice   *device,
 
 /**
  * clutter_input_device_get_vendor_id:
- * @device: a slave #ClutterInputDevice
+ * @device: a physical #ClutterInputDevice
  *
  * Gets the vendor ID of this device.
  *
@@ -2071,14 +2222,14 @@ const gchar *
 clutter_input_device_get_vendor_id (ClutterInputDevice *device)
 {
   g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), NULL);
-  g_return_val_if_fail (clutter_input_device_get_device_mode (device) != CLUTTER_INPUT_MODE_MASTER, NULL);
+  g_return_val_if_fail (clutter_input_device_get_device_mode (device) != CLUTTER_INPUT_MODE_LOGICAL, NULL);
 
   return device->vendor_id;
 }
 
 /**
  * clutter_input_device_get_product_id:
- * @device: a slave #ClutterInputDevice
+ * @device: a physical #ClutterInputDevice
  *
  * Gets the product ID of this device.
  *
@@ -2090,7 +2241,7 @@ const gchar *
 clutter_input_device_get_product_id (ClutterInputDevice *device)
 {
   g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), NULL);
-  g_return_val_if_fail (clutter_input_device_get_device_mode (device) != CLUTTER_INPUT_MODE_MASTER, NULL);
+  g_return_val_if_fail (clutter_input_device_get_device_mode (device) != CLUTTER_INPUT_MODE_LOGICAL, NULL);
 
   return device->product_id;
 }
@@ -2100,7 +2251,7 @@ clutter_input_device_add_tool (ClutterInputDevice     *device,
                                ClutterInputDeviceTool *tool)
 {
   g_return_if_fail (CLUTTER_IS_INPUT_DEVICE (device));
-  g_return_if_fail (clutter_input_device_get_device_mode (device) != CLUTTER_INPUT_MODE_MASTER);
+  g_return_if_fail (clutter_input_device_get_device_mode (device) != CLUTTER_INPUT_MODE_LOGICAL);
   g_return_if_fail (CLUTTER_IS_INPUT_DEVICE_TOOL (tool));
 
   if (!device->tools)
@@ -2118,7 +2269,7 @@ clutter_input_device_lookup_tool (ClutterInputDevice         *device,
   guint i;
 
   g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), NULL);
-  g_return_val_if_fail (clutter_input_device_get_device_mode (device) != CLUTTER_INPUT_MODE_MASTER, NULL);
+  g_return_val_if_fail (clutter_input_device_get_device_mode (device) != CLUTTER_INPUT_MODE_LOGICAL, NULL);
 
   if (!device->tools)
     return NULL;
@@ -2285,4 +2436,20 @@ clutter_input_device_is_grouped (ClutterInputDevice *device,
   g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (other_device), FALSE);
 
   return CLUTTER_INPUT_DEVICE_GET_CLASS (device)->is_grouped (device, other_device);
+}
+
+/**
+ * clutter_input_device_get_seat:
+ * @device: a #ClutterInputDevice
+ *
+ * Returns the seat the device belongs to
+ *
+ * Returns: (transfer none): the device seat
+ **/
+ClutterSeat *
+clutter_input_device_get_seat (ClutterInputDevice *device)
+{
+  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), NULL);
+
+  return device->seat;
 }

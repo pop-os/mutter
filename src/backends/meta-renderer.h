@@ -27,10 +27,11 @@
 
 #include <glib-object.h>
 
-#include "cogl/cogl.h"
-#include "clutter/clutter-mutter.h"
 #include "backends/meta-monitor-manager-private.h"
 #include "backends/meta-renderer-view.h"
+#include "core/util-private.h"
+#include "clutter/clutter-mutter.h"
+#include "cogl/cogl.h"
 
 #define META_TYPE_RENDERER (meta_renderer_get_type ())
 G_DECLARE_DERIVABLE_TYPE (MetaRenderer, meta_renderer, META, RENDERER, GObject)
@@ -41,16 +42,33 @@ struct _MetaRendererClass
 
   CoglRenderer * (* create_cogl_renderer) (MetaRenderer *renderer);
   MetaRendererView * (* create_view) (MetaRenderer       *renderer,
-                                      MetaLogicalMonitor *logical_monitor);
+                                      MetaLogicalMonitor *logical_monitor,
+                                      MetaOutput         *output,
+                                      MetaCrtc           *crtc);
+  void (* rebuild_views) (MetaRenderer *renderer);
+  GList * (* get_views_for_monitor) (MetaRenderer *renderer,
+                                     MetaMonitor  *monitor);
 };
+
+MetaBackend * meta_renderer_get_backend (MetaRenderer *renderer);
 
 CoglRenderer * meta_renderer_create_cogl_renderer (MetaRenderer *renderer);
 
 void meta_renderer_rebuild_views (MetaRenderer *renderer);
 
-void meta_renderer_set_legacy_view (MetaRenderer     *renderer,
-                                    MetaRendererView *legacy_view);
+void meta_renderer_add_view (MetaRenderer     *renderer,
+                             MetaRendererView *view);
 
+GList * meta_renderer_get_views_for_monitor (MetaRenderer *renderer,
+                                             MetaMonitor  *monitor);
+
+META_EXPORT_TEST
 GList * meta_renderer_get_views (MetaRenderer *renderer);
+
+gboolean meta_renderer_is_hardware_accelerated (MetaRenderer *renderer);
+
+void meta_renderer_pause (MetaRenderer *renderer);
+
+void meta_renderer_resume (MetaRenderer *renderer);
 
 #endif /* META_RENDERER_H */

@@ -37,9 +37,7 @@
  * #ClutterClone is available since Clutter 1.0
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #define CLUTTER_ENABLE_EXPERIMENTAL_API
 #include "clutter-actor-private.h"
@@ -54,6 +52,8 @@
 struct _ClutterClonePrivate
 {
   ClutterActor *clone_source;
+  float x_scale, y_scale;
+
   gulong source_destroy_id;
 };
 
@@ -124,8 +124,6 @@ static void
 clutter_clone_apply_transform (ClutterActor *self, CoglMatrix *matrix)
 {
   ClutterClonePrivate *priv = CLUTTER_CLONE (self)->priv;
-  ClutterActorBox box, source_box;
-  gfloat x_scale, y_scale;
 
   /* First chain up and apply all the standard ClutterActor
    * transformations... */
@@ -136,25 +134,12 @@ clutter_clone_apply_transform (ClutterActor *self, CoglMatrix *matrix)
   if (priv->clone_source == NULL)
     return;
 
-  /* get our allocated size */
-  clutter_actor_get_allocation_box (self, &box);
-
-  /* and get the allocated size of the source */
-  clutter_actor_get_allocation_box (priv->clone_source, &source_box);
-
-  /* We need to scale what the clone-source actor paints to fill our own
-   * allocation...
-   */
-  x_scale = clutter_actor_box_get_width (&box)
-          / clutter_actor_box_get_width (&source_box);
-  y_scale = clutter_actor_box_get_height (&box)
-          / clutter_actor_box_get_height (&source_box);
-
-  cogl_matrix_scale (matrix, x_scale, y_scale, x_scale);
+  cogl_matrix_scale (matrix, priv->x_scale, priv->y_scale, 1.f);
 }
 
 static void
-clutter_clone_paint (ClutterActor *actor)
+clutter_clone_paint (ClutterActor        *actor,
+                     ClutterPaintContext *paint_context)
 {
   ClutterClone *self = CLUTTER_CLONE (actor);
   ClutterClonePrivate *priv = self->priv;
@@ -191,7 +176,7 @@ clutter_clone_paint (ClutterActor *actor)
   if (clutter_actor_is_realized (priv->clone_source))
     {
       _clutter_actor_push_clone_paint ();
-      clutter_actor_paint (priv->clone_source);
+      clutter_actor_paint (priv->clone_source, paint_context);
       _clutter_actor_pop_clone_paint ();
     }
 
@@ -214,7 +199,7 @@ clutter_clone_get_paint_volume (ClutterActor       *actor,
   if (priv->clone_source == NULL)
     return TRUE;
 
-  /* query the volume of the source actor and simply masquarade it as
+  /* query the volume of the source actor and simply masquerade it as
    * the clones volume... */
   source_volume = clutter_actor_get_paint_volume (priv->clone_source);
   if (source_volume == NULL)
@@ -241,18 +226,50 @@ clutter_clone_has_overlaps (ClutterActor *actor)
 
 static void
 clutter_clone_allocate (ClutterActor           *self,
-                        const ClutterActorBox  *box,
-                        ClutterAllocationFlags  flags)
+                        const ClutterActorBox  *box)
 {
   ClutterClonePrivate *priv = CLUTTER_CLONE (self)->priv;
   ClutterActorClass *parent_class;
+  ClutterActorBox source_box;
+  float x_scale, y_scale;
 
   /* chain up */
   parent_class = CLUTTER_ACTOR_CLASS (clutter_clone_parent_class);
-  parent_class->allocate (self, box, flags);
+  parent_class->allocate (self, box);
 
   if (priv->clone_source == NULL)
     return;
+
+  /* ClutterActor delays allocating until the actor is shown; however
+   * we cannot paint it correctly in that case, so force an allocation.
+   */
+  if (clutter_actor_get_parent (priv->clone_source) != NULL &&
+      !clutter_actor_has_allocation (priv->clone_source))
+    {
+      float x = 0.f;
+      float y = 0.f;
+
+      clutter_actor_get_fixed_position (priv->clone_source, &x, &y);
+      clutter_actor_allocate_preferred_size (priv->clone_source, x, y);
+    }
+
+  clutter_actor_get_allocation_box (priv->clone_source, &source_box);
+
+  /* We need to scale what the clone-source actor paints to fill our own
+   * allocation...
+   */
+  x_scale = clutter_actor_box_get_width (box)
+          / clutter_actor_box_get_width (&source_box);
+  y_scale = clutter_actor_box_get_height (box)
+          / clutter_actor_box_get_height (&source_box);
+
+  if (!G_APPROX_VALUE (priv->x_scale, x_scale, FLT_EPSILON) ||
+      !G_APPROX_VALUE (priv->y_scale, y_scale, FLT_EPSILON))
+    {
+      priv->x_scale = x_scale;
+      priv->y_scale = y_scale;
+      clutter_actor_invalidate_transform (CLUTTER_ACTOR (self));
+    }
 
 #if 0
   /* XXX - this is wrong: ClutterClone cannot clone unparented
@@ -267,7 +284,7 @@ clutter_clone_allocate (ClutterActor           *self,
    * paint cycle, we can safely give it as much size as it requires
    */
   if (clutter_actor_get_parent (priv->clone_source) == NULL)
-    clutter_actor_allocate_preferred_size (priv->clone_source, flags);
+    clutter_actor_allocate_preferred_size (priv->clone_source);
 #endif
 }
 
@@ -359,6 +376,9 @@ static void
 clutter_clone_init (ClutterClone *self)
 {
   self->priv = clutter_clone_get_instance_private (self);
+
+  self->priv->x_scale = 1.f;
+  self->priv->y_scale = 1.f;
 }
 
 /**
@@ -395,8 +415,7 @@ clutter_clone_set_source_internal (ClutterClone *self,
 
   if (priv->clone_source != NULL)
     {
-      g_signal_handler_disconnect (priv->clone_source, priv->source_destroy_id);
-      priv->source_destroy_id = 0;
+      g_clear_signal_handler (&priv->source_destroy_id, priv->clone_source);
       _clutter_actor_detach_clone (priv->clone_source, CLUTTER_ACTOR (self));
       g_object_unref (priv->clone_source);
       priv->clone_source = NULL;

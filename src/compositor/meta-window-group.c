@@ -1,19 +1,17 @@
 /* -*- mode: C; c-file-style: "gnu"; indent-tabs-mode: nil; -*- */
 
-#include <config.h>
+#include "config.h"
 
-#define _ISOC99_SOURCE /* for roundf */
+#include <gdk/gdk.h>
 #include <math.h>
 
-#include <gdk/gdk.h> /* for gdk_rectangle_intersect() */
-
-#include "clutter-utils.h"
-#include "compositor-private.h"
-#include "meta-window-actor-private.h"
-#include "meta-window-group-private.h"
-#include "window-private.h"
-#include "meta-cullable.h"
-#include "display-private.h"
+#include "compositor/clutter-utils.h"
+#include "compositor/compositor-private.h"
+#include "compositor/meta-cullable.h"
+#include "compositor/meta-window-actor-private.h"
+#include "compositor/meta-window-group-private.h"
+#include "core/display-private.h"
+#include "core/window-private.h"
 
 struct _MetaWindowGroupClass
 {
@@ -54,16 +52,26 @@ cullable_iface_init (MetaCullableInterface *iface)
 }
 
 static void
-meta_window_group_paint (ClutterActor *actor)
+meta_window_group_paint (ClutterActor        *actor,
+                         ClutterPaintContext *paint_context)
 {
+  MetaWindowGroup *window_group = META_WINDOW_GROUP (actor);
+  ClutterActorClass *parent_actor_class =
+    CLUTTER_ACTOR_CLASS (meta_window_group_parent_class);
+  ClutterActor *stage = clutter_actor_get_stage (actor);
+  const cairo_region_t *redraw_clip;
   cairo_region_t *clip_region;
   cairo_region_t *unobscured_region;
-  cairo_rectangle_int_t visible_rect, clip_rect;
+  cairo_rectangle_int_t visible_rect;
   int paint_x_origin, paint_y_origin;
   int screen_width, screen_height;
 
-  MetaWindowGroup *window_group = META_WINDOW_GROUP (actor);
-  ClutterActor *stage = clutter_actor_get_stage (actor);
+  redraw_clip = clutter_paint_context_get_redraw_clip (paint_context);
+  if (!redraw_clip)
+    {
+      parent_actor_class->paint (actor, paint_context);
+      return;
+    }
 
   meta_display_get_size (window_group->display, &screen_width, &screen_height);
 
@@ -82,13 +90,19 @@ meta_window_group_paint (ClutterActor *actor)
    */
   if (clutter_actor_is_in_clone_paint (actor))
     {
-      if (!meta_actor_painting_untransformed (screen_width,
+      CoglFramebuffer *fb;
+
+      fb = clutter_paint_context_get_framebuffer (paint_context);
+      if (!meta_actor_painting_untransformed (fb,
+                                              screen_width,
+                                              screen_height,
+                                              screen_width,
                                               screen_height,
                                               &paint_x_origin,
                                               &paint_y_origin) ||
-          !meta_actor_is_untransformed (actor, NULL, NULL))
+          !meta_cullable_is_untransformed (META_CULLABLE (actor)))
         {
-          CLUTTER_ACTOR_CLASS (meta_window_group_parent_class)->paint (actor);
+          parent_actor_class->paint (actor, paint_context);
           return;
         }
     }
@@ -104,16 +118,12 @@ meta_window_group_paint (ClutterActor *actor)
 
   unobscured_region = cairo_region_create_rectangle (&visible_rect);
 
-  /* Get the clipped redraw bounds from Clutter so that we can avoid
-   * painting shadows on windows that don't need to be painted in this
-   * frame. In the case of a multihead setup with mismatched monitor
-   * sizes, we could intersect this with an accurate union of the
-   * monitors to avoid painting shadows that are visible only in the
-   * holes. */
-  clutter_stage_get_redraw_clip_bounds (CLUTTER_STAGE (stage),
-                                        &clip_rect);
-
-  clip_region = cairo_region_create_rectangle (&clip_rect);
+  /* Get the clipped redraw bounds so that we can avoid painting shadows on
+   * windows that don't need to be painted in this frame. In the case of a
+   * multihead setup with mismatched monitor sizes, we could intersect this
+   * with an accurate union of the monitors to avoid painting shadows that are
+   * visible only in the holes. */
+  clip_region = cairo_region_copy (redraw_clip);
 
   cairo_region_translate (clip_region, -paint_x_origin, -paint_y_origin);
 
@@ -122,7 +132,7 @@ meta_window_group_paint (ClutterActor *actor)
   cairo_region_destroy (unobscured_region);
   cairo_region_destroy (clip_region);
 
-  CLUTTER_ACTOR_CLASS (meta_window_group_parent_class)->paint (actor);
+  parent_actor_class->paint (actor, paint_context);
 
   meta_cullable_reset_culling (META_CULLABLE (window_group));
 }

@@ -28,175 +28,12 @@
 #include "backends/meta-monitor-config-migration.h"
 #include "backends/meta-monitor-config-store.h"
 #include "backends/meta-output.h"
+#include "core/window-private.h"
 #include "meta-backend-test.h"
 #include "tests/meta-monitor-manager-test.h"
 #include "tests/monitor-test-utils.h"
 #include "tests/test-utils.h"
-
-#define ALL_TRANSFORMS ((1 << (META_MONITOR_TRANSFORM_FLIPPED_270 + 1)) - 1)
-
-#define MAX_N_MODES 10
-#define MAX_N_OUTPUTS 10
-#define MAX_N_CRTCS 10
-#define MAX_N_MONITORS 10
-#define MAX_N_LOGICAL_MONITORS 10
-
-/*
- * The following structures are used to define test cases.
- *
- * Each test case consists of a test case setup and a test case expectaction.
- * and a expected result, consisting
- * of an array of monitors, logical monitors and a screen size.
- *
- * TEST CASE SETUP:
- *
- * A test case setup consists of an array of modes, an array of outputs and an
- * array of CRTCs.
- *
- * A mode has a width and height in pixels, and a refresh rate in updates per
- * second.
- *
- * An output has an array of available modes, and a preferred mode. Modes are
- * defined as indices into the modes array of the test case setup.
- *
- * It also has CRTc and an array of possible CRTCs. Crtcs are defined as indices
- * into the CRTC array. The CRTC value -1 means no CRTC.
- *
- * It also has various meta data, such as physical dimension, tile info and
- * scale.
- *
- * A CRTC only has a current mode. A mode is defined as an index into the modes
- * array.
- *
- *
- * TEST CASE EXPECTS:
- *
- * A test case expects consists of an array of monitors, an array of logical
- * monitors, a output and crtc count, and a screen width.
- *
- * A monitor represents a physical monitor (such as an external monitor, or a
- * laptop panel etc). A monitor consists of an array of outputs, defined by
- * indices into the setup output array, an array of monitor modes, and the
- * current mode, defined by an index into the monitor modes array, and the
- * physical dimensions.
- *
- * A logical monitor represents a region of the total screen area. It contains
- * the expected layout and a scale.
- */
-
-typedef enum _MonitorTestFlag
-{
-  MONITOR_TEST_FLAG_NONE,
-  MONITOR_TEST_FLAG_NO_STORED
-} MonitorTestFlag;
-
-typedef struct _MonitorTestCaseMode
-{
-  int width;
-  int height;
-  float refresh_rate;
-  MetaCrtcModeFlag flags;
-} MonitorTestCaseMode;
-
-typedef struct _MonitorTestCaseOutput
-{
-  int crtc;
-  int modes[MAX_N_MODES];
-  int n_modes;
-  int preferred_mode;
-  int possible_crtcs[MAX_N_CRTCS];
-  int n_possible_crtcs;
-  int width_mm;
-  int height_mm;
-  MetaTileInfo tile_info;
-  float scale;
-  gboolean is_laptop_panel;
-  gboolean is_underscanning;
-  const char *serial;
-  MetaMonitorTransform panel_orientation_transform;
-} MonitorTestCaseOutput;
-
-typedef struct _MonitorTestCaseCrtc
-{
-  int current_mode;
-} MonitorTestCaseCrtc;
-
-typedef struct _MonitorTestCaseSetup
-{
-  MonitorTestCaseMode modes[MAX_N_MODES];
-  int n_modes;
-
-  MonitorTestCaseOutput outputs[MAX_N_OUTPUTS];
-  int n_outputs;
-
-  MonitorTestCaseCrtc crtcs[MAX_N_CRTCS];
-  int n_crtcs;
-} MonitorTestCaseSetup;
-
-typedef struct _MonitorTestCaseMonitorCrtcMode
-{
-  int output;
-  int crtc_mode;
-} MetaTestCaseMonitorCrtcMode;
-
-typedef struct _MonitorTestCaseMonitorMode
-{
-  int width;
-  int height;
-  float refresh_rate;
-  MetaCrtcModeFlag flags;
-  MetaTestCaseMonitorCrtcMode crtc_modes[MAX_N_CRTCS];
-} MetaMonitorTestCaseMonitorMode;
-
-typedef struct _MonitorTestCaseMonitor
-{
-  long outputs[MAX_N_OUTPUTS];
-  int n_outputs;
-  MetaMonitorTestCaseMonitorMode modes[MAX_N_MODES];
-  int n_modes;
-  int current_mode;
-  int width_mm;
-  int height_mm;
-  gboolean is_underscanning;
-} MonitorTestCaseMonitor;
-
-typedef struct _MonitorTestCaseLogicalMonitor
-{
-  MetaRectangle layout;
-  float scale;
-  int monitors[MAX_N_MONITORS];
-  int n_monitors;
-  MetaMonitorTransform transform;
-} MonitorTestCaseLogicalMonitor;
-
-typedef struct _MonitorTestCaseCrtcExpect
-{
-  MetaMonitorTransform transform;
-  int current_mode;
-  int x;
-  int y;
-} MonitorTestCaseCrtcExpect;
-
-typedef struct _MonitorTestCaseExpect
-{
-  MonitorTestCaseMonitor monitors[MAX_N_MONITORS];
-  int n_monitors;
-  MonitorTestCaseLogicalMonitor logical_monitors[MAX_N_LOGICAL_MONITORS];
-  int n_logical_monitors;
-  int primary_logical_monitor;
-  int n_outputs;
-  MonitorTestCaseCrtcExpect crtcs[MAX_N_CRTCS];
-  int n_crtcs;
-  int n_tiled_monitors;
-  int screen_width;
-  int screen_height;
-} MonitorTestCaseExpect;
-
-typedef struct _MonitorTestCase
-{
-  MonitorTestCaseSetup setup;
-  MonitorTestCaseExpect expect;
-} MonitorTestCase;
+#include "x11/meta-x11-display-private.h"
 
 static MonitorTestCase initial_test_case = {
   .setup = {
@@ -311,6 +148,7 @@ static MonitorTestCase initial_test_case = {
       },
       {
         .current_mode = 0,
+        .x = 1024,
       }
     },
     .n_crtcs = 2,
@@ -319,717 +157,107 @@ static MonitorTestCase initial_test_case = {
   }
 };
 
-static TestClient *monitor_test_client = NULL;
+static TestClient *wayland_monitor_test_client = NULL;
+static TestClient *x11_monitor_test_client = NULL;
 
-#define TEST_CLIENT_NAME "client1"
-#define TEST_CLIENT_WINDOW "window1"
+#define WAYLAND_TEST_CLIENT_NAME "wayland_monitor_test_client"
+#define WAYLAND_TEST_CLIENT_WINDOW "window1"
+#define X11_TEST_CLIENT_NAME "x11_monitor_test_client"
+#define X11_TEST_CLIENT_WINDOW "window1"
+
+static gboolean
+monitor_tests_alarm_filter (MetaX11Display        *x11_display,
+                            XSyncAlarmNotifyEvent *event,
+                            gpointer               data)
+{
+  return test_client_alarm_filter (x11_display, event, x11_monitor_test_client);
+}
 
 static void
-create_monitor_test_client (void)
+create_monitor_test_clients (void)
 {
   GError *error = NULL;
 
-  monitor_test_client = test_client_new (TEST_CLIENT_NAME,
-                                         META_WINDOW_CLIENT_TYPE_WAYLAND,
-                                         &error);
-  if (!monitor_test_client)
-    g_error ("Failed to launch test client: %s", error->message);
+  test_wait_for_x11_display ();
 
-  if (!test_client_do (monitor_test_client, &error,
-                       "create", TEST_CLIENT_WINDOW,
+  meta_x11_display_set_alarm_filter (meta_get_display ()->x11_display,
+                                     monitor_tests_alarm_filter, NULL);
+
+  wayland_monitor_test_client = test_client_new (WAYLAND_TEST_CLIENT_NAME,
+                                                 META_WINDOW_CLIENT_TYPE_WAYLAND,
+                                                 &error);
+  if (!wayland_monitor_test_client)
+    g_error ("Failed to launch Wayland test client: %s", error->message);
+
+  x11_monitor_test_client = test_client_new (X11_TEST_CLIENT_NAME,
+                                             META_WINDOW_CLIENT_TYPE_X11,
+                                             &error);
+  if (!x11_monitor_test_client)
+    g_error ("Failed to launch X11 test client: %s", error->message);
+
+  if (!test_client_do (wayland_monitor_test_client, &error,
+                       "create", WAYLAND_TEST_CLIENT_WINDOW,
                        NULL))
-    g_error ("Failed to create window: %s", error->message);
+    g_error ("Failed to create Wayland window: %s", error->message);
 
-  if (!test_client_do (monitor_test_client, &error,
-                       "show", TEST_CLIENT_WINDOW,
+  if (!test_client_do (x11_monitor_test_client, &error,
+                       "create", X11_TEST_CLIENT_WINDOW,
+                       NULL))
+    g_error ("Failed to create X11 window: %s", error->message);
+
+  if (!test_client_do (wayland_monitor_test_client, &error,
+                       "show", WAYLAND_TEST_CLIENT_WINDOW,
+                       NULL))
+    g_error ("Failed to show the window: %s", error->message);
+
+  if (!test_client_do (x11_monitor_test_client, &error,
+                       "show", X11_TEST_CLIENT_WINDOW,
                        NULL))
     g_error ("Failed to show the window: %s", error->message);
 }
 
 static void
-check_monitor_test_client_state (void)
+check_test_client_state (TestClient *test_client)
 {
   GError *error = NULL;
 
-  if (!test_client_wait (monitor_test_client, &error))
-    g_error ("Failed to sync test client: %s", error->message);
+  if (!test_client_wait (test_client, &error))
+    {
+      g_error ("Failed to sync test client '%s': %s",
+               test_client_get_id (test_client), error->message);
+    }
 }
 
 static void
-destroy_monitor_test_client (void)
+check_monitor_test_clients_state (void)
+{
+  check_test_client_state (wayland_monitor_test_client);
+  check_test_client_state (x11_monitor_test_client);
+}
+
+static void
+destroy_monitor_test_clients (void)
 {
   GError *error = NULL;
 
-  if (!test_client_quit (monitor_test_client, &error))
-    g_error ("Failed to quit test client: %s", error->message);
+  if (!test_client_quit (wayland_monitor_test_client, &error))
+    g_error ("Failed to quit Wayland test client: %s", error->message);
 
-  test_client_destroy (monitor_test_client);
-}
+  if (!test_client_quit (x11_monitor_test_client, &error))
+    g_error ("Failed to quit X11 test client: %s", error->message);
 
-static MetaOutput *
-output_from_winsys_id (MetaMonitorManager *monitor_manager,
-                       long                winsys_id)
-{
-  MetaMonitorManagerTest *monitor_manager_test =
-    META_MONITOR_MANAGER_TEST (monitor_manager);
-  MetaGpu *gpu = meta_monitor_manager_test_get_gpu (monitor_manager_test);
-  GList *l;
+  test_client_destroy (wayland_monitor_test_client);
+  test_client_destroy (x11_monitor_test_client);
 
-  for (l = meta_gpu_get_outputs (gpu); l; l = l->next)
-    {
-      MetaOutput *output = l->data;
-
-      if (output->winsys_id == winsys_id)
-        return output;
-    }
-
-  return NULL;
-}
-
-typedef struct _CheckMonitorModeData
-{
-  MetaMonitorManager *monitor_manager;
-  MetaTestCaseMonitorCrtcMode *expect_crtc_mode_iter;
-} CheckMonitorModeData;
-
-static gboolean
-check_monitor_mode (MetaMonitor         *monitor,
-                    MetaMonitorMode     *mode,
-                    MetaMonitorCrtcMode *monitor_crtc_mode,
-                    gpointer             user_data,
-                    GError             **error)
-{
-  CheckMonitorModeData *data = user_data;
-  MetaMonitorManager *monitor_manager = data->monitor_manager;
-  MetaOutput *output;
-  MetaCrtcMode *crtc_mode;
-  int expect_crtc_mode_index;
-
-  output = output_from_winsys_id (monitor_manager,
-                                  data->expect_crtc_mode_iter->output);
-  g_assert (monitor_crtc_mode->output == output);
-
-  expect_crtc_mode_index = data->expect_crtc_mode_iter->crtc_mode;
-  if (expect_crtc_mode_index == -1)
-    {
-      crtc_mode = NULL;
-    }
-  else
-    {
-      MetaGpu *gpu = meta_output_get_gpu (output);
-
-      crtc_mode = g_list_nth_data (meta_gpu_get_modes (gpu),
-                                   expect_crtc_mode_index);
-    }
-  g_assert (monitor_crtc_mode->crtc_mode == crtc_mode);
-
-  if (crtc_mode)
-    {
-      float refresh_rate;
-      MetaCrtcModeFlag flags;
-
-      refresh_rate = meta_monitor_mode_get_refresh_rate (mode);
-      flags = meta_monitor_mode_get_flags (mode);
-
-      g_assert_cmpfloat (refresh_rate, ==, crtc_mode->refresh_rate);
-      g_assert_cmpint (flags, ==, (crtc_mode->flags & HANDLED_CRTC_MODE_FLAGS));
-    }
-
-  data->expect_crtc_mode_iter++;
-
-  return TRUE;
-}
-
-static gboolean
-check_current_monitor_mode (MetaMonitor         *monitor,
-                            MetaMonitorMode     *mode,
-                            MetaMonitorCrtcMode *monitor_crtc_mode,
-                            gpointer             user_data,
-                            GError             **error)
-{
-  CheckMonitorModeData *data = user_data;
-  MetaMonitorManager *monitor_manager = data->monitor_manager;
-  MetaOutput *output;
-  MetaCrtc *crtc;
-
-  output = output_from_winsys_id (monitor_manager,
-                                  data->expect_crtc_mode_iter->output);
-  crtc = meta_output_get_assigned_crtc (output);
-
-  if (data->expect_crtc_mode_iter->crtc_mode == -1)
-    {
-      g_assert_null (crtc);
-    }
-  else
-    {
-      MetaLogicalMonitor *logical_monitor;
-
-      g_assert_nonnull (crtc);
-      g_assert (monitor_crtc_mode->crtc_mode == crtc->current_mode);
-
-      logical_monitor = crtc->logical_monitor;
-      g_assert_nonnull (logical_monitor);
-    }
-
-
-  data->expect_crtc_mode_iter++;
-
-  return TRUE;
-}
-
-static MetaLogicalMonitor *
-logical_monitor_from_layout (MetaMonitorManager *monitor_manager,
-                             MetaRectangle      *layout)
-{
-  GList *l;
-
-  for (l = monitor_manager->logical_monitors; l; l = l->next)
-    {
-      MetaLogicalMonitor *logical_monitor = l->data;
-
-      if (meta_rectangle_equal (layout, &logical_monitor->rect))
-        return logical_monitor;
-    }
-
-  return NULL;
-}
-
-static void
-check_logical_monitor (MonitorTestCase               *test_case,
-                       MetaMonitorManager            *monitor_manager,
-                       MonitorTestCaseLogicalMonitor *test_logical_monitor)
-{
-  MetaLogicalMonitor *logical_monitor;
-  MetaOutput *primary_output;
-  GList *monitors;
-  GList *l;
-  int i;
-
-  logical_monitor = logical_monitor_from_layout (monitor_manager,
-                                                 &test_logical_monitor->layout);
-  g_assert_nonnull (logical_monitor);
-
-  g_assert_cmpint (logical_monitor->rect.x,
-                   ==,
-                   test_logical_monitor->layout.x);
-  g_assert_cmpint (logical_monitor->rect.y,
-                   ==,
-                   test_logical_monitor->layout.y);
-  g_assert_cmpint (logical_monitor->rect.width,
-                   ==,
-                   test_logical_monitor->layout.width);
-  g_assert_cmpint (logical_monitor->rect.height,
-                   ==,
-                   test_logical_monitor->layout.height);
-  g_assert_cmpfloat (logical_monitor->scale,
-                     ==,
-                     test_logical_monitor->scale);
-  g_assert_cmpuint (logical_monitor->transform,
-                    ==,
-                    test_logical_monitor->transform);
-
-  if (logical_monitor == monitor_manager->primary_logical_monitor)
-    g_assert (meta_logical_monitor_is_primary (logical_monitor));
-
-  primary_output = NULL;
-  monitors = meta_logical_monitor_get_monitors (logical_monitor);
-  g_assert_cmpint ((int) g_list_length (monitors),
-                   ==,
-                   test_logical_monitor->n_monitors);
-
-  for (i = 0; i < test_logical_monitor->n_monitors; i++)
-    {
-      MetaMonitor *monitor =
-        g_list_nth (monitor_manager->monitors,
-                    test_logical_monitor->monitors[i])->data;
-
-      g_assert_nonnull (g_list_find (monitors, monitor));
-    }
-
-  for (l = monitors; l; l = l->next)
-    {
-      MetaMonitor *monitor = l->data;
-      GList *outputs;
-      GList *l_output;
-
-      outputs = meta_monitor_get_outputs (monitor);
-      for (l_output = outputs; l_output; l_output = l_output->next)
-        {
-          MetaOutput *output = l_output->data;
-          MetaCrtc *crtc;
-
-          if (output->is_primary)
-            {
-              g_assert_null (primary_output);
-              primary_output = output;
-            }
-
-          crtc = meta_output_get_assigned_crtc (output);
-          g_assert (!crtc || crtc->logical_monitor == logical_monitor);
-          g_assert_cmpint (logical_monitor->is_presentation,
-                           ==,
-                           output->is_presentation);
-        }
-    }
-
-  if (logical_monitor == monitor_manager->primary_logical_monitor)
-    g_assert_nonnull (primary_output);
-}
-
-static void
-get_compensated_crtc_position (MetaCrtc *crtc,
-                               int      *x,
-                               int      *y)
-{
-  MetaLogicalMonitor *logical_monitor;
-  MetaBackend *backend = meta_get_backend ();
-  MetaRenderer *renderer = meta_backend_get_renderer (backend);
-  GList *views;
-  GList *l;
-
-  logical_monitor = crtc->logical_monitor;
-  g_assert_nonnull (logical_monitor);
-
-  views = meta_renderer_get_views (renderer);
-  for (l = views; l; l = l->next)
-    {
-      MetaRendererView *view = l->data;
-      MetaRectangle view_layout;
-
-      clutter_stage_view_get_layout (CLUTTER_STAGE_VIEW (view),
-                                     &view_layout);
-
-      if (meta_rectangle_equal (&view_layout,
-                                &logical_monitor->rect))
-        {
-          *x = crtc->rect.x - view_layout.x;
-          *y = crtc->rect.y - view_layout.y;
-          return;
-        }
-    }
-
-  *x = crtc->rect.x;
-  *y = crtc->rect.y;
-}
-
-static void
-check_monitor_configuration (MonitorTestCase *test_case)
-{
-  MetaBackend *backend = meta_get_backend ();
-  MetaMonitorManager *monitor_manager =
-    meta_backend_get_monitor_manager (backend);
-  MetaMonitorManagerTest *monitor_manager_test =
-    META_MONITOR_MANAGER_TEST (monitor_manager);
-  MetaGpu *gpu = meta_monitor_manager_test_get_gpu (monitor_manager_test);
-  int tiled_monitor_count;
-  GList *monitors;
-  GList *crtcs;
-  int n_logical_monitors;
-  GList *l;
-  int i;
-
-  g_assert_cmpint (monitor_manager->screen_width,
-                   ==,
-                   test_case->expect.screen_width);
-  g_assert_cmpint (monitor_manager->screen_height,
-                   ==,
-                   test_case->expect.screen_height);
-  g_assert_cmpint ((int) g_list_length (meta_gpu_get_outputs (gpu)),
-                   ==,
-                   test_case->expect.n_outputs);
-  g_assert_cmpint ((int) g_list_length (meta_gpu_get_crtcs (gpu)),
-                   ==,
-                   test_case->expect.n_crtcs);
-
-  tiled_monitor_count =
-    meta_monitor_manager_test_get_tiled_monitor_count (monitor_manager_test);
-  g_assert_cmpint (tiled_monitor_count,
-                   ==,
-                   test_case->expect.n_tiled_monitors);
-
-  monitors = meta_monitor_manager_get_monitors (monitor_manager);
-  g_assert_cmpint ((int) g_list_length (monitors),
-                   ==,
-                   test_case->expect.n_monitors);
-  for (l = monitors, i = 0; l; l = l->next, i++)
-    {
-      MetaMonitor *monitor = l->data;
-      GList *outputs;
-      GList *l_output;
-      int j;
-      int width_mm, height_mm;
-      GList *modes;
-      GList *l_mode;
-      MetaMonitorMode *current_mode;
-      int expected_current_mode_index;
-      MetaMonitorMode *expected_current_mode;
-
-      outputs = meta_monitor_get_outputs (monitor);
-
-      g_assert_cmpint ((int) g_list_length (outputs),
-                       ==,
-                       test_case->expect.monitors[i].n_outputs);
-
-      for (l_output = outputs, j = 0; l_output; l_output = l_output->next, j++)
-        {
-          MetaOutput *output = l_output->data;
-          long winsys_id = test_case->expect.monitors[i].outputs[j];
-
-          g_assert (output == output_from_winsys_id (monitor_manager,
-                                                     winsys_id));
-          g_assert_cmpint (test_case->expect.monitors[i].is_underscanning,
-                           ==,
-                           output->is_underscanning);
-        }
-
-      meta_monitor_get_physical_dimensions (monitor, &width_mm, &height_mm);
-      g_assert_cmpint (width_mm,
-                       ==,
-                       test_case->expect.monitors[i].width_mm);
-      g_assert_cmpint (height_mm,
-                       ==,
-                       test_case->expect.monitors[i].height_mm);
-
-      modes = meta_monitor_get_modes (monitor);
-      g_assert_cmpint (g_list_length (modes),
-                       ==,
-                       test_case->expect.monitors[i].n_modes);
-
-      for (l_mode = modes, j = 0; l_mode; l_mode = l_mode->next, j++)
-        {
-          MetaMonitorMode *mode = l_mode->data;
-          int width;
-          int height;
-          float refresh_rate;
-          MetaCrtcModeFlag flags;
-          CheckMonitorModeData data;
-
-          meta_monitor_mode_get_resolution (mode, &width, &height);
-          refresh_rate = meta_monitor_mode_get_refresh_rate (mode);
-          flags = meta_monitor_mode_get_flags (mode);
-
-          g_assert_cmpint (width,
-                           ==,
-                           test_case->expect.monitors[i].modes[j].width);
-          g_assert_cmpint (height,
-                           ==,
-                           test_case->expect.monitors[i].modes[j].height);
-          g_assert_cmpfloat (refresh_rate,
-                             ==,
-                             test_case->expect.monitors[i].modes[j].refresh_rate);
-          g_assert_cmpint (flags,
-                           ==,
-                           test_case->expect.monitors[i].modes[j].flags);
-
-          data = (CheckMonitorModeData) {
-            .monitor_manager = monitor_manager,
-            .expect_crtc_mode_iter =
-              test_case->expect.monitors[i].modes[j].crtc_modes
-          };
-          meta_monitor_mode_foreach_output (monitor, mode,
-                                            check_monitor_mode,
-                                            &data,
-                                            NULL);
-        }
-
-      current_mode = meta_monitor_get_current_mode (monitor);
-      expected_current_mode_index = test_case->expect.monitors[i].current_mode;
-      if (expected_current_mode_index == -1)
-        expected_current_mode = NULL;
-      else
-        expected_current_mode = g_list_nth (modes,
-                                            expected_current_mode_index)->data;
-
-      g_assert (current_mode == expected_current_mode);
-      if (current_mode)
-        g_assert (meta_monitor_is_active (monitor));
-      else
-        g_assert (!meta_monitor_is_active (monitor));
-
-      if (current_mode)
-        {
-          CheckMonitorModeData data;
-
-          data = (CheckMonitorModeData) {
-            .monitor_manager = monitor_manager,
-            .expect_crtc_mode_iter =
-              test_case->expect.monitors[i].modes[expected_current_mode_index].crtc_modes
-          };
-          meta_monitor_mode_foreach_output (monitor, expected_current_mode,
-                                            check_current_monitor_mode,
-                                            &data,
-                                            NULL);
-        }
-
-      meta_monitor_derive_current_mode (monitor);
-      g_assert (current_mode == meta_monitor_get_current_mode (monitor));
-    }
-
-  n_logical_monitors =
-    meta_monitor_manager_get_num_logical_monitors (monitor_manager);
-  g_assert_cmpint (n_logical_monitors,
-                   ==,
-                   test_case->expect.n_logical_monitors);
-
-  /*
-   * Check that we have a primary logical monitor (except for headless),
-   * and that the main output of the first monitor is the only output
-   * that is marked as primary (further below). Note: outputs being primary or
-   * not only matters on X11.
-   */
-  if (test_case->expect.primary_logical_monitor == -1)
-    {
-      g_assert_null (monitor_manager->primary_logical_monitor);
-      g_assert_null (monitor_manager->logical_monitors);
-    }
-  else
-    {
-      MonitorTestCaseLogicalMonitor *test_logical_monitor =
-        &test_case->expect.logical_monitors[test_case->expect.primary_logical_monitor];
-      MetaLogicalMonitor *logical_monitor;
-
-      logical_monitor =
-        logical_monitor_from_layout (monitor_manager,
-                                     &test_logical_monitor->layout);
-      g_assert (logical_monitor == monitor_manager->primary_logical_monitor);
-    }
-
-  for (i = 0; i < test_case->expect.n_logical_monitors; i++)
-    {
-      MonitorTestCaseLogicalMonitor *test_logical_monitor =
-        &test_case->expect.logical_monitors[i];
-
-      check_logical_monitor (test_case, monitor_manager, test_logical_monitor);
-    }
-  g_assert_cmpint (n_logical_monitors, ==, i);
-
-  crtcs = meta_gpu_get_crtcs (gpu);
-  for (l = crtcs, i = 0; l; l = l->next, i++)
-    {
-      MetaCrtc *crtc = l->data;
-
-      if (test_case->expect.crtcs[i].current_mode == -1)
-        {
-          g_assert_null (crtc->current_mode);
-        }
-      else
-        {
-          MetaLogicalMonitor *logical_monitor = crtc->logical_monitor;
-          MetaCrtcMode *expected_current_mode;
-          int crtc_x, crtc_y;
-
-          expected_current_mode =
-            g_list_nth_data (meta_gpu_get_modes (gpu),
-                             test_case->expect.crtcs[i].current_mode);
-          g_assert (crtc->current_mode == expected_current_mode);
-
-          g_assert_cmpuint (crtc->transform,
-                            ==,
-                            test_case->expect.crtcs[i].transform);
-
-          if (meta_is_stage_views_enabled ())
-            {
-              get_compensated_crtc_position (crtc, &crtc_x, &crtc_y);
-
-              g_assert_cmpint (crtc_x, ==, test_case->expect.crtcs[i].x);
-              g_assert_cmpint (crtc_y, ==, test_case->expect.crtcs[i].y);
-            }
-          else
-            {
-              int expect_crtc_x;
-              int expect_crtc_y;
-
-              g_assert_cmpuint (logical_monitor->transform,
-                                ==,
-                                crtc->transform);
-
-              expect_crtc_x = (test_case->expect.crtcs[i].x +
-                               logical_monitor->rect.x);
-              expect_crtc_y = (test_case->expect.crtcs[i].y +
-                               logical_monitor->rect.y);
-
-              g_assert_cmpint (crtc->rect.x, ==, expect_crtc_x);
-              g_assert_cmpint (crtc->rect.y, ==, expect_crtc_y);
-            }
-        }
-    }
-
-  check_monitor_test_client_state ();
-}
-
-static void
-meta_output_test_destroy_notify (MetaOutput *output)
-{
-  g_clear_pointer (&output->driver_private, g_free);
-}
-
-static MetaMonitorTestSetup *
-create_monitor_test_setup (MonitorTestCase *test_case,
-                           MonitorTestFlag  flags)
-{
-  MetaMonitorTestSetup *test_setup;
-  int i;
-  int n_laptop_panels = 0;
-  int n_normal_panels = 0;
-  gboolean hotplug_mode_update;
-
-  if (flags & MONITOR_TEST_FLAG_NO_STORED)
-    hotplug_mode_update = TRUE;
-  else
-    hotplug_mode_update = FALSE;
-
-  test_setup = g_new0 (MetaMonitorTestSetup, 1);
-
-  test_setup->modes = NULL;
-  for (i = 0; i < test_case->setup.n_modes; i++)
-    {
-      MetaCrtcMode *mode;
-
-      mode = g_object_new (META_TYPE_CRTC_MODE, NULL);
-      mode->mode_id = i;
-      mode->width = test_case->setup.modes[i].width;
-      mode->height = test_case->setup.modes[i].height;
-      mode->refresh_rate = test_case->setup.modes[i].refresh_rate;
-      mode->flags = test_case->setup.modes[i].flags;
-
-      test_setup->modes = g_list_append (test_setup->modes, mode);
-    }
-
-  test_setup->crtcs = NULL;
-  for (i = 0; i < test_case->setup.n_crtcs; i++)
-    {
-      MetaCrtc *crtc;
-      int current_mode_index;
-      MetaCrtcMode *current_mode;
-
-      current_mode_index = test_case->setup.crtcs[i].current_mode;
-      if (current_mode_index == -1)
-        current_mode = NULL;
-      else
-        current_mode = g_list_nth_data (test_setup->modes, current_mode_index);
-
-      crtc = g_object_new (META_TYPE_CRTC, NULL);
-      crtc->crtc_id = i + 1;
-      crtc->current_mode = current_mode;
-      crtc->transform = META_MONITOR_TRANSFORM_NORMAL;
-      crtc->all_transforms = ALL_TRANSFORMS;
-
-      test_setup->crtcs = g_list_append (test_setup->crtcs, crtc);
-    }
-
-  test_setup->outputs = NULL;
-  for (i = 0; i < test_case->setup.n_outputs; i++)
-    {
-      MetaOutput *output;
-      MetaOutputTest *output_test;
-      int crtc_index;
-      MetaCrtc *crtc;
-      int preferred_mode_index;
-      MetaCrtcMode *preferred_mode;
-      MetaCrtcMode **modes;
-      int n_modes;
-      int j;
-      MetaCrtc **possible_crtcs;
-      int n_possible_crtcs;
-      int scale;
-      gboolean is_laptop_panel;
-      const char *serial;
-
-      crtc_index = test_case->setup.outputs[i].crtc;
-      if (crtc_index == -1)
-        crtc = NULL;
-      else
-        crtc = g_list_nth_data (test_setup->crtcs, crtc_index);
-
-      preferred_mode_index = test_case->setup.outputs[i].preferred_mode;
-      if (preferred_mode_index == -1)
-        preferred_mode = NULL;
-      else
-        preferred_mode = g_list_nth_data (test_setup->modes,
-                                          preferred_mode_index);
-
-      n_modes = test_case->setup.outputs[i].n_modes;
-      modes = g_new0 (MetaCrtcMode *, n_modes);
-      for (j = 0; j < n_modes; j++)
-        {
-          int mode_index;
-
-          mode_index = test_case->setup.outputs[i].modes[j];
-          modes[j] = g_list_nth_data (test_setup->modes, mode_index);
-        }
-
-      n_possible_crtcs = test_case->setup.outputs[i].n_possible_crtcs;
-      possible_crtcs = g_new0 (MetaCrtc *, n_possible_crtcs);
-      for (j = 0; j < n_possible_crtcs; j++)
-        {
-          int possible_crtc_index;
-
-          possible_crtc_index = test_case->setup.outputs[i].possible_crtcs[j];
-          possible_crtcs[j] = g_list_nth_data (test_setup->crtcs,
-                                               possible_crtc_index);
-        }
-
-      output_test = g_new0 (MetaOutputTest, 1);
-
-      scale = test_case->setup.outputs[i].scale;
-      if (scale < 1)
-        scale = 1;
-
-      *output_test = (MetaOutputTest) {
-        .scale = scale
-      };
-
-      is_laptop_panel = test_case->setup.outputs[i].is_laptop_panel;
-
-      serial = test_case->setup.outputs[i].serial;
-      if (!serial)
-        serial = "0x123456";
-
-      output = g_object_new (META_TYPE_OUTPUT, NULL);
-
-      if (crtc)
-        meta_output_assign_crtc (output, crtc);
-      output->winsys_id = i;
-      output->name = (is_laptop_panel ? g_strdup_printf ("eDP-%d",
-                                                  ++n_laptop_panels)
-                               : g_strdup_printf ("DP-%d",
-                                                  ++n_normal_panels));
-      output->vendor = g_strdup ("MetaProduct's Inc.");
-      output->product = g_strdup ("MetaMonitor");
-      output->serial = g_strdup (serial);
-      output->suggested_x = -1;
-      output->suggested_y = -1;
-      output->hotplug_mode_update = hotplug_mode_update;
-      output->width_mm = test_case->setup.outputs[i].width_mm;
-      output->height_mm = test_case->setup.outputs[i].height_mm;
-      output->subpixel_order = COGL_SUBPIXEL_ORDER_UNKNOWN;
-      output->preferred_mode = preferred_mode;
-      output->n_modes = n_modes;
-      output->modes = modes;
-      output->n_possible_crtcs = n_possible_crtcs;
-      output->possible_crtcs = possible_crtcs;
-      output->n_possible_clones = 0;
-      output->possible_clones = NULL;
-      output->backlight = -1;
-      output->connector_type = (is_laptop_panel ? META_CONNECTOR_TYPE_eDP
-                                         : META_CONNECTOR_TYPE_DisplayPort);
-      output->tile_info = test_case->setup.outputs[i].tile_info;
-      output->is_underscanning = test_case->setup.outputs[i].is_underscanning;
-      output->panel_orientation_transform =
-        test_case->setup.outputs[i].panel_orientation_transform;
-      output->driver_private = output_test;
-      output->driver_notify = (GDestroyNotify) meta_output_test_destroy_notify;
-
-      test_setup->outputs = g_list_append (test_setup->outputs, output);
-    }
-
-  return test_setup;
+  meta_x11_display_set_alarm_filter (meta_get_display ()->x11_display,
+                                     NULL, NULL);
 }
 
 static void
 meta_test_monitor_initial_linear_config (void)
 {
-  check_monitor_configuration (&initial_test_case);
+  check_monitor_configuration (&initial_test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -1102,10 +330,11 @@ meta_test_monitor_one_disconnected_linear_config (void)
     .screen_height = 768
   };
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -1212,6 +441,7 @@ meta_test_monitor_one_off_linear_config (void)
       },
       {
         .current_mode = 0,
+        .x = 1024,
       }
     },
     .n_crtcs = 2,
@@ -1219,10 +449,11 @@ meta_test_monitor_one_off_linear_config (void)
     .screen_height = 768
   };
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -1339,10 +570,11 @@ meta_test_monitor_preferred_linear_config (void)
   };
   MetaMonitorTestSetup *test_setup;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -1468,10 +700,11 @@ meta_test_monitor_tiled_linear_config (void)
   };
   MetaMonitorTestSetup *test_setup;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -1641,10 +874,11 @@ meta_test_monitor_tiled_non_preferred_linear_config (void)
   };
   MetaMonitorTestSetup *test_setup;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -1790,10 +1024,11 @@ meta_test_monitor_tiled_non_main_origin_linear_config (void)
   };
   MetaMonitorTestSetup *test_setup;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -1920,6 +1155,7 @@ meta_test_monitor_hidpi_linear_config (void)
         },
         {
           .current_mode = 1,
+          .x = 640,
         }
       },
       .n_crtcs = 2,
@@ -1935,19 +1171,11 @@ meta_test_monitor_hidpi_linear_config (void)
       return;
     }
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
-}
-
-static void
-set_suggested_output_position (MetaOutput *output,
-                               int         x,
-                               int         y)
-{
-  output->suggested_x = x;
-  output->suggested_y = y;
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -1977,7 +1205,10 @@ meta_test_monitor_suggested_config (void)
           .possible_crtcs = { 0 },
           .n_possible_crtcs = 1,
           .width_mm = 222,
-          .height_mm = 125
+          .height_mm = 125,
+          .hotplug_mode = TRUE,
+          .suggested_x = 1024,
+          .suggested_y = 758,
         },
         {
           .crtc = 1,
@@ -1987,7 +1218,10 @@ meta_test_monitor_suggested_config (void)
           .possible_crtcs = { 1 },
           .n_possible_crtcs = 1,
           .width_mm = 220,
-          .height_mm = 124
+          .height_mm = 124,
+          .hotplug_mode = TRUE,
+          .suggested_x = 0,
+          .suggested_y = 0,
         }
       },
       .n_outputs = 2,
@@ -2072,6 +1306,8 @@ meta_test_monitor_suggested_config (void)
       .crtcs = {
         {
           .current_mode = 0,
+          .x = 1024,
+          .y = 758,
         },
         {
           .current_mode = 1,
@@ -2085,16 +1321,12 @@ meta_test_monitor_suggested_config (void)
   };
   MetaMonitorTestSetup *test_setup;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
 
-  set_suggested_output_position (g_list_nth_data (test_setup->outputs, 0),
-                                 1024, 758);
-  set_suggested_output_position (g_list_nth_data (test_setup->outputs, 1),
-                                 0, 0);
-
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -2211,7 +1443,7 @@ meta_test_monitor_limited_crtcs (void)
   };
   MetaMonitorTestSetup *test_setup;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
 
   g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_WARNING,
@@ -2220,7 +1452,8 @@ meta_test_monitor_limited_crtcs (void)
   emulate_hotplug (test_setup);
   g_test_assert_expected_messages ();
 
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -2340,6 +1573,7 @@ meta_test_monitor_lid_switch_config (void)
         },
         {
           .current_mode = 0,
+          .x = 1024,
         }
       },
       .n_crtcs = 2,
@@ -2353,10 +1587,11 @@ meta_test_monitor_lid_switch_config (void)
   MetaMonitorManager *monitor_manager =
     meta_backend_get_monitor_manager (backend);
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 
   meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), TRUE);
   meta_monitor_manager_lid_is_closed_changed (monitor_manager);
@@ -2371,8 +1606,10 @@ meta_test_monitor_lid_switch_config (void)
   test_case.expect.screen_width = 1024;
   test_case.expect.monitors[0].current_mode = -1;
   test_case.expect.crtcs[0].current_mode = -1;
+  test_case.expect.crtcs[1].x = 0;
 
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 
   meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), FALSE);
   meta_monitor_manager_lid_is_closed_changed (monitor_manager);
@@ -2390,8 +1627,10 @@ meta_test_monitor_lid_switch_config (void)
 
   test_case.expect.crtcs[0].current_mode = 0;
   test_case.expect.crtcs[1].current_mode = 0;
+  test_case.expect.crtcs[1].x = 1024;
 
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -2524,12 +1763,13 @@ meta_test_monitor_lid_opened_config (void)
   MetaMonitorManager *monitor_manager =
     meta_backend_get_monitor_manager (backend);
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), TRUE);
 
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 
   meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), FALSE);
   meta_monitor_manager_lid_is_closed_changed (monitor_manager);
@@ -2538,9 +1778,12 @@ meta_test_monitor_lid_opened_config (void)
   test_case.expect.screen_width = 1024 * 2;
   test_case.expect.monitors[0].current_mode = 0;
   test_case.expect.crtcs[0].current_mode = 0;
+  test_case.expect.crtcs[0].x = 1024;
   test_case.expect.crtcs[1].current_mode = 0;
+  test_case.expect.crtcs[1].x = 0;
 
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -2628,12 +1871,13 @@ meta_test_monitor_lid_closed_no_external (void)
   MetaMonitorTestSetup *test_setup;
   MetaBackend *backend = meta_get_backend ();
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), TRUE);
 
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -2771,12 +2015,13 @@ meta_test_monitor_lid_closed_with_hotplugged_external (void)
    *  3) Close lid
    */
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), FALSE);
 
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 
   /* External monitor connected */
 
@@ -2785,12 +2030,14 @@ meta_test_monitor_lid_closed_with_hotplugged_external (void)
   test_case.expect.n_monitors = 2;
   test_case.expect.n_logical_monitors = 2;
   test_case.expect.crtcs[1].current_mode = 0;
+  test_case.expect.crtcs[1].x = 1024;
   test_case.expect.screen_width = 1024 * 2;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 
   /* Lid closed */
 
@@ -2798,13 +2045,15 @@ meta_test_monitor_lid_closed_with_hotplugged_external (void)
   test_case.expect.logical_monitors[0].monitors[0] = 1,
   test_case.expect.n_logical_monitors = 1;
   test_case.expect.crtcs[0].current_mode = -1;
+  test_case.expect.crtcs[1].x = 0;
   test_case.expect.screen_width = 1024;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), TRUE);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 
   /*
    * The second part of this test emulate the following:
@@ -2821,13 +2070,15 @@ meta_test_monitor_lid_closed_with_hotplugged_external (void)
   test_case.expect.logical_monitors[1].monitors[0] = 1,
   test_case.expect.n_logical_monitors = 2;
   test_case.expect.crtcs[0].current_mode = 0;
+  test_case.expect.crtcs[1].x = 1024;
   test_case.expect.screen_width = 1024 * 2;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), FALSE);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 
   /* External monitor disconnected */
 
@@ -2838,10 +2089,11 @@ meta_test_monitor_lid_closed_with_hotplugged_external (void)
   test_case.expect.crtcs[1].current_mode = -1;
   test_case.expect.screen_width = 1024;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 
   /* Lid closed */
 
@@ -2849,19 +2101,134 @@ meta_test_monitor_lid_closed_with_hotplugged_external (void)
   test_case.expect.n_logical_monitors = 1;
   test_case.expect.screen_width = 1024;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), TRUE);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 
   /* Lid opened */
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), FALSE);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
+}
+
+static void
+meta_test_monitor_lid_scaled_closed_opened (void)
+{
+  MonitorTestCase test_case = {
+    .setup = {
+      .modes = {
+        {
+          .width = 1920,
+          .height = 1080,
+          .refresh_rate = 60.000495910644531
+        }
+      },
+      .n_modes = 1,
+      .outputs = {
+        {
+          .crtc = 0,
+          .modes = { 0 },
+          .n_modes = 1,
+          .preferred_mode = 0,
+          .possible_crtcs = { 0 },
+          .n_possible_crtcs = 1,
+          .width_mm = 222,
+          .height_mm = 125,
+          .is_laptop_panel = TRUE
+        },
+      },
+      .n_outputs = 1,
+      .crtcs = {
+        {
+          .current_mode = 0
+        },
+      },
+      .n_crtcs = 1
+    },
+
+    .expect = {
+      .monitors = {
+        {
+          .outputs = { 0 },
+          .n_outputs = 1,
+          .modes = {
+            {
+              .width = 1920,
+              .height = 1080,
+              .refresh_rate = 60.000495910644531,
+              .crtc_modes = {
+                {
+                  .output = 0,
+                  .crtc_mode = 0
+                }
+              }
+            }
+          },
+          .n_modes = 1,
+          .current_mode = 0,
+          .width_mm = 222,
+          .height_mm = 125,
+        }
+      },
+      .n_monitors = 1,
+      .logical_monitors = {
+        {
+          .monitors = { 0 },
+          .n_monitors = 1,
+          .layout = { .x = 0, .y = 0, .width = 960, .height = 540 },
+          .scale = 2
+        }
+      },
+      .n_logical_monitors = 1,
+      .primary_logical_monitor = 0,
+      .n_outputs = 1,
+      .crtcs = {
+        {
+          .current_mode = 0,
+        }
+      },
+      .n_crtcs = 1,
+      .n_tiled_monitors = 0,
+      .screen_width = 960,
+      .screen_height = 540
+    }
+  };
+  MetaMonitorTestSetup *test_setup;
+  MetaBackend *backend = meta_get_backend ();
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
+
+  if (!meta_is_stage_views_enabled ())
+    {
+      g_test_skip ("Not using stage views");
+      return;
+    }
+
+  test_setup = create_monitor_test_setup (&test_case.setup,
+                                          MONITOR_TEST_FLAG_NONE);
+  set_custom_monitor_config ("lid-scale.xml");
+  emulate_hotplug (test_setup);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
+
+  meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), TRUE);
+  meta_monitor_manager_lid_is_closed_changed (monitor_manager);
+
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
+
+  meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), FALSE);
+  meta_monitor_manager_lid_is_closed_changed (monitor_manager);
+
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -2886,19 +2253,36 @@ meta_test_monitor_no_outputs (void)
     }
   };
   MetaMonitorTestSetup *test_setup;
+  GError *error = NULL;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
 
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
+
+  if (!test_client_do (x11_monitor_test_client, &error,
+                       "resize", X11_TEST_CLIENT_WINDOW,
+                       "123", "210",
+                       NULL))
+    g_error ("Failed to resize X11 window: %s", error->message);
+
+  if (!test_client_do (wayland_monitor_test_client, &error,
+                       "resize", WAYLAND_TEST_CLIENT_WINDOW,
+                       "123", "210",
+                       NULL))
+    g_error ("Failed to resize Wayland window: %s", error->message);
+
+  check_monitor_test_clients_state ();
 
   /* Also check that we handle going headless -> headless */
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
 
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -2985,10 +2369,11 @@ meta_test_monitor_underscanning_config (void)
   };
   MetaMonitorTestSetup *test_setup;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -3080,10 +2465,11 @@ meta_test_monitor_preferred_non_first_mode (void)
   };
   MetaMonitorTestSetup *test_setup;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -3113,10 +2499,155 @@ meta_test_monitor_non_upright_panel (void)
   test_case.expect.crtcs[0].current_mode = 1;
   test_case.expect.crtcs[0].transform = META_MONITOR_TRANSFORM_90;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
+}
+
+static void
+meta_test_monitor_switch_external_without_external (void)
+{
+  MonitorTestCase test_case = {
+    .setup = {
+      .modes = {
+        {
+          .width = 1024,
+          .height = 768,
+          .refresh_rate = 60.0
+        }
+      },
+      .n_modes = 1,
+      .outputs = {
+        {
+          .crtc = 0,
+          .modes = { 0 },
+          .n_modes = 1,
+          .preferred_mode = 0,
+          .possible_crtcs = { 0 },
+          .n_possible_crtcs = 1,
+          .width_mm = 222,
+          .height_mm = 125,
+          .is_laptop_panel = TRUE
+        },
+        {
+          .crtc = 1,
+          .modes = { 0 },
+          .n_modes = 1,
+          .preferred_mode = 0,
+          .possible_crtcs = { 1 },
+          .n_possible_crtcs = 1,
+          .width_mm = 222,
+          .height_mm = 125,
+          .is_laptop_panel = TRUE
+        }
+      },
+      .n_outputs = 2,
+      .crtcs = {
+        {
+          .current_mode = 0
+        },
+        {
+          .current_mode = 0
+        }
+      },
+      .n_crtcs = 2
+    },
+
+    .expect = {
+      .monitors = {
+        {
+          .outputs = { 0 },
+          .n_outputs = 1,
+          .modes = {
+            {
+              .width = 1024,
+              .height = 768,
+              .refresh_rate = 60.0,
+              .crtc_modes = {
+                {
+                  .output = 0,
+                  .crtc_mode = 0
+                }
+              }
+            }
+          },
+          .n_modes = 1,
+          .current_mode = 0,
+          .width_mm = 222,
+          .height_mm = 125
+        },
+        {
+          .outputs = { 1 },
+          .n_outputs = 1,
+          .modes = {
+            {
+              .width = 1024,
+              .height = 768,
+              .refresh_rate = 60.0,
+              .crtc_modes = {
+                {
+                  .output = 1,
+                  .crtc_mode = 0
+                }
+              }
+            }
+          },
+          .n_modes = 1,
+          .current_mode = 0,
+          .width_mm = 222,
+          .height_mm = 125
+        }
+      },
+      .n_monitors = 2,
+      .logical_monitors = {
+        {
+          .monitors = { 0 },
+          .n_monitors = 1,
+          .layout = { .x = 0, .y = 0, .width = 1024, .height = 768 },
+          .scale = 1
+        },
+        {
+          .monitors = { 1 },
+          .n_monitors = 1,
+          .layout = { .x = 1024, .y = 0, .width = 1024, .height = 768 },
+          .scale = 1
+        }
+      },
+      .n_logical_monitors = 2,
+      .primary_logical_monitor = 0,
+      .n_outputs = 2,
+      .crtcs = {
+        {
+          .current_mode = 0,
+        },
+        {
+          .current_mode = 0,
+          .x = 1024,
+        },
+      },
+      .n_crtcs = 2,
+      .n_tiled_monitors = 0,
+      .screen_width = 2048,
+      .screen_height = 768
+    }
+  };
+  MetaMonitorTestSetup *test_setup;
+  MetaBackend *backend = meta_get_backend ();
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
+
+  test_setup = create_monitor_test_setup (&test_case.setup,
+                                          MONITOR_TEST_FLAG_NO_STORED);
+  emulate_hotplug (test_setup);
+  check_monitor_configuration (&test_case.expect);
+
+  meta_monitor_manager_switch_config (monitor_manager,
+                                      META_MONITOR_SWITCH_CONFIG_EXTERNAL);
+  check_monitor_configuration (&test_case.expect);
+
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -3240,6 +2771,7 @@ meta_test_monitor_custom_vertical_config (void)
         },
         {
           .current_mode = 1,
+          .y = 768,
         }
       },
       .n_crtcs = 2,
@@ -3250,12 +2782,13 @@ meta_test_monitor_custom_vertical_config (void)
   };
   MetaMonitorTestSetup *test_setup;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   set_custom_monitor_config ("vertical.xml");
   emulate_hotplug (test_setup);
 
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -3379,6 +2912,7 @@ meta_test_monitor_custom_primary_config (void)
         },
         {
           .current_mode = 1,
+          .x = 1024,
         }
       },
       .n_crtcs = 2,
@@ -3389,12 +2923,13 @@ meta_test_monitor_custom_primary_config (void)
   };
   MetaMonitorTestSetup *test_setup;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   set_custom_monitor_config ("primary.xml");
   emulate_hotplug (test_setup);
 
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -3481,12 +3016,13 @@ meta_test_monitor_custom_underscanning_config (void)
   };
   MetaMonitorTestSetup *test_setup;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   set_custom_monitor_config ("underscanning.xml");
   emulate_hotplug (test_setup);
 
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -3578,12 +3114,13 @@ meta_test_monitor_custom_scale_config (void)
       return;
     }
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   set_custom_monitor_config ("scale.xml");
   emulate_hotplug (test_setup);
 
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -3675,12 +3212,13 @@ meta_test_monitor_custom_fractional_scale_config (void)
       return;
     }
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   set_custom_monitor_config ("fractional-scale.xml");
   emulate_hotplug (test_setup);
 
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -3772,12 +3310,13 @@ meta_test_monitor_custom_high_precision_fractional_scale_config (void)
       return;
     }
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   set_custom_monitor_config ("high-precision-fractional-scale.xml");
   emulate_hotplug (test_setup);
 
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -3891,7 +3430,7 @@ meta_test_monitor_custom_tiled_config (void)
         },
         {
           .current_mode = 0,
-          .x = 400,
+          .x = 200,
           .y = 0
         }
       },
@@ -3909,12 +3448,13 @@ meta_test_monitor_custom_tiled_config (void)
       return;
     }
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   set_custom_monitor_config ("tiled.xml");
   emulate_hotplug (test_setup);
 
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -4066,12 +3606,13 @@ meta_test_monitor_custom_tiled_custom_resolution_config (void)
       return;
     }
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   set_custom_monitor_config ("tiled-custom-resolution.xml");
   emulate_hotplug (test_setup);
 
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -4240,12 +3781,13 @@ meta_test_monitor_custom_tiled_non_preferred_config (void)
   };
   MetaMonitorTestSetup *test_setup;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   set_custom_monitor_config ("non-preferred-tiled-custom-resolution.xml");
   emulate_hotplug (test_setup);
 
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -4368,12 +3910,13 @@ meta_test_monitor_custom_mirrored_config (void)
   };
   MetaMonitorTestSetup *test_setup;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   set_custom_monitor_config ("mirrored.xml");
   emulate_hotplug (test_setup);
 
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -4494,6 +4037,7 @@ meta_test_monitor_custom_first_rotated_config (void)
         },
         {
           .current_mode = 0,
+          .x = 768,
         }
       },
       .n_crtcs = 2,
@@ -4503,11 +4047,12 @@ meta_test_monitor_custom_first_rotated_config (void)
   };
   MetaMonitorTestSetup *test_setup;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   set_custom_monitor_config ("first-rotated.xml");
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -4624,10 +4169,12 @@ meta_test_monitor_custom_second_rotated_config (void)
       .crtcs = {
         {
           .current_mode = 0,
+          .y = 256,
         },
         {
           .current_mode = 0,
-          .transform = META_MONITOR_TRANSFORM_90
+          .transform = META_MONITOR_TRANSFORM_90,
+          .x = 1024,
         }
       },
       .n_crtcs = 2,
@@ -4637,11 +4184,12 @@ meta_test_monitor_custom_second_rotated_config (void)
   };
   MetaMonitorTestSetup *test_setup;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   set_custom_monitor_config ("second-rotated.xml");
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -4798,16 +4346,19 @@ meta_test_monitor_custom_second_rotated_tiled_config (void)
       .crtcs = {
         {
           .current_mode = 0,
+          .y = 256,
         },
         {
           .current_mode = 1,
           .transform = META_MONITOR_TRANSFORM_90,
-          .x = 0,
-          .y = 400,
+          .x = 1024,
+          .y = 0,
         },
         {
           .current_mode = 1,
-          .transform = META_MONITOR_TRANSFORM_90
+          .transform = META_MONITOR_TRANSFORM_90,
+          .x = 1024,
+          .y = 400,
         }
       },
       .n_crtcs = 3,
@@ -4826,11 +4377,205 @@ meta_test_monitor_custom_second_rotated_tiled_config (void)
   meta_monitor_manager_test_set_handles_transforms (monitor_manager_test,
                                                     TRUE);
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   set_custom_monitor_config ("second-rotated-tiled.xml");
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
+}
+
+static void
+meta_test_monitor_custom_second_rotated_nonnative_tiled_config (void)
+{
+  MonitorTestCase test_case = {
+    .setup = {
+      .modes = {
+        {
+          .width = 1024,
+          .height = 768,
+          .refresh_rate = 60.000495910644531
+        },
+        {
+          .width = 400,
+          .height = 600,
+          .refresh_rate = 60.000495910644531
+        }
+      },
+      .n_modes = 2,
+      .outputs = {
+        {
+          .crtc = 0,
+          .modes = { 0 },
+          .n_modes = 1,
+          .preferred_mode = 0,
+          .possible_crtcs = { 0 },
+          .n_possible_crtcs = 1,
+          .width_mm = 222,
+          .height_mm = 125,
+        },
+        {
+          .crtc = -1,
+          .modes = { 1 },
+          .n_modes = 1,
+          .preferred_mode = 1,
+          .possible_crtcs = { 1, 2 },
+          .n_possible_crtcs = 2,
+          .width_mm = 222,
+          .height_mm = 125,
+          .tile_info = {
+            .group_id = 1,
+            .max_h_tiles = 2,
+            .max_v_tiles = 1,
+            .loc_h_tile = 0,
+            .loc_v_tile = 0,
+            .tile_w = 400,
+            .tile_h = 600
+          }
+        },
+        {
+          .crtc = -1,
+          .modes = { 1 },
+          .n_modes = 1,
+          .preferred_mode = 1,
+          .possible_crtcs = { 1, 2 },
+          .n_possible_crtcs = 2,
+          .width_mm = 222,
+          .height_mm = 125,
+          .tile_info = {
+            .group_id = 1,
+            .max_h_tiles = 2,
+            .max_v_tiles = 1,
+            .loc_h_tile = 1,
+            .loc_v_tile = 0,
+            .tile_w = 400,
+            .tile_h = 600
+          }
+        }
+      },
+      .n_outputs = 3,
+      .crtcs = {
+        {
+          .current_mode = -1
+        },
+        {
+          .current_mode = -1
+        },
+        {
+          .current_mode = -1
+        }
+      },
+      .n_crtcs = 3
+    },
+
+    .expect = {
+      .monitors = {
+        {
+          .outputs = { 0 },
+          .n_outputs = 1,
+          .modes = {
+            {
+              .width = 1024,
+              .height = 768,
+              .refresh_rate = 60.000495910644531,
+              .crtc_modes = {
+                {
+                  .output = 0,
+                  .crtc_mode = 0
+                }
+              }
+            }
+          },
+          .n_modes = 1,
+          .current_mode = 0,
+          .width_mm = 222,
+          .height_mm = 125,
+        },
+        {
+          .outputs = { 1, 2 },
+          .n_outputs = 2,
+          .modes = {
+            {
+              .width = 800,
+              .height = 600,
+              .refresh_rate = 60.000495910644531,
+              .crtc_modes = {
+                {
+                  .output = 1,
+                  .crtc_mode = 1,
+                },
+                {
+                  .output = 2,
+                  .crtc_mode = 1,
+                }
+              }
+            }
+          },
+          .n_modes = 1,
+          .current_mode = 0,
+          .width_mm = 222,
+          .height_mm = 125,
+        }
+      },
+      .n_monitors = 2,
+      .logical_monitors = {
+        {
+          .monitors = { 0 },
+          .n_monitors = 1,
+          .layout = { .x = 0, .y = 256, .width = 1024, .height = 768 },
+          .scale = 1
+        },
+        {
+          .monitors = { 1 },
+          .n_monitors = 1,
+          .layout = { .x = 1024, .y = 0, .width = 600, .height = 800 },
+          .scale = 1,
+          .transform = META_MONITOR_TRANSFORM_90
+        }
+      },
+      .n_logical_monitors = 2,
+      .primary_logical_monitor = 0,
+      .n_outputs = 3,
+      .crtcs = {
+        {
+          .current_mode = 0,
+          .y = 256,
+        },
+        {
+          .current_mode = 1,
+          .transform = META_MONITOR_TRANSFORM_NORMAL,
+          .x = 1024,
+          .y = 0,
+        },
+        {
+          .current_mode = 1,
+          .transform = META_MONITOR_TRANSFORM_NORMAL,
+          .x = 1024,
+          .y = 400,
+        }
+      },
+      .n_crtcs = 3,
+      .n_tiled_monitors = 1,
+      .screen_width = 1024 + 600,
+      .screen_height = 1024
+    }
+  };
+  MetaMonitorTestSetup *test_setup;
+  MetaBackend *backend = meta_get_backend ();
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
+  MetaMonitorManagerTest *monitor_manager_test =
+    META_MONITOR_MANAGER_TEST (monitor_manager);
+
+  meta_monitor_manager_test_set_handles_transforms (monitor_manager_test,
+                                                    FALSE);
+
+  test_setup = create_monitor_test_setup (&test_case.setup,
+                                          MONITOR_TEST_FLAG_NONE);
+  set_custom_monitor_config ("second-rotated-tiled.xml");
+  emulate_hotplug (test_setup);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -4947,10 +4692,12 @@ meta_test_monitor_custom_second_rotated_nonnative_config (void)
       .crtcs = {
         {
           .current_mode = 0,
+          .y = 256,
         },
         {
           .current_mode = 0,
-          .transform = META_MONITOR_TRANSFORM_NORMAL
+          .transform = META_MONITOR_TRANSFORM_NORMAL,
+          .x = 1024,
         }
       },
       .n_crtcs = 2,
@@ -4974,11 +4721,12 @@ meta_test_monitor_custom_second_rotated_nonnative_config (void)
   meta_monitor_manager_test_set_handles_transforms (monitor_manager_test,
                                                     FALSE);
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   set_custom_monitor_config ("second-rotated.xml");
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -5083,12 +4831,13 @@ meta_test_monitor_custom_interlaced_config (void)
   };
   MetaMonitorTestSetup *test_setup;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   set_custom_monitor_config ("interlaced.xml");
   emulate_hotplug (test_setup);
 
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -5212,12 +4961,13 @@ meta_test_monitor_custom_oneoff (void)
   };
   MetaMonitorTestSetup *test_setup;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   set_custom_monitor_config ("oneoff.xml");
   emulate_hotplug (test_setup);
 
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -5235,6 +4985,7 @@ meta_test_monitor_custom_lid_switch_config (void)
       .n_modes = 1,
       .outputs = {
         {
+          .crtc = -1,
           .modes = { 0 },
           .n_modes = 1,
           .preferred_mode = 0,
@@ -5245,6 +4996,7 @@ meta_test_monitor_custom_lid_switch_config (void)
           .is_laptop_panel = TRUE
         },
         {
+          .crtc = -1,
           .modes = { 0 },
           .n_modes = 1,
           .preferred_mode = 0,
@@ -5347,11 +5099,12 @@ meta_test_monitor_custom_lid_switch_config (void)
   MetaMonitorTestSetup *test_setup;
   MetaBackend *backend = meta_get_backend ();
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   set_custom_monitor_config ("lid-switch.xml");
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 
   /* External monitor connected */
 
@@ -5360,6 +5113,7 @@ meta_test_monitor_custom_lid_switch_config (void)
   test_case.expect.n_outputs = 2;
   test_case.expect.crtcs[0].transform = META_MONITOR_TRANSFORM_NORMAL;
   test_case.expect.crtcs[1].current_mode = 0;
+  test_case.expect.crtcs[1].x = 1024;
   test_case.expect.crtcs[1].transform = META_MONITOR_TRANSFORM_270;
   test_case.expect.logical_monitors[0].layout =
     (MetaRectangle) { .width = 1024, .height = 768 };
@@ -5368,15 +5122,17 @@ meta_test_monitor_custom_lid_switch_config (void)
   test_case.expect.n_logical_monitors = 2;
   test_case.expect.screen_width = 1024 + 768;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 
   /* Lid was closed */
 
   test_case.expect.crtcs[0].current_mode = -1;
   test_case.expect.crtcs[1].transform = META_MONITOR_TRANSFORM_90;
+  test_case.expect.crtcs[1].x = 0;
   test_case.expect.monitors[0].current_mode = -1;
   test_case.expect.logical_monitors[0].layout =
     (MetaRectangle) { .width = 768, .height = 1024 };
@@ -5386,10 +5142,11 @@ meta_test_monitor_custom_lid_switch_config (void)
   test_case.expect.screen_width = 768;
   meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), TRUE);
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 
   /* Lid was opened */
 
@@ -5397,6 +5154,7 @@ meta_test_monitor_custom_lid_switch_config (void)
   test_case.expect.crtcs[0].transform = META_MONITOR_TRANSFORM_NORMAL;
   test_case.expect.crtcs[1].current_mode = 0;
   test_case.expect.crtcs[1].transform = META_MONITOR_TRANSFORM_270;
+  test_case.expect.crtcs[1].x = 1024;
   test_case.expect.monitors[0].current_mode = 0;
   test_case.expect.logical_monitors[0].layout =
     (MetaRectangle) { .width = 1024, .height = 768 };
@@ -5407,10 +5165,11 @@ meta_test_monitor_custom_lid_switch_config (void)
   test_case.expect.screen_width = 1024 + 768;
   meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), FALSE);
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
   emulate_hotplug (test_setup);
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 }
 
 static void
@@ -5511,7 +5270,7 @@ meta_test_monitor_migrated_rotated (void)
   g_autofree char *expected_data = NULL;
   g_autoptr (GFile) migrated_file = NULL;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
 
   migrated_path = g_build_filename (g_get_tmp_dir (),
@@ -5535,7 +5294,8 @@ meta_test_monitor_migrated_rotated (void)
 
   emulate_hotplug (test_setup);
 
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 
   expected_path = g_test_get_filename (G_TEST_DIST,
                                        "tests", "migration",
@@ -5651,7 +5411,7 @@ meta_test_monitor_migrated_wiggle_discard (void)
   g_autofree char *expected_data = NULL;
   g_autoptr (GFile) migrated_file = NULL;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
 
   migrated_path = g_build_filename (g_get_tmp_dir (),
@@ -5679,7 +5439,8 @@ meta_test_monitor_migrated_wiggle_discard (void)
   emulate_hotplug (test_setup);
   g_test_assert_expected_messages ();
 
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 
   expected_path = g_test_get_filename (G_TEST_DIST,
                                        "tests", "migration",
@@ -5696,6 +5457,128 @@ meta_test_monitor_migrated_wiggle_discard (void)
   migrated_file = g_file_new_for_path (migrated_path);
   if (!g_file_delete (migrated_file, NULL, &error))
     g_error ("Failed to remove test data output file: %s", error->message);
+}
+
+static gboolean
+quit_main_loop (gpointer data)
+{
+  GMainLoop *loop = data;
+
+  g_main_loop_quit (loop);
+
+  return G_SOURCE_REMOVE;
+}
+
+static void
+dispatch (void)
+{
+  GMainLoop *loop;
+
+  loop = g_main_loop_new (NULL, FALSE);
+  meta_later_add (META_LATER_BEFORE_REDRAW,
+                  quit_main_loop,
+                  loop,
+                  NULL);
+  g_main_loop_run (loop);
+}
+
+static TestClient *
+create_test_window (const char *window_name)
+{
+  TestClient *test_client;
+  static int client_count = 0;
+  g_autofree char *client_name = NULL;
+  g_autoptr (GError) error = NULL;
+
+  client_name = g_strdup_printf ("test_client_%d", client_count++);
+  test_client = test_client_new (client_name, META_WINDOW_CLIENT_TYPE_WAYLAND,
+                                 &error);
+  if (!test_client)
+    g_error ("Failed to launch test client: %s", error->message);
+
+  if (!test_client_do (test_client, &error,
+                       "create", window_name,
+                       NULL))
+    g_error ("Failed to create window: %s", error->message);
+
+  return test_client;
+}
+
+static void
+meta_test_monitor_wm_tiling (void)
+{
+  MonitorTestCase test_case = initial_test_case;
+  MetaMonitorTestSetup *test_setup;
+  g_autoptr (GError) error = NULL;
+
+  test_setup = create_monitor_test_setup (&test_case.setup,
+                                          MONITOR_TEST_FLAG_NO_STORED);
+  emulate_hotplug (test_setup);
+
+  /*
+   * 1) Start with two monitors connected.
+   * 2) Tile it on the second monitor.
+   * 3) Unplug both monitors.
+   * 4) Replug in first monitor.
+   */
+
+  const char *test_window_name= "window1";
+  TestClient *test_client = create_test_window (test_window_name);
+
+  if (!test_client_do (test_client, &error,
+                       "show", test_window_name,
+                       NULL))
+    g_error ("Failed to show the window: %s", error->message);
+
+  MetaWindow *test_window =
+    test_client_find_window (test_client,
+                             test_window_name,
+                             &error);
+  if (!test_window)
+    g_error ("Failed to find the window: %s", error->message);
+  test_client_wait_for_window_shown (test_client, test_window);
+
+  meta_window_tile (test_window, META_TILE_MAXIMIZED);
+  meta_window_move_to_monitor (test_window, 1);
+  check_test_client_state (test_client);
+
+  fprintf(stderr, ":::: %s:%d %s() - UNPLUGGING\n", __FILE__, __LINE__, __func__);
+
+  test_case.setup.n_outputs = 0;
+  test_setup = create_monitor_test_setup (&test_case.setup,
+                                          MONITOR_TEST_FLAG_NO_STORED);
+  emulate_hotplug (test_setup);
+  test_case.setup.n_outputs = 1;
+  test_setup = create_monitor_test_setup (&test_case.setup,
+                                          MONITOR_TEST_FLAG_NO_STORED);
+  emulate_hotplug (test_setup);
+
+  dispatch ();
+
+  /*
+   * 1) Start with two monitors connected.
+   * 2) Tile a window on the second monitor.
+   * 3) Untile window.
+   * 4) Unplug monitor.
+   * 5) Tile window again.
+   */
+
+  test_case.setup.n_outputs = 2;
+  test_setup = create_monitor_test_setup (&test_case.setup,
+                                          MONITOR_TEST_FLAG_NO_STORED);
+  emulate_hotplug (test_setup);
+
+  meta_window_move_to_monitor (test_window, 1);
+  meta_window_tile (test_window, META_TILE_NONE);
+
+  test_case.setup.n_outputs = 1;
+  test_setup = create_monitor_test_setup (&test_case.setup,
+                                          MONITOR_TEST_FLAG_NO_STORED);
+  emulate_hotplug (test_setup);
+
+  meta_window_tile (test_window, META_TILE_MAXIMIZED);
+
+  test_client_destroy (test_client);
 }
 
 static void
@@ -5796,7 +5679,7 @@ meta_test_monitor_migrated_wiggle (void)
   g_autofree char *expected_data = NULL;
   g_autoptr (GFile) migrated_file = NULL;
 
-  test_setup = create_monitor_test_setup (&test_case,
+  test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
 
   migrated_path = g_build_filename (g_get_tmp_dir (),
@@ -5820,7 +5703,8 @@ meta_test_monitor_migrated_wiggle (void)
 
   emulate_hotplug (test_setup);
 
-  check_monitor_configuration (&test_case);
+  check_monitor_configuration (&test_case.expect);
+  check_monitor_test_clients_state ();
 
   expected_path = g_test_get_filename (G_TEST_DIST,
                                        "tests", "migration",
@@ -5866,14 +5750,17 @@ add_monitor_test (const char *test_path,
               NULL);
 }
 
+static MetaMonitorTestSetup *
+create_initial_test_setup (void)
+{
+  return create_monitor_test_setup (&initial_test_case.setup,
+                                    MONITOR_TEST_FLAG_NO_STORED);
+}
+
 void
 init_monitor_tests (void)
 {
-  MetaMonitorTestSetup *initial_test_setup;
-
-  initial_test_setup = create_monitor_test_setup (&initial_test_case,
-                                                  MONITOR_TEST_FLAG_NO_STORED);
-  meta_monitor_manager_test_init_test_setup (initial_test_setup);
+  meta_monitor_manager_test_init_test_setup (create_initial_test_setup);
 
   add_monitor_test ("/backends/monitor/initial-linear-config",
                     meta_test_monitor_initial_linear_config);
@@ -5903,6 +5790,8 @@ init_monitor_tests (void)
                     meta_test_monitor_lid_closed_no_external);
   add_monitor_test ("/backends/monitor/lid-closed-with-hotplugged-external",
                     meta_test_monitor_lid_closed_with_hotplugged_external);
+  add_monitor_test ("/backends/monitor/lid-scaled-closed-opened",
+                    meta_test_monitor_lid_scaled_closed_opened);
   add_monitor_test ("/backends/monitor/no-outputs",
                     meta_test_monitor_no_outputs);
   add_monitor_test ("/backends/monitor/underscanning-config",
@@ -5911,6 +5800,8 @@ init_monitor_tests (void)
                     meta_test_monitor_preferred_non_first_mode);
   add_monitor_test ("/backends/monitor/non-upright-panel",
                     meta_test_monitor_non_upright_panel);
+  add_monitor_test ("/backends/monitor/switch-external-without-external",
+                    meta_test_monitor_switch_external_without_external);
 
   add_monitor_test ("/backends/monitor/custom/vertical-config",
                     meta_test_monitor_custom_vertical_config);
@@ -5938,6 +5829,8 @@ init_monitor_tests (void)
                     meta_test_monitor_custom_second_rotated_config);
   add_monitor_test ("/backends/monitor/custom/second-rotated-tiled-config",
                     meta_test_monitor_custom_second_rotated_tiled_config);
+  add_monitor_test ("/backends/monitor/custom/second-rotated-nonnative-tiled-config",
+                    meta_test_monitor_custom_second_rotated_nonnative_tiled_config);
   add_monitor_test ("/backends/monitor/custom/second-rotated-nonnative-config",
                     meta_test_monitor_custom_second_rotated_nonnative_config);
   add_monitor_test ("/backends/monitor/custom/interlaced-config",
@@ -5953,16 +5846,19 @@ init_monitor_tests (void)
                     meta_test_monitor_migrated_wiggle);
   add_monitor_test ("/backends/monitor/migrated/wiggle-discard",
                     meta_test_monitor_migrated_wiggle_discard);
+
+  add_monitor_test ("/backends/monitor/wm/tiling",
+                    meta_test_monitor_wm_tiling);
 }
 
 void
 pre_run_monitor_tests (void)
 {
-  create_monitor_test_client ();
+  create_monitor_test_clients ();
 }
 
 void
 finish_monitor_tests (void)
 {
-  destroy_monitor_test_client ();
+  destroy_monitor_test_clients ();
 }

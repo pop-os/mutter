@@ -3,6 +3,7 @@
 /*
  * Copyright (C) 2016 Red Hat Inc.
  * Copyright (C) 2017 Intel Corporation
+ * Copyright (C) 2018,2019 DisplayLink (UK) Ltd.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -24,21 +25,36 @@
  *     Daniel Stone <daniels@collabora.com>
  */
 
+/**
+ * SECTION:meta-wayland-dma-buf
+ * @title: MetaWaylandDmaBuf
+ * @short_description: Handles passing DMA-BUFs in Wayland
+ *
+ * The MetaWaylandDmaBuf namespace contains several objects and functions to
+ * handle DMA-BUF buffers that are passed through from clients in Wayland (e.g.
+ * using the linux_dmabuf_unstable_v1 protocol).
+ */
+
 #include "config.h"
 
 #include "wayland/meta-wayland-dma-buf.h"
 
-#include "cogl/cogl.h"
-#include "cogl/cogl-egl.h"
+#include <drm_fourcc.h>
+
 #include "backends/meta-backend-private.h"
-#include "backends/meta-egl.h"
 #include "backends/meta-egl-ext.h"
+#include "backends/meta-egl.h"
+#include "cogl/cogl-egl.h"
+#include "cogl/cogl.h"
 #include "meta/meta-backend.h"
 #include "wayland/meta-wayland-buffer.h"
 #include "wayland/meta-wayland-private.h"
 #include "wayland/meta-wayland-versions.h"
 
-#include <drm_fourcc.h>
+#ifdef HAVE_NATIVE_BACKEND
+#include "backends/native/meta-drm-buffer-gbm.h"
+#include "backends/native/meta-renderer-native.h"
+#endif
 
 #include "linux-dmabuf-unstable-v1-server-protocol.h"
 
@@ -58,15 +74,15 @@ struct _MetaWaylandDmaBufBuffer
   uint64_t drm_modifier;
   bool is_y_inverted;
   int fds[META_WAYLAND_DMA_BUF_MAX_FDS];
-  int offsets[META_WAYLAND_DMA_BUF_MAX_FDS];
-  unsigned int strides[META_WAYLAND_DMA_BUF_MAX_FDS];
+  uint32_t offsets[META_WAYLAND_DMA_BUF_MAX_FDS];
+  uint32_t strides[META_WAYLAND_DMA_BUF_MAX_FDS];
 };
 
 G_DEFINE_TYPE (MetaWaylandDmaBufBuffer, meta_wayland_dma_buf_buffer, G_TYPE_OBJECT);
 
-gboolean
-meta_wayland_dma_buf_buffer_attach (MetaWaylandBuffer *buffer,
-                                    GError           **error)
+static gboolean
+meta_wayland_dma_buf_realize_texture (MetaWaylandBuffer  *buffer,
+                                      GError            **error)
 {
   MetaBackend *backend = meta_get_backend ();
   MetaEgl *egl = meta_backend_get_egl (backend);
@@ -74,28 +90,47 @@ meta_wayland_dma_buf_buffer_attach (MetaWaylandBuffer *buffer,
   CoglContext *cogl_context = clutter_backend_get_cogl_context (clutter_backend);
   EGLDisplay egl_display = cogl_egl_context_get_egl_display (cogl_context);
   MetaWaylandDmaBufBuffer *dma_buf = buffer->dma_buf.dma_buf;
+  uint32_t n_planes;
+  uint64_t modifiers[META_WAYLAND_DMA_BUF_MAX_FDS];
   CoglPixelFormat cogl_format;
   EGLImageKHR egl_image;
+  CoglEglImageFlags flags;
   CoglTexture2D *texture;
-  EGLint attribs[64];
-  int attr_idx = 0;
 
-  if (buffer->texture)
+  if (buffer->dma_buf.texture)
     return TRUE;
 
   switch (dma_buf->drm_format)
     {
+    /*
+     * NOTE: The cogl_format here is only used for texture color channel
+     * swizzling as compared to COGL_PIXEL_FORMAT_ARGB. It is *not* used
+     * for accessing the buffer memory. EGL will access the buffer
+     * memory according to the DRM fourcc code. Cogl will not mmap
+     * and access the buffer memory at all.
+     */
     case DRM_FORMAT_XRGB8888:
       cogl_format = COGL_PIXEL_FORMAT_RGB_888;
       break;
     case DRM_FORMAT_ARGB8888:
       cogl_format = COGL_PIXEL_FORMAT_ARGB_8888_PRE;
       break;
+    case DRM_FORMAT_XRGB2101010:
+      cogl_format = COGL_PIXEL_FORMAT_ARGB_2101010;
+      break;
     case DRM_FORMAT_ARGB2101010:
       cogl_format = COGL_PIXEL_FORMAT_ARGB_2101010_PRE;
       break;
     case DRM_FORMAT_RGB565:
       cogl_format = COGL_PIXEL_FORMAT_RGB_565;
+      break;
+    case DRM_FORMAT_XBGR16161616F:
+    case DRM_FORMAT_ABGR16161616F:
+      cogl_format = COGL_PIXEL_FORMAT_ABGR_FP_16161616_PRE;
+      break;
+    case DRM_FORMAT_XRGB16161616F:
+    case DRM_FORMAT_ARGB16161616F:
+      cogl_format = COGL_PIXEL_FORMAT_ARGB_FP_16161616_PRE;
       break;
     default:
       g_set_error (error, G_IO_ERROR,
@@ -104,83 +139,35 @@ meta_wayland_dma_buf_buffer_attach (MetaWaylandBuffer *buffer,
       return FALSE;
     }
 
-  attribs[attr_idx++] = EGL_WIDTH;
-  attribs[attr_idx++] = dma_buf->width;
-  attribs[attr_idx++] = EGL_HEIGHT;
-  attribs[attr_idx++] = dma_buf->height;
-  attribs[attr_idx++] = EGL_LINUX_DRM_FOURCC_EXT;
-  attribs[attr_idx++] = dma_buf->drm_format;
-
-  attribs[attr_idx++] = EGL_DMA_BUF_PLANE0_FD_EXT;
-  attribs[attr_idx++] = dma_buf->fds[0];
-  attribs[attr_idx++] = EGL_DMA_BUF_PLANE0_OFFSET_EXT;
-  attribs[attr_idx++] = dma_buf->offsets[0];
-  attribs[attr_idx++] = EGL_DMA_BUF_PLANE0_PITCH_EXT;
-  attribs[attr_idx++] = dma_buf->strides[0];
-  attribs[attr_idx++] = EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT;
-  attribs[attr_idx++] = dma_buf->drm_modifier & 0xffffffff;
-  attribs[attr_idx++] = EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT;
-  attribs[attr_idx++] = dma_buf->drm_modifier >> 32;
-
-  if (dma_buf->fds[1] >= 0)
+  for (n_planes = 0; n_planes < META_WAYLAND_DMA_BUF_MAX_FDS; n_planes++)
     {
-      attribs[attr_idx++] = EGL_DMA_BUF_PLANE1_FD_EXT;
-      attribs[attr_idx++] = dma_buf->fds[1];
-      attribs[attr_idx++] = EGL_DMA_BUF_PLANE1_OFFSET_EXT;
-      attribs[attr_idx++] = dma_buf->offsets[1];
-      attribs[attr_idx++] = EGL_DMA_BUF_PLANE1_PITCH_EXT;
-      attribs[attr_idx++] = dma_buf->strides[1];
-      attribs[attr_idx++] = EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT;
-      attribs[attr_idx++] = dma_buf->drm_modifier & 0xffffffff;
-      attribs[attr_idx++] = EGL_DMA_BUF_PLANE1_MODIFIER_HI_EXT;
-      attribs[attr_idx++] = dma_buf->drm_modifier >> 32;
+      if (dma_buf->fds[n_planes] < 0)
+        break;
+
+      modifiers[n_planes] = dma_buf->drm_modifier;
     }
 
-  if (dma_buf->fds[2] >= 0)
-    {
-      attribs[attr_idx++] = EGL_DMA_BUF_PLANE2_FD_EXT;
-      attribs[attr_idx++] = dma_buf->fds[2];
-      attribs[attr_idx++] = EGL_DMA_BUF_PLANE2_OFFSET_EXT;
-      attribs[attr_idx++] = dma_buf->offsets[2];
-      attribs[attr_idx++] = EGL_DMA_BUF_PLANE2_PITCH_EXT;
-      attribs[attr_idx++] = dma_buf->strides[2];
-      attribs[attr_idx++] = EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT;
-      attribs[attr_idx++] = dma_buf->drm_modifier & 0xffffffff;
-      attribs[attr_idx++] = EGL_DMA_BUF_PLANE2_MODIFIER_HI_EXT;
-      attribs[attr_idx++] = dma_buf->drm_modifier >> 32;
-    }
-
-  if (dma_buf->fds[3] >= 0)
-    {
-      attribs[attr_idx++] = EGL_DMA_BUF_PLANE3_FD_EXT;
-      attribs[attr_idx++] = dma_buf->fds[3];
-      attribs[attr_idx++] = EGL_DMA_BUF_PLANE3_OFFSET_EXT;
-      attribs[attr_idx++] = dma_buf->offsets[3];
-      attribs[attr_idx++] = EGL_DMA_BUF_PLANE3_PITCH_EXT;
-      attribs[attr_idx++] = dma_buf->strides[3];
-      attribs[attr_idx++] = EGL_DMA_BUF_PLANE3_MODIFIER_LO_EXT;
-      attribs[attr_idx++] = dma_buf->drm_modifier & 0xffffffff;
-      attribs[attr_idx++] = EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT;
-      attribs[attr_idx++] = dma_buf->drm_modifier >> 32;
-    }
-
-  attribs[attr_idx++] = EGL_NONE;
-  attribs[attr_idx++] = EGL_NONE;
-
-  /* The EXT_image_dma_buf_import spec states that EGL_NO_CONTEXT is to be used
-   * in conjunction with the EGL_LINUX_DMA_BUF_EXT target. Similarly, the
-   * native buffer is named in the attribs. */
-  egl_image = meta_egl_create_image (egl, egl_display, EGL_NO_CONTEXT,
-                                     EGL_LINUX_DMA_BUF_EXT, NULL, attribs,
-                                     error);
+  egl_image = meta_egl_create_dmabuf_image (egl,
+                                            egl_display,
+                                            dma_buf->width,
+                                            dma_buf->height,
+                                            dma_buf->drm_format,
+                                            n_planes,
+                                            dma_buf->fds,
+                                            dma_buf->strides,
+                                            dma_buf->offsets,
+                                            modifiers,
+                                            error);
   if (egl_image == EGL_NO_IMAGE_KHR)
     return FALSE;
 
+  flags = COGL_EGL_IMAGE_FLAG_NO_GET_DATA;
   texture = cogl_egl_texture_2d_new_from_image (cogl_context,
                                                 dma_buf->width,
                                                 dma_buf->height,
                                                 cogl_format,
                                                 egl_image,
+                                                flags,
                                                 error);
 
   meta_egl_destroy_image (egl, egl_display, egl_image, NULL);
@@ -188,10 +175,139 @@ meta_wayland_dma_buf_buffer_attach (MetaWaylandBuffer *buffer,
   if (!texture)
     return FALSE;
 
-  buffer->texture = COGL_TEXTURE (texture);
+  buffer->dma_buf.texture = COGL_TEXTURE (texture);
   buffer->is_y_inverted = dma_buf->is_y_inverted;
 
   return TRUE;
+}
+
+gboolean
+meta_wayland_dma_buf_buffer_attach (MetaWaylandBuffer  *buffer,
+                                    CoglTexture       **texture,
+                                    GError            **error)
+{
+  if (!meta_wayland_dma_buf_realize_texture (buffer, error))
+    return FALSE;
+
+  cogl_clear_object (texture);
+  *texture = cogl_object_ref (buffer->dma_buf.texture);
+  return TRUE;
+}
+
+#ifdef HAVE_NATIVE_BACKEND
+static struct gbm_bo *
+import_scanout_gbm_bo (MetaWaylandDmaBufBuffer *dma_buf,
+                       MetaGpuKms              *gpu_kms,
+                       int                      n_planes,
+                       gboolean                *use_modifier)
+{
+  struct gbm_device *gbm_device;
+
+  gbm_device = meta_gbm_device_from_gpu (gpu_kms);
+
+  if (dma_buf->drm_modifier != DRM_FORMAT_MOD_INVALID ||
+      n_planes > 1 ||
+      dma_buf->offsets[0] > 0)
+    {
+      struct gbm_import_fd_modifier_data import_with_modifier;
+
+      import_with_modifier = (struct gbm_import_fd_modifier_data) {
+        .width = dma_buf->width,
+        .height = dma_buf->height,
+        .format = dma_buf->drm_format,
+        .num_fds = n_planes,
+        .modifier = dma_buf->drm_modifier,
+      };
+      memcpy (import_with_modifier.fds,
+              dma_buf->fds,
+              sizeof (dma_buf->fds));
+      memcpy (import_with_modifier.strides,
+              dma_buf->strides,
+              sizeof (import_with_modifier.strides));
+      memcpy (import_with_modifier.offsets,
+              dma_buf->offsets,
+              sizeof (import_with_modifier.offsets));
+
+      *use_modifier = TRUE;
+      return gbm_bo_import (gbm_device, GBM_BO_IMPORT_FD_MODIFIER,
+                            &import_with_modifier,
+                            GBM_BO_USE_SCANOUT);
+    }
+  else
+    {
+      struct gbm_import_fd_data import_legacy;
+
+      import_legacy = (struct gbm_import_fd_data) {
+        .width = dma_buf->width,
+        .height = dma_buf->height,
+        .format = dma_buf->drm_format,
+        .stride = dma_buf->strides[0],
+        .fd = dma_buf->fds[0],
+      };
+
+      *use_modifier = FALSE;
+      return gbm_bo_import (gbm_device, GBM_BO_IMPORT_FD,
+                            &import_legacy,
+                            GBM_BO_USE_SCANOUT);
+    }
+}
+#endif
+
+CoglScanout *
+meta_wayland_dma_buf_try_acquire_scanout (MetaWaylandDmaBufBuffer *dma_buf,
+                                          CoglOnscreen            *onscreen)
+{
+#ifdef HAVE_NATIVE_BACKEND
+  MetaBackend *backend = meta_get_backend ();
+  MetaRenderer *renderer = meta_backend_get_renderer (backend);
+  MetaRendererNative *renderer_native = META_RENDERER_NATIVE (renderer);
+  MetaGpuKms *gpu_kms;
+  int n_planes;
+  uint32_t drm_format;
+  uint64_t drm_modifier;
+  uint32_t stride;
+  struct gbm_bo *gbm_bo;
+  gboolean use_modifier;
+  g_autoptr (GError) error = NULL;
+  MetaDrmBufferGbm *fb;
+
+  for (n_planes = 0; n_planes < META_WAYLAND_DMA_BUF_MAX_FDS; n_planes++)
+    {
+      if (dma_buf->fds[n_planes] < 0)
+        break;
+    }
+
+  drm_format = dma_buf->drm_format;
+  drm_modifier = dma_buf->drm_modifier;
+  stride = dma_buf->strides[0];
+  if (!meta_onscreen_native_is_buffer_scanout_compatible (onscreen,
+                                                          drm_format,
+                                                          drm_modifier,
+                                                          stride))
+    return NULL;
+
+  gpu_kms = meta_renderer_native_get_primary_gpu (renderer_native);
+  gbm_bo = import_scanout_gbm_bo (dma_buf, gpu_kms, n_planes, &use_modifier);
+  if (!gbm_bo)
+    {
+      g_debug ("Failed to import scanout gbm_bo: %s", g_strerror (errno));
+      return NULL;
+    }
+
+  fb = meta_drm_buffer_gbm_new_take (gpu_kms, gbm_bo,
+                                     use_modifier,
+                                     &error);
+  if (!fb)
+    {
+      g_debug ("Failed to create scanout buffer: %s", error->message);
+      gbm_bo_destroy (gbm_bo);
+      return NULL;
+    }
+
+  return COGL_SCANOUT (fb);
+#else
+  return NULL;
+#endif
 }
 
 static void
@@ -284,12 +400,26 @@ static const struct wl_buffer_interface dma_buf_buffer_impl =
   buffer_destroy,
 };
 
+/**
+ * meta_wayland_dma_buf_from_buffer:
+ * @buffer: A #MetaWaylandBuffer object
+ *
+ * Fetches the associated #MetaWaylandDmaBufBuffer from the wayland buffer.
+ * This does not *create* a new object, as this happens in the create_params
+ * request of linux_dmabuf_unstable_v1.
+ *
+ * Returns: (transfer none): The corresponding #MetaWaylandDmaBufBuffer (or
+ * %NULL if it wasn't a dma_buf-based wayland buffer)
+ */
 MetaWaylandDmaBufBuffer *
 meta_wayland_dma_buf_from_buffer (MetaWaylandBuffer *buffer)
 {
+  if (!buffer->resource)
+    return NULL;
+
   if (wl_resource_instance_of (buffer->resource, &wl_buffer_interface,
                                &dma_buf_buffer_impl))
-      return wl_resource_get_user_data (buffer->resource);
+    return wl_resource_get_user_data (buffer->resource);
 
   return NULL;
 }
@@ -366,7 +496,7 @@ buffer_params_create_common (struct wl_client   *client,
   buffer = meta_wayland_buffer_from_resource (buffer_resource);
 
   meta_wayland_buffer_realize (buffer);
-  if (!meta_wayland_buffer_attach (buffer, &error))
+  if (!meta_wayland_dma_buf_realize_texture (buffer, &error))
     {
       if (buffer_id == 0)
         {
@@ -459,6 +589,24 @@ static const struct zwp_linux_dmabuf_v1_interface dma_buf_implementation =
   dma_buf_handle_create_buffer_params,
 };
 
+static gboolean
+should_send_modifiers (MetaBackend *backend)
+{
+  MetaSettings *settings = meta_backend_get_settings (backend);
+
+#ifdef HAVE_NATIVE_BACKEND
+  if (META_IS_BACKEND_NATIVE (backend))
+    {
+      MetaRenderer *renderer = meta_backend_get_renderer (backend);
+      MetaRendererNative *renderer_native = META_RENDERER_NATIVE (renderer);
+      return meta_renderer_native_use_modifiers (renderer_native);
+    }
+#endif
+
+  return meta_settings_is_experimental_feature_enabled (
+           settings, META_EXPERIMENTAL_FEATURE_KMS_MODIFIERS);
+}
+
 static void
 send_modifiers (struct wl_resource *resource,
                 uint32_t            format)
@@ -481,12 +629,28 @@ send_modifiers (struct wl_resource *resource,
   if (wl_resource_get_version (resource) < ZWP_LINUX_DMABUF_V1_MODIFIER_SINCE_VERSION)
     return;
 
+  if (!should_send_modifiers (backend))
+    {
+      zwp_linux_dmabuf_v1_send_modifier (resource, format,
+                                         DRM_FORMAT_MOD_INVALID >> 32,
+                                         DRM_FORMAT_MOD_INVALID & 0xffffffff);
+      return;
+    }
+
   /* First query the number of available modifiers, then allocate an array,
    * then fill the array. */
   ret = meta_egl_query_dma_buf_modifiers (egl, egl_display, format, 0, NULL,
                                           NULL, &num_modifiers, NULL);
-  if (!ret || num_modifiers == 0)
+  if (!ret)
     return;
+
+  if (num_modifiers == 0)
+    {
+      zwp_linux_dmabuf_v1_send_modifier (resource, format,
+                                         DRM_FORMAT_MOD_INVALID >> 32,
+                                         DRM_FORMAT_MOD_INVALID & 0xffffffff);
+      return;
+    }
 
   modifiers = g_new0 (uint64_t, num_modifiers);
   ret = meta_egl_query_dma_buf_modifiers (egl, egl_display, format,
@@ -526,9 +690,23 @@ dma_buf_bind (struct wl_client *client,
   send_modifiers (resource, DRM_FORMAT_ARGB8888);
   send_modifiers (resource, DRM_FORMAT_XRGB8888);
   send_modifiers (resource, DRM_FORMAT_ARGB2101010);
+  send_modifiers (resource, DRM_FORMAT_XRGB2101010);
   send_modifiers (resource, DRM_FORMAT_RGB565);
+  send_modifiers (resource, DRM_FORMAT_ABGR16161616F);
+  send_modifiers (resource, DRM_FORMAT_XBGR16161616F);
+  send_modifiers (resource, DRM_FORMAT_XRGB16161616F);
+  send_modifiers (resource, DRM_FORMAT_ARGB16161616F);
 }
 
+/**
+ * meta_wayland_dma_buf_init:
+ * @compositor: The #MetaWaylandCompositor
+ *
+ * Creates the global Wayland object that exposes the linux-dmabuf protocol.
+ *
+ * Returns: Whether the initialization was successful. If this is %FALSE,
+ * clients won't be able to use the linux-dmabuf protocol to pass buffers.
+ */
 gboolean
 meta_wayland_dma_buf_init (MetaWaylandCompositor *compositor)
 {

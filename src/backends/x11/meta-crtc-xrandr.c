@@ -35,19 +35,30 @@
 
 #include "backends/x11/meta-crtc-xrandr.h"
 
-#include <stdlib.h>
 #include <X11/Xlib-xcb.h>
+#include <stdlib.h>
 #include <xcb/randr.h>
 
+#include "backends/meta-backend-private.h"
 #include "backends/meta-crtc.h"
+#include "backends/meta-output.h"
 #include "backends/x11/meta-crtc-xrandr.h"
 #include "backends/x11/meta-gpu-xrandr.h"
 #include "backends/x11/meta-monitor-manager-xrandr.h"
 
-#define ALL_TRANSFORMS ((1 << (META_MONITOR_TRANSFORM_FLIPPED_270 + 1)) - 1)
+struct _MetaCrtcXrandr
+{
+  MetaCrtc parent;
+
+  MetaRectangle rect;
+  MetaMonitorTransform transform;
+  MetaCrtcMode *current_mode;
+};
+
+G_DEFINE_TYPE (MetaCrtcXrandr, meta_crtc_xrandr, META_TYPE_CRTC)
 
 gboolean
-meta_crtc_xrandr_set_config (MetaCrtc            *crtc,
+meta_crtc_xrandr_set_config (MetaCrtcXrandr      *crtc_xrandr,
                              xcb_randr_crtc_t     xrandr_crtc,
                              xcb_timestamp_t      timestamp,
                              int                  x,
@@ -58,9 +69,11 @@ meta_crtc_xrandr_set_config (MetaCrtc            *crtc,
                              int                  n_outputs,
                              xcb_timestamp_t     *out_timestamp)
 {
-  MetaGpu *gpu = meta_crtc_get_gpu (crtc);
+  MetaGpu *gpu = meta_crtc_get_gpu (META_CRTC (crtc_xrandr));
   MetaGpuXrandr *gpu_xrandr = META_GPU_XRANDR (gpu);
-  MetaMonitorManager *monitor_manager = meta_gpu_get_monitor_manager (gpu);
+  MetaBackend *backend = meta_gpu_get_backend (gpu);
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
   MetaMonitorManagerXrandr *monitor_manager_xrandr =
     META_MONITOR_MANAGER_XRANDR (monitor_manager);
   Display *xdisplay;
@@ -150,7 +163,7 @@ meta_monitor_transform_from_xrandr_all (Rotation rotation)
   /* All rotations and one reflection -> all of them by composition */
   if ((rotation & ALL_ROTATIONS) &&
       ((rotation & RR_Reflect_X) || (rotation & RR_Reflect_Y)))
-    return ALL_TRANSFORMS;
+    return META_MONITOR_ALL_TRANSFORMS;
 
   ret = 1 << META_MONITOR_TRANSFORM_NORMAL;
   if (rotation & RR_Rotate_90)
@@ -171,39 +184,124 @@ meta_monitor_transform_from_xrandr_all (Rotation rotation)
   return ret;
 }
 
-MetaCrtc *
-meta_create_xrandr_crtc (MetaGpuXrandr      *gpu_xrandr,
-                         XRRCrtcInfo        *xrandr_crtc,
-                         RRCrtc              crtc_id,
-                         XRRScreenResources *resources)
+gboolean
+meta_crtc_xrandr_is_assignment_changed (MetaCrtcXrandr     *crtc_xrandr,
+                                        MetaCrtcAssignment *crtc_assignment)
 {
-  MetaCrtc *crtc;
+  unsigned int i;
+
+  if (crtc_xrandr->current_mode != crtc_assignment->mode)
+    return TRUE;
+
+  if (crtc_xrandr->rect.x != (int) roundf (crtc_assignment->layout.origin.x))
+    return TRUE;
+
+  if (crtc_xrandr->rect.y != (int) roundf (crtc_assignment->layout.origin.y))
+    return TRUE;
+
+  if (crtc_xrandr->transform != crtc_assignment->transform)
+    return TRUE;
+
+  for (i = 0; i < crtc_assignment->outputs->len; i++)
+    {
+      MetaOutput *output = ((MetaOutput**) crtc_assignment->outputs->pdata)[i];
+      MetaCrtc *assigned_crtc;
+
+      assigned_crtc = meta_output_get_assigned_crtc (output);
+      if (assigned_crtc != META_CRTC (crtc_xrandr))
+        return TRUE;
+    }
+
+  return FALSE;
+}
+
+MetaCrtcMode *
+meta_crtc_xrandr_get_current_mode (MetaCrtcXrandr *crtc_xrandr)
+{
+  return crtc_xrandr->current_mode;
+}
+
+MetaCrtcXrandr *
+meta_crtc_xrandr_new (MetaGpuXrandr      *gpu_xrandr,
+                      XRRCrtcInfo        *xrandr_crtc,
+                      RRCrtc              crtc_id,
+                      XRRScreenResources *resources)
+{
+  MetaGpu *gpu = META_GPU (gpu_xrandr);
+  MetaBackend *backend = meta_gpu_get_backend (gpu);
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
+  MetaMonitorManagerXrandr *monitor_manager_xrandr =
+    META_MONITOR_MANAGER_XRANDR (monitor_manager);
+  Display *xdisplay =
+    meta_monitor_manager_xrandr_get_xdisplay (monitor_manager_xrandr);
+  MetaMonitorTransform all_transforms;
+  MetaCrtcXrandr *crtc_xrandr;
+  XRRPanning *panning;
   unsigned int i;
   GList *modes;
 
-  crtc = g_object_new (META_TYPE_CRTC, NULL);
-
-  crtc->gpu = META_GPU (gpu_xrandr);
-  crtc->crtc_id = crtc_id;
-  crtc->rect.x = xrandr_crtc->x;
-  crtc->rect.y = xrandr_crtc->y;
-  crtc->rect.width = xrandr_crtc->width;
-  crtc->rect.height = xrandr_crtc->height;
-  crtc->is_dirty = FALSE;
-  crtc->transform =
-    meta_monitor_transform_from_xrandr (xrandr_crtc->rotation);
-  crtc->all_transforms =
+  all_transforms =
     meta_monitor_transform_from_xrandr_all (xrandr_crtc->rotations);
+  crtc_xrandr = g_object_new (META_TYPE_CRTC_XRANDR,
+                              "id", (uint64_t) crtc_id,
+                              "gpu", gpu,
+                              "all-transforms", all_transforms,
+                              NULL);
 
-  modes = meta_gpu_get_modes (crtc->gpu);
+  crtc_xrandr->transform =
+    meta_monitor_transform_from_xrandr (xrandr_crtc->rotation);
+
+  panning = XRRGetPanning (xdisplay, resources, crtc_id);
+  if (panning && panning->width > 0 && panning->height > 0)
+    {
+      crtc_xrandr->rect = (MetaRectangle) {
+        .x = panning->left,
+        .y = panning->top,
+        .width = panning->width,
+        .height = panning->height,
+      };
+    }
+  else
+    {
+      crtc_xrandr->rect = (MetaRectangle) {
+        .x = xrandr_crtc->x,
+        .y = xrandr_crtc->y,
+        .width = xrandr_crtc->width,
+        .height = xrandr_crtc->height,
+      };
+    }
+
+  modes = meta_gpu_get_modes (gpu);
   for (i = 0; i < (unsigned int) resources->nmode; i++)
     {
       if (resources->modes[i].id == xrandr_crtc->mode)
         {
-          crtc->current_mode = g_list_nth_data (modes, i);
+          crtc_xrandr->current_mode = g_list_nth_data (modes, i);
           break;
         }
     }
 
-  return crtc;
+  if (crtc_xrandr->current_mode)
+    {
+      meta_crtc_set_config (META_CRTC (crtc_xrandr),
+                            &GRAPHENE_RECT_INIT (crtc_xrandr->rect.x,
+                                                 crtc_xrandr->rect.y,
+                                                 crtc_xrandr->rect.width,
+                                                 crtc_xrandr->rect.height),
+                            crtc_xrandr->current_mode,
+                            crtc_xrandr->transform);
+    }
+
+  return crtc_xrandr;
+}
+
+static void
+meta_crtc_xrandr_init (MetaCrtcXrandr *crtc_xrandr)
+{
+}
+
+static void
+meta_crtc_xrandr_class_init (MetaCrtcXrandrClass *klass)
+{
 }

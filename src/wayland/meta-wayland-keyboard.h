@@ -45,10 +45,11 @@
 #ifndef META_WAYLAND_KEYBOARD_H
 #define META_WAYLAND_KEYBOARD_H
 
-#include <clutter/clutter.h>
 #include <wayland-server.h>
 #include <xkbcommon/xkbcommon.h>
 
+#include "clutter/clutter.h"
+#include "core/meta-anonymous-file.h"
 #include "wayland/meta-wayland-types.h"
 
 #define META_TYPE_WAYLAND_KEYBOARD (meta_wayland_keyboard_get_type ())
@@ -74,8 +75,7 @@ typedef struct
 {
   struct xkb_keymap *keymap;
   struct xkb_state *state;
-  size_t keymap_size;
-  char *keymap_string;
+  MetaAnonymousFile *keymap_rofile;
 } MetaWaylandXkbInfo;
 
 struct _MetaWaylandKeyboard
@@ -104,7 +104,6 @@ struct _MetaWaylandKeyboard
   MetaWaylandKeyboardGrab default_grab;
 
   GSettings *settings;
-  GSettings *gsd_settings;
 };
 
 void meta_wayland_keyboard_enable (MetaWaylandKeyboard *keyboard);

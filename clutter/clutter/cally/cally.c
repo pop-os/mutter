@@ -29,20 +29,15 @@
  *
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #define CLUTTER_DISABLE_DEPRECATION_WARNINGS
 
 #include "cally.h"
 
 #include "cally-actor.h"
-#include "cally-group.h"
 #include "cally-stage.h"
 #include "cally-text.h"
-#include "cally-texture.h"
-#include "cally-rectangle.h"
 #include "cally-clone.h"
 
 #include "cally-factory.h"
@@ -55,11 +50,8 @@
 
 /* factories initialization*/
 CALLY_ACCESSIBLE_FACTORY (CALLY_TYPE_ACTOR, cally_actor, cally_actor_new)
-CALLY_ACCESSIBLE_FACTORY (CALLY_TYPE_GROUP, cally_group, cally_group_new)
 CALLY_ACCESSIBLE_FACTORY (CALLY_TYPE_STAGE, cally_stage, cally_stage_new)
 CALLY_ACCESSIBLE_FACTORY (CALLY_TYPE_TEXT, cally_text, cally_text_new)
-CALLY_ACCESSIBLE_FACTORY (CALLY_TYPE_TEXTURE, cally_texture, cally_texture_new)
-CALLY_ACCESSIBLE_FACTORY (CALLY_TYPE_RECTANGLE, cally_rectangle, cally_rectangle_new)
 CALLY_ACCESSIBLE_FACTORY (CALLY_TYPE_CLONE, cally_clone, cally_clone_new)
 
 /**
@@ -77,11 +69,8 @@ cally_accessibility_init (void)
 {
   /* setting the factories */
   CALLY_ACTOR_SET_FACTORY (CLUTTER_TYPE_ACTOR, cally_actor);
-  CALLY_ACTOR_SET_FACTORY (CLUTTER_TYPE_GROUP, cally_group);
   CALLY_ACTOR_SET_FACTORY (CLUTTER_TYPE_STAGE, cally_stage);
   CALLY_ACTOR_SET_FACTORY (CLUTTER_TYPE_TEXT, cally_text);
-  CALLY_ACTOR_SET_FACTORY (CLUTTER_TYPE_TEXTURE, cally_texture);
-  CALLY_ACTOR_SET_FACTORY (CLUTTER_TYPE_RECTANGLE, cally_rectangle);
   CALLY_ACTOR_SET_FACTORY (CLUTTER_TYPE_CLONE, cally_clone);
 
   /* Initialize the CallyUtility class */

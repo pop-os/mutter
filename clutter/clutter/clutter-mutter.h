@@ -26,25 +26,51 @@
 #define __CLUTTER_H_INSIDE__
 
 #include "clutter-backend.h"
+#include "clutter-event-private.h"
+#include "clutter-input-device-private.h"
+#include "clutter-input-pointer-a11y-private.h"
 #include "clutter-macros.h"
+#include "clutter-private.h"
+#include "clutter-stage-private.h"
 #include "clutter-stage-view.h"
 #include "cogl/clutter-stage-cogl.h"
-#include "x11/clutter-stage-x11.h"
+#include "clutter/x11/clutter-backend-x11.h"
 
-CLUTTER_AVAILABLE_IN_MUTTER
+CLUTTER_EXPORT
+GList * clutter_stage_peek_stage_views (ClutterStage *stage);
+
+CLUTTER_EXPORT
+gboolean clutter_actor_is_effectively_on_stage_view (ClutterActor     *self,
+                                                     ClutterStageView *view);
+
+CLUTTER_EXPORT
 void clutter_set_custom_backend_func (ClutterBackend *(* func) (void));
 
-CLUTTER_AVAILABLE_IN_MUTTER
-gboolean        _clutter_get_sync_to_vblank     (void);
-
-CLUTTER_AVAILABLE_IN_MUTTER
+CLUTTER_EXPORT
 int64_t clutter_stage_get_frame_counter (ClutterStage *stage);
 
-CLUTTER_AVAILABLE_IN_MUTTER
+CLUTTER_EXPORT
 void clutter_stage_capture_into (ClutterStage          *stage,
                                  gboolean               paint,
                                  cairo_rectangle_int_t *rect,
                                  uint8_t               *data);
+
+CLUTTER_EXPORT
+void clutter_stage_clear_stage_views (ClutterStage *stage);
+
+CLUTTER_EXPORT
+void clutter_stage_view_assign_next_scanout (ClutterStageView *stage_view,
+                                             CoglScanout      *scanout);
+
+CLUTTER_EXPORT
+gboolean clutter_actor_has_damage (ClutterActor *actor);
+
+CLUTTER_EXPORT
+gboolean clutter_actor_has_transitions (ClutterActor *actor);
+
+CLUTTER_EXPORT
+ClutterFrameClock * clutter_actor_pick_frame_clock (ClutterActor  *self,
+                                                    ClutterActor **out_actor);
 
 #undef __CLUTTER_H_INSIDE__
 

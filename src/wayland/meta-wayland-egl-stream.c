@@ -26,18 +26,17 @@
 
 #include "wayland/meta-wayland-egl-stream.h"
 
-#include "cogl/cogl-egl.h"
+#include <dlfcn.h>
+
 #include "backends/meta-backend-private.h"
-#include "backends/meta-egl.h"
 #include "backends/meta-egl-ext.h"
+#include "backends/meta-egl.h"
+#include "cogl/cogl-egl.h"
 #include "meta/meta-backend.h"
 #include "wayland/meta-wayland-buffer.h"
 #include "wayland/meta-wayland-private.h"
 
-#ifdef HAVE_WAYLAND_EGLSTREAM
-
 #include "wayland-eglstream-controller-server-protocol.h"
-#include <dlfcn.h>
 
 static struct wl_interface *wl_eglstream_controller_interface_ptr = NULL;
 
@@ -85,12 +84,9 @@ bind_eglstream_controller (struct wl_client *client,
                                   NULL);
 }
 
-#endif /* HAVE_WAYLAND_EGLSTREAM */
-
 gboolean
 meta_wayland_eglstream_controller_init (MetaWaylandCompositor *compositor)
 {
-#ifdef HAVE_WAYLAND_EGLSTREAM
   /*
    * wl_eglstream_controller_interface is provided by
    * libnvidia-egl-wayland.so.1
@@ -119,6 +115,8 @@ meta_wayland_eglstream_controller_init (MetaWaylandCompositor *compositor)
                         bind_eglstream_controller) == NULL)
     goto fail;
 
+  g_debug ("WL: loaded libnvidia-egl-wayland.so.1:wl_eglstream_controller.");
+
   return TRUE;
 
 fail:
@@ -126,7 +124,6 @@ fail:
     dlclose(lib);
 
   g_debug ("WL: Unable to initialize wl_eglstream_controller.");
-#endif
 
   return FALSE;
 }
@@ -139,6 +136,7 @@ struct _MetaWaylandEglStream
   MetaWaylandBuffer *buffer;
   CoglTexture2D *texture;
   gboolean is_y_inverted;
+  CoglSnippet *snippet;
 };
 
 G_DEFINE_TYPE (MetaWaylandEglStream, meta_wayland_egl_stream,
@@ -294,18 +292,22 @@ meta_wayland_egl_stream_is_y_inverted (MetaWaylandEglStream *stream)
 }
 
 CoglSnippet *
-meta_wayland_egl_stream_create_snippet (void)
+meta_wayland_egl_stream_create_snippet (MetaWaylandEglStream *stream)
 {
-  CoglSnippet *snippet;
+  if (!stream->snippet)
+    {
+      CoglSnippet *snippet;
 
-  snippet = cogl_snippet_new (COGL_SNIPPET_HOOK_TEXTURE_LOOKUP,
-                              "uniform samplerExternalOES tex_external;",
-                              NULL);
-  cogl_snippet_set_replace (snippet,
-                            "cogl_texel = texture2D (tex_external,\n"
-                            "                        cogl_tex_coord.xy);");
+      snippet = cogl_snippet_new (COGL_SNIPPET_HOOK_TEXTURE_LOOKUP,
+                                  "uniform samplerExternalOES tex_external;",
+                                  NULL);
+      cogl_snippet_set_replace (snippet,
+                                "cogl_texel = texture2D (tex_external,\n"
+                                "                        cogl_tex_coord.xy);");
+      stream->snippet = snippet;
+    }
 
-  return snippet;
+  return cogl_object_ref (stream->snippet);
 }
 
 gboolean
@@ -345,6 +347,8 @@ meta_wayland_egl_stream_finalize (GObject *object)
   g_assert (!stream->texture);
 
   meta_egl_destroy_stream (egl, egl_display, stream->egl_stream, NULL);
+
+  cogl_clear_object (&stream->snippet);
 
   G_OBJECT_CLASS (meta_wayland_egl_stream_parent_class)->finalize (object);
 }

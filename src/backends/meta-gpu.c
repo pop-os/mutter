@@ -23,13 +23,14 @@
 
 #include "backends/meta-gpu.h"
 
+#include "backends/meta-backend-private.h"
 #include "backends/meta-output.h"
 
 enum
 {
   PROP_0,
 
-  PROP_MONITOR_MANAGER,
+  PROP_BACKEND,
 
   PROP_LAST
 };
@@ -38,7 +39,7 @@ static GParamSpec *obj_props[PROP_LAST];
 
 typedef struct _MetaGpuPrivate
 {
-  MetaMonitorManager *monitor_manager;
+  MetaBackend *backend;
 
   GList *outputs;
   GList *crtcs;
@@ -56,8 +57,9 @@ meta_gpu_has_hotplug_mode_update (MetaGpu *gpu)
   for (l = priv->outputs; l; l = l->next)
     {
       MetaOutput *output = l->data;
+      const MetaOutputInfo *output_info = meta_output_get_info (output);
 
-      if (output->hotplug_mode_update)
+      if (output_info->hotplug_mode_update)
         return TRUE;
     }
 
@@ -88,12 +90,12 @@ meta_gpu_read_current (MetaGpu  *gpu,
   return ret;
 }
 
-MetaMonitorManager *
-meta_gpu_get_monitor_manager (MetaGpu *gpu)
+MetaBackend *
+meta_gpu_get_backend (MetaGpu *gpu)
 {
   MetaGpuPrivate *priv = meta_gpu_get_instance_private (gpu);
 
-  return priv->monitor_manager;
+  return priv->backend;
 }
 
 GList *
@@ -158,8 +160,8 @@ meta_gpu_set_property (GObject      *object,
 
   switch (prop_id)
     {
-    case PROP_MONITOR_MANAGER:
-      priv->monitor_manager = g_value_get_object (value);
+    case PROP_BACKEND:
+      priv->backend = g_value_get_object (value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -177,8 +179,8 @@ meta_gpu_get_property (GObject    *object,
 
   switch (prop_id)
     {
-    case PROP_MONITOR_MANAGER:
-      g_value_set_object (value, priv->monitor_manager);
+    case PROP_BACKEND:
+      g_value_set_object (value, priv->backend);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -212,11 +214,11 @@ meta_gpu_class_init (MetaGpuClass *klass)
   object_class->get_property = meta_gpu_get_property;
   object_class->finalize = meta_gpu_finalize;
 
-  obj_props[PROP_MONITOR_MANAGER] =
-    g_param_spec_object ("monitor-manager",
-                         "monitor-manager",
-                         "MetaMonitorManager",
-                         META_TYPE_MONITOR_MANAGER,
+  obj_props[PROP_BACKEND] =
+    g_param_spec_object ("backend",
+                         "backend",
+                         "MetaBackend",
+                         META_TYPE_BACKEND,
                          G_PARAM_READWRITE |
                          G_PARAM_CONSTRUCT_ONLY |
                          G_PARAM_STATIC_STRINGS);

@@ -27,6 +27,7 @@
 #include "core/display-private.h"
 #include "core/window-private.h"
 #include "wayland/meta-wayland.h"
+#include "wayland/meta-xwayland.h"
 #include "x11/meta-x11-display-private.h"
 
 struct _TestClient {
@@ -57,21 +58,44 @@ G_DEFINE_QUARK (test-runner-error-quark, test_runner_error)
 
 static char *test_client_path;
 
-void
-test_init (int    argc,
-           char **argv)
+static void
+ensure_test_client_path (int    argc,
+                         char **argv)
 {
-  char *basename = g_path_get_basename (argv[0]);
-  char *dirname = g_path_get_dirname (argv[0]);
+  test_client_path = g_test_build_filename (G_TEST_BUILT,
+                                            "src",
+                                            "tests",
+                                            "mutter-test-client",
+                                            NULL);
+  if (!g_file_test (test_client_path,
+                    G_FILE_TEST_EXISTS | G_FILE_TEST_IS_EXECUTABLE))
+    {
+      g_autofree char *basename = NULL;
+      g_autofree char *dirname = NULL;
 
-  if (g_str_has_prefix (basename, "lt-"))
-    test_client_path = g_build_filename (dirname,
-                                         "../mutter-test-client", NULL);
-  else
-    test_client_path = g_build_filename (dirname,
-                                         "mutter-test-client", NULL);
-  g_free (basename);
-  g_free (dirname);
+      basename = g_path_get_basename (argv[0]);
+
+      dirname = g_path_get_dirname (argv[0]);
+      test_client_path = g_build_filename (dirname,
+                                           "mutter-test-client", NULL);
+    }
+
+  if (!g_file_test (test_client_path,
+                    G_FILE_TEST_EXISTS | G_FILE_TEST_IS_EXECUTABLE))
+    g_error ("mutter-test-client executable not found");
+}
+
+void
+test_init (int    *argc,
+           char ***argv)
+{
+  g_test_init (argc, argv, NULL);
+  g_test_bug_base ("http://bugzilla.gnome.org/show_bug.cgi?id=");
+
+  ensure_test_client_path (*argc, *argv);
+
+  meta_wayland_override_display_name ("mutter-test-display");
+  meta_xwayland_override_display_number (512);
 }
 
 AsyncWaiter *
@@ -161,10 +185,12 @@ async_waiter_set_and_wait (AsyncWaiter *waiter)
 }
 
 gboolean
-async_waiter_alarm_filter (AsyncWaiter           *waiter,
-                           MetaX11Display        *x11_display,
-                           XSyncAlarmNotifyEvent *event)
+async_waiter_alarm_filter (MetaX11Display        *x11_display,
+                           XSyncAlarmNotifyEvent *event,
+                           gpointer               data)
 {
+  AsyncWaiter *waiter = data;
+
   if (event->alarm != waiter->alarm)
     return FALSE;
 
@@ -333,13 +359,65 @@ test_client_find_window (TestClient *client,
   return result;
 }
 
-gboolean
-test_client_alarm_filter (TestClient            *client,
-                          MetaX11Display        *x11_display,
-                          XSyncAlarmNotifyEvent *event)
+typedef struct _WaitForShownData
 {
+  GMainLoop *loop;
+  MetaWindow *window;
+  gulong shown_handler_id;
+} WaitForShownData;
+
+static void
+on_window_shown (MetaWindow       *window,
+                 WaitForShownData *data)
+{
+  g_main_loop_quit (data->loop);
+}
+
+static gboolean
+wait_for_showing_before_redraw (gpointer user_data)
+{
+  WaitForShownData *data = user_data;
+
+  if (meta_window_is_hidden (data->window))
+    {
+      data->shown_handler_id = g_signal_connect (data->window, "shown",
+                                                 G_CALLBACK (on_window_shown),
+                                                 data);
+    }
+  else
+    {
+      g_main_loop_quit (data->loop);
+    }
+
+  return FALSE;
+}
+
+void
+test_client_wait_for_window_shown (TestClient *client,
+                                   MetaWindow *window)
+{
+  WaitForShownData data = {
+    .loop = g_main_loop_new (NULL, FALSE),
+    .window = window,
+  };
+  meta_later_add (META_LATER_BEFORE_REDRAW,
+                  wait_for_showing_before_redraw,
+                  &data,
+                  NULL);
+  g_main_loop_run (data.loop);
+  g_clear_signal_handler (&data.shown_handler_id, window);
+  g_main_loop_unref (data.loop);
+}
+
+gboolean
+test_client_alarm_filter (MetaX11Display        *x11_display,
+                          XSyncAlarmNotifyEvent *event,
+                          gpointer               data)
+{
+  TestClient *client = data;
+
   if (client->waiter)
-    return async_waiter_alarm_filter (client->waiter, x11_display, event);
+    return async_waiter_alarm_filter (x11_display, event, client->waiter);
   else
     return FALSE;
 }
@@ -349,7 +427,7 @@ test_client_new (const char          *id,
                  MetaWindowClientType type,
                  GError             **error)
 {
-  TestClient *client = g_new0 (TestClient, 1);
+  TestClient *client;
   GSubprocessLauncher *launcher;
   GSubprocess *subprocess;
   MetaWaylandCompositor *compositor;
@@ -384,6 +462,7 @@ test_client_new (const char          *id,
   if (!subprocess)
     return NULL;
 
+  client = g_new0 (TestClient, 1);
   client->type = type;
   client->id = g_strdup (id);
   client->cancellable = g_cancellable_new ();
@@ -442,4 +521,30 @@ test_client_destroy (TestClient *client)
   g_main_loop_unref (client->loop);
   g_free (client->id);
   g_free (client);
+}
+
+const char *
+test_get_plugin_name (void)
+{
+  const char *name;
+
+  name = g_getenv ("MUTTER_TEST_PLUGIN_PATH");
+  if (name)
+    return name;
+  else
+    return "libdefault";
+}
+
+void
+test_wait_for_x11_display (void)
+{
+  MetaDisplay *display;
+
+  display = meta_get_display ();
+  g_assert_nonnull (display);
+
+  while (!display->x11_display)
+    g_main_context_iteration (NULL, TRUE);
+
+  g_assert_nonnull (display->x11_display);
 }

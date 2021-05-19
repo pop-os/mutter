@@ -20,11 +20,12 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "config.h"
+
 #include <math.h>
 #include <string.h>
 
-#include "meta-texture-tower.h"
-#include "meta-texture-rectangle.h"
+#include "compositor/meta-texture-tower.h"
 
 #ifndef M_LOG2E
 #define M_LOG2E 1.4426950408889634074
@@ -242,8 +243,11 @@ meta_texture_tower_update_area (MetaTextureTower *tower,
  * Meta.
  */
 static int
-get_paint_level (int width, int height)
+get_paint_level (ClutterPaintContext *paint_context,
+                 int                  width,
+                 int                  height)
 {
+  CoglFramebuffer *framebuffer;
   CoglMatrix projection, modelview, pm;
   float v[4];
   double viewport_width, viewport_height;
@@ -270,12 +274,13 @@ get_paint_level (int width, int height)
    *  (w_c)                               (w_o)        (1)
    */
 
-  cogl_get_projection_matrix (&projection);
-  cogl_get_modelview_matrix (&modelview);
+  framebuffer = clutter_paint_context_get_framebuffer (paint_context);
+  cogl_framebuffer_get_projection_matrix (framebuffer, &projection);
+  cogl_framebuffer_get_modelview_matrix (framebuffer, &modelview);
 
   cogl_matrix_multiply (&pm, &projection, &modelview);
 
-  cogl_get_viewport (v);
+  cogl_framebuffer_get_viewport4fv (framebuffer, v);
   viewport_width = v[2];
   viewport_height = v[3];
 
@@ -344,34 +349,15 @@ get_paint_level (int width, int height)
     return (int)(0.5 + lambda);
 }
 
-static gboolean
-is_power_of_two (int x)
-{
-  return (x & (x - 1)) == 0;
-}
-
 static void
 texture_tower_create_texture (MetaTextureTower *tower,
                               int               level,
                               int               width,
                               int               height)
 {
-  if ((!is_power_of_two (width) || !is_power_of_two (height)) &&
-      meta_texture_rectangle_check (tower->textures[level - 1]))
-    {
-      ClutterBackend *backend = clutter_get_default_backend ();
-      CoglContext *context = clutter_backend_get_cogl_context (backend);
-      CoglTextureRectangle *texture_rectangle;
-
-      texture_rectangle = cogl_texture_rectangle_new_with_size (context, width, height);
-      tower->textures[level] = COGL_TEXTURE (texture_rectangle);
-    }
-  else
-    {
-      tower->textures[level] = cogl_texture_new_with_size (width, height,
-                                                           COGL_TEXTURE_NO_AUTO_MIPMAP,
-                                                           TEXTURE_FORMAT);
-    }
+  tower->textures[level] = cogl_texture_new_with_size (width, height,
+                                                       COGL_TEXTURE_NO_AUTO_MIPMAP,
+                                                       TEXTURE_FORMAT);
 
   tower->invalid[level].x1 = 0;
   tower->invalid[level].y1 = 0;
@@ -391,7 +377,7 @@ texture_tower_revalidate (MetaTextureTower *tower,
   int dest_texture_height = cogl_texture_get_height (dest_texture);
   Box *invalid = &tower->invalid[level];
   CoglFramebuffer *fb;
-  CoglError *catch_error = NULL;
+  GError *catch_error = NULL;
   CoglPipeline *pipeline;
 
   if (tower->fbos[level] == NULL)
@@ -401,7 +387,7 @@ texture_tower_revalidate (MetaTextureTower *tower,
 
   if (!cogl_framebuffer_allocate (fb, &catch_error))
     {
-      cogl_error_free (catch_error);
+      g_error_free (catch_error);
       return;
     }
 
@@ -435,6 +421,7 @@ texture_tower_revalidate (MetaTextureTower *tower,
 /**
  * meta_texture_tower_get_paint_texture:
  * @tower: a #MetaTextureTower
+ * @paint_context: a #ClutterPaintContext
  *
  * Gets the texture from the tower that best matches the current
  * rendering scale. (On the assumption here the texture is going to
@@ -446,7 +433,8 @@ texture_tower_revalidate (MetaTextureTower *tower,
  *  %NULL if no base texture has yet been set.
  */
 CoglTexture *
-meta_texture_tower_get_paint_texture (MetaTextureTower *tower)
+meta_texture_tower_get_paint_texture (MetaTextureTower    *tower,
+                                      ClutterPaintContext *paint_context)
 {
   int texture_width, texture_height;
   int level;
@@ -459,7 +447,7 @@ meta_texture_tower_get_paint_texture (MetaTextureTower *tower)
   texture_width = cogl_texture_get_width (tower->textures[0]);
   texture_height = cogl_texture_get_height (tower->textures[0]);
 
-  level = get_paint_level(texture_width, texture_height);
+  level = get_paint_level (paint_context, texture_width, texture_height);
   if (level < 0) /* singular paint matrix, scaled to nothing */
     return NULL;
   level = MIN (level, tower->n_levels - 1);

@@ -22,14 +22,15 @@
 #ifndef META_INPUT_SETTINGS_PRIVATE_H
 #define META_INPUT_SETTINGS_PRIVATE_H
 
-#include "display-private.h"
-#include "meta-monitor-manager-private.h"
-
-#include <clutter/clutter.h>
+#include <gdesktop-enums.h>
 
 #ifdef HAVE_LIBWACOM
 #include <libwacom/libwacom.h>
 #endif
+
+#include "backends/meta-backend-types.h"
+#include "clutter/clutter.h"
+#include "meta/display.h"
 
 #define META_TYPE_INPUT_SETTINGS (meta_input_settings_get_type ())
 G_DECLARE_DERIVABLE_TYPE (MetaInputSettings, meta_input_settings,
@@ -54,9 +55,15 @@ struct _MetaInputSettingsClass
   void (* set_tap_enabled)   (MetaInputSettings  *settings,
                               ClutterInputDevice *device,
                               gboolean            enabled);
+  void (* set_tap_button_map) (MetaInputSettings            *settings,
+                               ClutterInputDevice           *device,
+                               GDesktopTouchpadTapButtonMap  mode);
   void (* set_tap_and_drag_enabled) (MetaInputSettings  *settings,
                                      ClutterInputDevice *device,
                                      gboolean            enabled);
+  void (* set_tap_and_drag_lock_enabled) (MetaInputSettings  *settings,
+                                          ClutterInputDevice *device,
+                                          gboolean            enabled);
   void (* set_disable_while_typing) (MetaInputSettings  *settings,
                                      ClutterInputDevice *device,
                                      gboolean            enabled);
@@ -113,6 +120,17 @@ struct _MetaInputSettingsClass
                                   GDesktopStylusButtonAction  primary,
                                   GDesktopStylusButtonAction  secondary,
                                   GDesktopStylusButtonAction  tertiary);
+
+  void (* set_mouse_middle_click_emulation) (MetaInputSettings  *settings,
+                                             ClutterInputDevice *device,
+                                             gboolean            enabled);
+  void (* set_touchpad_middle_click_emulation) (MetaInputSettings  *settings,
+                                                ClutterInputDevice *device,
+                                                gboolean            enabled);
+  void (* set_trackball_middle_click_emulation) (MetaInputSettings  *settings,
+                                                 ClutterInputDevice *device,
+                                                 gboolean            enabled);
+
   gboolean (* has_two_finger_scroll) (MetaInputSettings  *settings,
                                       ClutterInputDevice *device);
   gboolean (* is_trackball_device) (MetaInputSettings  *settings,
@@ -123,9 +141,6 @@ GSettings *           meta_input_settings_get_tablet_settings (MetaInputSettings
                                                                ClutterInputDevice *device);
 MetaLogicalMonitor *  meta_input_settings_get_tablet_logical_monitor (MetaInputSettings  *settings,
                                                                       ClutterInputDevice *device);
-
-GDesktopTabletMapping meta_input_settings_get_tablet_mapping (MetaInputSettings  *settings,
-                                                              ClutterInputDevice *device);
 
 gboolean                   meta_input_settings_is_pad_button_grabbed     (MetaInputSettings  *input_settings,
                                                                           ClutterInputDevice *pad,
@@ -138,9 +153,7 @@ gchar *                    meta_input_settings_get_pad_action_label      (MetaIn
                                                                           MetaPadActionType   action,
                                                                           guint               number);
 
-#ifdef HAVE_LIBWACOM
-WacomDevice * meta_input_settings_get_tablet_wacom_device (MetaInputSettings *settings,
-                                                           ClutterInputDevice *device);
-#endif
+void meta_input_settings_maybe_save_numlock_state    (MetaInputSettings *input_settings);
+void meta_input_settings_maybe_restore_numlock_state (MetaInputSettings *input_settings);
 
 #endif /* META_INPUT_SETTINGS_PRIVATE_H */

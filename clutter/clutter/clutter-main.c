@@ -47,9 +47,7 @@
  * [threads.c](https://git.gnome.org/browse/clutter/tree/examples/threads.c?h=clutter-1.18)
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #include <stdlib.h>
 
@@ -57,45 +55,33 @@
 #include "clutter-backend-private.h"
 #include "clutter-config.h"
 #include "clutter-debug.h"
-#include "clutter-device-manager-private.h"
 #include "clutter-event-private.h"
 #include "clutter-feature.h"
+#include "clutter-input-device-private.h"
+#include "clutter-input-pointer-a11y-private.h"
+#include "clutter-graphene.h"
 #include "clutter-main.h"
-#include "clutter-master-clock.h"
 #include "clutter-mutter.h"
+#include "clutter-paint-node-private.h"
 #include "clutter-private.h"
 #include "clutter-settings-private.h"
 #include "clutter-stage-manager.h"
 #include "clutter-stage-private.h"
-#include "clutter-version.h" 	/* For flavour define */
-
-#ifdef CLUTTER_WINDOWING_X11
-#include "x11/clutter-backend-x11.h"
-#endif
-#ifdef CLUTTER_WINDOWING_EGL
-#include "egl/clutter-backend-eglnative.h"
-#endif
+#include "clutter-backend-private.h"
 
 #include <cogl/cogl.h>
 #include <cogl-pango/cogl-pango.h>
 
-#include "cally.h" /* For accessibility support */
+#include "cally/cally.h" /* For accessibility support */
 
 /* main context */
 static ClutterMainContext *ClutterCntx       = NULL;
-G_LOCK_DEFINE_STATIC (ClutterCntx);
-
-/* main lock and locking/unlocking functions */
-static GMutex clutter_threads_mutex;
-static GCallback clutter_threads_lock        = NULL;
-static GCallback clutter_threads_unlock      = NULL;
 
 /* command line options */
 static gboolean clutter_is_initialized       = FALSE;
 static gboolean clutter_show_fps             = FALSE;
 static gboolean clutter_fatal_warnings       = FALSE;
 static gboolean clutter_disable_mipmap_text  = FALSE;
-static gboolean clutter_use_fuzzy_picking    = FALSE;
 static gboolean clutter_enable_accessibility = TRUE;
 static gboolean clutter_sync_to_vblank       = TRUE;
 
@@ -103,17 +89,10 @@ static guint clutter_default_fps             = 60;
 
 static ClutterTextDirection clutter_text_direction = CLUTTER_TEXT_DIRECTION_LTR;
 
-static guint clutter_main_loop_level         = 0;
-static GSList *main_loops                    = NULL;
-
 /* debug flags */
 guint clutter_debug_flags       = 0;
 guint clutter_paint_debug_flags = 0;
 guint clutter_pick_debug_flags  = 0;
-
-const guint clutter_major_version = CLUTTER_MAJOR_VERSION;
-const guint clutter_minor_version = CLUTTER_MINOR_VERSION;
-const guint clutter_micro_version = CLUTTER_MICRO_VERSION;
 
 #ifdef CLUTTER_ENABLE_DEBUG
 static const GDebugKey clutter_debug_keys[] = {
@@ -137,7 +116,6 @@ static const GDebugKey clutter_debug_keys[] = {
 
 static const GDebugKey clutter_pick_debug_keys[] = {
   { "nop-picking", CLUTTER_DEBUG_NOP_PICKING },
-  { "dump-pick-buffers", CLUTTER_DEBUG_DUMP_PICK_BUFFERS },
 };
 
 static const GDebugKey clutter_paint_debug_keys[] = {
@@ -149,41 +127,8 @@ static const GDebugKey clutter_paint_debug_keys[] = {
   { "disable-offscreen-redirect", CLUTTER_DEBUG_DISABLE_OFFSCREEN_REDIRECT },
   { "continuous-redraw", CLUTTER_DEBUG_CONTINUOUS_REDRAW },
   { "paint-deform-tiles", CLUTTER_DEBUG_PAINT_DEFORM_TILES },
+  { "damage-region", CLUTTER_DEBUG_PAINT_DAMAGE_REGION },
 };
-
-static void
-clutter_threads_impl_lock (void)
-{
-  g_mutex_lock (&clutter_threads_mutex);
-}
-
-static void
-clutter_threads_impl_unlock (void)
-{
-  /* we need to trylock here, in case the lock hasn't been acquired; on
-   * various systems trying to release a mutex that hasn't been acquired
-   * will cause a run-time error. trylock() will either fail, in which
-   * case we can release the lock we own; or it will succeeds, in which
-   * case we need to release the lock we just acquired. so we ignore the
-   * returned value.
-   *
-   * see: https://bugs.gnome.org/679439
-   */
-  g_mutex_trylock (&clutter_threads_mutex);
-  g_mutex_unlock (&clutter_threads_mutex);
-}
-
-static inline void
-clutter_threads_init_default (void)
-{
-  g_mutex_init (&clutter_threads_mutex);
-
-  if (clutter_threads_lock == NULL)
-    clutter_threads_lock = clutter_threads_impl_lock;
-
-  if (clutter_threads_unlock == NULL)
-    clutter_threads_unlock = clutter_threads_impl_unlock;
-}
 
 #define ENVIRONMENT_GROUP       "Environment"
 #define DEBUG_GROUP             "Debug"
@@ -198,17 +143,6 @@ clutter_config_read_from_key_file (GKeyFile *keyfile)
 
   if (!g_key_file_has_group (keyfile, ENVIRONMENT_GROUP))
     return;
-
-  str_value =
-    g_key_file_get_string (keyfile, ENVIRONMENT_GROUP,
-                           "Backends",
-                           &key_error);
-  if (key_error != NULL)
-    g_clear_error (&key_error);
-  else
-    clutter_try_set_windowing_backend (str_value);
-
-  g_free (str_value);
 
   str_value =
     g_key_file_get_string (keyfile, ENVIRONMENT_GROUP,
@@ -243,16 +177,6 @@ clutter_config_read_from_key_file (GKeyFile *keyfile)
 
   bool_value =
     g_key_file_get_boolean (keyfile, ENVIRONMENT_GROUP,
-                            "UseFuzzyPicking",
-                            &key_error);
-
-  if (key_error != NULL)
-    g_clear_error (&key_error);
-  else
-    clutter_use_fuzzy_picking = bool_value;
-
-  bool_value =
-    g_key_file_get_boolean (keyfile, ENVIRONMENT_GROUP,
                             "EnableAccessibility",
                             &key_error);
 
@@ -260,16 +184,6 @@ clutter_config_read_from_key_file (GKeyFile *keyfile)
     g_clear_error (&key_error);
   else
     clutter_enable_accessibility = bool_value;
-
-  bool_value =
-    g_key_file_get_boolean (keyfile, ENVIRONMENT_GROUP,
-                            "SyncToVblank",
-                            &key_error);
-
-  if (key_error != NULL)
-    g_clear_error (&key_error);
-  else
-    clutter_sync_to_vblank = bool_value;
 
   int_value =
     g_key_file_get_integer (keyfile, ENVIRONMENT_GROUP,
@@ -409,28 +323,6 @@ clutter_config_read (void)
   g_free (config_path);
 }
 
-/**
- * clutter_get_show_fps:
- *
- * Returns whether Clutter should print out the frames per second on the
- * console. You can enable this setting either using the
- * <literal>CLUTTER_SHOW_FPS</literal> environment variable or passing
- * the <literal>--clutter-show-fps</literal> command line argument. *
- *
- * Return value: %TRUE if Clutter should show the FPS.
- *
- * Since: 0.4
- *
- * Deprecated: 1.10: This function does not do anything. Use the environment
- *   variable or the configuration file to determine whether Clutter should
- *   print out the FPS counter on the console.
- */
-gboolean
-clutter_get_show_fps (void)
-{
-  return FALSE;
-}
-
 gboolean
 _clutter_context_get_show_fps (void)
 {
@@ -477,205 +369,6 @@ clutter_disable_accessibility (void)
     }
 
   clutter_enable_accessibility = FALSE;
-}
-
-/**
- * clutter_redraw:
- *
- * Forces a redraw of the entire stage. Applications should never use this
- * function, but queue a redraw using clutter_actor_queue_redraw().
- *
- * This function should only be used by libraries integrating Clutter from
- * within another toolkit.
- *
- * Deprecated: 1.10: Use clutter_stage_ensure_redraw() instead.
- */
-void
-clutter_redraw (ClutterStage *stage)
-{
-  g_return_if_fail (CLUTTER_IS_STAGE (stage));
-
-  clutter_stage_ensure_redraw (stage);
-}
-
-/**
- * clutter_set_motion_events_enabled:
- * @enable: %TRUE to enable per-actor motion events
- *
- * Sets whether per-actor motion events should be enabled or not on
- * all #ClutterStage<!-- -->s managed by Clutter.
- *
- * If @enable is %FALSE the following events will not work:
- *
- *  - ClutterActor::motion-event, except on the #ClutterStage
- *  - ClutterActor::enter-event
- *  - ClutterActor::leave-event
- *
- * Since: 0.6
- *
- * Deprecated: 1.8: Use clutter_stage_set_motion_events_enabled() instead.
- */
-void
-clutter_set_motion_events_enabled (gboolean enable)
-{
-  ClutterStageManager *stage_manager;
-  ClutterMainContext *context;
-  const GSList *l;
-
-  enable = !!enable;
-
-  context = _clutter_context_get_default ();
-  if (context->motion_events_per_actor == enable)
-    return;
-
-  /* store the flag for later query and for newly created stages */
-  context->motion_events_per_actor = enable;
-
-  /* propagate the change to all stages */
-  stage_manager = clutter_stage_manager_get_default ();
-
-  for (l = clutter_stage_manager_peek_stages (stage_manager);
-       l != NULL;
-       l = l->next)
-    {
-      clutter_stage_set_motion_events_enabled (l->data, enable);
-    }
-}
-
-/**
- * clutter_get_motion_events_enabled:
- *
- * Gets whether the per-actor motion events are enabled.
- *
- * Return value: %TRUE if the motion events are enabled
- *
- * Since: 0.6
- *
- * Deprecated: 1.8: Use clutter_stage_get_motion_events_enabled() instead.
- */
-gboolean
-clutter_get_motion_events_enabled (void)
-{
-  return _clutter_context_get_motion_events_enabled ();
-}
-
-void
-_clutter_id_to_color (guint         id_,
-                      ClutterColor *col)
-{
-  ClutterMainContext *ctx;
-  gint red, green, blue;
-
-  ctx = _clutter_context_get_default ();
-
-  if (ctx->fb_g_mask == 0)
-    {
-      /* Figure out framebuffer masks used for pick */
-      cogl_get_bitmasks (&ctx->fb_r_mask,
-			 &ctx->fb_g_mask,
-			 &ctx->fb_b_mask, NULL);
-
-      ctx->fb_r_mask_used = ctx->fb_r_mask;
-      ctx->fb_g_mask_used = ctx->fb_g_mask;
-      ctx->fb_b_mask_used = ctx->fb_b_mask;
-
-      /* XXX - describe what "fuzzy picking" is */
-      if (clutter_use_fuzzy_picking)
-	{
-	  ctx->fb_r_mask_used--;
-	  ctx->fb_g_mask_used--;
-	  ctx->fb_b_mask_used--;
-	}
-    }
-
-  /* compute the numbers we'll store in the components */
-  red   = (id_ >> (ctx->fb_g_mask_used+ctx->fb_b_mask_used))
-        & (0xff >> (8-ctx->fb_r_mask_used));
-  green = (id_ >> ctx->fb_b_mask_used)
-        & (0xff >> (8-ctx->fb_g_mask_used));
-  blue  = (id_)
-        & (0xff >> (8-ctx->fb_b_mask_used));
-
-  /* shift left bits a bit and add one, this circumvents
-   * at least some potential rounding errors in GL/GLES
-   * driver / hw implementation.
-   */
-  if (ctx->fb_r_mask_used != ctx->fb_r_mask)
-    red = red * 2;
-  if (ctx->fb_g_mask_used != ctx->fb_g_mask)
-    green = green * 2;
-  if (ctx->fb_b_mask_used != ctx->fb_b_mask)
-    blue  = blue  * 2;
-
-  /* shift up to be full 8bit values */
-  red   = (red   << (8 - ctx->fb_r_mask)) | (0x7f >> (ctx->fb_r_mask_used));
-  green = (green << (8 - ctx->fb_g_mask)) | (0x7f >> (ctx->fb_g_mask_used));
-  blue  = (blue  << (8 - ctx->fb_b_mask)) | (0x7f >> (ctx->fb_b_mask_used));
-
-  col->red   = red;
-  col->green = green;
-  col->blue  = blue;
-  col->alpha = 0xff;
-
-  /* XXX: We rotate the nibbles of the colors here so that there is a
-   * visible variation between colors of sequential actor identifiers;
-   * otherwise pick buffers dumped to an image will pretty much just look
-   * black.
-   */
-  if (G_UNLIKELY (clutter_pick_debug_flags & CLUTTER_DEBUG_DUMP_PICK_BUFFERS))
-    {
-      col->red   = (col->red << 4)   | (col->red >> 4);
-      col->green = (col->green << 4) | (col->green >> 4);
-      col->blue  = (col->blue << 4)  | (col->blue >> 4);
-    }
-}
-
-guint
-_clutter_pixel_to_id (guchar pixel[4])
-{
-  ClutterMainContext *ctx;
-  gint red, green, blue;
-  guint retval;
-
-  ctx = _clutter_context_get_default ();
-
-  /* reduce the pixel components to the number of bits actually used of the
-   * 8bits.
-   */
-  if (G_UNLIKELY (clutter_pick_debug_flags & CLUTTER_DEBUG_DUMP_PICK_BUFFERS))
-    {
-      guchar tmp;
-
-      /* XXX: In _clutter_id_to_color we rotated the nibbles of the colors so
-       * that there is a visible variation between colors of sequential actor
-       * identifiers (otherwise pick buffers dumped to an image will pretty
-       * much just look black.) Here we reverse that rotation.
-       */
-      tmp = ((pixel[0] << 4) | (pixel[0] >> 4));
-      red = tmp >> (8 - ctx->fb_r_mask);
-      tmp = ((pixel[1] << 4) | (pixel[1] >> 4));
-      green = tmp >> (8 - ctx->fb_g_mask);
-      tmp = ((pixel[2] << 4) | (pixel[2] >> 4));
-      blue = tmp >> (8 - ctx->fb_b_mask);
-    }
-  else
-    {
-      red   = pixel[0] >> (8 - ctx->fb_r_mask);
-      green = pixel[1] >> (8 - ctx->fb_g_mask);
-      blue  = pixel[2] >> (8 - ctx->fb_b_mask);
-    }
-
-  /* divide potentially by two if 'fuzzy' */
-  red   = red   >> (ctx->fb_r_mask - ctx->fb_r_mask_used);
-  green = green >> (ctx->fb_g_mask - ctx->fb_g_mask_used);
-  blue  = blue  >> (ctx->fb_b_mask - ctx->fb_b_mask_used);
-
-  /* combine the correct per component values into the final id */
-  retval = blue
-         + (green <<  ctx->fb_b_mask_used)
-         + (red << (ctx->fb_b_mask_used + ctx->fb_g_mask_used));
-
-  return retval;
 }
 
 static CoglPangoFontMap *
@@ -736,155 +429,14 @@ clutter_get_text_direction (void)
   return dir;
 }
 
-/**
- * clutter_main_quit:
- *
- * Terminates the Clutter mainloop.
- */
-void
-clutter_main_quit (void)
-{
-  if (main_loops == NULL)
-    {
-      g_critical ("Calling clutter_main_quit() without calling clutter_main() "
-                  "is not allowed. If you are using another main loop, use the "
-                  "appropriate API to terminate it.");
-      return;
-    }
-
-  CLUTTER_NOTE (MISC, "Terminating main loop level %d", clutter_main_loop_level);
-
-  g_main_loop_quit (main_loops->data);
-}
-
-/**
- * clutter_main_level:
- *
- * Retrieves the depth of the Clutter mainloop.
- *
- * Return value: The level of the mainloop.
- */
-gint
-clutter_main_level (void)
-{
-  return clutter_main_loop_level;
-}
-
-/**
- * clutter_main:
- *
- * Starts the Clutter mainloop.
- */
-void
-clutter_main (void)
-{
-  GMainLoop *loop;
-
-  if (!_clutter_context_is_initialized ())
-    {
-      g_warning ("Called clutter_main() but Clutter wasn't initialised. "
-		 "You must call clutter_init() first.");
-      return;
-    }
-
-  clutter_main_loop_level++;
-
-  CLUTTER_NOTE (MISC, "Entering main loop level %d", clutter_main_loop_level);
-
-  loop = g_main_loop_new (NULL, TRUE);
-  main_loops = g_slist_prepend (main_loops, loop);
-
-  if (g_main_loop_is_running (main_loops->data))
-    {
-      _clutter_threads_release_lock ();
-      g_main_loop_run (loop);
-      _clutter_threads_acquire_lock ();
-    }
-
-  main_loops = g_slist_remove (main_loops, loop);
-
-  g_main_loop_unref (loop);
-
-  CLUTTER_NOTE (MISC, "Leaving main loop level %d", clutter_main_loop_level);
-
-  clutter_main_loop_level--;
-}
-
-/**
- * clutter_threads_init:
- *
- * Initialises the Clutter threading mechanism, so that Clutter API can be
- * called by multiple threads, using clutter_threads_enter() and
- * clutter_threads_leave() to mark the critical sections.
- *
- * You must call g_thread_init() before this function.
- *
- * This function must be called before clutter_init().
- *
- * It is safe to call this function multiple times.
- *
- * Since: 0.4
- *
- * Deprecated: 1.10: This function does not do anything. Threading support
- *   is initialized when Clutter is initialized.
- */
-void
-clutter_threads_init (void)
-{
-}
-
-/**
- * clutter_threads_set_lock_functions: (skip)
- * @enter_fn: function called when aquiring the Clutter main lock
- * @leave_fn: function called when releasing the Clutter main lock
- *
- * Allows the application to replace the standard method that
- * Clutter uses to protect its data structures. Normally, Clutter
- * creates a single #GMutex that is locked by clutter_threads_enter(),
- * and released by clutter_threads_leave(); using this function an
- * application provides, instead, a function @enter_fn that is
- * called by clutter_threads_enter() and a function @leave_fn that is
- * called by clutter_threads_leave().
- *
- * The functions must provide at least same locking functionality
- * as the default implementation, but can also do extra application
- * specific processing.
- *
- * As an example, consider an application that has its own recursive
- * lock that when held, holds the Clutter lock as well. When Clutter
- * unlocks the Clutter lock when entering a recursive main loop, the
- * application must temporarily release its lock as well.
- *
- * Most threaded Clutter apps won't need to use this method.
- *
- * This method must be called before clutter_init(), and cannot
- * be called multiple times.
- *
- * Since: 0.4
- */
-void
-clutter_threads_set_lock_functions (GCallback enter_fn,
-                                    GCallback leave_fn)
-{
-  g_return_if_fail (clutter_threads_lock == NULL &&
-                    clutter_threads_unlock == NULL);
-
-  clutter_threads_lock = enter_fn;
-  clutter_threads_unlock = leave_fn;
-}
-
 gboolean
 _clutter_threads_dispatch (gpointer data)
 {
   ClutterThreadsDispatch *dispatch = data;
   gboolean ret = FALSE;
 
-  _clutter_threads_acquire_lock ();
-
   if (!g_source_is_destroyed (g_main_current_source ()))
     ret = dispatch->func (dispatch->data);
-
-  _clutter_threads_release_lock ();
 
   return ret;
 }
@@ -929,16 +481,10 @@ _clutter_threads_dispatch_free (gpointer data)
  *    SafeClosure *closure = data;
  *    gboolean res = FALSE;
  *
- *    // mark the critical section //
- *
- *    clutter_threads_enter();
- *
  *    // the callback does not need to acquire the Clutter
  *     / lock itself, as it is held by the this proxy handler
  *     //
  *    res = closure->callback (closure->data);
- *
- *    clutter_threads_leave();
  *
  *    return res;
  * }
@@ -1116,86 +662,6 @@ clutter_threads_add_timeout (guint       interval,
                                            NULL);
 }
 
-void
-_clutter_threads_acquire_lock (void)
-{
-  if (clutter_threads_lock != NULL)
-    (* clutter_threads_lock) ();
-}
-
-void
-_clutter_threads_release_lock (void)
-{
-  if (clutter_threads_unlock != NULL)
-    (* clutter_threads_unlock) ();
-}
-
-/**
- * clutter_threads_enter:
- *
- * Locks the Clutter thread lock.
- *
- * Since: 0.4
- *
- * Deprecated: 1.12: This function should not be used by application
- *   code; marking critical sections is not portable on various
- *   platforms. Instead of acquiring the Clutter lock, schedule UI
- *   updates from the main loop using clutter_threads_add_idle() or
- *   clutter_threads_add_timeout().
- */
-void
-clutter_threads_enter (void)
-{
-  _clutter_threads_acquire_lock ();
-}
-
-/**
- * clutter_threads_leave:
- *
- * Unlocks the Clutter thread lock.
- *
- * Since: 0.4
- *
- * Deprecated: 1.12: This function should not be used by application
- *   code; marking critical sections is not portable on various
- *   platforms. Instead of acquiring the Clutter lock, schedule UI
- *   updates from the main loop using clutter_threads_add_idle() or
- *   clutter_threads_add_timeout().
- */
-void
-clutter_threads_leave (void)
-{
-  _clutter_threads_release_lock ();
-}
-
-
-/**
- * clutter_get_debug_enabled:
- *
- * Check if Clutter has debugging enabled.
- *
- * Return value: %FALSE
- *
- * Deprecated: 1.10: This function does not do anything.
- */
-gboolean
-clutter_get_debug_enabled (void)
-{
-  return FALSE;
-}
-
-void
-_clutter_context_lock (void)
-{
-  G_LOCK (ClutterCntx);
-}
-
-void
-_clutter_context_unlock (void)
-{
-  G_UNLOCK (ClutterCntx);
-}
-
 gboolean
 _clutter_context_is_initialized (void)
 {
@@ -1205,8 +671,8 @@ _clutter_context_is_initialized (void)
   return ClutterCntx->is_initialized;
 }
 
-static ClutterMainContext *
-clutter_context_get_default_unlocked (void)
+ClutterMainContext *
+_clutter_context_get_default (void)
 {
   if (G_UNLIKELY (ClutterCntx == NULL))
     {
@@ -1231,55 +697,10 @@ clutter_context_get_default_unlocked (void)
       ctx->settings = clutter_settings_get_default ();
       _clutter_settings_set_backend (ctx->settings, ctx->backend);
 
-      ctx->motion_events_per_actor = TRUE;
       ctx->last_repaint_id = 1;
     }
 
   return ClutterCntx;
-}
-
-ClutterMainContext *
-_clutter_context_get_default (void)
-{
-  ClutterMainContext *retval;
-
-  _clutter_context_lock ();
-
-  retval = clutter_context_get_default_unlocked ();
-
-  _clutter_context_unlock ();
-
-  return retval;
-}
-
-/**
- * clutter_get_timestamp:
- *
- * Returns the approximate number of microseconds passed since Clutter was
- * intialised.
- *
- * This function shdould not be used by application code.
- *
- * The output of this function depends on whether Clutter was configured to
- * enable its debugging code paths, so it's less useful than intended.
- *
- * Since Clutter 1.10, this function is an alias to g_get_monotonic_time()
- * if Clutter was configured to enable the debugging code paths.
- *
- * Return value: Number of microseconds since clutter_init() was called, or
- *   zero if Clutter was not configured with debugging code paths.
- *
- * Deprecated: 1.10: Use #GTimer or g_get_monotonic_time() for a proper
- *   timing source
- */
-gulong
-clutter_get_timestamp (void)
-{
-#ifdef CLUTTER_ENABLE_DEBUG
-  return (gulong) g_get_monotonic_time ();
-#else
-  return 0L;
-#endif
 }
 
 static gboolean
@@ -1372,6 +793,9 @@ clutter_init_real (GError **error)
         CLUTTER_DEBUG_DISABLE_CLIPPED_REDRAWS | CLUTTER_DEBUG_DISABLE_CULLING;
     }
 
+  if (clutter_paint_debug_flags & CLUTTER_DEBUG_PAINT_DAMAGE_REGION)
+    g_message ("Enabling damaged region");
+
   /* this will take care of initializing Cogl's state and
    * query the GL machinery for features
    */
@@ -1390,6 +814,9 @@ clutter_init_real (GError **error)
   if (clutter_enable_accessibility)
     cally_accessibility_init ();
 
+  /* Initialize types required for paint nodes */
+  _clutter_paint_node_init_types ();
+
   return CLUTTER_INIT_SUCCESS;
 }
 
@@ -1406,9 +833,6 @@ static GOptionEntry clutter_args[] = {
   { "clutter-disable-mipmapped-text", 0, 0, G_OPTION_ARG_NONE,
     &clutter_disable_mipmap_text,
     N_("Disable mipmapping on text"), NULL },
-  { "clutter-use-fuzzy-picking", 0, 0, G_OPTION_ARG_NONE,
-    &clutter_use_fuzzy_picking,
-    N_("Use 'fuzzy' picking"), NULL },
 #ifdef CLUTTER_ENABLE_DEBUG
   { "clutter-debug", 0, 0, G_OPTION_ARG_CALLBACK, clutter_arg_debug_cb,
     N_("Clutter debugging flags to set"), "FLAGS" },
@@ -1489,14 +913,6 @@ pre_parse_hook (GOptionContext  *context,
   env_string = g_getenv ("CLUTTER_DISABLE_MIPMAPPED_TEXT");
   if (env_string)
     clutter_disable_mipmap_text = TRUE;
-
-  env_string = g_getenv ("CLUTTER_FUZZY_PICK");
-  if (env_string)
-    clutter_use_fuzzy_picking = TRUE;
-
-  env_string = g_getenv ("CLUTTER_VBLANK");
-  if (g_strcmp0 (env_string, "none") == 0)
-    clutter_sync_to_vblank = FALSE;
 
   return _clutter_backend_pre_parse (backend, error);
 }
@@ -1584,8 +1000,8 @@ clutter_get_option_group (void)
   context = _clutter_context_get_default ();
 
   group = g_option_group_new ("clutter",
-                              _("Clutter Options"),
-                              _("Show Clutter Options"),
+                              "Clutter Options",
+                              "Show Clutter Options",
                               NULL,
                               NULL);
 
@@ -1947,7 +1363,7 @@ event_click_count_generate (ClutterEvent *event)
         previous_y = event->button.y;
         previous_time = event->button.time;
 
-        /* fallthrough */
+        G_GNUC_FALLTHROUGH;
       case CLUTTER_BUTTON_RELEASE:
         event->button.click_count = click_count;
         break;
@@ -2006,30 +1422,40 @@ static inline void
 emit_pointer_event (ClutterEvent       *event,
                     ClutterInputDevice *device)
 {
-  ClutterMainContext *context = _clutter_context_get_default ();
+  if (_clutter_event_process_filters (event))
+    return;
+
+  if (device != NULL && device->pointer_grab_actor != NULL)
+    clutter_actor_event (device->pointer_grab_actor, event, FALSE);
+  else
+    emit_event_chain (event);
+}
+
+static inline void
+emit_crossing_event (ClutterEvent       *event,
+                     ClutterInputDevice *device)
+{
+  ClutterEventSequence *sequence = clutter_event_get_event_sequence (event);
+  ClutterActor *grab_actor = NULL;
 
   if (_clutter_event_process_filters (event))
     return;
 
-  if (context->pointer_grab_actor == NULL &&
-      (device == NULL || device->pointer_grab_actor == NULL))
+  if (sequence)
     {
-      /* no grab, time to capture and bubble */
-      emit_event_chain (event);
+      if (device->sequence_grab_actors != NULL)
+        grab_actor = g_hash_table_lookup (device->sequence_grab_actors, sequence);
     }
   else
     {
-      if (context->pointer_grab_actor != NULL)
-        {
-          /* global grab */
-          clutter_actor_event (context->pointer_grab_actor, event, FALSE);
-        }
-      else if (device != NULL && device->pointer_grab_actor != NULL)
-        {
-          /* per device grab */
-          clutter_actor_event (device->pointer_grab_actor, event, FALSE);
-        }
+      if (device != NULL && device->pointer_grab_actor != NULL)
+        grab_actor = device->pointer_grab_actor;
     }
+
+  if (grab_actor != NULL)
+    clutter_actor_event (grab_actor, event, FALSE);
+  else
+    emit_event_chain (event);
 }
 
 static inline void
@@ -2063,30 +1489,13 @@ static inline void
 emit_keyboard_event (ClutterEvent       *event,
                      ClutterInputDevice *device)
 {
-  ClutterMainContext *context = _clutter_context_get_default ();
-
   if (_clutter_event_process_filters (event))
     return;
 
-  if (context->keyboard_grab_actor == NULL &&
-      (device == NULL || device->keyboard_grab_actor == NULL))
-    {
-      /* no grab, time to capture and bubble */
-      emit_event_chain (event);
-    }
+  if (device != NULL && device->keyboard_grab_actor != NULL)
+    clutter_actor_event (device->keyboard_grab_actor, event, FALSE);
   else
-    {
-      if (context->keyboard_grab_actor != NULL)
-        {
-          /* global key grab */
-          clutter_actor_event (context->keyboard_grab_actor, event, FALSE);
-        }
-      else if (device != NULL && device->keyboard_grab_actor != NULL)
-        {
-          /* per-device key grab */
-          clutter_actor_event (context->keyboard_grab_actor, event, FALSE);
-        }
-    }
+    emit_event_chain (event);
 }
 
 static inline void
@@ -2163,6 +1572,11 @@ _clutter_process_event_details (ClutterActor        *stage,
                                 ClutterEvent        *event)
 {
   ClutterInputDevice *device = clutter_event_get_device (event);
+  ClutterMainContext *clutter_context;
+  ClutterBackend *backend;
+
+  clutter_context = _clutter_context_get_default ();
+  backend = clutter_context->backend;
 
   switch (event->type)
     {
@@ -2176,6 +1590,9 @@ _clutter_process_event_details (ClutterActor        *stage,
       case CLUTTER_PAD_BUTTON_RELEASE:
       case CLUTTER_PAD_STRIP:
       case CLUTTER_PAD_RING:
+      case CLUTTER_IM_COMMIT:
+      case CLUTTER_IM_DELETE:
+      case CLUTTER_IM_PREEDIT:
         {
           ClutterActor *actor = NULL;
 
@@ -2205,9 +1622,9 @@ _clutter_process_event_details (ClutterActor        *stage,
           {
             ClutterActor *actor = NULL;
 
-            emit_pointer_event (event, device);
+            emit_crossing_event (event, device);
 
-            actor = _clutter_input_device_update (device, NULL, FALSE);
+            actor = clutter_input_device_update (device, NULL, FALSE);
             if (actor != stage)
               {
                 ClutterEvent *crossing;
@@ -2217,12 +1634,12 @@ _clutter_process_event_details (ClutterActor        *stage,
                 crossing->crossing.related = stage;
                 crossing->crossing.source = actor;
 
-                emit_pointer_event (crossing, device);
+                emit_crossing_event (crossing, device);
                 clutter_event_free (crossing);
               }
           }
         else
-          emit_pointer_event (event, device);
+          emit_crossing_event (event, device);
         break;
 
       case CLUTTER_LEAVE:
@@ -2241,14 +1658,13 @@ _clutter_process_event_details (ClutterActor        *stage,
             crossing->crossing.related = stage;
             crossing->crossing.source = device->cursor_actor;
 
-            emit_pointer_event (crossing, device);
+            emit_crossing_event (crossing, device);
             clutter_event_free (crossing);
           }
-        emit_pointer_event (event, device);
+        emit_crossing_event (event, device);
         break;
 
       case CLUTTER_DESTROY_NOTIFY:
-      case CLUTTER_DELETE:
         event->any.source = stage;
 
         if (_clutter_event_process_filters (event))
@@ -2259,6 +1675,17 @@ _clutter_process_event_details (ClutterActor        *stage,
         break;
 
       case CLUTTER_MOTION:
+        if (clutter_backend_is_display_server (backend) &&
+            !(event->any.flags & CLUTTER_EVENT_FLAG_SYNTHETIC))
+          {
+            if (_clutter_is_input_pointer_a11y_enabled (device))
+              {
+                gfloat x, y;
+
+                clutter_event_get_coords (event, &x, &y);
+                _clutter_input_pointer_a11y_on_motion_event (device, x, y);
+              }
+          }
         /* only the stage gets motion events if they are enabled */
         if (!clutter_stage_get_motion_events_enabled (CLUTTER_STAGE (stage)) &&
             event->any.source == NULL)
@@ -2269,15 +1696,7 @@ _clutter_process_event_details (ClutterActor        *stage,
             if (_clutter_event_process_filters (event))
               break;
 
-            /* global grabs */
-            if (context->pointer_grab_actor != NULL)
-              {
-                clutter_actor_event (context->pointer_grab_actor,
-                                     event,
-                                     FALSE);
-                break;
-              }
-            else if (device != NULL && device->pointer_grab_actor != NULL)
+            if (device != NULL && device->pointer_grab_actor != NULL)
               {
                 clutter_actor_event (device->pointer_grab_actor,
                                      event,
@@ -2294,9 +1713,18 @@ _clutter_process_event_details (ClutterActor        *stage,
             break;
           }
 
-      /* fallthrough from motion */
+        G_GNUC_FALLTHROUGH;
       case CLUTTER_BUTTON_PRESS:
       case CLUTTER_BUTTON_RELEASE:
+        if (clutter_backend_is_display_server (backend))
+          {
+            if (_clutter_is_input_pointer_a11y_enabled (device) && (event->type != CLUTTER_MOTION))
+              {
+                _clutter_input_pointer_a11y_on_button_event (device,
+                                                             event->button.button,
+                                                             event->type == CLUTTER_BUTTON_PRESS);
+              }
+          }
       case CLUTTER_SCROLL:
       case CLUTTER_TOUCHPAD_PINCH:
       case CLUTTER_TOUCHPAD_SWIPE:
@@ -2350,7 +1778,7 @@ _clutter_process_event_details (ClutterActor        *stage,
                * get the actor underneath
                */
               if (device != NULL)
-                actor = _clutter_input_device_update (device, NULL, TRUE);
+                actor = clutter_input_device_update (device, NULL, TRUE);
               else
                 {
                   CLUTTER_NOTE (EVENT, "No device found: picking");
@@ -2423,7 +1851,7 @@ _clutter_process_event_details (ClutterActor        *stage,
             break;
           }
 
-      /* fallthrough from motion */
+        G_GNUC_FALLTHROUGH;
       case CLUTTER_TOUCH_BEGIN:
       case CLUTTER_TOUCH_CANCEL:
       case CLUTTER_TOUCH_END:
@@ -2460,14 +1888,15 @@ _clutter_process_event_details (ClutterActor        *stage,
 
                   emit_touch_event (event, device);
 
-                  if (event->type == CLUTTER_TOUCH_END)
+                  if (event->type == CLUTTER_TOUCH_END ||
+                      event->type == CLUTTER_TOUCH_CANCEL)
                     _clutter_input_device_remove_event_sequence (device, event);
 
                   break;
                 }
 
               if (device != NULL)
-                actor = _clutter_input_device_update (device, sequence, TRUE);
+                actor = clutter_input_device_update (device, sequence, TRUE);
               else
                 {
                   CLUTTER_NOTE (EVENT, "No device found: picking");
@@ -2495,7 +1924,8 @@ _clutter_process_event_details (ClutterActor        *stage,
 
           emit_touch_event (event, device);
 
-          if (event->type == CLUTTER_TOUCH_END)
+          if (event->type == CLUTTER_TOUCH_END ||
+              event->type == CLUTTER_TOUCH_CANCEL)
             _clutter_input_device_remove_event_sequence (device, event);
 
           break;
@@ -2518,13 +1948,24 @@ _clutter_process_event_details (ClutterActor        *stage,
         break;
 
       case CLUTTER_STAGE_STATE:
-        /* fullscreen / focus - forward to stage */
+        /* focus - forward to stage */
         event->any.source = stage;
         if (!_clutter_event_process_filters (event))
           clutter_stage_event (CLUTTER_STAGE (stage), event);
         break;
 
       case CLUTTER_CLIENT_MESSAGE:
+        break;
+
+      case CLUTTER_DEVICE_ADDED:
+      case CLUTTER_DEVICE_REMOVED:
+        if (!_clutter_event_process_filters (event))
+          {
+            ClutterSeat *seat;
+
+            seat = clutter_backend_get_default_seat (context->backend);
+            clutter_seat_handle_device_event (seat, event);
+          }
         break;
 
       case CLUTTER_EVENT_LAST:
@@ -2565,27 +2006,6 @@ _clutter_process_event (ClutterEvent *event)
   context->current_event = g_slist_delete_link (context->current_event, context->current_event);
 }
 
-/**
- * clutter_get_actor_by_gid:
- * @id_: a #ClutterActor unique id.
- *
- * Retrieves the #ClutterActor with @id_.
- *
- * Return value: (transfer none): the actor with the passed id or %NULL.
- *   The returned actor does not have its reference count increased.
- *
- * Since: 0.6
- *
- * Deprecated: 1.8: The id is deprecated, and this function always returns
- *   %NULL. Use the proper scene graph API in #ClutterActor to find a child
- *   of the stage.
- */
-ClutterActor *
-clutter_get_actor_by_gid (guint32 id_)
-{
-  return NULL;
-}
-
 void
 clutter_base_init (void)
 {
@@ -2600,8 +2020,7 @@ clutter_base_init (void)
       g_type_init ();
 #endif
 
-      /* initialise the Big Clutter Lock™ if necessary */
-      clutter_threads_init_default ();
+      clutter_graphene_init ();
     }
 }
 
@@ -2622,591 +2041,6 @@ clutter_get_default_frame_rate (void)
   context = _clutter_context_get_default ();
 
   return context->frame_rate;
-}
-
-/**
- * clutter_set_default_frame_rate:
- * @frames_per_sec: the new default frame rate
- *
- * Sets the default frame rate. This frame rate will be used to limit
- * the number of frames drawn if Clutter is not able to synchronize
- * with the vertical refresh rate of the display. When synchronization
- * is possible, this value is ignored.
- *
- * Since: 0.6
- *
- * Deprecated: 1.10: This function does not do anything any more.
- */
-void
-clutter_set_default_frame_rate (guint frames_per_sec)
-{
-}
-
-static void
-on_grab_actor_destroy (ClutterActor       *actor,
-                       ClutterInputDevice *device)
-{
-  if (device == NULL)
-    {
-      ClutterMainContext *context = _clutter_context_get_default ();
-
-      if (context->pointer_grab_actor == actor)
-        clutter_ungrab_pointer ();
-
-      if (context->keyboard_grab_actor == actor)
-        clutter_ungrab_keyboard ();
-
-      return;
-    }
-
-  switch (device->device_type)
-    {
-    case CLUTTER_POINTER_DEVICE:
-      device->pointer_grab_actor = NULL;
-      break;
-
-    case CLUTTER_KEYBOARD_DEVICE:
-      device->keyboard_grab_actor = NULL;
-      break;
-
-    default:
-      g_assert_not_reached ();
-    }
-}
-
-/**
- * clutter_grab_pointer:
- * @actor: a #ClutterActor
- *
- * Grabs pointer events, after the grab is done all pointer related events
- * (press, motion, release, enter, leave and scroll) are delivered to this
- * actor directly without passing through both capture and bubble phases of
- * the event delivery chain. The source set in the event will be the actor
- * that would have received the event if the pointer grab was not in effect.
- *
- * Grabs completely override the entire event delivery chain
- * done by Clutter. Pointer grabs should only be used as a last resource;
- * using the #ClutterActor::captured-event signal should always be the
- * preferred way to intercept event delivery to reactive actors.
- *
- * This function should rarely be used.
- *
- * If a grab is required, you are strongly encouraged to use a specific
- * input device by calling clutter_input_device_grab().
- *
- * Since: 0.6
- */
-void
-clutter_grab_pointer (ClutterActor *actor)
-{
-  ClutterMainContext *context;
-
-  g_return_if_fail (actor == NULL || CLUTTER_IS_ACTOR (actor));
-
-  context = _clutter_context_get_default ();
-
-  if (context->pointer_grab_actor == actor)
-    return;
-
-  if (context->pointer_grab_actor != NULL)
-    {
-      g_signal_handlers_disconnect_by_func (context->pointer_grab_actor,
-                                            G_CALLBACK (on_grab_actor_destroy),
-                                            NULL);
-      context->pointer_grab_actor = NULL;
-    }
-
-  if (actor != NULL)
-    {
-      context->pointer_grab_actor = actor;
-
-      g_signal_connect (context->pointer_grab_actor, "destroy",
-                        G_CALLBACK (on_grab_actor_destroy),
-                        NULL);
-    }
-}
-
-/**
- * clutter_input_device_grab:
- * @device: a #ClutterInputDevice
- * @actor: a #ClutterActor
- *
- * Acquires a grab on @actor for the given @device.
- *
- * Any event coming from @device will be delivered to @actor, bypassing
- * the usual event delivery mechanism, until the grab is released by
- * calling clutter_input_device_ungrab().
- *
- * The grab is client-side: even if the windowing system used by the Clutter
- * backend has the concept of "device grabs", Clutter will not use them.
- *
- * Only #ClutterInputDevice of types %CLUTTER_POINTER_DEVICE and
- * %CLUTTER_KEYBOARD_DEVICE can hold a grab.
- *
- * Since: 1.10
- */
-void
-clutter_input_device_grab (ClutterInputDevice *device,
-                           ClutterActor       *actor)
-{
-  ClutterActor **grab_actor;
-
-  g_return_if_fail (CLUTTER_IS_INPUT_DEVICE (device));
-  g_return_if_fail (CLUTTER_IS_ACTOR (actor));
-
-  switch (device->device_type)
-    {
-    case CLUTTER_POINTER_DEVICE:
-    case CLUTTER_TABLET_DEVICE:
-      grab_actor = &(device->pointer_grab_actor);
-      break;
-
-    case CLUTTER_KEYBOARD_DEVICE:
-      grab_actor = &(device->keyboard_grab_actor);
-      break;
-
-    default:
-      g_critical ("Only pointer and keyboard devices can grab an actor");
-      return;
-    }
-
-  if (*grab_actor != NULL)
-    {
-      g_signal_handlers_disconnect_by_func (*grab_actor,
-                                            G_CALLBACK (on_grab_actor_destroy),
-                                            device);
-    }
-
-  *grab_actor = actor;
-
-  g_signal_connect (*grab_actor,
-                    "destroy",
-                    G_CALLBACK (on_grab_actor_destroy),
-                    device);
-}
-
-/**
- * clutter_input_device_ungrab:
- * @device: a #ClutterInputDevice
- *
- * Releases the grab on the @device, if one is in place.
- *
- * Since: 1.10
- */
-void
-clutter_input_device_ungrab (ClutterInputDevice *device)
-{
-  ClutterActor **grab_actor;
-
-  g_return_if_fail (CLUTTER_IS_INPUT_DEVICE (device));
-
-  switch (device->device_type)
-    {
-    case CLUTTER_POINTER_DEVICE:
-    case CLUTTER_TABLET_DEVICE:
-      grab_actor = &(device->pointer_grab_actor);
-      break;
-
-    case CLUTTER_KEYBOARD_DEVICE:
-      grab_actor = &(device->keyboard_grab_actor);
-      break;
-
-    default:
-      return;
-    }
-
-  if (*grab_actor == NULL)
-    return;
-
-  g_signal_handlers_disconnect_by_func (*grab_actor,
-                                        G_CALLBACK (on_grab_actor_destroy),
-                                        device);
-
-  *grab_actor = NULL;
-}
-
-/**
- * clutter_input_device_get_grabbed_actor:
- * @device: a #ClutterInputDevice
- *
- * Retrieves a pointer to the #ClutterActor currently grabbing all
- * the events coming from @device.
- *
- * Return value: (transfer none): a #ClutterActor, or %NULL
- *
- * Since: 1.10
- */
-ClutterActor *
-clutter_input_device_get_grabbed_actor (ClutterInputDevice *device)
-{
-  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), NULL);
-
-  switch (device->device_type)
-    {
-    case CLUTTER_POINTER_DEVICE:
-      return device->pointer_grab_actor;
-
-    case CLUTTER_KEYBOARD_DEVICE:
-      return device->keyboard_grab_actor;
-
-    default:
-      g_critical ("Only pointer and keyboard devices can grab an actor");
-    }
-
-  return NULL;
-}
-
-/**
- * clutter_grab_pointer_for_device:
- * @actor: a #ClutterActor
- * @id_: a device id, or -1
- *
- * Grabs all the pointer events coming from the device @id for @actor.
- *
- * If @id is -1 then this function is equivalent to clutter_grab_pointer().
- *
- * Since: 0.8
- *
- * Deprecated: 1.10: Use clutter_input_device_grab() instead.
- */
-void
-clutter_grab_pointer_for_device (ClutterActor *actor,
-                                 gint          id_)
-{
-  ClutterDeviceManager *manager;
-  ClutterInputDevice *dev;
-
-  g_return_if_fail (actor == NULL || CLUTTER_IS_ACTOR (actor));
-
-  /* essentially a global grab */
-  if (id_ == -1)
-    {
-      if (actor == NULL)
-        clutter_ungrab_pointer ();
-      else
-        clutter_grab_pointer (actor);
-
-      return;
-    }
-
-  manager = clutter_device_manager_get_default ();
-  if (manager == NULL)
-    return;
-
-  dev = clutter_device_manager_get_device (manager, id_);
-  if (dev == NULL)
-    return;
-
-  if (dev->device_type != CLUTTER_POINTER_DEVICE)
-    return;
-
-  if (actor == NULL)
-    clutter_input_device_ungrab (dev);
-  else
-    clutter_input_device_grab (dev, actor);
-}
-
-
-/**
- * clutter_ungrab_pointer:
- *
- * Removes an existing grab of the pointer.
- *
- * Since: 0.6
- */
-void
-clutter_ungrab_pointer (void)
-{
-  clutter_grab_pointer (NULL);
-}
-
-/**
- * clutter_ungrab_pointer_for_device:
- * @id_: a device id
- *
- * Removes an existing grab of the pointer events for device @id_.
- *
- * Since: 0.8
- *
- * Deprecated: 1.10: Use clutter_input_device_ungrab() instead.
- */
-void
-clutter_ungrab_pointer_for_device (gint id_)
-{
-  ClutterDeviceManager *manager;
-  ClutterInputDevice *device;
-
-  manager = clutter_device_manager_get_default ();
-  if (manager == NULL)
-    return;
-
-  device = clutter_device_manager_get_device (manager, id_);
-  if (device != NULL)
-    clutter_input_device_ungrab (device);
-}
-
-
-/**
- * clutter_get_pointer_grab:
- *
- * Queries the current pointer grab of clutter.
- *
- * Return value: (transfer none): the actor currently holding the pointer grab, or NULL if there is no grab.
- *
- * Since: 0.6
- */
-ClutterActor *
-clutter_get_pointer_grab (void)
-{
-  ClutterMainContext *context;
-  context = _clutter_context_get_default ();
-
-  return context->pointer_grab_actor;
-}
-
-
-/**
- * clutter_grab_keyboard:
- * @actor: a #ClutterActor
- *
- * Grabs keyboard events, after the grab is done keyboard
- * events (#ClutterActor::key-press-event and #ClutterActor::key-release-event)
- * are delivered to this actor directly. The source set in the event will be
- * the actor that would have received the event if the keyboard grab was not
- * in effect.
- *
- * Like pointer grabs, keyboard grabs should only be used as a last
- * resource.
- *
- * See also clutter_stage_set_key_focus() and clutter_actor_grab_key_focus()
- * to perform a "soft" key grab and assign key focus to a specific actor.
- *
- * Since: 0.6
- */
-void
-clutter_grab_keyboard (ClutterActor *actor)
-{
-  ClutterMainContext *context;
-
-  g_return_if_fail (actor == NULL || CLUTTER_IS_ACTOR (actor));
-
-  context = _clutter_context_get_default ();
-
-  if (context->keyboard_grab_actor == actor)
-    return;
-
-  if (context->keyboard_grab_actor != NULL)
-    {
-      g_signal_handlers_disconnect_by_func (context->keyboard_grab_actor,
-                                            G_CALLBACK (on_grab_actor_destroy),
-                                            NULL);
-      context->keyboard_grab_actor = NULL;
-    }
-
-  if (actor != NULL)
-    {
-      context->keyboard_grab_actor = actor;
-
-      g_signal_connect (context->keyboard_grab_actor, "destroy",
-                        G_CALLBACK (on_grab_actor_destroy),
-                        NULL);
-    }
-}
-
-/**
- * clutter_ungrab_keyboard:
- *
- * Removes an existing grab of the keyboard.
- *
- * Since: 0.6
- */
-void
-clutter_ungrab_keyboard (void)
-{
-  clutter_grab_keyboard (NULL);
-}
-
-/**
- * clutter_get_keyboard_grab:
- *
- * Queries the current keyboard grab of clutter.
- *
- * Return value: (transfer none): the actor currently holding the keyboard grab, or NULL if there is no grab.
- *
- * Since: 0.6
- */
-ClutterActor *
-clutter_get_keyboard_grab (void)
-{
-  ClutterMainContext *context;
-
-  context = _clutter_context_get_default ();
-
-  return context->keyboard_grab_actor;
-}
-
-/**
- * clutter_clear_glyph_cache:
- *
- * Clears the internal cache of glyphs used by the Pango
- * renderer. This will free up some memory and GL texture
- * resources. The cache will be automatically refilled as more text is
- * drawn.
- *
- * Since: 0.8
- *
- * Deprecated: 1.10: Use clutter_get_font_map() and
- *   cogl_pango_font_map_clear_glyph_cache() instead.
- */
-void
-clutter_clear_glyph_cache (void)
-{
-  CoglPangoFontMap *font_map;
-
-  font_map = clutter_context_get_pango_fontmap ();
-  cogl_pango_font_map_clear_glyph_cache (font_map);
-}
-
-/**
- * clutter_set_font_flags:
- * @flags: The new flags
- *
- * Sets the font quality options for subsequent text rendering
- * operations.
- *
- * Using mipmapped textures will improve the quality for scaled down
- * text but will use more texture memory.
- *
- * Enabling hinting improves text quality for static text but may
- * introduce some artifacts if the text is animated.
- *
- * Since: 1.0
- *
- * Deprecated: 1.10: Use clutter_backend_set_font_options() and the
- *   #cairo_font_option_t API.
- */
-void
-clutter_set_font_flags (ClutterFontFlags flags)
-{
-  CoglPangoFontMap *font_map;
-  ClutterFontFlags old_flags, changed_flags;
-  const cairo_font_options_t *font_options;
-  cairo_font_options_t *new_font_options;
-  cairo_hint_style_t hint_style;
-  gboolean use_mipmapping;
-  ClutterBackend *backend;
-
-  backend = clutter_get_default_backend ();
-  font_map = clutter_context_get_pango_fontmap ();
-  font_options = clutter_backend_get_font_options (backend);
-  old_flags = 0;
-
-  if (cogl_pango_font_map_get_use_mipmapping (font_map))
-    old_flags |= CLUTTER_FONT_MIPMAPPING;
-
-  hint_style = cairo_font_options_get_hint_style (font_options);
-  if (hint_style != CAIRO_HINT_STYLE_DEFAULT &&
-      hint_style != CAIRO_HINT_STYLE_NONE)
-    old_flags |= CLUTTER_FONT_HINTING;
-
-  if (old_flags == flags)
-    return;
-
-  new_font_options = cairo_font_options_copy (font_options);
-
-  /* Only set the font options that have actually changed so we don't
-     override a detailed setting from the backend */
-  changed_flags = old_flags ^ flags;
-
-  if ((changed_flags & CLUTTER_FONT_MIPMAPPING))
-    {
-      use_mipmapping = (changed_flags & CLUTTER_FONT_MIPMAPPING) != 0;
-
-      cogl_pango_font_map_set_use_mipmapping (font_map, use_mipmapping);
-    }
-
-  if ((changed_flags & CLUTTER_FONT_HINTING))
-    {
-      hint_style = (flags & CLUTTER_FONT_HINTING)
-                 ? CAIRO_HINT_STYLE_FULL
-                 : CAIRO_HINT_STYLE_NONE;
-
-      cairo_font_options_set_hint_style (new_font_options, hint_style);
-    }
-
-  clutter_backend_set_font_options (backend, new_font_options);
-
-  cairo_font_options_destroy (new_font_options);
-}
-
-/**
- * clutter_get_font_flags:
- *
- * Gets the current font flags for rendering text. See
- * clutter_set_font_flags().
- *
- * Return value: The font flags
- *
- * Since: 1.0
- *
- * Deprecated: 1.10: Use clutter_backend_get_font_options() and the
- *   #cairo_font_options_t API.
- */
-ClutterFontFlags
-clutter_get_font_flags (void)
-{
-  CoglPangoFontMap *font_map = NULL;
-  const cairo_font_options_t *font_options;
-  ClutterFontFlags flags = 0;
-  cairo_hint_style_t hint_style;
-
-  font_map = clutter_context_get_pango_fontmap ();
-  if (cogl_pango_font_map_get_use_mipmapping (font_map))
-    flags |= CLUTTER_FONT_MIPMAPPING;
-
-  font_options =
-    clutter_backend_get_font_options (clutter_get_default_backend ());
-
-  hint_style = cairo_font_options_get_hint_style (font_options);
-  if (hint_style != CAIRO_HINT_STYLE_DEFAULT &&
-      hint_style != CAIRO_HINT_STYLE_NONE)
-    flags |= CLUTTER_FONT_HINTING;
-
-  return flags;
-}
-
-/**
- * clutter_get_input_device_for_id:
- * @id_: the unique id for a device
- *
- * Retrieves the #ClutterInputDevice from its @id_. This is a convenience
- * wrapper for clutter_device_manager_get_device() and it is functionally
- * equivalent to:
- *
- * |[
- *   ClutterDeviceManager *manager;
- *   ClutterInputDevice *device;
- *
- *   manager = clutter_device_manager_get_default ();
- *   device = clutter_device_manager_get_device (manager, id);
- * ]|
- *
- * Return value: (transfer none): a #ClutterInputDevice, or %NULL
- *
- * Since: 0.8
- *
- * Deprecated: 1.10: Use clutter_device_manager_get_device() instead.
- */
-ClutterInputDevice *
-clutter_get_input_device_for_id (gint id_)
-{
-  ClutterDeviceManager *manager;
-
-  manager = clutter_device_manager_get_default ();
-  if (manager == NULL)
-    return NULL;
-
-  return clutter_device_manager_get_device (manager, id_);
 }
 
 /**
@@ -3253,9 +2087,7 @@ clutter_threads_remove_repaint_func (guint handle_id)
 
   g_return_if_fail (handle_id > 0);
 
-  _clutter_context_lock ();
-
-  context = clutter_context_get_default_unlocked ();
+  context = _clutter_context_get_default ();
   l = context->repaint_funcs;
   while (l != NULL)
     {
@@ -3278,8 +2110,6 @@ clutter_threads_remove_repaint_func (guint handle_id)
 
       l = l->next;
     }
-
-  _clutter_context_unlock ();
 }
 
 /**
@@ -3301,8 +2131,7 @@ clutter_threads_remove_repaint_func (guint handle_id)
  * that it does not block, otherwise the frame time budget may be lost.
  *
  * A repaint function is useful to ensure that an update of the scenegraph
- * is performed before the scenegraph is repainted; for instance, uploading
- * a frame from a video into a #ClutterTexture. By default, a repaint
+ * is performed before the scenegraph is repainted. By default, a repaint
  * function added using this function will be invoked prior to the frame
  * being processed.
  *
@@ -3351,8 +2180,7 @@ clutter_threads_add_repaint_func (GSourceFunc    func,
  * that it does not block, otherwise the frame time budget may be lost.
  *
  * A repaint function is useful to ensure that an update of the scenegraph
- * is performed before the scenegraph is repainted; for instance, uploading
- * a frame from a video into a #ClutterTexture. The @flags passed to this
+ * is performed before the scenegraph is repainted. The @flags passed to this
  * function will determine the section of the frame processing that will
  * result in @func being called.
  *
@@ -3380,31 +2208,19 @@ clutter_threads_add_repaint_func_full (ClutterRepaintFlags flags,
 
   g_return_val_if_fail (func != NULL, 0);
 
-  _clutter_context_lock ();
-
-  context = clutter_context_get_default_unlocked ();
+  context = _clutter_context_get_default ();
 
   repaint_func = g_slice_new (ClutterRepaintFunction);
 
   repaint_func->id = context->last_repaint_id++;
 
-  /* mask out QUEUE_REDRAW_ON_ADD, since we're going to consume it */
-  repaint_func->flags = flags & ~CLUTTER_REPAINT_FLAGS_QUEUE_REDRAW_ON_ADD;
+  repaint_func->flags = flags;
   repaint_func->func = func;
   repaint_func->data = data;
   repaint_func->notify = notify;
 
   context->repaint_funcs = g_list_prepend (context->repaint_funcs,
                                            repaint_func);
-
-  _clutter_context_unlock ();
-
-  if ((flags & CLUTTER_REPAINT_FLAGS_QUEUE_REDRAW_ON_ADD) != 0)
-    {
-      ClutterMasterClock *master_clock = _clutter_master_clock_get_default ();
-
-      _clutter_master_clock_ensure_next_iteration (master_clock);
-    }
 
   return repaint_func->id;
 }
@@ -3472,36 +2288,6 @@ _clutter_run_repaint_functions (ClutterRepaintFlags flags)
 }
 
 /**
- * clutter_check_version:
- * @major: major version, like 1 in 1.2.3
- * @minor: minor version, like 2 in 1.2.3
- * @micro: micro version, like 3 in 1.2.3
- *
- * Run-time version check, to check the version the Clutter library
- * that an application is currently linked against
- *
- * This is the run-time equivalent of the compile-time %CLUTTER_CHECK_VERSION
- * pre-processor macro
- *
- * Return value: %TRUE if the version of the Clutter library is
- *   greater than (@major, @minor, @micro), and %FALSE otherwise
- *
- * Since: 1.2
- */
-gboolean
-clutter_check_version (guint major,
-                       guint minor,
-                       guint micro)
-{
-  return (clutter_major_version > major ||
-          (clutter_major_version == major &&
-           clutter_minor_version > minor) ||
-          (clutter_major_version == major &&
-           clutter_minor_version == minor &&
-           clutter_micro_version >= micro));
-}
-
-/**
  * clutter_get_default_text_direction:
  *
  * Retrieves the default direction for the text. The text direction is
@@ -3541,30 +2327,6 @@ _clutter_clear_events_queue (void)
     }
 }
 
-void
-_clutter_clear_events_queue_for_stage (ClutterStage *stage)
-{
-  ClutterMainContext *context = _clutter_context_get_default ();
-  GList *l, *next;
-
-  if (context->events_queue == NULL)
-    return;
-
-  /* Remove any pending events for this stage from the event queue */
-  for (l = context->events_queue->head; l; l = next)
-    {
-      ClutterEvent *event = l->data;
-
-      next = l->next;
-
-      if (event->any.stage == stage)
-        {
-          g_queue_delete_link (context->events_queue, l);
-          clutter_event_free (event);
-        }
-    }
-}
-
 ClutterPickMode
 _clutter_context_get_pick_mode (void)
 {
@@ -3573,105 +2335,40 @@ _clutter_context_get_pick_mode (void)
   return context->pick_mode;
 }
 
+/**
+ * clutter_add_debug_flags: (skip)
+ *
+ * Adds the debug flags passed to the list of debug flags.
+ */
 void
-_clutter_context_push_shader_stack (ClutterActor *actor)
+clutter_add_debug_flags (ClutterDebugFlag     debug_flags,
+                         ClutterDrawDebugFlag draw_flags,
+                         ClutterPickDebugFlag pick_flags)
 {
-  ClutterMainContext *context = _clutter_context_get_default ();
-
-  context->shaders = g_slist_prepend (context->shaders, actor);
-}
-
-ClutterActor *
-_clutter_context_peek_shader_stack (void)
-{
-  ClutterMainContext *context = _clutter_context_get_default ();
-
-  if (context->shaders != NULL)
-    return context->shaders->data;
-
-  return NULL;
-}
-
-ClutterActor *
-_clutter_context_pop_shader_stack (ClutterActor *actor)
-{
-  ClutterMainContext *context = _clutter_context_get_default ();
-
-  context->shaders = g_slist_remove (context->shaders, actor);
-
-  return _clutter_context_peek_shader_stack ();
-}
-
-gboolean
-_clutter_context_get_motion_events_enabled (void)
-{
-  ClutterMainContext *context = _clutter_context_get_default ();
-
-  return context->motion_events_per_actor;
+  clutter_debug_flags |= debug_flags;
+  clutter_paint_debug_flags |= draw_flags;
+  clutter_pick_debug_flags |= pick_flags;
 }
 
 /**
- * clutter_check_windowing_backend:
- * @backend_type: the name of the backend to check
+ * clutter_remove_debug_flags: (skip)
  *
- * Checks the run-time name of the Clutter windowing system backend, using
- * the symbolic macros like %CLUTTER_WINDOWING_X11.
- *
- * This function should be used in conjuction with the compile-time macros
- * inside applications and libraries that are using the platform-specific
- * windowing system API, to ensure that they are running on the correct
- * windowing system; for instance:
- *
- * |[
- * #ifdef CLUTTER_WINDOWING_X11
- *   if (clutter_check_windowing_backend (CLUTTER_WINDOWING_X11))
- *     {
- *       // it is safe to use the clutter_x11_* API
- *     }
- *   else
- * #endif
- *     g_error ("Unknown Clutter backend.");
- * ]|
- *
- * Return value: %TRUE if the current Clutter windowing system backend is
- *   the one checked, and %FALSE otherwise
- *
- * Since: 1.10
+ * Removes the debug flags passed from the list of debug flags.
  */
-gboolean
-clutter_check_windowing_backend (const char *backend_type)
+void
+clutter_remove_debug_flags (ClutterDebugFlag     debug_flags,
+                            ClutterDrawDebugFlag draw_flags,
+                            ClutterPickDebugFlag pick_flags)
 {
-  ClutterMainContext *context = _clutter_context_get_default ();
-
-  g_return_val_if_fail (backend_type != NULL, FALSE);
-
-  backend_type = g_intern_string (backend_type);
-
-#ifdef CLUTTER_WINDOWING_EGL
-  if (backend_type == I_(CLUTTER_WINDOWING_EGL) &&
-      CLUTTER_IS_BACKEND_EGL_NATIVE (context->backend))
-    return TRUE;
-  else
-#endif
-#ifdef CLUTTER_WINDOWING_X11
-  if (backend_type == I_(CLUTTER_WINDOWING_X11) &&
-      CLUTTER_IS_BACKEND_X11 (context->backend))
-    return TRUE;
-  else
-#endif
-  return FALSE;
+  clutter_debug_flags &= ~debug_flags;
+  clutter_paint_debug_flags &= ~draw_flags;
+  clutter_pick_debug_flags &= ~pick_flags;
 }
 
 void
 _clutter_set_sync_to_vblank (gboolean sync_to_vblank)
 {
   clutter_sync_to_vblank = !!sync_to_vblank;
-}
-
-gboolean
-_clutter_get_sync_to_vblank (void)
-{
-  return clutter_sync_to_vblank;
 }
 
 void

@@ -42,11 +42,11 @@
 
 #include "config.h"
 
-#include "meta-wayland-popup.h"
+#include "wayland/meta-wayland-popup.h"
 
-#include "meta-wayland-pointer.h"
-#include "meta-wayland-private.h"
-#include "meta-wayland-surface.h"
+#include "wayland/meta-wayland-pointer.h"
+#include "wayland/meta-wayland-private.h"
+#include "wayland/meta-wayland-surface.h"
 
 G_DEFINE_INTERFACE (MetaWaylandPopupSurface, meta_wayland_popup_surface,
                     G_TYPE_OBJECT);
@@ -102,6 +102,7 @@ popup_grab_focus (MetaWaylandPointerGrab *grab,
 {
   MetaWaylandPopupGrab *popup_grab = (MetaWaylandPopupGrab*)grab;
   MetaWaylandSeat *seat = meta_wayland_pointer_get_seat (grab->pointer);
+  MetaWaylandPointer *pointer = grab->pointer;
 
   /*
    * We rely on having a pointer grab even when the seat doesn't have
@@ -110,6 +111,9 @@ popup_grab_focus (MetaWaylandPointerGrab *grab,
    * capability.
    */
   if (!meta_wayland_seat_has_pointer (seat))
+    return;
+
+  if (pointer->button_count > 0)
     return;
 
   /* Popup grabs are in owner-events mode (ie, events for the same client
@@ -186,7 +190,7 @@ meta_wayland_popup_grab_begin (MetaWaylandPopupGrab *grab,
                                MetaWaylandSurface   *surface)
 {
   MetaWaylandPointer *pointer = grab->generic.pointer;
-  MetaWindow *window = surface->window;
+  MetaWindow *window = meta_wayland_surface_get_window (surface);
 
   meta_wayland_pointer_start_grab (pointer, (MetaWaylandPointerGrab*)grab);
   meta_display_begin_grab_op (window->display,

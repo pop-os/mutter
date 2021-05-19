@@ -31,27 +31,23 @@
  *   Neil Roberts <neil@linux.intel.com>
  */
 
-#ifdef HAVE_CONFIG_H
 #include "cogl-config.h"
-#endif
 
 #include <string.h>
 
 #include <test-fixtures/test-unit.h>
 
 #include "cogl-context-private.h"
-#include "cogl-util-gl-private.h"
 #include "cogl-pipeline-private.h"
-#include "cogl-pipeline-opengl-private.h"
-
-#ifdef COGL_PIPELINE_VERTEND_GLSL
+#include "driver/gl/cogl-util-gl-private.h"
+#include "driver/gl/cogl-pipeline-opengl-private.h"
 
 #include "cogl-context-private.h"
 #include "cogl-object-private.h"
-#include "cogl-program-private.h"
-#include "cogl-pipeline-vertend-glsl-private.h"
 #include "cogl-pipeline-state-private.h"
-#include "cogl-glsl-shader-private.h"
+#include "cogl-glsl-shader-boilerplate.h"
+#include "driver/gl/cogl-pipeline-vertend-glsl-private.h"
+#include "deprecated/cogl-program-private.h"
 
 const CoglPipelineVertend _cogl_pipeline_glsl_vertend;
 
@@ -136,6 +132,150 @@ dirty_shader_state (CoglPipeline *pipeline)
                              NULL);
 }
 
+static gboolean
+add_layer_vertex_boilerplate_cb (CoglPipelineLayer *layer,
+                                 void *user_data)
+{
+  GString *layer_declarations = user_data;
+  int unit_index = _cogl_pipeline_layer_get_unit_index (layer);
+  g_string_append_printf (layer_declarations,
+                          "attribute vec4 cogl_tex_coord%d_in;\n"
+                          "#define cogl_texture_matrix%i cogl_texture_matrix[%i]\n"
+                          "#define cogl_tex_coord%i_out _cogl_tex_coord[%i]\n",
+                          layer->index,
+                          layer->index,
+                          unit_index,
+                          layer->index,
+                          unit_index);
+  return TRUE;
+}
+
+static gboolean
+add_layer_fragment_boilerplate_cb (CoglPipelineLayer *layer,
+                                   void *user_data)
+{
+  GString *layer_declarations = user_data;
+  g_string_append_printf (layer_declarations,
+                          "#define cogl_tex_coord%i_in _cogl_tex_coord[%i]\n",
+                          layer->index,
+                          _cogl_pipeline_layer_get_unit_index (layer));
+  return TRUE;
+}
+
+void
+_cogl_glsl_shader_set_source_with_boilerplate (CoglContext *ctx,
+                                               GLuint shader_gl_handle,
+                                               GLenum shader_gl_type,
+                                               CoglPipeline *pipeline,
+                                               GLsizei count_in,
+                                               const char **strings_in,
+                                               const GLint *lengths_in)
+{
+  const char *vertex_boilerplate;
+  const char *fragment_boilerplate;
+
+  const char **strings = g_alloca (sizeof (char *) * (count_in + 4));
+  GLint *lengths = g_alloca (sizeof (GLint) * (count_in + 4));
+  char *version_string;
+  int count = 0;
+
+  int n_layers;
+
+  vertex_boilerplate = _COGL_VERTEX_SHADER_BOILERPLATE;
+  fragment_boilerplate = _COGL_FRAGMENT_SHADER_BOILERPLATE;
+
+  version_string = g_strdup_printf ("#version %i\n\n",
+                                    ctx->glsl_version_to_use);
+  strings[count] = version_string;
+  lengths[count++] = -1;
+
+  if (cogl_has_feature (ctx, COGL_FEATURE_ID_TEXTURE_EGL_IMAGE_EXTERNAL))
+    {
+      static const char image_external_extension[] =
+        "#extension GL_OES_EGL_image_external : require\n";
+      strings[count] = image_external_extension;
+      lengths[count++] = sizeof (image_external_extension) - 1;
+    }
+
+  if (shader_gl_type == GL_VERTEX_SHADER)
+    {
+      strings[count] = vertex_boilerplate;
+      lengths[count++] = strlen (vertex_boilerplate);
+    }
+  else if (shader_gl_type == GL_FRAGMENT_SHADER)
+    {
+      strings[count] = fragment_boilerplate;
+      lengths[count++] = strlen (fragment_boilerplate);
+    }
+
+  n_layers = cogl_pipeline_get_n_layers (pipeline);
+  if (n_layers)
+    {
+      GString *layer_declarations = ctx->codegen_boilerplate_buffer;
+      g_string_set_size (layer_declarations, 0);
+
+      g_string_append_printf (layer_declarations,
+                              "varying vec4 _cogl_tex_coord[%d];\n",
+                              n_layers);
+
+      if (shader_gl_type == GL_VERTEX_SHADER)
+        {
+          g_string_append_printf (layer_declarations,
+                                  "uniform mat4 cogl_texture_matrix[%d];\n",
+                                  n_layers);
+
+          _cogl_pipeline_foreach_layer_internal (pipeline,
+                                                 add_layer_vertex_boilerplate_cb,
+                                                 layer_declarations);
+        }
+      else if (shader_gl_type == GL_FRAGMENT_SHADER)
+        {
+          _cogl_pipeline_foreach_layer_internal (pipeline,
+                                                 add_layer_fragment_boilerplate_cb,
+                                                 layer_declarations);
+        }
+
+      strings[count] = layer_declarations->str;
+      lengths[count++] = -1; /* null terminated */
+    }
+
+  memcpy (strings + count, strings_in, sizeof (char *) * count_in);
+  if (lengths_in)
+    memcpy (lengths + count, lengths_in, sizeof (GLint) * count_in);
+  else
+    {
+      int i;
+
+      for (i = 0; i < count_in; i++)
+        lengths[count + i] = -1; /* null terminated */
+    }
+  count += count_in;
+
+  if (G_UNLIKELY (COGL_DEBUG_ENABLED (COGL_DEBUG_SHOW_SOURCE)))
+    {
+      GString *buf = g_string_new (NULL);
+      int i;
+
+      g_string_append_printf (buf,
+                              "%s shader:\n",
+                              shader_gl_type == GL_VERTEX_SHADER ?
+                              "vertex" : "fragment");
+      for (i = 0; i < count; i++)
+        if (lengths[i] != -1)
+          g_string_append_len (buf, strings[i], lengths[i]);
+        else
+          g_string_append (buf, strings[i]);
+
+      g_message ("%s", buf->str);
+
+      g_string_free (buf, TRUE);
+    }
+
+  GE( ctx, glShaderSource (shader_gl_handle, count,
+                           (const char **) strings, lengths) );
+
+  g_free (version_string);
+}
 GLuint
 _cogl_pipeline_vertend_glsl_get_shader (CoglPipeline *pipeline)
 {
@@ -166,20 +306,14 @@ get_layer_vertex_snippets (CoglPipelineLayer *layer)
   return &layer->big_state->vertex_snippets;
 }
 
-static CoglBool
+static gboolean
 add_layer_declaration_cb (CoglPipelineLayer *layer,
                           void *user_data)
 {
   CoglPipelineShaderState *shader_state = user_data;
-  CoglTextureType texture_type =
-    _cogl_pipeline_layer_get_texture_type (layer);
-  const char *target_string;
-
-  _cogl_gl_util_get_texture_target_string (texture_type, &target_string, NULL);
 
   g_string_append_printf (shader_state->header,
-                          "uniform sampler%s cogl_sampler%i;\n",
-                          target_string,
+                          "uniform sampler2D cogl_sampler%i;\n",
                           layer->index);
 
   return TRUE;
@@ -315,8 +449,7 @@ _cogl_pipeline_vertend_glsl_start (CoglPipeline *pipeline,
   if (cogl_pipeline_get_per_vertex_point_size (pipeline))
     g_string_append (shader_state->header,
                      "attribute float cogl_point_size_in;\n");
-  else if (!_cogl_has_private_feature
-           (ctx, COGL_PRIVATE_FEATURE_BUILTIN_POINT_SIZE_UNIFORM))
+  else
     {
       /* There is no builtin uniform for the point size on GLES2 so we
          need to copy it from the custom uniform in the vertex shader
@@ -334,7 +467,7 @@ _cogl_pipeline_vertend_glsl_start (CoglPipeline *pipeline,
     }
 }
 
-static CoglBool
+static gboolean
 _cogl_pipeline_vertend_glsl_add_layer (CoglPipeline *pipeline,
                                        CoglPipelineLayer *layer,
                                        unsigned long layers_difference,
@@ -407,7 +540,7 @@ _cogl_pipeline_vertend_glsl_add_layer (CoglPipeline *pipeline,
   return TRUE;
 }
 
-static CoglBool
+static gboolean
 _cogl_pipeline_vertend_glsl_end (CoglPipeline *pipeline,
                                  unsigned long pipelines_difference)
 {
@@ -425,7 +558,7 @@ _cogl_pipeline_vertend_glsl_end (CoglPipeline *pipeline,
       GLuint shader;
       CoglPipelineSnippetData snippet_data;
       CoglPipelineSnippetList *vertex_snippets;
-      CoglBool has_per_vertex_point_size =
+      gboolean has_per_vertex_point_size =
         cogl_pipeline_get_per_vertex_point_size (pipeline);
 
       COGL_STATIC_COUNTER (vertend_glsl_compile_counter,
@@ -551,19 +684,6 @@ _cogl_pipeline_vertend_glsl_end (CoglPipeline *pipeline,
       shader_state->gl_shader = shader;
     }
 
-#ifdef HAVE_COGL_GL
-  if (_cogl_has_private_feature
-      (ctx, COGL_PRIVATE_FEATURE_BUILTIN_POINT_SIZE_UNIFORM) &&
-      (pipelines_difference & COGL_PIPELINE_STATE_POINT_SIZE))
-    {
-      CoglPipeline *authority =
-        _cogl_pipeline_get_authority (pipeline, COGL_PIPELINE_STATE_POINT_SIZE);
-
-      if (authority->big_state->point_size > 0.0f)
-        GE( ctx, glPointSize (authority->big_state->point_size) );
-    }
-#endif /* HAVE_COGL_GL */
-
   return TRUE;
 }
 
@@ -661,11 +781,7 @@ UNIT_TEST (check_point_size_shader,
    * size */
   if (shader_states[0])
     {
-      if (_cogl_has_private_feature
-          (test_ctx, COGL_PRIVATE_FEATURE_BUILTIN_POINT_SIZE_UNIFORM))
-        g_assert (shader_states[0] == shader_states[1]);
-      else
-        g_assert (shader_states[0] != shader_states[1]);
+      g_assert (shader_states[0] != shader_states[1]);
     }
 
   /* The second and third pipelines should always have the same shader
@@ -676,5 +792,3 @@ UNIT_TEST (check_point_size_shader,
   /* The fourth pipeline should be exactly the same as the first */
   g_assert (shader_states[0] == shader_states[3]);
 }
-
-#endif /* COGL_PIPELINE_VERTEND_GLSL */

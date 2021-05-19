@@ -20,12 +20,18 @@
 #ifndef META_DND_PRIVATE__H
 #define META_DND_PRIVATE__H
 
+#include <glib.h>
 #include <X11/Xlib.h>
 
-gboolean meta_dnd_handle_xdnd_event (MetaBackend    *backend,
-                                     MetaCompositor *compositor,
-                                     Display        *xdisplay,
-                                     XEvent         *xev);
+#include "backends/meta-backend-private.h"
+#include "compositor/meta-compositor-x11.h"
+
+gboolean meta_dnd_handle_xdnd_event (MetaBackend       *backend,
+                                     MetaCompositorX11 *compositor_x11,
+                                     Display           *xdisplay,
+                                     XEvent            *xev);
+
+void meta_dnd_init_xdnd (MetaX11Display *x11_display);
 
 #ifdef HAVE_WAYLAND
 void meta_dnd_wayland_handle_begin_modal (MetaCompositor *compositor);

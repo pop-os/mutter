@@ -34,22 +34,25 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#define _XOPEN_SOURCE 500 /* for gethostname() */
+#define _XOPEN_SOURCE 600 /* for gethostname() */
 
-#include <config.h>
-#include "window-props.h"
-#include "window-x11.h"
-#include "window-x11-private.h"
-#include "x11/meta-x11-display-private.h"
-#include <meta/meta-x11-errors.h>
-#include "xprops.h"
-#include "frame.h"
-#include <meta/group.h>
+#include "config.h"
+
+#include "x11/window-props.h"
+
 #include <X11/Xatom.h>
 #include <unistd.h>
 #include <string.h>
-#include "util-private.h"
-#include "meta-workspace-manager-private.h"
+
+#include "core/frame.h"
+#include "core/meta-workspace-manager-private.h"
+#include "core/util-private.h"
+#include "meta/group.h"
+#include "meta/meta-x11-errors.h"
+#include "x11/meta-x11-display-private.h"
+#include "x11/window-x11-private.h"
+#include "x11/window-x11.h"
+#include "x11/xprops.h"
 
 #ifndef HOST_NAME_MAX
 /* Solaris headers apparently don't define this so do so manually; #326745 */
@@ -60,7 +63,8 @@ typedef void (* ReloadValueFunc) (MetaWindow    *window,
                                   MetaPropValue *value,
                                   gboolean       initial);
 
-typedef enum {
+typedef enum
+{
   NONE       = 0,
   LOAD_INIT  = (1 << 0),
   INCLUDE_OR = (1 << 1),
@@ -245,7 +249,7 @@ reload_net_wm_window_type (MetaWindow    *window,
 {
   MetaX11Display *x11_display = window->display->x11_display;
   MetaWindowX11 *window_x11 = META_WINDOW_X11 (window);
-  MetaWindowX11Private *priv = window_x11->priv;
+  MetaWindowX11Private *priv = meta_window_x11_get_private (window_x11);
 
   if (value->type != META_PROP_VALUE_INVALID)
     {
@@ -287,7 +291,7 @@ reload_icon (MetaWindow    *window,
              Atom           atom)
 {
   MetaWindowX11 *window_x11 = META_WINDOW_X11 (window);
-  MetaWindowX11Private *priv = window_x11->priv;
+  MetaWindowX11Private *priv = meta_window_x11_get_private (window_x11);
 
   meta_icon_cache_property_changed (&priv->icon_cache,
                                     window->display->x11_display,
@@ -422,27 +426,6 @@ reload_wm_window_role (MetaWindow    *window,
   g_clear_pointer (&window->role, g_free);
   if (value->type != META_PROP_VALUE_INVALID)
     window->role = g_strdup (value->v.str);
-}
-
-static void
-reload_net_wm_pid (MetaWindow    *window,
-                   MetaPropValue *value,
-                   gboolean       initial)
-{
-  if (value->type != META_PROP_VALUE_INVALID)
-    {
-      uint32_t cardinal = (int) value->v.cardinal;
-
-      if (cardinal <= 0)
-        meta_warning ("Application set a bogus _NET_WM_PID %u\n",
-                      cardinal);
-      else
-        {
-          window->net_wm_pid = cardinal;
-          meta_verbose ("Window has _NET_WM_PID %d\n",
-                        window->net_wm_pid);
-        }
-    }
 }
 
 static void
@@ -592,7 +575,7 @@ set_window_title (MetaWindow *window,
                   const char *title)
 {
   MetaWindowX11 *window_x11 = META_WINDOW_X11 (window);
-  MetaWindowX11Private *priv = window_x11->priv;
+  MetaWindowX11Private *priv = meta_window_x11_get_private (window_x11);
 
   char *new_title = NULL;
 
@@ -615,7 +598,7 @@ reload_net_wm_name (MetaWindow    *window,
                     gboolean       initial)
 {
   MetaWindowX11 *window_x11 = META_WINDOW_X11 (window);
-  MetaWindowX11Private *priv = window_x11->priv;
+  MetaWindowX11Private *priv = meta_window_x11_get_private (window_x11);
 
   if (value->type != META_PROP_VALUE_INVALID)
     {
@@ -640,7 +623,7 @@ reload_wm_name (MetaWindow    *window,
                 gboolean       initial)
 {
   MetaWindowX11 *window_x11 = META_WINDOW_X11 (window);
-  MetaWindowX11Private *priv = window_x11->priv;
+  MetaWindowX11Private *priv = meta_window_x11_get_private (window_x11);
 
   if (priv->using_net_wm_name)
     {
@@ -780,7 +763,7 @@ reload_net_wm_state (MetaWindow    *window,
 {
   MetaX11Display *x11_display = window->display->x11_display;
   MetaWindowX11 *window_x11 = META_WINDOW_X11 (window);
-  MetaWindowX11Private *priv = window_x11->priv;
+  MetaWindowX11Private *priv = meta_window_x11_get_private (window_x11);
 
   int i;
 
@@ -1095,13 +1078,19 @@ reload_update_counter (MetaWindow    *window,
     }
 }
 
+#define FLAG_IS_ON(hints,flag) \
+  (((hints)->flags & (flag)) != 0)
+
+#define FLAG_IS_OFF(hints,flag) \
+  (((hints)->flags & (flag)) == 0)
+
 #define FLAG_TOGGLED_ON(old,new,flag) \
- (((old)->flags & (flag)) == 0 &&     \
-  ((new)->flags & (flag)) != 0)
+  (FLAG_IS_OFF(old,flag) &&           \
+   FLAG_IS_ON(new,flag))
 
 #define FLAG_TOGGLED_OFF(old,new,flag) \
- (((old)->flags & (flag)) != 0 &&      \
-  ((new)->flags & (flag)) == 0)
+  (FLAG_IS_ON(old,flag) &&             \
+   FLAG_IS_OFF(new,flag))
 
 #define FLAG_CHANGED(old,new,flag) \
   (FLAG_TOGGLED_ON(old,new,flag) || FLAG_TOGGLED_OFF(old,new,flag))
@@ -1153,6 +1142,86 @@ spew_size_hints_differences (const XSizeHints *old,
     meta_topic (META_DEBUG_GEOMETRY, "XSizeHints: PWinGravity now %s  (%d -> %d)\n",
                 FLAG_TOGGLED_ON (old, new, PWinGravity) ? "set" : "unset",
                 old->win_gravity, new->win_gravity);
+}
+
+static gboolean
+hints_have_changed (const XSizeHints *old,
+                    const XSizeHints *new)
+{
+  /* 1. Check if the relevant values have changed if the flag is set. */
+
+  if (FLAG_TOGGLED_ON (old, new, USPosition) ||
+      (FLAG_IS_ON (new, USPosition) &&
+       (old->x != new->x ||
+        old->y != new->y)))
+    return TRUE;
+
+  if (FLAG_TOGGLED_ON (old, new, USSize) ||
+      (FLAG_IS_ON (new, USSize) &&
+       (old->width != new->width ||
+        old->height != new->height)))
+    return TRUE;
+
+  if (FLAG_TOGGLED_ON (old, new, PPosition) ||
+      (FLAG_IS_ON (new, PPosition) &&
+       (old->x != new->x ||
+        old->y != new->y)))
+    return TRUE;
+
+  if (FLAG_TOGGLED_ON (old, new, PSize) ||
+      (FLAG_IS_ON (new, PSize) &&
+       (old->width != new->width ||
+        old->height != new->height)))
+    return TRUE;
+
+  if (FLAG_TOGGLED_ON (old, new, PMinSize) ||
+      (FLAG_IS_ON (new, PMinSize) &&
+       (old->min_width != new->min_width ||
+        old->min_height != new->min_height)))
+    return TRUE;
+
+  if (FLAG_TOGGLED_ON (old, new, PMaxSize) ||
+      (FLAG_IS_ON (new, PMaxSize) &&
+       (old->max_width != new->max_width ||
+        old->max_height != new->max_height)))
+    return TRUE;
+
+  if (FLAG_TOGGLED_ON (old, new, PResizeInc) ||
+      (FLAG_IS_ON (new, PResizeInc) &&
+       (old->width_inc != new->width_inc ||
+        old->height_inc != new->height_inc)))
+    return TRUE;
+
+  if (FLAG_TOGGLED_ON (old, new, PAspect) ||
+      (FLAG_IS_ON (new, PAspect) &&
+       (old->min_aspect.x != new->min_aspect.x ||
+        old->min_aspect.y != new->min_aspect.y ||
+        old->max_aspect.x != new->max_aspect.x ||
+        old->max_aspect.y != new->max_aspect.y)))
+    return TRUE;
+
+  if (FLAG_TOGGLED_ON (old, new, PBaseSize) ||
+      (FLAG_IS_ON (new, PBaseSize) &&
+       (old->base_width != new->base_width ||
+        old->base_height != new->base_height)))
+    return TRUE;
+
+  if (FLAG_TOGGLED_ON (old, new, PWinGravity) ||
+      (FLAG_IS_ON (new, PWinGravity) &&
+       (old->win_gravity != new->win_gravity)))
+    return TRUE;
+
+  /* 2. Check if the flags have been unset. */
+  return FLAG_TOGGLED_OFF (old, new, USPosition) ||
+         FLAG_TOGGLED_OFF (old, new, USSize) ||
+         FLAG_TOGGLED_OFF (old, new, PPosition) ||
+         FLAG_TOGGLED_OFF (old, new, PSize) ||
+         FLAG_TOGGLED_OFF (old, new, PMinSize) ||
+         FLAG_TOGGLED_OFF (old, new, PMaxSize) ||
+         FLAG_TOGGLED_OFF (old, new, PResizeInc) ||
+         FLAG_TOGGLED_OFF (old, new, PAspect) ||
+         FLAG_TOGGLED_OFF (old, new, PBaseSize) ||
+         FLAG_TOGGLED_OFF (old, new, PWinGravity);
 }
 
 void
@@ -1300,7 +1369,7 @@ meta_set_normal_hints (MetaWindow *window,
       meta_topic (META_DEBUG_GEOMETRY,
                   "Window %s doesn't set gravity, using NW\n",
                   window->desc);
-      window->size_hints.win_gravity = NorthWestGravity;
+      window->size_hints.win_gravity = META_GRAVITY_NORTH_WEST;
       window->size_hints.flags |= PWinGravity;
     }
 
@@ -1505,6 +1574,7 @@ reload_normal_hints (MetaWindow    *window,
   if (value->type != META_PROP_VALUE_INVALID)
     {
       XSizeHints old_hints;
+      gboolean hints_have_differences;
 
       meta_topic (META_DEBUG_GEOMETRY, "Updating WM_NORMAL_HINTS for %s\n", window->desc);
 
@@ -1512,12 +1582,16 @@ reload_normal_hints (MetaWindow    *window,
 
       meta_set_normal_hints (window, value->v.size_hints.hints);
 
-      spew_size_hints_differences (&old_hints, &window->size_hints);
+      hints_have_differences = hints_have_changed (&old_hints,
+                                                   &window->size_hints);
+      if (hints_have_differences)
+        {
+          spew_size_hints_differences (&old_hints, &window->size_hints);
+          meta_window_recalc_features (window);
 
-      meta_window_recalc_features (window);
-
-      if (!initial)
-        meta_window_queue(window, META_QUEUE_MOVE_RESIZE);
+          if (!initial)
+            meta_window_queue (window, META_QUEUE_MOVE_RESIZE);
+        }
     }
 }
 
@@ -1528,9 +1602,9 @@ reload_wm_protocols (MetaWindow    *window,
 {
   int i;
 
-  window->take_focus = FALSE;
-  window->delete_window = FALSE;
-  window->can_ping = FALSE;
+  meta_window_x11_set_wm_take_focus (window, FALSE);
+  meta_window_x11_set_wm_ping (window, FALSE);
+  meta_window_x11_set_wm_delete_window (window, FALSE);
 
   if (value->type == META_PROP_VALUE_INVALID)
     return;
@@ -1540,13 +1614,13 @@ reload_wm_protocols (MetaWindow    *window,
     {
       if (value->v.atom_list.atoms[i] ==
           window->display->x11_display->atom_WM_TAKE_FOCUS)
-        window->take_focus = TRUE;
+        meta_window_x11_set_wm_take_focus (window, TRUE);
       else if (value->v.atom_list.atoms[i] ==
                window->display->x11_display->atom_WM_DELETE_WINDOW)
-        window->delete_window = TRUE;
+        meta_window_x11_set_wm_delete_window (window, TRUE);
       else if (value->v.atom_list.atoms[i] ==
                window->display->x11_display->atom__NET_WM_PING)
-        window->can_ping = TRUE;
+        meta_window_x11_set_wm_ping (window, TRUE);
       ++i;
     }
 
@@ -1561,7 +1635,7 @@ reload_wm_hints (MetaWindow    *window,
                  gboolean       initial)
 {
   MetaWindowX11 *window_x11 = META_WINDOW_X11 (window);
-  MetaWindowX11Private *priv = window_x11->priv;
+  MetaWindowX11Private *priv = meta_window_x11_get_private (window_x11);
   Window old_group_leader;
   gboolean urgent;
 
@@ -1621,6 +1695,22 @@ reload_wm_hints (MetaWindow    *window,
   meta_window_queue (window, META_QUEUE_UPDATE_ICON | META_QUEUE_MOVE_RESIZE);
 }
 
+static gboolean
+check_xtransient_for_loop (MetaWindow *window,
+                           MetaWindow *parent)
+{
+  while (parent)
+    {
+      if (parent == window)
+        return TRUE;
+
+      parent = meta_x11_display_lookup_x_window (parent->display->x11_display,
+                                                 parent->xtransient_for);
+    }
+
+  return FALSE;
+}
+
 static void
 reload_transient_for (MetaWindow    *window,
                       MetaPropValue *value,
@@ -1641,20 +1731,45 @@ reload_transient_for (MetaWindow    *window,
                         transient_for, window->desc);
           transient_for = None;
         }
+      else if (parent->override_redirect)
+        {
+          const gchar *window_kind = window->override_redirect ?
+            "override-redirect" : "top-level";
+
+          if (parent->xtransient_for != None)
+            {
+              /* We don't have to go through the parents, as per this code it is
+               * not possible that a window has the WM_TRANSIENT_FOR set to an
+               * override-redirect window anyways */
+              meta_warning ("WM_TRANSIENT_FOR window %s for %s window %s is an "
+                            "override-redirect window and this is not correct "
+                            "according to the standard, so we'll fallback to "
+                            "the first non-override-redirect window 0x%lx.\n",
+                            parent->desc, window->desc, window_kind,
+                            parent->xtransient_for);
+              transient_for = parent->xtransient_for;
+              parent =
+                meta_x11_display_lookup_x_window (parent->display->x11_display,
+                                                  transient_for);
+            }
+          else
+            {
+              meta_warning ("WM_TRANSIENT_FOR window %s for %s window %s is an "
+                            "override-redirect window and this is not correct "
+                            "according to the standard, so we'll fallback to "
+                            "the root window.\n", parent->desc, window_kind,
+                            window->desc);
+              transient_for = parent->display->x11_display->xroot;
+              parent = NULL;
+            }
+        }
 
       /* Make sure there is not a loop */
-      while (parent)
+      if (check_xtransient_for_loop (window, parent))
         {
-          if (parent == window)
-            {
-              meta_warning ("WM_TRANSIENT_FOR window 0x%lx for %s would create loop.\n",
-                            transient_for, window->desc);
-              transient_for = None;
-              break;
-            }
-
-          parent = meta_x11_display_lookup_x_window (parent->display->x11_display,
-                                                     parent->xtransient_for);
+          meta_warning ("WM_TRANSIENT_FOR window 0x%lx for %s would create a "
+                        "loop.\n", transient_for, window->desc);
+          transient_for = None;
         }
     }
   else
@@ -1675,8 +1790,6 @@ reload_transient_for (MetaWindow    *window,
     meta_window_set_transient_for (window, NULL);
   else
     {
-      parent = meta_x11_display_lookup_x_window (window->display->x11_display,
-                                                 window->xtransient_for);
       meta_window_set_transient_for (window, parent);
     }
 }
@@ -1708,56 +1821,32 @@ reload_gtk_theme_variant (MetaWindow    *window,
 }
 
 static void
-reload_gtk_hide_titlebar_when_maximized (MetaWindow    *window,
-                                         MetaPropValue *value,
-                                         gboolean       initial)
-{
-  gboolean requested_value = FALSE;
-  gboolean current_value = window->hide_titlebar_when_maximized;
-
-  if (!meta_prefs_get_ignore_request_hide_titlebar () && value->type != META_PROP_VALUE_INVALID)
-    {
-      requested_value = ((int) value->v.cardinal == 1);
-      meta_verbose ("Request to hide titlebar for window %s.\n", window->desc);
-    }
-
-  if (requested_value == current_value)
-    return;
-
-  window->hide_titlebar_when_maximized = requested_value;
-
-  if (META_WINDOW_MAXIMIZED (window))
-    {
-      meta_window_queue (window, META_QUEUE_MOVE_RESIZE);
-      meta_window_frame_size_changed (window);
-
-      if (window->frame)
-        meta_frame_update_style (window->frame);
-    }
-}
-
-static void
 reload_bypass_compositor (MetaWindow    *window,
                           MetaPropValue *value,
                           gboolean       initial)
 {
-  int requested_value = 0;
-  int current_value = window->bypass_compositor;
+  MetaWindowX11 *window_x11 = META_WINDOW_X11 (window);
+  MetaWindowX11Private *priv = meta_window_x11_get_private (window_x11);
+  MetaBypassCompositorHint requested_value;
+  MetaBypassCompositorHint current_value;
 
   if (value->type != META_PROP_VALUE_INVALID)
-      requested_value = (int) value->v.cardinal;
+    requested_value = (MetaBypassCompositorHint) value->v.cardinal;
+  else
+    requested_value = META_BYPASS_COMPOSITOR_HINT_AUTO;
 
+  current_value = priv->bypass_compositor;
   if (requested_value == current_value)
     return;
 
-  if (requested_value == _NET_WM_BYPASS_COMPOSITOR_HINT_ON)
+  if (requested_value == META_BYPASS_COMPOSITOR_HINT_ON)
     meta_verbose ("Request to bypass compositor for window %s.\n", window->desc);
-  else if (requested_value == _NET_WM_BYPASS_COMPOSITOR_HINT_OFF)
+  else if (requested_value == META_BYPASS_COMPOSITOR_HINT_OFF)
     meta_verbose ("Request to don't bypass compositor for window %s.\n", window->desc);
-  else if (requested_value != _NET_WM_BYPASS_COMPOSITOR_HINT_AUTO)
+  else if (requested_value != META_BYPASS_COMPOSITOR_HINT_AUTO)
     return;
 
-  window->bypass_compositor = requested_value;
+  priv->bypass_compositor = requested_value;
 }
 
 static void
@@ -1836,7 +1925,6 @@ meta_x11_display_init_window_prop_hooks (MetaX11Display *x11_display)
     { x11_display->atom_WM_CLIENT_MACHINE, META_PROP_VALUE_STRING,   reload_wm_client_machine, LOAD_INIT | INCLUDE_OR },
     { x11_display->atom__NET_WM_NAME,      META_PROP_VALUE_UTF8,     reload_net_wm_name,       LOAD_INIT | INCLUDE_OR },
     { XA_WM_CLASS,                         META_PROP_VALUE_CLASS_HINT, reload_wm_class,        LOAD_INIT | INCLUDE_OR },
-    { x11_display->atom__NET_WM_PID,       META_PROP_VALUE_CARDINAL, reload_net_wm_pid,        LOAD_INIT | INCLUDE_OR },
     { XA_WM_NAME,                          META_PROP_VALUE_TEXT_PROPERTY, reload_wm_name,      LOAD_INIT | INCLUDE_OR },
     { x11_display->atom__MUTTER_HINTS,     META_PROP_VALUE_TEXT_PROPERTY, reload_mutter_hints, LOAD_INIT | INCLUDE_OR },
     { x11_display->atom__NET_WM_OPAQUE_REGION, META_PROP_VALUE_CARDINAL_LIST, reload_opaque_region, LOAD_INIT | INCLUDE_OR },
@@ -1849,9 +1937,8 @@ meta_x11_display_init_window_prop_hooks (MetaX11Display *x11_display)
     { x11_display->atom__NET_WM_USER_TIME, META_PROP_VALUE_CARDINAL, reload_net_wm_user_time,  LOAD_INIT },
     { x11_display->atom__NET_WM_STATE,     META_PROP_VALUE_ATOM_LIST, reload_net_wm_state,     LOAD_INIT | INIT_ONLY },
     { x11_display->atom__MOTIF_WM_HINTS,   META_PROP_VALUE_MOTIF_HINTS, reload_mwm_hints,      LOAD_INIT },
-    { XA_WM_TRANSIENT_FOR,                 META_PROP_VALUE_WINDOW,    reload_transient_for,    LOAD_INIT },
+    { XA_WM_TRANSIENT_FOR,                 META_PROP_VALUE_WINDOW,    reload_transient_for,    LOAD_INIT | INCLUDE_OR },
     { x11_display->atom__GTK_THEME_VARIANT, META_PROP_VALUE_UTF8,     reload_gtk_theme_variant, LOAD_INIT },
-    { x11_display->atom__GTK_HIDE_TITLEBAR_WHEN_MAXIMIZED, META_PROP_VALUE_CARDINAL,     reload_gtk_hide_titlebar_when_maximized, LOAD_INIT },
     { x11_display->atom__GTK_APPLICATION_ID,               META_PROP_VALUE_UTF8,         reload_gtk_application_id,               LOAD_INIT },
     { x11_display->atom__GTK_UNIQUE_BUS_NAME,              META_PROP_VALUE_UTF8,         reload_gtk_unique_bus_name,              LOAD_INIT },
     { x11_display->atom__GTK_APPLICATION_OBJECT_PATH,      META_PROP_VALUE_UTF8,         reload_gtk_application_object_path,      LOAD_INIT },

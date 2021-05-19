@@ -22,10 +22,10 @@
 #include "clutter-build-config.h"
 
 #include "clutter-private.h"
+#include "clutter/clutter-input-device-private.h"
 #include "clutter/clutter-input-method.h"
 #include "clutter/clutter-input-method-private.h"
 #include "clutter/clutter-input-focus-private.h"
-#include "clutter/clutter-device-manager-private.h"
 
 typedef struct _ClutterInputMethodPrivate ClutterInputMethodPrivate;
 
@@ -37,7 +37,8 @@ struct _ClutterInputMethodPrivate
   gboolean can_show_preedit;
 };
 
-enum {
+enum
+{
   COMMIT,
   DELETE_SURROUNDING,
   REQUEST_SURROUNDING,
@@ -46,7 +47,8 @@ enum {
   N_SIGNALS,
 };
 
-enum {
+enum
+{
   PROP_0,
   PROP_CONTENT_HINTS,
   PROP_CONTENT_PURPOSE,
@@ -166,7 +168,7 @@ clutter_input_method_class_init (ClutterInputMethodClass *klass)
                   G_TYPE_FROM_CLASS (object_class),
                   G_SIGNAL_RUN_LAST,
                   0, NULL, NULL, NULL,
-                  G_TYPE_NONE, 2, G_TYPE_UINT, G_TYPE_UINT);
+                  G_TYPE_NONE, 2, G_TYPE_INT, G_TYPE_UINT);
   signals[REQUEST_SURROUNDING] =
     g_signal_new ("request-surrounding",
                   G_TYPE_FROM_CLASS (object_class),
@@ -185,7 +187,7 @@ clutter_input_method_class_init (ClutterInputMethodClass *klass)
                   G_TYPE_FROM_CLASS (object_class),
                   G_SIGNAL_RUN_LAST,
                   0, NULL, NULL, NULL,
-                  G_TYPE_NONE, 1, CLUTTER_TYPE_RECT);
+                  G_TYPE_NONE, 1, GRAPHENE_TYPE_RECT);
 
   pspecs[PROP_CONTENT_HINTS] =
     g_param_spec_flags ("content-hints",
@@ -264,9 +266,6 @@ clutter_input_method_focus_out (ClutterInputMethod *im)
 
   klass = CLUTTER_INPUT_METHOD_GET_CLASS (im);
   klass->focus_out (im);
-
-  g_signal_emit (im, signals[INPUT_PANEL_STATE],
-                 0, CLUTTER_INPUT_PANEL_STATE_OFF);
 }
 
 ClutterInputFocus *
@@ -278,31 +277,55 @@ clutter_input_method_get_focus (ClutterInputMethod *im)
   return priv->focus;
 }
 
+static void
+clutter_input_method_put_im_event (ClutterInputMethod *im,
+                                   ClutterEventType    event_type,
+                                   const char         *text,
+                                   int32_t             offset,
+                                   uint32_t            len)
+{
+  ClutterInputDevice *keyboard;
+  ClutterSeat *seat;
+  ClutterStage *stage;
+  ClutterEvent *event;
+
+  seat = clutter_backend_get_default_seat (clutter_get_default_backend ());
+  keyboard = clutter_seat_get_keyboard (seat);
+  stage = _clutter_input_device_get_stage (keyboard);
+  if (stage == NULL)
+    return;
+
+  event = clutter_event_new (event_type);
+  event->im.text = g_strdup (text);
+  event->im.offset = offset;
+  event->im.len = len;
+  clutter_event_set_device (event, keyboard);
+  clutter_event_set_source_device (event, keyboard);
+  clutter_event_set_flags (event, CLUTTER_EVENT_FLAG_INPUT_METHOD);
+
+  clutter_event_set_stage (event, stage);
+
+  clutter_event_put (event);
+  clutter_event_free (event);
+}
+
 void
 clutter_input_method_commit (ClutterInputMethod *im,
                              const gchar        *text)
 {
-  ClutterInputMethodPrivate *priv;
-
   g_return_if_fail (CLUTTER_IS_INPUT_METHOD (im));
 
-  priv = clutter_input_method_get_instance_private (im);
-  if (priv->focus)
-    clutter_input_focus_commit (priv->focus, text);
+  clutter_input_method_put_im_event (im, CLUTTER_IM_COMMIT, text, 0, 0);
 }
 
 void
 clutter_input_method_delete_surrounding (ClutterInputMethod *im,
-                                         guint               offset,
+                                         int                 offset,
                                          guint               len)
 {
-  ClutterInputMethodPrivate *priv;
-
   g_return_if_fail (CLUTTER_IS_INPUT_METHOD (im));
 
-  priv = clutter_input_method_get_instance_private (im);
-  if (priv->focus)
-    clutter_input_focus_delete_surrounding (priv->focus, offset, len);
+  clutter_input_method_put_im_event (im, CLUTTER_IM_DELETE, NULL, offset, len);
 }
 
 void
@@ -330,13 +353,9 @@ clutter_input_method_set_preedit_text (ClutterInputMethod *im,
                                        const gchar        *preedit,
                                        guint               cursor)
 {
-  ClutterInputMethodPrivate *priv;
-
   g_return_if_fail (CLUTTER_IS_INPUT_METHOD (im));
 
-  priv = clutter_input_method_get_instance_private (im);
-  if (priv->focus)
-    clutter_input_focus_set_preedit_text (priv->focus, preedit, cursor);
+  clutter_input_method_put_im_event (im, CLUTTER_IM_PREEDIT, preedit, cursor, 0);
 }
 
 void
@@ -361,12 +380,12 @@ clutter_input_method_notify_key_event (ClutterInputMethod *im,
 }
 
 void
-clutter_input_method_toggle_input_panel (ClutterInputMethod *im)
+clutter_input_method_set_input_panel_state (ClutterInputMethod     *im,
+                                            ClutterInputPanelState  state)
 {
   g_return_if_fail (CLUTTER_IS_INPUT_METHOD (im));
 
-  g_signal_emit (im, signals[INPUT_PANEL_STATE], 0,
-                 CLUTTER_INPUT_PANEL_STATE_TOGGLE);
+  g_signal_emit (im, signals[INPUT_PANEL_STATE], 0, state);
 }
 
 void
@@ -378,8 +397,8 @@ clutter_input_method_reset (ClutterInputMethod *im)
 }
 
 void
-clutter_input_method_set_cursor_location (ClutterInputMethod *im,
-                                          const ClutterRect  *rect)
+clutter_input_method_set_cursor_location (ClutterInputMethod    *im,
+                                          const graphene_rect_t *rect)
 {
   g_return_if_fail (CLUTTER_IS_INPUT_METHOD (im));
 
@@ -453,8 +472,8 @@ clutter_input_method_forward_key (ClutterInputMethod *im,
                                   gboolean            press)
 {
   ClutterInputMethodPrivate *priv;
-  ClutterDeviceManager *device_manager;
   ClutterInputDevice *keyboard;
+  ClutterSeat *seat;
   ClutterStage *stage;
   ClutterEvent *event;
 
@@ -464,9 +483,8 @@ clutter_input_method_forward_key (ClutterInputMethod *im,
   if (!priv->focus)
     return;
 
-  device_manager = clutter_device_manager_get_default ();
-  keyboard = clutter_device_manager_get_core_device (device_manager,
-                                                     CLUTTER_KEYBOARD_DEVICE);
+  seat = clutter_backend_get_default_seat (clutter_get_default_backend ());
+  keyboard = clutter_seat_get_keyboard (seat);
   stage = _clutter_input_device_get_stage (keyboard);
   if (stage == NULL)
     return;

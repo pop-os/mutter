@@ -30,9 +30,7 @@
  * computes the interpolation between two values, stored by a #ClutterInterval.
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #include "clutter-transition.h"
 
@@ -136,7 +134,6 @@ clutter_transition_stopped (ClutterTimeline *timeline,
       clutter_transition_detach (CLUTTER_TRANSITION (timeline),
                                  priv->animatable);
       g_clear_object (&priv->animatable);
-      g_object_unref (timeline);
     }
 }
 
@@ -367,6 +364,7 @@ clutter_transition_set_animatable (ClutterTransition *transition,
                                    ClutterAnimatable *animatable)
 {
   ClutterTransitionPrivate *priv;
+  ClutterActor *actor;
 
   g_return_if_fail (CLUTTER_IS_TRANSITION (transition));
   g_return_if_fail (animatable == NULL || CLUTTER_IS_ANIMATABLE (animatable));
@@ -386,6 +384,9 @@ clutter_transition_set_animatable (ClutterTransition *transition,
       priv->animatable = g_object_ref (animatable);
       clutter_transition_attach (transition, priv->animatable);
     }
+
+  actor = clutter_animatable_get_actor (animatable);
+  clutter_timeline_set_actor (CLUTTER_TIMELINE (transition), actor);
 }
 
 /**

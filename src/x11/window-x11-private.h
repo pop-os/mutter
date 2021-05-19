@@ -23,30 +23,32 @@
 #ifndef META_WINDOW_X11_PRIVATE_H
 #define META_WINDOW_X11_PRIVATE_H
 
-#include "window-private.h"
+#include "core/window-private.h"
 #include "x11/iconcache.h"
+#include "x11/window-x11.h"
 
 G_BEGIN_DECLS
 
+/*
+ * Mirrors _NET_WM_BYPASS_COMPOSITOR preference values.
+ */
+typedef enum _MetaBypassCompositorHint
+{
+  META_BYPASS_COMPOSITOR_HINT_AUTO = 0,
+  META_BYPASS_COMPOSITOR_HINT_ON = 1,
+  META_BYPASS_COMPOSITOR_HINT_OFF = 2,
+} MetaBypassCompositorHint;
+
 typedef struct _MetaWindowX11Private MetaWindowX11Private;
-
-struct _MetaWindowX11Class
-{
-  MetaWindowClass parent_class;
-};
-
-struct _MetaWindowX11
-{
-  MetaWindow parent;
-
-  MetaWindowX11Private *priv;
-};
 
 struct _MetaWindowX11Private
 {
   /* TRUE if the client forced these on */
   guint wm_state_skip_taskbar : 1;
   guint wm_state_skip_pager : 1;
+  guint wm_take_focus : 1;
+  guint wm_ping : 1;
+  guint wm_delete_window : 1;
 
   /* Weird "_NET_WM_STATE_MODAL" flag */
   guint wm_state_modal : 1;
@@ -69,7 +71,18 @@ struct _MetaWindowX11Private
   MetaIconCache icon_cache;
   Pixmap wm_hints_pixmap;
   Pixmap wm_hints_mask;
+
+  /* Freeze/thaw on resize (for Xwayland) */
+  gboolean thaw_after_paint;
+
+  /* Bypass compositor hints */
+  MetaBypassCompositorHint bypass_compositor;
 };
+
+MetaWindowX11Private * meta_window_x11_get_private (MetaWindowX11 *window_x11);
+
+void meta_window_x11_set_bypass_compositor_hint (MetaWindowX11            *window_x11,
+                                                 MetaBypassCompositorHint  requested_value);
 
 G_END_DECLS
 

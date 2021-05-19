@@ -1,5 +1,3 @@
-/* -*- mode: C; c-file-style: "gnu"; indent-tabs-mode: nil; -*- */
-
 /*
  * Copyright (C) 2001 Havoc Pennington
  * Copyright (C) 2005 Elijah Newren
@@ -26,12 +24,9 @@
 
 #define _POSIX_C_SOURCE 200112L /* for fdopen() */
 
-#include <config.h>
-#include <meta/common.h>
-#include "util-private.h"
-#include <meta/main.h>
+#include "config.h"
 
-#include <clutter/clutter.h> /* For clutter_threads_add_repaint_func() */
+#include "core/util-private.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,6 +36,11 @@
 #include <X11/Xlib.h>   /* must explicitly be included for Solaris; #326746 */
 #include <X11/Xutil.h>  /* Just for the definition of the various gravities */
 
+#include "clutter/clutter.h"
+#include "cogl/cogl.h"
+#include "meta/common.h"
+#include "meta/main.h"
+
 #ifdef WITH_VERBOSE_MODE
 static void
 meta_topic_real_valist (MetaDebugTopic topic,
@@ -48,14 +48,12 @@ meta_topic_real_valist (MetaDebugTopic topic,
                         va_list        args) G_GNUC_PRINTF(2, 0);
 #endif
 
-static gboolean
-meta_later_remove_from_list (guint later_id, GSList **laters_list);
-
 static gint verbose_topics = 0;
 static gboolean is_debugging = FALSE;
 static gboolean replace_current = FALSE;
 static int no_prefix = 0;
 static gboolean is_wayland_compositor = FALSE;
+static int debug_paint_flags = 0;
 
 #ifdef WITH_VERBOSE_MODE
 static FILE* logfile = NULL;
@@ -240,20 +238,6 @@ utf8_fputs (const char *str,
   return retval;
 }
 
-/**
- * meta_free_gslist_and_elements: (skip)
- * @list_to_deep_free: list to deep free
- *
- */
-void
-meta_free_gslist_and_elements (GSList *list_to_deep_free)
-{
-  g_slist_foreach (list_to_deep_free,
-                   (void (*)(gpointer,gpointer))&g_free, /* ew, for ugly */
-                   NULL);
-  g_slist_free (list_to_deep_free);
-}
-
 #ifdef WITH_VERBOSE_MODE
 void
 meta_debug_spew_real (const char *format, ...)
@@ -281,9 +265,7 @@ meta_debug_spew_real (const char *format, ...)
 
   g_free (str);
 }
-#endif /* WITH_VERBOSE_MODE */
 
-#ifdef WITH_VERBOSE_MODE
 void
 meta_verbose_real (const char *format, ...)
 {
@@ -293,9 +275,7 @@ meta_verbose_real (const char *format, ...)
   meta_topic_real_valist (META_DEBUG_VERBOSE, format, args);
   va_end (args);
 }
-#endif /* WITH_VERBOSE_MODE */
 
-#ifdef WITH_VERBOSE_MODE
 static const char*
 topic_name (MetaDebugTopic topic)
 {
@@ -347,6 +327,8 @@ topic_name (MetaDebugTopic topic)
       return "EDGE_RESISTANCE";
     case META_DEBUG_DBUS:
       return "DBUS";
+    case META_DEBUG_INPUT:
+      return "INPUT";
     case META_DEBUG_VERBOSE:
       return "VERBOSE";
     }
@@ -537,42 +519,42 @@ meta_unsigned_long_hash  (gconstpointer v)
 }
 
 const char*
-meta_gravity_to_string (int gravity)
+meta_gravity_to_string (MetaGravity gravity)
 {
   switch (gravity)
     {
-    case NorthWestGravity:
-      return "NorthWestGravity";
+    case META_GRAVITY_NORTH_WEST:
+      return "META_GRAVITY_NORTH_WEST";
       break;
-    case NorthGravity:
-      return "NorthGravity";
+    case META_GRAVITY_NORTH:
+      return "META_GRAVITY_NORTH";
       break;
-    case NorthEastGravity:
-      return "NorthEastGravity";
+    case META_GRAVITY_NORTH_EAST:
+      return "META_GRAVITY_NORTH_EAST";
       break;
-    case WestGravity:
-      return "WestGravity";
+    case META_GRAVITY_WEST:
+      return "META_GRAVITY_WEST";
       break;
-    case CenterGravity:
-      return "CenterGravity";
+    case META_GRAVITY_CENTER:
+      return "META_GRAVITY_CENTER";
       break;
-    case EastGravity:
-      return "EastGravity";
+    case META_GRAVITY_EAST:
+      return "META_GRAVITY_EAST";
       break;
-    case SouthWestGravity:
-      return "SouthWestGravity";
+    case META_GRAVITY_SOUTH_WEST:
+      return "META_GRAVITY_SOUTH_WEST";
       break;
-    case SouthGravity:
-      return "SouthGravity";
+    case META_GRAVITY_SOUTH:
+      return "META_GRAVITY_SOUTH";
       break;
-    case SouthEastGravity:
-      return "SouthEastGravity";
+    case META_GRAVITY_SOUTH_EAST:
+      return "META_GRAVITY_SOUTH_EAST";
       break;
-    case StaticGravity:
-      return "StaticGravity";
+    case META_GRAVITY_STATIC:
+      return "META_GRAVITY_STATIC";
       break;
     default:
-      return "NorthWestGravity";
+      return "META_GRAVITY_NORTH_WEST";
       break;
     }
 }
@@ -725,261 +707,6 @@ meta_show_dialog (const char *type,
   return child_pid;
 }
 
-/***************************************************************************
- * Later functions: like idles but integrated with the Clutter repaint loop
- ***************************************************************************/
-
-static guint last_later_id = 0;
-
-typedef struct
-{
-  guint id;
-  guint ref_count;
-  MetaLaterType when;
-  GSourceFunc func;
-  gpointer data;
-  GDestroyNotify notify;
-  int source;
-  gboolean run_once;
-} MetaLater;
-
-static GSList *laters[] = {
-  NULL, /* META_LATER_RESIZE */
-  NULL, /* META_LATER_CALC_SHOWING */
-  NULL, /* META_LATER_CHECK_FULLSCREEN */
-  NULL, /* META_LATER_SYNC_STACK */
-  NULL, /* META_LATER_BEFORE_REDRAW */
-  NULL, /* META_LATER_IDLE */
-};
-/* This is a dummy timeline used to get the Clutter master clock running */
-static ClutterTimeline *later_timeline;
-static guint later_repaint_func = 0;
-
-static void ensure_later_repaint_func (void);
-
-static void
-unref_later (MetaLater *later)
-{
-  if (--later->ref_count == 0)
-    {
-      if (later->notify)
-        {
-          later->notify (later->data);
-          later->notify = NULL;
-        }
-      g_slice_free (MetaLater, later);
-    }
-}
-
-static void
-destroy_later (MetaLater *later)
-{
-  if (later->source)
-    {
-      g_source_remove (later->source);
-      later->source = 0;
-    }
-  later->func = NULL;
-  unref_later (later);
-}
-
-static void
-run_repaint_laters (GSList **laters_list)
-{
-  GSList *laters_copy;
-  GSList *l;
-
-  laters_copy = NULL;
-  for (l = *laters_list; l; l = l->next)
-    {
-      MetaLater *later = l->data;
-      if (later->source == 0 ||
-          (later->when <= META_LATER_BEFORE_REDRAW && !later->run_once))
-        {
-          later->ref_count++;
-          laters_copy = g_slist_prepend (laters_copy, later);
-        }
-    }
-  laters_copy = g_slist_reverse (laters_copy);
-
-  for (l = laters_copy; l; l = l->next)
-    {
-      MetaLater *later = l->data;
-
-      if (!later->func || !later->func (later->data))
-        meta_later_remove_from_list (later->id, laters_list);
-      unref_later (later);
-    }
-
-  g_slist_free (laters_copy);
-}
-
-static gboolean
-run_all_repaint_laters (gpointer data)
-{
-  guint i;
-  GSList *l;
-  gboolean keep_timeline_running = FALSE;
-
-  for (i = 0; i < G_N_ELEMENTS (laters); i++)
-    {
-      run_repaint_laters (&laters[i]);
-    }
-
-  for (i = 0; i < G_N_ELEMENTS (laters); i++)
-    {
-      for (l = laters[i]; l; l = l->next)
-        {
-          MetaLater *later = l->data;
-
-          if (later->source == 0)
-            keep_timeline_running = TRUE;
-        }
-    }
-
-  if (!keep_timeline_running)
-    clutter_timeline_stop (later_timeline);
-
-  /* Just keep the repaint func around - it's cheap if the lists are empty */
-  return TRUE;
-}
-
-static void
-ensure_later_repaint_func (void)
-{
-  if (!later_timeline)
-    later_timeline = clutter_timeline_new (G_MAXUINT);
-
-  if (later_repaint_func == 0)
-    later_repaint_func = clutter_threads_add_repaint_func (run_all_repaint_laters,
-                                                           NULL, NULL);
-
-  /* Make sure the repaint function gets run */
-  clutter_timeline_start (later_timeline);
-}
-
-static gboolean
-call_idle_later (gpointer data)
-{
-  MetaLater *later = data;
-
-  if (!later->func (later->data))
-    {
-      meta_later_remove (later->id);
-      return FALSE;
-    }
-  else
-    {
-      later->run_once = TRUE;
-      return TRUE;
-    }
-}
-
-/**
- * meta_later_add:
- * @when:     enumeration value determining the phase at which to run the callback
- * @func:     callback to run later
- * @data:     data to pass to the callback
- * @notify:   function to call to destroy @data when it is no longer in use, or %NULL
- *
- * Sets up a callback  to be called at some later time. @when determines the
- * particular later occasion at which it is called. This is much like g_idle_add(),
- * except that the functions interact properly with clutter event handling.
- * If a "later" function is added from a clutter event handler, and is supposed
- * to be run before the stage is redrawn, it will be run before that redraw
- * of the stage, not the next one.
- *
- * Return value: an integer ID (guaranteed to be non-zero) that can be used
- *  to cancel the callback and prevent it from being run.
- */
-guint
-meta_later_add (MetaLaterType  when,
-                GSourceFunc    func,
-                gpointer       data,
-                GDestroyNotify notify)
-{
-  MetaLater *later = g_slice_new0 (MetaLater);
-
-  later->id = ++last_later_id;
-  later->ref_count = 1;
-  later->when = when;
-  later->func = func;
-  later->data = data;
-  later->notify = notify;
-
-  laters[when] = g_slist_prepend (laters[when], later);
-
-  switch (when)
-    {
-    case META_LATER_RESIZE:
-      /* We add this one two ways - as a high-priority idle and as a
-       * repaint func. If we are in a clutter event callback, the repaint
-       * handler will get hit first, and we'll take care of this function
-       * there so it gets called before the stage is redrawn, even if
-       * we haven't gotten back to the main loop. Otherwise, the idle
-       * handler will get hit first and we want to call this function
-       * there so it will happen before GTK+ repaints.
-       */
-      later->source = g_idle_add_full (META_PRIORITY_RESIZE, call_idle_later, later, NULL);
-      g_source_set_name_by_id (later->source, "[mutter] call_idle_later");
-      ensure_later_repaint_func ();
-      break;
-    case META_LATER_CALC_SHOWING:
-    case META_LATER_CHECK_FULLSCREEN:
-    case META_LATER_SYNC_STACK:
-    case META_LATER_BEFORE_REDRAW:
-      ensure_later_repaint_func ();
-      break;
-    case META_LATER_IDLE:
-      later->source = g_idle_add_full (G_PRIORITY_DEFAULT_IDLE, call_idle_later, later, NULL);
-      g_source_set_name_by_id (later->source, "[mutter] call_idle_later");
-      break;
-    }
-
-  return later->id;
-}
-
-static gboolean
-meta_later_remove_from_list (guint later_id, GSList **laters_list)
-{
-  GSList *l;
-
-  for (l = *laters_list; l; l = l->next)
-    {
-      MetaLater *later = l->data;
-
-      if (later->id == later_id)
-        {
-          *laters_list = g_slist_delete_link (*laters_list, l);
-          /* If this was a "repaint func" later, we just let the
-           * repaint func run and get removed
-           */
-          destroy_later (later);
-          return TRUE;
-        }
-    }
-
-  return FALSE;
-}
-
-/**
- * meta_later_remove:
- * @later_id: the integer ID returned from meta_later_add()
- *
- * Removes a callback added with meta_later_add()
- */
-void
-meta_later_remove (guint later_id)
-{
-  guint i;
-
-  for (i = 0; i < G_N_ELEMENTS (laters); i++)
-    {
-      if (meta_later_remove_from_list (later_id, &laters[i]))
-        return;
-    }
-}
-
 MetaLocaleDirection
 meta_get_locale_direction (void)
 {
@@ -991,6 +718,7 @@ meta_get_locale_direction (void)
       return META_LOCALE_DIRECTION_RTL;
     default:
       g_assert_not_reached ();
+      return 0;
     }
 }
 
@@ -1010,5 +738,37 @@ meta_generate_random_id (GRand *rand,
   return id;
 }
 
-/* eof util.c */
 
+void
+meta_add_clutter_debug_flags (ClutterDebugFlag     debug_flags,
+                              ClutterDrawDebugFlag draw_flags,
+                              ClutterPickDebugFlag pick_flags)
+{
+  clutter_add_debug_flags (debug_flags, draw_flags, pick_flags);
+}
+
+void
+meta_remove_clutter_debug_flags (ClutterDebugFlag     debug_flags,
+                                 ClutterDrawDebugFlag draw_flags,
+                                 ClutterPickDebugFlag pick_flags)
+{
+  clutter_remove_debug_flags (debug_flags, draw_flags, pick_flags);
+}
+
+void
+meta_add_debug_paint_flag (MetaDebugPaintFlag flag)
+{
+  debug_paint_flags |= flag;
+}
+
+void
+meta_remove_debug_paint_flag (MetaDebugPaintFlag flag)
+{
+  debug_paint_flags &= ~flag;
+}
+
+MetaDebugPaintFlag
+meta_get_debug_paint_flags (void)
+{
+  return debug_paint_flags;
+}

@@ -39,9 +39,7 @@
  *
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #include "cally-text.h"
 #include "cally-actor-private.h"
@@ -249,11 +247,7 @@ cally_text_finalize   (GObject *obj)
 /*   g_object_unref (cally_text->priv->textutil); */
 /*   cally_text->priv->textutil = NULL; */
 
-  if (cally_text->priv->insert_idle_handler)
-    {
-      g_source_remove (cally_text->priv->insert_idle_handler);
-      cally_text->priv->insert_idle_handler = 0;
-    }
+  g_clear_handle_id (&cally_text->priv->insert_idle_handler, g_source_remove);
 
   G_OBJECT_CLASS (cally_text_parent_class)->finalize (obj);
 }
@@ -1440,7 +1434,7 @@ static void cally_text_get_character_extents (AtkText *text,
   PangoLayout *layout;
   PangoRectangle extents;
   const gchar *text_value;
-  ClutterVertex verts[4];
+  graphene_point3d_t verts[4];
 
   actor = CALLY_GET_CLUTTER_ACTOR (text);
   if (actor == NULL) /* State is defunct */
@@ -1519,7 +1513,7 @@ cally_text_get_offset_at_point (AtkText *text,
 }
 
 
-/******** Auxiliar private methods ******/
+/******** Auxiliary private methods ******/
 
 /* ClutterText only maintains the current cursor position and a extra selection
    bound, but this could be before or after the cursor. This method returns
@@ -1558,7 +1552,7 @@ _cally_text_delete_text_cb (ClutterText *clutter_text,
 
   g_return_if_fail (CALLY_IS_TEXT (data));
 
-  /* Ignore zero lengh deletions */
+  /* Ignore zero length deletions */
   if (end_pos - start_pos == 0)
     return;
 
@@ -1659,7 +1653,7 @@ cally_text_insert_text (AtkEditableText *text,
   clutter_text_insert_text (CLUTTER_TEXT (actor),
                             string, *position);
 
-  /* we suppose that the text insertion will be succesful,
+  /* we suppose that the text insertion will be successful,
      clutter-text doesn't warn about it. A option would be search for
      the text, but it seems not really required */
   *position += length;
@@ -1872,7 +1866,7 @@ static gint
 _cally_atk_attribute_lookup_func (gconstpointer data,
                                   gconstpointer user_data)
 {
-    AtkTextAttribute attr = (AtkTextAttribute) user_data;
+    AtkTextAttribute attr = (AtkTextAttribute) GPOINTER_TO_INT (user_data);
     AtkAttribute *at = (AtkAttribute *) data;
     if (!g_strcmp0 (at->name, atk_text_attribute_get_name (attr)))
         return 0;
@@ -2296,7 +2290,7 @@ _cally_misc_get_index_at_point (ClutterText *clutter_text,
   gint index, x_window, y_window, x_toplevel, y_toplevel;
   gint x_temp, y_temp;
   gboolean ret;
-  ClutterVertex verts[4];
+  graphene_point3d_t verts[4];
   PangoLayout *layout;
   gint x_layout, y_layout;
 

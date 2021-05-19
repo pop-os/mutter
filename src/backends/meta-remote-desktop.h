@@ -26,6 +26,7 @@
 #include <glib-object.h>
 
 #include "backends/meta-dbus-session-watcher.h"
+
 #include "meta-dbus-remote-desktop.h"
 
 typedef struct _MetaRemoteDesktopSession MetaRemoteDesktopSession;
@@ -34,6 +35,10 @@ typedef struct _MetaRemoteDesktopSession MetaRemoteDesktopSession;
 G_DECLARE_FINAL_TYPE (MetaRemoteDesktop, meta_remote_desktop,
                       META, REMOTE_DESKTOP,
                       MetaDBusRemoteDesktopSkeleton)
+
+void meta_remote_desktop_inhibit (MetaRemoteDesktop *remote_desktop);
+
+void meta_remote_desktop_uninhibit (MetaRemoteDesktop *remote_desktop);
 
 MetaRemoteDesktopSession * meta_remote_desktop_get_session (MetaRemoteDesktop *remote_desktop,
                                                             const char        *session_id);

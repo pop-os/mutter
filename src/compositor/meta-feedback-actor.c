@@ -24,13 +24,14 @@
  * @short_description: Actor for painting user interaction feedback
  */
 
-#include <config.h>
+#include "config.h"
 
-#include "display-private.h"
-#include "compositor-private.h"
-#include "meta-feedback-actor-private.h"
+#include "compositor/compositor-private.h"
+#include "compositor/meta-feedback-actor-private.h"
+#include "core/display-private.h"
 
-enum {
+enum
+{
   PROP_ANCHOR_X = 1,
   PROP_ANCHOR_Y
 };
@@ -39,10 +40,12 @@ typedef struct _MetaFeedbackActorPrivate MetaFeedbackActorPrivate;
 
 struct _MetaFeedbackActorPrivate
 {
-  int anchor_x;
-  int anchor_y;
-  int pos_x;
-  int pos_y;
+  float anchor_x;
+  float anchor_y;
+  float pos_x;
+  float pos_y;
+
+  int geometry_scale;
 };
 
 G_DEFINE_TYPE_WITH_PRIVATE (MetaFeedbackActor, meta_feedback_actor, CLUTTER_TYPE_ACTOR)
@@ -51,10 +54,11 @@ static void
 meta_feedback_actor_constructed (GObject *object)
 {
   MetaDisplay *display;
+  ClutterActor *feedback_group;
 
   display = meta_get_display ();
-  clutter_actor_add_child (display->compositor->feedback_group,
-                           CLUTTER_ACTOR (object));
+  feedback_group = meta_get_feedback_group_for_display (display);
+  clutter_actor_add_child (feedback_group, CLUTTER_ACTOR (object));
 }
 
 static void
@@ -63,8 +67,10 @@ meta_feedback_actor_update_position (MetaFeedbackActor *self)
   MetaFeedbackActorPrivate *priv = meta_feedback_actor_get_instance_private (self);
 
   clutter_actor_set_position (CLUTTER_ACTOR (self),
-                              priv->pos_x - priv->anchor_x,
-                              priv->pos_y - priv->anchor_y);
+                              priv->pos_x -
+                              (priv->anchor_x * priv->geometry_scale),
+                              priv->pos_y -
+                              (priv->anchor_y * priv->geometry_scale));
 }
 
 static void
@@ -104,10 +110,10 @@ meta_feedback_actor_get_property (GObject      *object,
   switch (prop_id)
     {
     case PROP_ANCHOR_X:
-      g_value_set_int (value, priv->anchor_x);
+      g_value_set_float (value, priv->anchor_x);
       break;
     case PROP_ANCHOR_Y:
-      g_value_set_int (value, priv->anchor_y);
+      g_value_set_float (value, priv->anchor_y);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -125,21 +131,21 @@ meta_feedback_actor_class_init (MetaFeedbackActorClass *klass)
   object_class->set_property = meta_feedback_actor_set_property;
   object_class->get_property = meta_feedback_actor_get_property;
 
-  pspec = g_param_spec_int ("anchor-x",
-                            "Anchor X",
-                            "The X axis of the anchor point",
-                            0, G_MAXINT, 0,
-                            G_PARAM_READWRITE);
+  pspec = g_param_spec_float ("anchor-x",
+                              "Anchor X",
+                              "The X axis of the anchor point",
+                              0, G_MAXFLOAT, 0,
+                              G_PARAM_READWRITE);
 
   g_object_class_install_property (object_class,
                                    PROP_ANCHOR_X,
                                    pspec);
 
-  pspec = g_param_spec_int ("anchor-y",
-                            "Anchor Y",
-                            "The Y axis of the anchor point",
-                            0, G_MAXINT, 0,
-                            G_PARAM_READWRITE);
+  pspec = g_param_spec_float ("anchor-y",
+                              "Anchor Y",
+                              "The Y axis of the anchor point",
+                              0, G_MAXFLOAT, 0,
+                              G_PARAM_READWRITE);
 
   g_object_class_install_property (object_class,
                                    PROP_ANCHOR_Y,
@@ -160,8 +166,8 @@ meta_feedback_actor_init (MetaFeedbackActor *self)
  * Return value: the newly created background actor
  */
 ClutterActor *
-meta_feedback_actor_new (int anchor_x,
-                         int anchor_y)
+meta_feedback_actor_new (float anchor_x,
+                         float anchor_y)
 {
   MetaFeedbackActor *self;
 
@@ -175,8 +181,8 @@ meta_feedback_actor_new (int anchor_x,
 
 void
 meta_feedback_actor_set_anchor (MetaFeedbackActor *self,
-                                int                anchor_x,
-                                int                anchor_y)
+                                float              anchor_x,
+                                float              anchor_y)
 {
   MetaFeedbackActorPrivate *priv;
 
@@ -204,8 +210,8 @@ meta_feedback_actor_set_anchor (MetaFeedbackActor *self,
 
 void
 meta_feedback_actor_get_anchor (MetaFeedbackActor *self,
-                                int               *anchor_x,
-                                int               *anchor_y)
+                                float             *anchor_x,
+                                float             *anchor_y)
 {
   MetaFeedbackActorPrivate *priv;
 
@@ -221,8 +227,8 @@ meta_feedback_actor_get_anchor (MetaFeedbackActor *self,
 
 void
 meta_feedback_actor_set_position (MetaFeedbackActor  *self,
-                                  int                 x,
-                                  int                 y)
+                                  float               x,
+                                  float               y)
 {
   MetaFeedbackActorPrivate *priv;
 
@@ -239,11 +245,39 @@ void
 meta_feedback_actor_update (MetaFeedbackActor  *self,
                             const ClutterEvent *event)
 {
-  ClutterPoint point;
+  graphene_point_t point;
 
   g_return_if_fail (META_IS_FEEDBACK_ACTOR (self));
   g_return_if_fail (event != NULL);
 
   clutter_event_get_position (event, &point);
   meta_feedback_actor_set_position (self, point.x, point.y);
+}
+
+void
+meta_feedback_actor_set_geometry_scale (MetaFeedbackActor *self,
+                                        int                geometry_scale)
+{
+  MetaFeedbackActorPrivate *priv =
+    meta_feedback_actor_get_instance_private (self);
+  CoglMatrix child_transform;
+
+  if (priv->geometry_scale == geometry_scale)
+    return;
+
+  priv->geometry_scale = geometry_scale;
+
+  cogl_matrix_init_identity (&child_transform);
+  cogl_matrix_scale (&child_transform, geometry_scale, geometry_scale, 1);
+  clutter_actor_set_child_transform (CLUTTER_ACTOR (self),
+                                     &child_transform);
+}
+
+int
+meta_feedback_actor_get_geometry_scale (MetaFeedbackActor *self)
+{
+  MetaFeedbackActorPrivate *priv =
+    meta_feedback_actor_get_instance_private (self);
+
+  return priv->geometry_scale;
 }

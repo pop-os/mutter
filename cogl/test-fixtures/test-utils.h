@@ -33,11 +33,9 @@ typedef enum _TestFlags
   TEST_KNOWN_FAILURE = 1<<0,
   TEST_REQUIREMENT_GL = 1<<1,
   TEST_REQUIREMENT_NPOT = 1<<2,
-  TEST_REQUIREMENT_TEXTURE_3D = 1<<3,
   TEST_REQUIREMENT_TEXTURE_RECTANGLE = 1<<4,
   TEST_REQUIREMENT_TEXTURE_RG = 1<<5,
   TEST_REQUIREMENT_POINT_SPRITE = 1<<6,
-  TEST_REQUIREMENT_GLES2_CONTEXT = 1<<7,
   TEST_REQUIREMENT_MAP_WRITE = 1<<8,
   TEST_REQUIREMENT_GLSL = 1<<9,
   TEST_REQUIREMENT_OFFSCREEN = 1<<10,
@@ -59,7 +57,8 @@ typedef enum _TestFlags
  *
  * Flags to pass to the test_utils_texture_new_* family of functions.
  */
-typedef enum {
+typedef enum
+{
   TEST_UTILS_TEXTURE_NONE           = 0,
   TEST_UTILS_TEXTURE_NO_AUTO_MIPMAP = 1 << 0,
   TEST_UTILS_TEXTURE_NO_SLICING     = 1 << 1,
@@ -69,7 +68,7 @@ typedef enum {
 extern CoglContext *test_ctx;
 extern CoglFramebuffer *test_fb;
 
-void
+gboolean
 test_utils_init (TestFlags requirement_flags,
                  TestFlags known_failure_flags);
 
@@ -86,7 +85,7 @@ test_utils_fini (void);
  *
  * Creates a new #CoglTexture with the specified dimensions and pixel format.
  *
- * The storage for the texture is not necesarily created before this
+ * The storage for the texture is not necessarily created before this
  * function returns. The storage can be explicitly allocated using
  * cogl_texture_allocate() or preferably you can let Cogl
  * automatically allocate the storage lazily when uploading data when
@@ -112,7 +111,7 @@ test_utils_texture_new_with_size (CoglContext *ctx,
  * @rowstride: the memory offset in bytes between the starts of
  *    scanlines in @data
  * @data: pointer the memory region where the source buffer resides
- * @error: A #CoglError to catch exceptional errors or %NULL
+ * @error: A #GError to catch exceptional errors or %NULL
  *
  * Creates a new #CoglTexture based on data residing in memory.
  *
@@ -152,13 +151,13 @@ test_utils_texture_new_from_data (CoglContext *ctx,
 CoglTexture *
 test_utils_texture_new_from_bitmap (CoglBitmap *bitmap,
                                     TestUtilsTextureFlags flags,
-                                    CoglBool premultiplied);
+                                    gboolean premultiplied);
 
 /*
  * test_utils_check_pixel:
  * @framebuffer: The #CoglFramebuffer to read from
- * @x: x co-ordinate of the pixel to test
- * @y: y co-ordinate of the pixel to test
+ * @x: x coordinate of the pixel to test
+ * @y: y coordinate of the pixel to test
  * @pixel: An integer of the form 0xRRGGBBAA representing the expected
  *         pixel value
  *
@@ -174,8 +173,8 @@ test_utils_check_pixel (CoglFramebuffer *framebuffer,
 
 /**
  * @framebuffer: The #CoglFramebuffer to read from
- * @x: x co-ordinate of the pixel to test
- * @y: y co-ordinate of the pixel to test
+ * @x: x coordinate of the pixel to test
+ * @y: y coordinate of the pixel to test
  * @pixel: An integer of the form 0xRRGGBBAA representing the expected
  *         pixel value
  *
@@ -193,8 +192,8 @@ test_utils_check_pixel_and_alpha (CoglFramebuffer *fb,
 /*
  * test_utils_check_pixel:
  * @framebuffer: The #CoglFramebuffer to read from
- * @x: x co-ordinate of the pixel to test
- * @y: y co-ordinate of the pixel to test
+ * @x: x coordinate of the pixel to test
+ * @y: y coordinate of the pixel to test
  * @pixel: An integer of the form 0xrrggbb representing the expected pixel value
  *
  * This performs reads a pixel on the given cogl @framebuffer and
@@ -210,8 +209,8 @@ test_utils_check_pixel_rgb (CoglFramebuffer *framebuffer,
 /*
  * test_utils_check_region:
  * @framebuffer: The #CoglFramebuffer to read from
- * @x: x co-ordinate of the region to test
- * @y: y co-ordinate of the region to test
+ * @x: x coordinate of the region to test
+ * @y: y coordinate of the region to test
  * @width: width of the region to test
  * @height: height of the region to test
  * @pixel: An integer of the form 0xrrggbb representing the expected region color
@@ -269,7 +268,7 @@ test_utils_create_color_texture (CoglContext *context,
  *
  * Queries if the user asked for verbose output or not.
  */
-CoglBool
+gboolean
 cogl_test_verbose (void);
 
 /* test_util_is_pot:
@@ -277,7 +276,7 @@ cogl_test_verbose (void);
  *
  * Returns whether the given integer is a power of two
  */
-static inline CoglBool
+static inline gboolean
 test_utils_is_pot (unsigned int number)
 {
   /* Make sure there is only one bit set */

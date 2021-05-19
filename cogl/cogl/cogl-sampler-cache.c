@@ -30,17 +30,10 @@
  *   Neil Roberts <neil@linux.intel.com>
  */
 
-#ifdef HAVE_CONFIG_H
 #include "cogl-config.h"
-#endif
 
 #include "cogl-sampler-cache-private.h"
 #include "cogl-context-private.h"
-#include "cogl-util-gl-private.h"
-
-#ifndef GL_TEXTURE_WRAP_R
-#define GL_TEXTURE_WRAP_R 0x8072
-#endif
 
 struct _CoglSamplerCache
 {
@@ -56,10 +49,6 @@ struct _CoglSamplerCache
      GL state. */
   GHashTable *hash_table_cogl;
   GHashTable *hash_table_gl;
-
-  /* This is used for generated fake unique sampler object numbers
-     when the sampler object extension is not supported */
-  GLuint next_fake_sampler_object_number;
 };
 
 static CoglSamplerCacheWrapMode
@@ -79,10 +68,9 @@ canonicalize_key (CoglSamplerCacheEntry *key)
      sampler object for the state */
   key->wrap_mode_s = get_real_wrap_mode (key->wrap_mode_s);
   key->wrap_mode_t = get_real_wrap_mode (key->wrap_mode_t);
-  key->wrap_mode_p = get_real_wrap_mode (key->wrap_mode_p);
 }
 
-static CoglBool
+static gboolean
 wrap_mode_equal_gl (CoglSamplerCacheWrapMode wrap_mode0,
                     CoglSamplerCacheWrapMode wrap_mode1)
 {
@@ -92,7 +80,7 @@ wrap_mode_equal_gl (CoglSamplerCacheWrapMode wrap_mode0,
   return get_real_wrap_mode (wrap_mode0) == get_real_wrap_mode (wrap_mode1);
 }
 
-static CoglBool
+static gboolean
 sampler_state_equal_gl (const void *value0,
                         const void *value1)
 {
@@ -102,8 +90,7 @@ sampler_state_equal_gl (const void *value0,
   return (state0->mag_filter == state1->mag_filter &&
           state0->min_filter == state1->min_filter &&
           wrap_mode_equal_gl (state0->wrap_mode_s, state1->wrap_mode_s) &&
-          wrap_mode_equal_gl (state0->wrap_mode_t, state1->wrap_mode_t) &&
-          wrap_mode_equal_gl (state0->wrap_mode_p, state1->wrap_mode_p));
+          wrap_mode_equal_gl (state0->wrap_mode_t, state1->wrap_mode_t));
 }
 
 static unsigned int
@@ -132,12 +119,11 @@ hash_sampler_state_gl (const void *key)
                                         sizeof (entry->min_filter));
   hash = hash_wrap_mode_gl (hash, entry->wrap_mode_s);
   hash = hash_wrap_mode_gl (hash, entry->wrap_mode_t);
-  hash = hash_wrap_mode_gl (hash, entry->wrap_mode_p);
 
   return _cogl_util_one_at_a_time_mix (hash);
 }
 
-static CoglBool
+static gboolean
 sampler_state_equal_cogl (const void *value0,
                           const void *value1)
 {
@@ -147,8 +133,7 @@ sampler_state_equal_cogl (const void *value0,
   return (state0->mag_filter == state1->mag_filter &&
           state0->min_filter == state1->min_filter &&
           state0->wrap_mode_s == state1->wrap_mode_s &&
-          state0->wrap_mode_t == state1->wrap_mode_t &&
-          state0->wrap_mode_p == state1->wrap_mode_p);
+          state0->wrap_mode_t == state1->wrap_mode_t);
 }
 
 static unsigned int
@@ -165,8 +150,6 @@ hash_sampler_state_cogl (const void *key)
                                         sizeof (entry->wrap_mode_s));
   hash = _cogl_util_one_at_a_time_hash (hash, &entry->wrap_mode_t,
                                         sizeof (entry->wrap_mode_t));
-  hash = _cogl_util_one_at_a_time_hash (hash, &entry->wrap_mode_p,
-                                        sizeof (entry->wrap_mode_p));
 
   return _cogl_util_one_at_a_time_mix (hash);
 }
@@ -184,20 +167,8 @@ _cogl_sampler_cache_new (CoglContext *context)
                                            sampler_state_equal_gl);
   cache->hash_table_cogl = g_hash_table_new (hash_sampler_state_cogl,
                                              sampler_state_equal_cogl);
-  cache->next_fake_sampler_object_number = 1;
 
   return cache;
-}
-
-static void
-set_wrap_mode (CoglContext *context,
-               GLuint sampler_object,
-               GLenum param,
-               CoglSamplerCacheWrapMode wrap_mode)
-{
-  GE( context, glSamplerParameteri (sampler_object,
-                                    param,
-                                    wrap_mode) );
 }
 
 static CoglSamplerCacheEntry *
@@ -210,43 +181,9 @@ _cogl_sampler_cache_get_entry_gl (CoglSamplerCache *cache,
 
   if (entry == NULL)
     {
-      CoglContext *context = cache->context;
-
       entry = g_slice_dup (CoglSamplerCacheEntry, key);
 
-      if (_cogl_has_private_feature (context,
-                                     COGL_PRIVATE_FEATURE_SAMPLER_OBJECTS))
-        {
-          GE( context, glGenSamplers (1, &entry->sampler_object) );
-
-          GE( context, glSamplerParameteri (entry->sampler_object,
-                                            GL_TEXTURE_MIN_FILTER,
-                                            entry->min_filter) );
-          GE( context, glSamplerParameteri (entry->sampler_object,
-                                            GL_TEXTURE_MAG_FILTER,
-                                            entry->mag_filter) );
-
-          set_wrap_mode (context,
-                         entry->sampler_object,
-                         GL_TEXTURE_WRAP_S,
-                         entry->wrap_mode_s);
-          set_wrap_mode (context,
-                         entry->sampler_object,
-                         GL_TEXTURE_WRAP_T,
-                         entry->wrap_mode_t);
-          set_wrap_mode (context,
-                         entry->sampler_object,
-                         GL_TEXTURE_WRAP_R,
-                         entry->wrap_mode_p);
-        }
-      else
-        {
-          /* If sampler objects aren't supported then we'll invent a
-             unique number so that pipelines can still compare the
-             unique state just by comparing the sampler object
-             numbers */
-          entry->sampler_object = cache->next_fake_sampler_object_number++;
-        }
+      cache->context->driver_vtable->sampler_init (cache->context, entry);
 
       g_hash_table_insert (cache->hash_table_gl, entry, entry);
     }
@@ -289,7 +226,6 @@ _cogl_sampler_cache_get_default_entry (CoglSamplerCache *cache)
 
   key.wrap_mode_s = COGL_SAMPLER_CACHE_WRAP_MODE_AUTOMATIC;
   key.wrap_mode_t = COGL_SAMPLER_CACHE_WRAP_MODE_AUTOMATIC;
-  key.wrap_mode_p = COGL_SAMPLER_CACHE_WRAP_MODE_AUTOMATIC;
 
   key.min_filter = GL_LINEAR;
   key.mag_filter = GL_LINEAR;
@@ -301,14 +237,12 @@ const CoglSamplerCacheEntry *
 _cogl_sampler_cache_update_wrap_modes (CoglSamplerCache *cache,
                                        const CoglSamplerCacheEntry *old_entry,
                                        CoglSamplerCacheWrapMode wrap_mode_s,
-                                       CoglSamplerCacheWrapMode wrap_mode_t,
-                                       CoglSamplerCacheWrapMode wrap_mode_p)
+                                       CoglSamplerCacheWrapMode wrap_mode_t)
 {
   CoglSamplerCacheEntry key = *old_entry;
 
   key.wrap_mode_s = wrap_mode_s;
   key.wrap_mode_t = wrap_mode_t;
-  key.wrap_mode_p = wrap_mode_p;
 
   return _cogl_sampler_cache_get_entry_cogl (cache, &key);
 }
@@ -335,9 +269,7 @@ hash_table_free_gl_cb (void *key,
   CoglContext *context = user_data;
   CoglSamplerCacheEntry *entry = value;
 
-  if (_cogl_has_private_feature (context,
-                                 COGL_PRIVATE_FEATURE_SAMPLER_OBJECTS))
-    GE( context, glDeleteSamplers (1, &entry->sampler_object) );
+  context->driver_vtable->sampler_free (context, entry);
 
   g_slice_free (CoglSamplerCacheEntry, entry);
 }

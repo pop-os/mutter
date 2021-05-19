@@ -6,14 +6,16 @@
 # Данило Шеган <danilo@prevod.org>, 2005.
 # Милош Поповић <gpopac@gmail.com>, 2010.
 # Мирослав Николић <miroslavnikolic@rocketmail.com>, 2011—2017.
+# Марко М. Костић <marko.m.kostic@gmail.com>, 2020.
+#
 msgid ""
 msgstr ""
 "Project-Id-Version: mutter\n"
 "Report-Msgid-Bugs-To: https://gitlab.gnome.org/GNOME/mutter/issues\n"
-"POT-Creation-Date: 2018-09-06 15:48+0000\n"
-"PO-Revision-Date: 2018-09-29 12:05+0200\n"
+"POT-Creation-Date: 2020-08-29 10:31+0000\n"
+"PO-Revision-Date: 2020-08-31 16:29+0200\n"
 "Last-Translator: Марко М. Костић <marko.m.kostic@gmail.com>\n"
-"Language-Team: српски <gnome-sr@googlegroups.org>\n"
+"Language-Team: Serbian <gnome-sr@googlegroups.org>\n"
 "Language: sr\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -21,7 +23,7 @@ msgstr ""
 "Plural-Forms: nplurals=4; plural=n==1? 3 : n%10==1 && n%100!=11 ? 0 : n"
 "%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2;\n"
 "X-Project-Style: gnome\n"
-"X-Generator: Poedit 2.0.6\n"
+"X-Generator: Poedit 2.4.1\n"
 
 #: data/50-mutter-navigation.xml:6
 msgid "Navigation"
@@ -397,7 +399,10 @@ msgid ""
 "proof. Currently possible keywords: • “scale-monitor-framebuffer” — makes "
 "mutter default to layout logical monitors in a logical pixel coordinate "
 "space, while scaling monitor framebuffers instead of window content, to "
-"manage HiDPI monitors. Does not require a restart."
+"manage HiDPI monitors. Does not require a restart. • “rt-scheduler” — makes "
+"mutter request a low priority real-time scheduling. The executable or user "
+"must have CAP_SYS_NICE. Requires a restart. • “autostart-xwayland” — "
+"initializes Xwayland lazily if there are X11 clients. Requires restart."
 msgstr ""
 "Да укључите пробне функције, додајте кључну реч функције на списак. Да ли "
 "функција захтева поновно покретање састављача зависи од дате функције. Није "
@@ -407,106 +412,140 @@ msgstr ""
 "да матер подразумевано распоређује логичке екране у логичком координантном "
 "простору пиксела, приликом промене величине спремишта кадрова екрана уместо "
 "садржаја прозора, зарад управљања екранима високе резолуције. Не захтева "
-"поновно покретање."
+"поновно покретање. • „rt-scheduler“ — чини да матер затражи заказивање у "
+"реалном времену нижег приоритета. Извршна датотека или корисник мора имати "
+"CAP_SYS_NICE. Потребно је поновно покретање. • “autostart-xwayland” — лењо "
+"покреће Икс-вејланд ако има Икс11 клијената. Потребно је поновно покретање."
 
-#: data/org.gnome.mutter.gschema.xml.in:141
+#: data/org.gnome.mutter.gschema.xml.in:134
+msgid "Modifier to use to locate the pointer"
+msgstr "Тастер који се користи за проналажење показивача"
+
+#: data/org.gnome.mutter.gschema.xml.in:135
+msgid "This key will initiate the “locate pointer” action."
+msgstr "Овај тастер ће покренути „пронађи показивач“ радњу"
+
+#: data/org.gnome.mutter.gschema.xml.in:142
+msgid "Timeout for check-alive ping"
+msgstr "Време истицања провере живахности"
+
+#: data/org.gnome.mutter.gschema.xml.in:143
+msgid ""
+"Number of milliseconds a client has to respond to a ping request in order to "
+"not be detected as frozen. Using 0 will disable the alive check completely."
+msgstr ""
+"Број милисекунди за које клијент мора одговорити на пинг захтев да се не би "
+"сматрао замрзнутим. Унос броја 0 ће онемогућити проверу живахности у "
+"потпуности."
+
+#: data/org.gnome.mutter.gschema.xml.in:165
 msgid "Select window from tab popup"
 msgstr "Бира прозор из језичка искакања"
 
-#: data/org.gnome.mutter.gschema.xml.in:146
+#: data/org.gnome.mutter.gschema.xml.in:170
 msgid "Cancel tab popup"
 msgstr "Отказивање језичка искакања"
 
-#: data/org.gnome.mutter.gschema.xml.in:151
+#: data/org.gnome.mutter.gschema.xml.in:175
 msgid "Switch monitor configurations"
 msgstr "Мења подешавања монитора"
 
-#: data/org.gnome.mutter.gschema.xml.in:156
+#: data/org.gnome.mutter.gschema.xml.in:180
 msgid "Rotates the built-in monitor configuration"
 msgstr "Заокреће уграђена подешавања монитора"
 
-#: data/org.gnome.mutter.wayland.gschema.xml.in:6
+#: data/org.gnome.mutter.wayland.gschema.xml.in:12
 msgid "Switch to VT 1"
 msgstr "Прелазак на ВТ 1"
 
-#: data/org.gnome.mutter.wayland.gschema.xml.in:10
+#: data/org.gnome.mutter.wayland.gschema.xml.in:16
 msgid "Switch to VT 2"
 msgstr "Прелазак на ВТ 2"
 
-#: data/org.gnome.mutter.wayland.gschema.xml.in:14
+#: data/org.gnome.mutter.wayland.gschema.xml.in:20
 msgid "Switch to VT 3"
 msgstr "Прелазак на ВТ 3"
 
-#: data/org.gnome.mutter.wayland.gschema.xml.in:18
+#: data/org.gnome.mutter.wayland.gschema.xml.in:24
 msgid "Switch to VT 4"
 msgstr "Прелазак на ВТ 4"
 
-#: data/org.gnome.mutter.wayland.gschema.xml.in:22
+#: data/org.gnome.mutter.wayland.gschema.xml.in:28
 msgid "Switch to VT 5"
 msgstr "Прелазак на ВТ 5"
 
-#: data/org.gnome.mutter.wayland.gschema.xml.in:26
+#: data/org.gnome.mutter.wayland.gschema.xml.in:32
 msgid "Switch to VT 6"
 msgstr "Прелазак на ВТ 6"
 
-#: data/org.gnome.mutter.wayland.gschema.xml.in:30
+#: data/org.gnome.mutter.wayland.gschema.xml.in:36
 msgid "Switch to VT 7"
 msgstr "Прелазак на ВТ 7"
 
-#: data/org.gnome.mutter.wayland.gschema.xml.in:34
+#: data/org.gnome.mutter.wayland.gschema.xml.in:40
 msgid "Switch to VT 8"
 msgstr "Прелазак на ВТ 8"
 
-#: data/org.gnome.mutter.wayland.gschema.xml.in:38
+#: data/org.gnome.mutter.wayland.gschema.xml.in:44
 msgid "Switch to VT 9"
 msgstr "Прелазак на ВТ 9"
 
-#: data/org.gnome.mutter.wayland.gschema.xml.in:42
+#: data/org.gnome.mutter.wayland.gschema.xml.in:48
 msgid "Switch to VT 10"
 msgstr "Прелазак на ВТ 10"
 
-#: data/org.gnome.mutter.wayland.gschema.xml.in:46
+#: data/org.gnome.mutter.wayland.gschema.xml.in:52
 msgid "Switch to VT 11"
 msgstr "Прелазак на ВТ 11"
 
-#: data/org.gnome.mutter.wayland.gschema.xml.in:50
+#: data/org.gnome.mutter.wayland.gschema.xml.in:56
 msgid "Switch to VT 12"
 msgstr "Прелазак на ВТ 12"
 
-#: data/org.gnome.mutter.wayland.gschema.xml.in:54
+#: data/org.gnome.mutter.wayland.gschema.xml.in:60
 msgid "Re-enable shortcuts"
 msgstr "Поново укључивање пречица"
 
-#: data/org.gnome.mutter.wayland.gschema.xml.in:64
-msgid "Allow grabs with Xwayland"
-msgstr "Дозволи грабљење на Икс-вејленду"
+#: data/org.gnome.mutter.wayland.gschema.xml.in:70
+msgid "Allow X11 grabs to lock keyboard focus with Xwayland"
+msgstr "Дозволи Икс11 грабљења да закључају фокус тастатуре у Икс-вејланду"
 
-#: data/org.gnome.mutter.wayland.gschema.xml.in:65
+#: data/org.gnome.mutter.wayland.gschema.xml.in:71
 msgid ""
-"Allow keyboard grabs issued by X11 applications running in Xwayland to be "
-"taken into account. For a X11 grab to be taken into account under Wayland, "
-"the client must also either send a specific X11 ClientMessage to the root "
-"window or be among the applications white-listed in key “xwayland-grab-"
-"access-rules”."
+"Allow all keyboard events to be routed to X11 “override redirect” windows "
+"with a grab when running in Xwayland. This option is to support X11 clients "
+"which map an “override redirect” window (which do not receive keyboard "
+"focus) and issue a keyboard grab to force all keyboard events to that "
+"window. This option is seldom used and has no effect on regular X11 windows "
+"which can receive keyboard focus under normal circumstances. For a X11 grab "
+"to be taken into account under Wayland, the client must also either send a "
+"specific X11 ClientMessage to the root window or be among the applications "
+"allowed in key “xwayland-grab-access-rules”."
 msgstr ""
-"Дозволи да се узму у обзир грабљења од стране Икс11 програма унутар Икс-"
-"вејленда. Да би се Икс11 грабљење узело у обзир под Вејлендом, клијент мора "
-"такође послати специфичну Икс11 клијентску поруку ка кореном прозору или "
-"мора бити на белом списку програма у кључу „xwayland-grab-access-rules“."
+"Дозволи да се сви догађаји тастатуре преусмере на Икс11 \"override redirect"
+"\" прозоре са грабљењем када се извршавају унутар Икс-вејленда. Ова опција "
+"постоји као подршка за Икс11 клијенте који мапирају \"override redirect\" "
+"прозор (који не добија фокус тастатуре) па онда пошаљу грабљење тастатуре "
+"које присили све догађаје са тастатуре на овај прозор. Ова опција се ретко "
+"користи и нема утицаја на обичне Икс11 прозоре који могу бити у фокусу "
+"тастатуре у обичним околностима. Да би се Икс11 грабљење узело у обзир под "
+"Вејлендом, клијент такође мора или послати одређену Икс11 клијентску поруку "
+"у корени прозор или мора бити одобрени програм у кључу \"xwayland-grab-"
+"access-rules\"."
 
-#: data/org.gnome.mutter.wayland.gschema.xml.in:77
+#: data/org.gnome.mutter.wayland.gschema.xml.in:90
 msgid "Xwayland applications allowed to issue keyboard grabs"
 msgstr "Икс-вејленд програми којима је дозвољено да раде грабљења на тастатури"
 
-#: data/org.gnome.mutter.wayland.gschema.xml.in:78
+#: data/org.gnome.mutter.wayland.gschema.xml.in:91
 msgid ""
 "List the resource names or resource class of X11 windows either allowed or "
 "not allowed to issue X11 keyboard grabs under Xwayland. The resource name or "
 "resource class of a given X11 window can be obtained using the command "
 "“xprop WM_CLASS”. Wildcards “*” and jokers “?” in the values are supported. "
-"Values starting with “!” are blacklisted, which has precedence over the "
-"whitelist, to revoke applications from the default system list. The default "
-"system list includes the following applications: "
+"Values starting with “!” are denied, which has precedence over the list of "
+"values allowed, to revoke applications from the default system list. The "
+"default system list includes the following applications: "
 "“@XWAYLAND_GRAB_DEFAULT_ACCESS_RULES@” Users can break an existing grab by "
 "using the specific keyboard shortcut defined by the keybinding key “restore-"
 "shortcuts”."
@@ -515,17 +554,33 @@ msgstr ""
 "или забрањено да раде грабљења на тастатури под Икс-вејлендом. Назив ресурса "
 "или класа ресурса датог Икс11 прозора се може наћи преко наредбе \"xprop "
 "WM_CLASS\". Џокер знакови „*“ и „?“ унутар вредности су подржани. Вредности "
-"које почињу са „!“ се стављају на црни списак, који има предност у односу на "
-"бели списак, за опозив програма за подразумеваног системског списка. "
-"Подразумевани системски списак садржи следеће програме: "
+"које почињу са „!“ се одбацују, овај списак има предност у односу на списак "
+"дозвољених вредности, за опозив програма за подразумеваног системског "
+"списка. Подразумевани системски списак садржи следеће програме: "
 "\"@XWAYLAND_GRAB_DEFAULT_ACCESS_RULES@\" Корисници могу сломити постојеће "
 "грабљење тако што ће употребити посебну пречицу на тастатури која је "
 "наведена у кључу за везивање тастера са називом \"restore-shortcuts\"."
 
+#: data/org.gnome.mutter.wayland.gschema.xml.in:116
+msgid "Disable selected X extensions in Xwayland"
+msgstr "Онемогући изабраних Н проширења у Икс-вејленду"
+
+#: data/org.gnome.mutter.wayland.gschema.xml.in:117
+msgid ""
+"This option disables the selected X extensions in Xwayland if Xwayland was "
+"built with support for those X extensions. This option has no effect if "
+"Xwayland was built without support for the selected extensions. Xwayland "
+"needs to be restarted for this setting to take effect."
+msgstr ""
+"Ова опција онемогућава изабраних Н проширења у Икс-Вејленду ако је Икс-"
+"Вејленд изграђен са подршком за та Н проширења. Ова опција не делује ако је "
+"Икс-Вејленд изграђен без подршке за изабрана проширења. Икс-Вејленд мора "
+"бити поново покренут да би ово подешавање ступило на снагу."
+
 #. TRANSLATORS: This string refers to a button that switches between
 #. * different modes.
 #.
-#: src/backends/meta-input-settings.c:2325
+#: src/backends/meta-input-settings.c:2698
 #, c-format
 msgid "Mode Switch (Group %d)"
 msgstr "Режим прекидача (група %d)"
@@ -533,102 +588,114 @@ msgstr "Режим прекидача (група %d)"
 #. TRANSLATORS: This string refers to an action, cycles drawing tablets'
 #. * mapping through the available outputs.
 #.
-#: src/backends/meta-input-settings.c:2348
+#: src/backends/meta-input-settings.c:2721
 msgid "Switch monitor"
 msgstr "Промени монитор"
 
-#: src/backends/meta-input-settings.c:2350
+#: src/backends/meta-input-settings.c:2723
 msgid "Show on-screen help"
 msgstr "Прикажи помоћ на екрану"
 
-#: src/backends/meta-monitor-manager.c:886
+#: src/backends/meta-monitor.c:235
 msgid "Built-in display"
 msgstr "Уграђени дисплеј"
 
-#: src/backends/meta-monitor-manager.c:909
+#: src/backends/meta-monitor.c:264
 msgid "Unknown"
 msgstr "Непознато"
 
-#: src/backends/meta-monitor-manager.c:911
+#: src/backends/meta-monitor.c:266
 msgid "Unknown Display"
 msgstr "Непознат дисплеј"
 
-#. TRANSLATORS: this is a monitor vendor name, followed by a
-#. * size in inches, like 'Dell 15"'
-#.
-#: src/backends/meta-monitor-manager.c:919
+#: src/backends/meta-monitor.c:274
 #, c-format
+msgctxt ""
+"This is a monitor vendor name, followed by a size in inches, like 'Dell 15\"'"
 msgid "%s %s"
 msgstr "%s %s"
 
+#: src/backends/meta-monitor.c:282
+#, c-format
+msgctxt ""
+"This is a monitor vendor name followed by product/model name where size in "
+"inches could not be calculated, e.g. Dell U2414H"
+msgid "%s %s"
+msgstr "%s %s"
+
+#. Translators: this string will appear in Sysprof
+#: src/backends/meta-profiler.c:79
+msgid "Compositor"
+msgstr "Састављач"
+
 #. This probably means that a non-WM compositor like xcompmgr is running;
 #. * we have no way to get it to exit
-#: src/compositor/compositor.c:481
+#: src/compositor/compositor.c:516
 #, c-format
 msgid ""
 "Another compositing manager is already running on screen %i on display “%s”."
 msgstr ""
 "Неки други композитни управник је већ покренут на приказу %i екрана „%s“."
 
-#: src/core/bell.c:254
+#: src/core/bell.c:192
 msgid "Bell event"
 msgstr "Звонца"
 
-#: src/core/main.c:191
+#: src/core/main.c:190
 msgid "Disable connection to session manager"
 msgstr "Искључује везу са управником сесије"
 
-#: src/core/main.c:197
+#: src/core/main.c:196
 msgid "Replace the running window manager"
 msgstr "Мења текућег управника прозорима"
 
-#: src/core/main.c:203
+#: src/core/main.c:202
 msgid "Specify session management ID"
 msgstr "Наводи ИБ управника сесије"
 
-#: src/core/main.c:208
+#: src/core/main.c:207
 msgid "X Display to use"
 msgstr "Икс екран који ће бити коришћен"
 
-#: src/core/main.c:214
+#: src/core/main.c:213
 msgid "Initialize session from savefile"
 msgstr "Покреће сесију из датотеке чувања"
 
-#: src/core/main.c:220
+#: src/core/main.c:219
 msgid "Make X calls synchronous"
 msgstr "Чини Икс позиве усклађеним"
 
-#: src/core/main.c:227
+#: src/core/main.c:226
 msgid "Run as a wayland compositor"
 msgstr "Ради као вејлендов композитор"
 
-#: src/core/main.c:233
+#: src/core/main.c:232
 msgid "Run as a nested compositor"
 msgstr "Ради као угнежђени композитор"
 
-#: src/core/main.c:239
+#: src/core/main.c:238
 msgid "Run wayland compositor without starting Xwayland"
 msgstr "Ради као вејлендов композитор без покретања Икс-вејленда"
 
-#: src/core/main.c:247
+#: src/core/main.c:246
 msgid "Run as a full display server, rather than nested"
 msgstr "Ради као пуни сервер приказа, уместо као угнеждени"
 
-#: src/core/main.c:253
+#: src/core/main.c:252
 msgid "Run with X11 backend"
 msgstr "Покрени на Икс11 позадинцу"
 
 #. Translators: %s is a window title
-#: src/core/meta-close-dialog-default.c:148
+#: src/core/meta-close-dialog-default.c:151
 #, c-format
 msgid "“%s” is not responding."
 msgstr "„%s“ не даје одзив."
 
-#: src/core/meta-close-dialog-default.c:150
+#: src/core/meta-close-dialog-default.c:153
 msgid "Application is not responding."
 msgstr "Програм не даје одзив."
 
-#: src/core/meta-close-dialog-default.c:155
+#: src/core/meta-close-dialog-default.c:158
 msgid ""
 "You may choose to wait a short while for it to continue or force the "
 "application to quit entirely."
@@ -636,15 +703,15 @@ msgstr ""
 "Можете мало сачекати док се програм не сабере или приморати програм да "
 "комплетно прекине са радом."
 
-#: src/core/meta-close-dialog-default.c:162
+#: src/core/meta-close-dialog-default.c:165
 msgid "_Force Quit"
 msgstr "_Приморај излаз"
 
-#: src/core/meta-close-dialog-default.c:162
+#: src/core/meta-close-dialog-default.c:165
 msgid "_Wait"
 msgstr "_Сачекај"
 
-#: src/core/mutter.c:39
+#: src/core/mutter.c:38
 #, c-format
 msgid ""
 "mutter %s\n"
@@ -659,29 +726,29 @@ msgstr ""
 "НЕ постоји никаква гаранција; чак ни гаранција о ТРЖИШНОЈ ВРЕДНОСТИ или "
 "ПРИЛАГОЂЕНОСТИ ОДРЕЂЕНОЈ НАМЕНИ.\n"
 
-#: src/core/mutter.c:53
+#: src/core/mutter.c:52
 msgid "Print version"
 msgstr "Исписује издање"
 
-#: src/core/mutter.c:59
+#: src/core/mutter.c:58
 msgid "Mutter plugin to use"
 msgstr "Прикључци Матера за коришћење"
 
-#: src/core/prefs.c:1787
+#: src/core/prefs.c:1911
 #, c-format
 msgid "Workspace %d"
 msgstr "%d. радни простор"
 
-#: src/core/util.c:120
+#: src/core/util.c:119
 msgid "Mutter was compiled without support for verbose mode\n"
 msgstr "Матер је преведен без подршке за опширан режим\n"
 
-#: src/wayland/meta-wayland-tablet-pad.c:567
+#: src/wayland/meta-wayland-tablet-pad.c:568
 #, c-format
 msgid "Mode Switch: Mode %d"
 msgstr "Режим прекидача: Режим %d"
 
-#: src/x11/meta-x11-display.c:666
+#: src/x11/meta-x11-display.c:676
 #, c-format
 msgid ""
 "Display “%s” already has a window manager; try using the --replace option to "
@@ -690,21 +757,26 @@ msgstr ""
 "Приказ „%s“ већ има управника прозора; пробајте да користите опцију „--"
 "replace“ да замените тренутног управника прозора."
 
-#: src/x11/meta-x11-display.c:1010
+#: src/x11/meta-x11-display.c:1089
 msgid "Failed to initialize GDK\n"
 msgstr "Нисам успео да покренем ГДК\n"
 
-#: src/x11/meta-x11-display.c:1034
+#: src/x11/meta-x11-display.c:1113
 #, c-format
 msgid "Failed to open X Window System display “%s”\n"
 msgstr "Нисам успео да отворим екран „%s“ Икс система прозора\n"
 
-#: src/x11/meta-x11-display.c:1117
+#: src/x11/meta-x11-display.c:1196
 #, c-format
 msgid "Screen %d on display “%s” is invalid\n"
 msgstr "Приказ „%d“ на екрану „%s“ није исправан\n"
 
-#: src/x11/session.c:1819
+#: src/x11/meta-x11-selection-input-stream.c:460
+#, c-format
+msgid "Format %s not supported"
+msgstr "Формат %s није подржан"
+
+#: src/x11/session.c:1821
 msgid ""
 "These windows do not support “save current setup” and will have to be "
 "restarted manually next time you log in."
@@ -712,7 +784,7 @@ msgstr ""
 "Ови прозори не подржавају могућност „сачувај тренутна подешавања“ па ћете "
 "морати ручно да их поново покренете када се следећи пут пријавите."
 
-#: src/x11/window-props.c:565
+#: src/x11/window-props.c:548
 #, c-format
 msgid "%s (on %s)"
 msgstr "%s (на %s)"

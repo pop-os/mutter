@@ -21,7 +21,7 @@
 
 #include "config.h"
 
-#include "meta-cursor.h"
+#include "backends/meta-cursor.h"
 
 #include "backends/meta-backend-private.h"
 #include "cogl/cogl.h"
@@ -43,6 +43,7 @@ typedef struct _MetaCursorSpritePrivate
 
   CoglTexture2D *texture;
   float texture_scale;
+  MetaMonitorTransform texture_transform;
   int hot_x, hot_y;
 } MetaCursorSpritePrivate;
 
@@ -91,11 +92,6 @@ meta_cursor_sprite_set_texture (MetaCursorSprite *sprite,
   MetaCursorSpritePrivate *priv =
     meta_cursor_sprite_get_instance_private (sprite);
 
-  if (priv->texture == COGL_TEXTURE_2D (texture) &&
-      priv->hot_x == hot_x &&
-      priv->hot_y == hot_y)
-    return;
-
   g_clear_pointer (&priv->texture, cogl_object_unref);
   if (texture)
     priv->texture = cogl_object_ref (texture);
@@ -113,6 +109,16 @@ meta_cursor_sprite_set_texture_scale (MetaCursorSprite *sprite,
     meta_cursor_sprite_get_instance_private (sprite);
 
   priv->texture_scale = scale;
+}
+
+void
+meta_cursor_sprite_set_texture_transform (MetaCursorSprite     *sprite,
+                                          MetaMonitorTransform  transform)
+{
+  MetaCursorSpritePrivate *priv =
+    meta_cursor_sprite_get_instance_private (sprite);
+
+  priv->texture_transform = transform;
 }
 
 CoglTexture *
@@ -136,6 +142,24 @@ meta_cursor_sprite_get_hotspot (MetaCursorSprite *sprite,
   *hot_y = priv->hot_y;
 }
 
+int
+meta_cursor_sprite_get_width (MetaCursorSprite *sprite)
+{
+  CoglTexture *texture;
+
+  texture = meta_cursor_sprite_get_cogl_texture (sprite);
+  return cogl_texture_get_width (texture);
+}
+
+int
+meta_cursor_sprite_get_height (MetaCursorSprite *sprite)
+{
+  CoglTexture *texture;
+
+  texture = meta_cursor_sprite_get_cogl_texture (sprite);
+  return cogl_texture_get_height (texture);
+}
+
 float
 meta_cursor_sprite_get_texture_scale (MetaCursorSprite *sprite)
 {
@@ -143,6 +167,15 @@ meta_cursor_sprite_get_texture_scale (MetaCursorSprite *sprite)
     meta_cursor_sprite_get_instance_private (sprite);
 
   return priv->texture_scale;
+}
+
+MetaMonitorTransform
+meta_cursor_sprite_get_texture_transform (MetaCursorSprite *sprite)
+{
+  MetaCursorSpritePrivate *priv =
+    meta_cursor_sprite_get_instance_private (sprite);
+
+  return priv->texture_transform;
 }
 
 void
@@ -156,10 +189,7 @@ meta_cursor_sprite_prepare_at (MetaCursorSprite *sprite,
 void
 meta_cursor_sprite_realize_texture (MetaCursorSprite *sprite)
 {
-  MetaCursorSpriteClass *klass = META_CURSOR_SPRITE_GET_CLASS (sprite);
-
-  if (klass->realize_texture)
-    klass->realize_texture (sprite);
+  META_CURSOR_SPRITE_GET_CLASS (sprite)->realize_texture (sprite);
 }
 
 static void
@@ -169,6 +199,7 @@ meta_cursor_sprite_init (MetaCursorSprite *sprite)
     meta_cursor_sprite_get_instance_private (sprite);
 
   priv->texture_scale = 1.0f;
+  priv->texture_transform = META_MONITOR_TRANSFORM_NORMAL;
 }
 
 static void

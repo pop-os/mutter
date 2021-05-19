@@ -21,7 +21,7 @@
  */
 
 /**
- * SECTION:display
+ * SECTION:x11-display
  * @title: MetaX11Display
  * @short_description: Mutter X display handler
  *
@@ -34,27 +34,26 @@
 #include "x11/meta-x11-display-private.h"
 
 #include <gdk/gdk.h>
-
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
 #include <X11/Xatom.h>
 #include <X11/XKBlib.h>
-#ifdef HAVE_RANDR
-#include <X11/extensions/Xrandr.h>
-#endif
 #include <X11/extensions/shape.h>
 #include <X11/Xcursor/Xcursor.h>
 #include <X11/extensions/Xcomposite.h>
 #include <X11/extensions/Xdamage.h>
 #include <X11/extensions/Xfixes.h>
 #include <X11/extensions/Xinerama.h>
+#include <X11/extensions/Xrandr.h>
 
 #include "backends/meta-backend-private.h"
+#include "backends/meta-dnd-private.h"
+#include "backends/meta-cursor-sprite-xcursor.h"
 #include "backends/meta-logical-monitor.h"
 #include "backends/meta-settings-private.h"
 #include "backends/x11/meta-backend-x11.h"
+#include "backends/x11/meta-stage-x11.h"
 #include "core/frame.h"
 #include "core/meta-workspace-manager-private.h"
 #include "core/util-private.h"
@@ -64,6 +63,7 @@
 
 #include "x11/events.h"
 #include "x11/group-props.h"
+#include "x11/meta-x11-selection-private.h"
 #include "x11/window-props.h"
 #include "x11/xprops.h"
 
@@ -98,13 +98,57 @@ static void prefs_changed_callback (MetaPreference pref,
                                     void          *data);
 
 static void
+meta_x11_display_unmanage_windows (MetaX11Display *x11_display)
+{
+  GList *windows, *l;
+
+  if (!x11_display->xids)
+    return;
+
+  windows = g_hash_table_get_values (x11_display->xids);
+  g_list_foreach (windows, (GFunc) g_object_ref, NULL);
+
+  for (l = windows; l; l = l->next)
+    {
+      if (META_IS_WINDOW (l->data))
+        {
+          MetaWindow *window = l->data;
+
+          if (!window->unmanaging)
+            meta_window_unmanage (window, META_CURRENT_TIME);
+        }
+      else if (META_IS_BARRIER (l->data))
+        meta_barrier_destroy (META_BARRIER (l->data));
+      else
+        g_assert_not_reached ();
+    }
+  g_list_free_full (windows, g_object_unref);
+}
+
+static void
 meta_x11_display_dispose (GObject *object)
 {
   MetaX11Display *x11_display = META_X11_DISPLAY (object);
 
+  x11_display->closing = TRUE;
+
+  if (x11_display->empty_region != None)
+    {
+      XFixesDestroyRegion (x11_display->xdisplay,
+                           x11_display->empty_region);
+      x11_display->empty_region = None;
+    }
+
+  meta_x11_startup_notification_release (x11_display);
+
   meta_prefs_remove_listener (prefs_changed_callback, x11_display);
 
   meta_x11_display_ungrab_keys (x11_display);
+
+  g_clear_object (&x11_display->x11_stack);
+
+  meta_x11_selection_shutdown (x11_display);
+  meta_x11_display_unmanage_windows (x11_display);
 
   if (x11_display->ui)
     {
@@ -148,21 +192,8 @@ meta_x11_display_dispose (GObject *object)
 
   if (x11_display->guard_window != None)
     {
-      MetaStackTracker *stack_tracker = x11_display->display->stack_tracker;
-
-      if (stack_tracker)
-        {
-          unsigned long serial;
-
-          serial = XNextRequest (x11_display->xdisplay);
-          meta_stack_tracker_record_remove (stack_tracker,
-                                            x11_display->guard_window,
-                                            serial);
-        }
-
       XUnmapWindow (x11_display->xdisplay, x11_display->guard_window);
       XDestroyWindow (x11_display->xdisplay, x11_display->guard_window);
-
       x11_display->guard_window = None;
     }
 
@@ -215,11 +246,7 @@ meta_x11_display_dispose (GObject *object)
       x11_display->gdk_display = NULL;
     }
 
-  if (x11_display->display_close_idle)
-    {
-      g_source_remove (x11_display->display_close_idle);
-      x11_display->display_close_idle = 0;
-    }
+  g_clear_handle_id (&x11_display->display_close_idle, g_source_remove);
 
   g_free (x11_display->name);
   x11_display->name = NULL;
@@ -411,10 +438,8 @@ query_xi_extension (MetaX11Display *x11_display)
           if (version >= 22)
             has_xi = TRUE;
 
-#ifdef HAVE_XI23
           if (version >= 23)
             x11_display->have_xinput_23 = TRUE;
-#endif /* HAVE_XI23 */
         }
     }
 
@@ -423,7 +448,7 @@ query_xi_extension (MetaX11Display *x11_display)
 }
 
 /*
- * Initialises the bell subsystem. This involves intialising
+ * Initialises the bell subsystem. This involves initialising
  * XKB (which, despite being a keyboard extension, is the
  * place to look for bell notifications), then asking it
  * to send us bell notifications, and then also switching
@@ -466,6 +491,13 @@ init_x11_bell (MetaX11Display *x11_display)
                                    &mask);
         }
     }
+
+  /* We are playing sounds using libcanberra support, we handle the
+   * bell whether its an audible bell or a visible bell */
+  XkbChangeEnabledControls (x11_display->xdisplay,
+                            XkbUseCoreKbd,
+                            XkbAudibleBellMask,
+                            0);
 }
 
 /*
@@ -481,36 +513,6 @@ shutdown_x11_bell (MetaX11Display *x11_display)
                             XkbUseCoreKbd,
                             XkbAudibleBellMask,
                             XkbAudibleBellMask);
-}
-
-/*
- * Turns the bell to audible or visual. This tells X what to do, but
- * not Mutter; you will need to set the "visual bell" pref for that.
- */
-static void
-set_x11_bell_is_audible (MetaX11Display *x11_display,
-                         gboolean is_audible)
-{
-#ifdef HAVE_LIBCANBERRA
-  /* When we are playing sounds using libcanberra support, we handle the
-   * bell whether its an audible bell or a visible bell */
-  gboolean enable_system_bell = FALSE;
-#else
-  gboolean enable_system_bell = is_audible;
-#endif /* HAVE_LIBCANBERRA */
-
-  XkbChangeEnabledControls (x11_display->xdisplay,
-                            XkbUseCoreKbd,
-                            XkbAudibleBellMask,
-                            enable_system_bell ? XkbAudibleBellMask : 0);
-}
-
-static void
-on_is_audible_changed (MetaBell       *bell,
-                       gboolean        is_audible,
-                       MetaX11Display *x11_display)
-{
-  set_x11_bell_is_audible (x11_display, is_audible);
 }
 
 static void
@@ -601,6 +603,8 @@ set_supported_hint (MetaX11Display *x11_display)
 
     x11_display->atom__GTK_FRAME_EXTENTS,
     x11_display->atom__GTK_SHOW_WINDOW_MENU,
+    x11_display->atom__GTK_EDGE_CONSTRAINTS,
+    x11_display->atom__GTK_WORKAREAS,
   };
 
   XChangeProperty (x11_display->xdisplay,
@@ -788,13 +792,11 @@ init_event_masks (MetaX11Display *x11_display)
   XISetMask (mask.mask, XI_Leave);
   XISetMask (mask.mask, XI_FocusIn);
   XISetMask (mask.mask, XI_FocusOut);
-#ifdef HAVE_XI23
   if (META_X11_DISPLAY_HAS_XINPUT_23 (x11_display))
     {
       XISetMask (mask.mask, XI_BarrierHit);
       XISetMask (mask.mask, XI_BarrierLeave);
     }
-#endif /* HAVE_XI23 */
   XISelectEvents (x11_display->xdisplay, x11_display->xroot, &mask, 1);
 
   event_mask = (SubstructureRedirectMask | SubstructureNotifyMask |
@@ -913,6 +915,56 @@ set_workspace_names (MetaX11Display *x11_display)
 }
 
 static void
+set_workspace_work_area_hint (MetaWorkspace  *workspace,
+                              MetaX11Display *x11_display)
+{
+  MetaMonitorManager *monitor_manager;
+  GList *logical_monitors;
+  GList *l;
+  int num_monitors;
+  unsigned long *data;
+  unsigned long *tmp;
+  g_autofree char *workarea_name;
+  Atom workarea_atom;
+
+  monitor_manager = meta_backend_get_monitor_manager (meta_get_backend ());
+  logical_monitors = meta_monitor_manager_get_logical_monitors (monitor_manager);
+  num_monitors = meta_monitor_manager_get_num_logical_monitors (monitor_manager);
+
+  data = g_new (unsigned long, num_monitors * 4);
+  tmp = data;
+
+  for (l = logical_monitors; l; l = l->next)
+    {
+      MetaRectangle area;
+
+      meta_workspace_get_work_area_for_logical_monitor (workspace, l->data, &area);
+
+      tmp[0] = area.x;
+      tmp[1] = area.y;
+      tmp[2] = area.width;
+      tmp[3] = area.height;
+
+      tmp += 4;
+    }
+
+  workarea_name = g_strdup_printf ("_GTK_WORKAREAS_D%d",
+                                   meta_workspace_index (workspace));
+
+  workarea_atom = XInternAtom (x11_display->xdisplay, workarea_name, False);
+
+  meta_x11_error_trap_push (x11_display);
+  XChangeProperty (x11_display->xdisplay,
+                   x11_display->xroot,
+                   workarea_atom,
+                   XA_CARDINAL, 32, PropModeReplace,
+                   (guchar*) data, num_monitors * 4);
+  meta_x11_error_trap_pop (x11_display);
+
+  g_free (data);
+}
+
+static void
 set_work_area_hint (MetaDisplay    *display,
                     MetaX11Display *x11_display)
 {
@@ -931,6 +983,8 @@ set_work_area_hint (MetaDisplay    *display,
       MetaWorkspace *workspace = l->data;
 
       meta_workspace_get_work_area_all_monitors (workspace, &area);
+      set_workspace_work_area_hint (workspace, x11_display);
+
       tmp[0] = area.x;
       tmp[1] = area.y;
       tmp[2] = area.width;
@@ -980,6 +1034,25 @@ meta_set_gnome_wm_keybindings (const char *wm_keybindings)
   gnome_wm_keybindings = wm_keybindings;
 }
 
+const gchar *
+meta_x11_get_display_name (void)
+{
+#ifdef HAVE_WAYLAND
+  if (meta_is_wayland_compositor ())
+    {
+      MetaWaylandCompositor *compositor;
+
+      compositor = meta_wayland_compositor_get_default ();
+
+      return meta_wayland_get_xwayland_display_name (compositor);
+    }
+  else
+#endif
+    {
+      return g_getenv ("DISPLAY");
+    }
+}
+
 gboolean
 meta_x11_init_gdk_display (GError **error)
 {
@@ -988,7 +1061,7 @@ meta_x11_init_gdk_display (GError **error)
   const char *gdk_gl_env = NULL;
   Display *xdisplay;
 
-  xdisplay_name = g_getenv ("DISPLAY");
+  xdisplay_name = meta_x11_get_display_name ();
   if (!xdisplay_name)
     {
       g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
@@ -1076,8 +1149,6 @@ meta_x11_display_new (MetaDisplay *display, GError **error)
   Atom wm_sn_atom;
   char buf[128];
   guint32 timestamp;
-  MetaWorkspace *current_workspace;
-  uint32_t current_workspace_index = 0;
   Atom atom_restart_helper;
   Window restart_helper_window = None;
   GdkDisplay *gdk_display;
@@ -1093,15 +1164,17 @@ meta_x11_display_new (MetaDisplay *display, GError **error)
   };
   Atom atoms[G_N_ELEMENTS(atom_names)];
 
+  if (!meta_x11_init_gdk_display (error))
+    return NULL;
+
   g_assert (prepared_gdk_display);
   gdk_display = g_steal_pointer (&prepared_gdk_display);
+  xdisplay = GDK_DISPLAY_XDISPLAY (gdk_display);
 
 #ifdef HAVE_WAYLAND
   if (meta_is_wayland_compositor ())
-    meta_xwayland_complete_init (display);
+    meta_xwayland_complete_init (display, xdisplay);
 #endif
-
-  xdisplay = GDK_DISPLAY_XDISPLAY (gdk_display);
 
   if (meta_is_syncing ())
     XSynchronize (xdisplay, True);
@@ -1277,32 +1350,12 @@ meta_x11_display_new (MetaDisplay *display, GError **error)
   set_desktop_geometry_hint (x11_display);
 
   x11_display->ui = meta_ui_new (x11_display);
+  x11_display->x11_stack = meta_x11_stack_new (x11_display);
 
   x11_display->keys_grabbed = FALSE;
   meta_x11_display_grab_keys (x11_display);
 
   meta_x11_display_update_workspace_layout (x11_display);
-
-  /* Get current workspace */
-  if (meta_prop_get_cardinal (x11_display,
-                              x11_display->xroot,
-                              x11_display->atom__NET_CURRENT_DESKTOP,
-                              &current_workspace_index))
-    {
-      meta_verbose ("Read existing _NET_CURRENT_DESKTOP = %d\n",
-                    (int) current_workspace_index);
-
-      /* Switch to the _NET_CURRENT_DESKTOP workspace */
-      current_workspace = meta_workspace_manager_get_workspace_by_index (display->workspace_manager,
-                                                                         current_workspace_index);
-
-      if (current_workspace != NULL)
-        meta_workspace_activate (current_workspace, timestamp);
-    }
-  else
-    {
-      meta_verbose ("No _NET_CURRENT_DESKTOP present\n");
-    }
 
   if (meta_prefs_get_dynamic_workspaces ())
     {
@@ -1316,14 +1369,12 @@ meta_x11_display_new (MetaDisplay *display, GError **error)
                                        &list, &n_items))
         {
           num = list[0];
-          meta_XFree (list);
+          g_free (list);
         }
 
         if (num > meta_workspace_manager_get_n_workspaces (display->workspace_manager))
           meta_workspace_manager_update_num_workspaces (display->workspace_manager, timestamp, num);
     }
-
-  set_active_workspace_hint (display->workspace_manager, x11_display);
 
   g_signal_connect_object (display->workspace_manager, "active-workspace-changed",
                            G_CALLBACK (set_active_workspace_hint),
@@ -1353,19 +1404,62 @@ meta_x11_display_new (MetaDisplay *display, GError **error)
 
   init_x11_bell (x11_display);
 
-  g_signal_connect_object (display->bell, "is-audible-changed",
-                           G_CALLBACK (on_is_audible_changed),
-                           x11_display, 0);
+  meta_x11_startup_notification_init (x11_display);
+  meta_x11_selection_init (x11_display);
 
-  set_x11_bell_is_audible (x11_display, meta_prefs_bell_is_audible ());
+  if (!meta_is_wayland_compositor ())
+    meta_dnd_init_xdnd (x11_display);
 
   return x11_display;
+}
+
+void
+meta_x11_display_restore_active_workspace (MetaX11Display *x11_display)
+{
+  MetaDisplay *display;
+  MetaWorkspace *current_workspace;
+  uint32_t current_workspace_index = 0;
+  guint32 timestamp;
+
+  g_return_if_fail (META_IS_X11_DISPLAY (x11_display));
+
+  display = x11_display->display;
+  timestamp = x11_display->timestamp;
+
+  /* Get current workspace */
+  if (meta_prop_get_cardinal (x11_display,
+                              x11_display->xroot,
+                              x11_display->atom__NET_CURRENT_DESKTOP,
+                              &current_workspace_index))
+    {
+      meta_verbose ("Read existing _NET_CURRENT_DESKTOP = %d\n",
+                    (int) current_workspace_index);
+
+      /* Switch to the _NET_CURRENT_DESKTOP workspace */
+      current_workspace = meta_workspace_manager_get_workspace_by_index (display->workspace_manager,
+                                                                         current_workspace_index);
+
+      if (current_workspace != NULL)
+        meta_workspace_activate (current_workspace, timestamp);
+    }
+  else
+    {
+      meta_verbose ("No _NET_CURRENT_DESKTOP present\n");
+    }
+
+  set_active_workspace_hint (display->workspace_manager, x11_display);
 }
 
 int
 meta_x11_display_get_screen_number (MetaX11Display *x11_display)
 {
   return DefaultScreen (x11_display->xdisplay);
+}
+
+MetaDisplay *
+meta_x11_display_get_display (MetaX11Display *x11_display)
+{
+  return x11_display->display;
 }
 
 /**
@@ -1786,14 +1880,17 @@ meta_x11_display_increment_event_serial (MetaX11Display *x11_display)
                    x11_display->atom__MOTIF_WM_HINTS);
 }
 
-void
+static void
 meta_x11_display_update_active_window_hint (MetaX11Display *x11_display)
 {
-  MetaWindow *focus_window = x11_display->display->focus_window;
+  MetaWindow *focus_window;
   gulong data[1];
 
   if (x11_display->display->closing)
     return; /* Leave old value for a replacement */
+
+  focus_window = meta_x11_display_lookup_x_window (x11_display,
+                                                   x11_display->focus_xwindow);
 
   if (focus_window)
     data[0] = focus_window->xwindow;
@@ -1809,17 +1906,27 @@ meta_x11_display_update_active_window_hint (MetaX11Display *x11_display)
   meta_x11_error_trap_pop (x11_display);
 }
 
-static void
-request_xserver_input_focus_change (MetaX11Display *x11_display,
-                                    MetaWindow     *meta_window,
-                                    Window          xwindow,
-                                    guint32         timestamp)
+void
+meta_x11_display_update_focus_window (MetaX11Display *x11_display,
+                                      Window          xwindow,
+                                      gulong          serial,
+                                      gboolean        focused_by_us)
 {
-  gulong serial;
+  x11_display->focus_serial = serial;
+  x11_display->focused_by_us = !!focused_by_us;
 
-  if (meta_display_timestamp_too_old (x11_display->display, &timestamp))
+  if (x11_display->focus_xwindow == xwindow)
     return;
 
+  x11_display->focus_xwindow = xwindow;
+  meta_x11_display_update_active_window_hint (x11_display);
+}
+
+static void
+meta_x11_display_set_input_focus_internal (MetaX11Display *x11_display,
+                                           Window          xwindow,
+                                           uint32_t        timestamp)
+{
   meta_x11_error_trap_push (x11_display);
 
   /* In order for mutter to know that the focus request succeeded, we track
@@ -1831,8 +1938,6 @@ request_xserver_input_focus_change (MetaX11Display *x11_display,
    * process at the same time.
    */
   XGrabServer (x11_display->xdisplay);
-
-  serial = XNextRequest (x11_display->xdisplay);
 
   XSetInputFocus (x11_display->xdisplay,
                   xwindow,
@@ -1847,30 +1952,28 @@ request_xserver_input_focus_change (MetaX11Display *x11_display,
   XUngrabServer (x11_display->xdisplay);
   XFlush (x11_display->xdisplay);
 
-  meta_display_update_focus_window (x11_display->display,
-                                    meta_window,
-                                    xwindow,
-                                    serial,
-                                    TRUE);
-
   meta_x11_error_trap_pop (x11_display);
-
-  x11_display->display->last_focus_time = timestamp;
-
-  if (meta_window == NULL || meta_window != x11_display->display->autoraise_window)
-    meta_display_remove_autoraise_callback (x11_display->display);
 }
 
 void
-meta_x11_display_set_input_focus_window (MetaX11Display *x11_display,
-                                         MetaWindow     *window,
-                                         gboolean        focus_frame,
-                                         guint32         timestamp)
+meta_x11_display_set_input_focus (MetaX11Display *x11_display,
+                                  MetaWindow     *window,
+                                  gboolean        focus_frame,
+                                  uint32_t        timestamp)
 {
-  request_xserver_input_focus_change (x11_display,
-                                      window,
-                                      focus_frame ? window->frame->xwindow : window->xwindow,
-                                      timestamp);
+  Window xwindow;
+  gulong serial;
+
+  if (window)
+    xwindow = focus_frame ? window->frame->xwindow : window->xwindow;
+  else
+    xwindow = x11_display->no_focus_window;
+
+  meta_x11_error_trap_push (x11_display);
+  meta_x11_display_set_input_focus_internal (x11_display, xwindow, timestamp);
+  serial = XNextRequest (x11_display->xdisplay);
+  meta_x11_display_update_focus_window (x11_display, xwindow, serial, TRUE);
+  meta_x11_error_trap_pop (x11_display);
 }
 
 void
@@ -1878,20 +1981,17 @@ meta_x11_display_set_input_focus_xwindow (MetaX11Display *x11_display,
                                           Window          window,
                                           guint32         timestamp)
 {
-  request_xserver_input_focus_change (x11_display,
-                                      NULL,
-                                      window,
-                                      timestamp);
-}
+  gulong serial;
 
-void
-meta_x11_display_focus_the_no_focus_window (MetaX11Display *x11_display,
-                                            guint32         timestamp)
-{
-  request_xserver_input_focus_change (x11_display,
-                                      NULL,
-                                      x11_display->no_focus_window,
-                                      timestamp);
+  if (meta_display_timestamp_too_old (x11_display->display, &timestamp))
+    return;
+
+  meta_x11_display_set_input_focus_internal (x11_display, window, timestamp);
+  serial = XNextRequest (x11_display->xdisplay);
+  meta_x11_display_update_focus_window (x11_display, window, serial, TRUE);
+  meta_display_update_focus_window (x11_display->display, NULL);
+  meta_display_remove_autoraise_callback (x11_display->display);
+  x11_display->display->last_focus_time = timestamp;
 }
 
 static MetaX11DisplayLogicalMonitorData *
@@ -2146,7 +2246,7 @@ meta_x11_display_update_workspace_layout (MetaX11Display *x11_display)
                         "(3 is accepted for backwards compat)\n", n_items);
         }
 
-      meta_XFree (list);
+      g_free (list);
 
       meta_workspace_manager_update_workspace_layout (workspace_manager,
                                                       starting_corner,
@@ -2166,4 +2266,76 @@ prefs_changed_callback (MetaPreference pref,
     {
       set_workspace_names (x11_display);
     }
+}
+
+void
+meta_x11_display_increment_focus_sentinel (MetaX11Display *x11_display)
+{
+  unsigned long data[1];
+
+  data[0] = meta_display_get_current_time (x11_display->display);
+
+  XChangeProperty (x11_display->xdisplay,
+                   x11_display->xroot,
+                   x11_display->atom__MUTTER_SENTINEL,
+                   XA_CARDINAL,
+                   32, PropModeReplace, (guchar*) data, 1);
+
+  x11_display->sentinel_counter += 1;
+}
+
+void
+meta_x11_display_decrement_focus_sentinel (MetaX11Display *x11_display)
+{
+  x11_display->sentinel_counter -= 1;
+
+  if (x11_display->sentinel_counter < 0)
+    x11_display->sentinel_counter = 0;
+}
+
+gboolean
+meta_x11_display_focus_sentinel_clear (MetaX11Display *x11_display)
+{
+  return (x11_display->sentinel_counter == 0);
+}
+
+void
+meta_x11_display_set_stage_input_region (MetaX11Display *x11_display,
+                                         XserverRegion   region)
+{
+  Display *xdisplay = x11_display->xdisplay;
+  MetaBackend *backend = meta_get_backend ();
+  ClutterStage *stage = CLUTTER_STAGE (meta_backend_get_stage (backend));
+  Window stage_xwindow;
+
+  g_return_if_fail (!meta_is_wayland_compositor ());
+
+  stage_xwindow = meta_x11_get_stage_window (stage);
+  XFixesSetWindowShapeRegion (xdisplay, stage_xwindow,
+                              ShapeInput, 0, 0, region);
+
+  /*
+   * It's generally a good heuristic that when a crossing event is generated
+   * because we reshape the overlay, we don't want it to affect
+   * focus-follows-mouse focus - it's not the user doing something, it's the
+   * environment changing under the user.
+   */
+  meta_display_add_ignored_crossing_serial (x11_display->display,
+                                            XNextRequest (xdisplay));
+  XFixesSetWindowShapeRegion (xdisplay,
+                              x11_display->composite_overlay_window,
+                              ShapeInput, 0, 0, region);
+}
+
+void
+meta_x11_display_clear_stage_input_region (MetaX11Display *x11_display)
+{
+  if (x11_display->empty_region == None)
+    {
+      x11_display->empty_region = XFixesCreateRegion (x11_display->xdisplay,
+                                                      NULL, 0);
+    }
+
+  meta_x11_display_set_stage_input_region (x11_display,
+                                           x11_display->empty_region);
 }

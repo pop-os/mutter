@@ -22,6 +22,8 @@
 #ifndef META_ORIENTATION_MANAGER_H
 #define META_ORIENTATION_MANAGER_H
 
+#include <glib-object.h>
+
 typedef enum
 {
   META_ORIENTATION_UNDEFINED,
@@ -36,5 +38,7 @@ G_DECLARE_FINAL_TYPE (MetaOrientationManager, meta_orientation_manager,
                       META, ORIENTATION_MANAGER, GObject)
 
 MetaOrientation meta_orientation_manager_get_orientation (MetaOrientationManager *self);
+
+gboolean meta_orientation_manager_has_accelerometer (MetaOrientationManager *self);
 
 #endif  /* META_ORIENTATION_MANAGER_H */

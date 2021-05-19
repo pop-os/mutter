@@ -17,25 +17,26 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "config.h"
+
 #include <gio/gio.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <meta/main.h>
-#include <meta/util.h>
-#include <meta/window.h>
-#include <ui/ui.h>
-#include "meta-plugin-manager.h"
-#include "wayland/meta-wayland.h"
-#include "window-private.h"
+#include "compositor/meta-plugin-manager.h"
+#include "core/window-private.h"
+#include "meta/main.h"
+#include "meta/util.h"
+#include "meta/window.h"
 #include "tests/test-utils.h"
+#include "ui/ui.h"
+#include "wayland/meta-wayland.h"
 #include "x11/meta-x11-display-private.h"
 
 typedef struct {
   GHashTable *clients;
   AsyncWaiter *waiter;
-  guint log_handler_id;
   GString *warning_messages;
   GMainLoop *loop;
 } TestCase;
@@ -49,48 +50,15 @@ test_case_alarm_filter (MetaX11Display        *x11_display,
   GHashTableIter iter;
   gpointer key, value;
 
-  if (async_waiter_alarm_filter (test->waiter, x11_display, event))
+  if (async_waiter_alarm_filter (x11_display, event, test->waiter))
     return TRUE;
 
   g_hash_table_iter_init (&iter, test->clients);
   while (g_hash_table_iter_next (&iter, &key, &value))
-    if (test_client_alarm_filter (value, x11_display, event))
+    if (test_client_alarm_filter (x11_display, event, value))
       return TRUE;
 
   return FALSE;
-}
-
-static gboolean
-test_case_check_warnings (TestCase *test,
-                          GError  **error)
-{
-  if (test->warning_messages != NULL)
-    {
-      g_set_error (error, TEST_RUNNER_ERROR, TEST_RUNNER_ERROR_RUNTIME_ERROR,
-                   "Warning messages:\n   %s", test->warning_messages->str);
-      g_string_free (test->warning_messages, TRUE);
-      test->warning_messages = NULL;
-      return FALSE;
-    }
-
-  return TRUE;
-}
-
-static void
-test_case_log_func (const gchar   *log_domain,
-                    GLogLevelFlags log_level,
-                    const gchar   *message,
-                    gpointer       user_data)
-{
-  TestCase *test = user_data;
-
-  if (test->warning_messages == NULL)
-    test->warning_messages = g_string_new (message);
-  else
-    {
-      g_string_append (test->warning_messages, "\n   ");
-      g_string_append (test->warning_messages, message);
-    }
 }
 
 static TestCase *
@@ -98,10 +66,7 @@ test_case_new (void)
 {
   TestCase *test = g_new0 (TestCase, 1);
 
-  test->log_handler_id = g_log_set_handler ("mutter",
-                                            G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING,
-                                            test_case_log_func,
-                                            test);
+  test_wait_for_x11_display ();
 
   meta_x11_display_set_alarm_filter (meta_get_display ()->x11_display,
                                      test_case_alarm_filter, test);
@@ -114,13 +79,31 @@ test_case_new (void)
 }
 
 static gboolean
-test_case_before_redraw (gpointer data)
+test_case_loop_quit (gpointer data)
 {
   TestCase *test = data;
 
   g_main_loop_quit (test->loop);
 
   return FALSE;
+}
+
+static gboolean
+test_case_dispatch (TestCase *test,
+                    GError  **error)
+{
+  /* Wait until we've done any outstanding queued up work.
+   * Though we add this as BEFORE_REDRAW, the iteration that runs the
+   * BEFORE_REDRAW idles will proceed on and do the redraw, so we're
+   * waiting until after *all* frame processing.
+   */
+  meta_later_add (META_LATER_BEFORE_REDRAW,
+                  test_case_loop_quit,
+                  test,
+                  NULL);
+  g_main_loop_run (test->loop);
+
+  return TRUE;
 }
 
 static gboolean
@@ -139,22 +122,25 @@ test_case_wait (TestCase *test,
     if (!test_client_wait (value, error))
       return FALSE;
 
-  /* Then wait until we've done any outstanding queued up work.
-   * Though we add this as BEFORE_REDRAW, the iteration that runs the
-   * BEFORE_REDRAW idles will proceed on and do the redraw, so we're
-   * waiting until after *all* frame processing.
-   */
-  meta_later_add (META_LATER_BEFORE_REDRAW,
-                  test_case_before_redraw,
-                  test,
-                  NULL);
-  g_main_loop_run (test->loop);
+  /* Then wait until we've done any outstanding queued up work. */
+  test_case_dispatch (test, error);
 
   /* Then set an XSync counter ourselves and and wait until
    * we receive the resulting event - this makes sure that we've
    * received back any X events we generated.
    */
   async_waiter_set_and_wait (test->waiter);
+  return TRUE;
+}
+
+static gboolean
+test_case_sleep (TestCase  *test,
+                 guint32    interval,
+                 GError   **error)
+{
+  g_timeout_add_full (G_PRIORITY_LOW, interval, test_case_loop_quit, test, NULL);
+  g_main_loop_run (test->loop);
+
   return TRUE;
 }
 
@@ -189,7 +175,7 @@ test_case_parse_window_id (TestCase    *test,
   const char *slash = strchr (client_and_window_id, '/');
   char *tmp;
   if (slash == NULL)
-    BAD_COMMAND ("client/window ID %s doesnt' contain a /", client_and_window_id);
+    BAD_COMMAND ("client/window ID %s doesn't contain a /", client_and_window_id);
 
   *window_id = slash + 1;
 
@@ -275,6 +261,61 @@ test_case_assert_stacking (TestCase *test,
 }
 
 static gboolean
+test_case_assert_focused (TestCase    *test,
+                          const char  *expected_window,
+                          GError     **error)
+{
+  MetaDisplay *display = meta_get_display ();
+
+  if (!display->focus_window)
+    {
+      if (g_strcmp0 (expected_window, "none") != 0)
+        {
+          g_set_error (error, TEST_RUNNER_ERROR, TEST_RUNNER_ERROR_ASSERTION_FAILED,
+                       "focus: expected='%s', actual='none'", expected_window);
+        }
+    }
+  else
+    {
+      const char *focused = display->focus_window->title;
+
+      if (g_str_has_prefix (focused, "test/"))
+        focused += 5;
+
+      if (g_strcmp0 (focused, expected_window) != 0)
+        g_set_error (error, TEST_RUNNER_ERROR, TEST_RUNNER_ERROR_ASSERTION_FAILED,
+                     "focus: expected='%s', actual='%s'",
+                     expected_window, focused);
+    }
+
+  return *error == NULL;
+}
+
+static gboolean
+test_case_assert_size (TestCase    *test,
+                       MetaWindow  *window,
+                       int          expected_width,
+                       int          expected_height,
+                       GError     **error)
+{
+  MetaRectangle frame_rect;
+
+  meta_window_get_frame_rect (window, &frame_rect);
+
+  if (frame_rect.width != expected_width ||
+      frame_rect.height != expected_height)
+    {
+      g_set_error (error, TEST_RUNNER_ERROR, TEST_RUNNER_ERROR_ASSERTION_FAILED,
+                   "Expected size %dx%d didn't match actual size %dx%d",
+                   expected_width, expected_height,
+                   frame_rect.width, frame_rect.height);
+      return FALSE;
+    }
+
+  return TRUE;
+}
+
+static gboolean
 test_case_check_xserver_stacking (TestCase *test,
                                   GError  **error)
 {
@@ -327,37 +368,54 @@ test_case_check_xserver_stacking (TestCase *test,
   return *error == NULL;
 }
 
-typedef struct _WaitForShownData
+static int
+maybe_divide (const char *str,
+              int         value)
 {
-  GMainLoop *loop;
-  MetaWindow *window;
-  guint shown_handler_id;
-} WaitForShownData;
+  if (strstr (str, "/") == str)
+    {
+      int divisor;
 
-static void
-on_window_shown (MetaWindow       *window,
-                 WaitForShownData *data)
-{
-  g_main_loop_quit (data->loop);
+      str += 1;
+      divisor = atoi (str);
+
+      value /= divisor;
+    }
+
+  return value;
 }
 
-static gboolean
-test_case_wait_for_showing_before_redraw (gpointer user_data)
+static int
+parse_window_size (MetaWindow *window,
+                   const char *size_str)
 {
-  WaitForShownData *data = user_data;
+  MetaLogicalMonitor *logical_monitor;
+  MetaRectangle logical_monitor_layout;
+  int value;
 
-  if (meta_window_is_hidden (data->window))
+  logical_monitor = meta_window_calculate_main_logical_monitor (window);
+  g_assert_nonnull (logical_monitor);
+
+  logical_monitor_layout = meta_logical_monitor_get_layout (logical_monitor);
+
+  if (strstr (size_str, "MONITOR_WIDTH") == size_str)
     {
-      data->shown_handler_id = g_signal_connect (data->window, "shown",
-                                                 G_CALLBACK (on_window_shown),
-                                                 data);
+      value = logical_monitor_layout.width;
+      size_str += strlen ("MONITOR_WIDTH");
+      value = maybe_divide (size_str, value);
+    }
+  else if (strstr (size_str, "MONITOR_HEIGHT") == size_str)
+    {
+      value = logical_monitor_layout.height;
+      size_str += strlen ("MONITOR_HEIGHT");
+      value = maybe_divide (size_str, value);
     }
   else
     {
-      g_main_loop_quit (data->loop);
+      value = atoi (size_str);
     }
 
-  return FALSE;
+  return value;
 }
 
 static gboolean
@@ -422,6 +480,9 @@ test_case_do (TestCase *test,
                            argc == 3 ? argv[2] : NULL,
                            NULL))
         return FALSE;
+
+      if (!test_client_wait (client, error))
+        return FALSE;
     }
   else if (strcmp (argv[0], "set_parent") == 0 ||
            strcmp (argv[0], "set_parent_exported") == 0)
@@ -441,10 +502,72 @@ test_case_do (TestCase *test,
                            NULL))
         return FALSE;
     }
+  else if (strcmp (argv[0], "accept_focus") == 0)
+    {
+      if (argc != 3 ||
+          (g_ascii_strcasecmp (argv[2], "true") != 0 &&
+           g_ascii_strcasecmp (argv[2], "false") != 0))
+        BAD_COMMAND("usage: %s <client-id>/<window-id> [true|false]",
+                    argv[0]);
+
+      TestClient *client;
+      const char *window_id;
+      if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
+        return FALSE;
+
+      if (!test_client_do (client, error,
+                           argv[0], window_id,
+                           argv[2],
+                           NULL))
+        return FALSE;
+    }
+  else if (strcmp (argv[0], "can_take_focus") == 0)
+    {
+      if (argc != 3 ||
+          (g_ascii_strcasecmp (argv[2], "true") != 0 &&
+           g_ascii_strcasecmp (argv[2], "false") != 0))
+        BAD_COMMAND("usage: %s <client-id>/<window-id> [true|false]",
+                    argv[0]);
+
+      TestClient *client;
+      const char *window_id;
+      if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
+        return FALSE;
+
+      if (!test_client_do (client, error,
+                           argv[0], window_id,
+                           argv[2],
+                           NULL))
+        return FALSE;
+    }
+  else if (strcmp (argv[0], "accept_take_focus") == 0)
+    {
+      if (argc != 3 ||
+          (g_ascii_strcasecmp (argv[2], "true") != 0 &&
+           g_ascii_strcasecmp (argv[2], "false") != 0))
+        BAD_COMMAND("usage: %s <client-id>/<window-id> [true|false]",
+                    argv[0]);
+
+      TestClient *client;
+      const char *window_id;
+      if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
+        return FALSE;
+
+      if (!test_client_do (client, error,
+                           argv[0], window_id,
+                           argv[2],
+                           NULL))
+        return FALSE;
+    }
   else if (strcmp (argv[0], "show") == 0)
     {
-      if (argc != 2)
-        BAD_COMMAND("usage: %s <client-id>/<window-id>", argv[0]);
+      gboolean show_async = FALSE;
+
+      if (argc != 2 && argc != 3)
+        BAD_COMMAND("usage: %s <client-id>/<window-id> [async]", argv[0]);
+
+      if (argc == 3 && strcmp (argv[2], "async") == 0)
+        show_async = TRUE;
 
       TestClient *client;
       const char *window_id;
@@ -454,22 +577,95 @@ test_case_do (TestCase *test,
       if (!test_client_do (client, error, argv[0], window_id, NULL))
         return FALSE;
 
+      if (!test_case_wait (test, error))
+        return FALSE;
+
       MetaWindow *window = test_client_find_window (client, window_id, error);
       if (!window)
         return FALSE;
 
-      WaitForShownData data = {
-        .loop = g_main_loop_new (NULL, FALSE),
-        .window = window,
-      };
-      meta_later_add (META_LATER_BEFORE_REDRAW,
-                      test_case_wait_for_showing_before_redraw,
-                      &data,
-                      NULL);
-      g_main_loop_run (data.loop);
-      if (data.shown_handler_id)
-        g_signal_handler_disconnect (window, data.shown_handler_id);
-      g_main_loop_unref (data.loop);
+      if (!show_async)
+        test_client_wait_for_window_shown (client, window);
+    }
+  else if (strcmp (argv[0], "resize") == 0)
+    {
+      if (argc != 4)
+        BAD_COMMAND("usage: %s <client-id>/<window-id> width height", argv[0]);
+
+      TestClient *client;
+      const char *window_id;
+      if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
+        return FALSE;
+
+      if (!test_client_do (client, error, argv[0], window_id,
+                           argv[2], argv[3], NULL))
+        return FALSE;
+    }
+  else if (strcmp (argv[0], "move") == 0)
+    {
+      if (argc != 4)
+        BAD_COMMAND("usage: %s <client-id>/<window-id> x y", argv[0]);
+
+      TestClient *client;
+      const char *window_id;
+      if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
+        return FALSE;
+
+      MetaWindow *window = test_client_find_window (client, window_id, error);
+      if (!window)
+        return FALSE;
+
+      meta_window_move_frame (window, TRUE, atoi (argv[2]), atoi (argv[3]));
+    }
+  else if (strcmp (argv[0], "tile") == 0)
+    {
+      if (argc != 3)
+        BAD_COMMAND("usage: %s <client-id>/<window-id> [right|left]", argv[0]);
+
+      TestClient *client;
+      const char *window_id;
+      if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
+        return FALSE;
+
+      MetaWindow *window = test_client_find_window (client, window_id, error);
+      if (!window)
+        return FALSE;
+
+      MetaTileMode tile_mode;
+      if (strcmp (argv[2], "right") == 0)
+        {
+          tile_mode = META_TILE_RIGHT;
+        }
+      else if (strcmp (argv[2], "left") == 0)
+        {
+          tile_mode = META_TILE_LEFT;
+        }
+      else
+        {
+          g_set_error (error,
+                       TEST_RUNNER_ERROR,
+                       TEST_RUNNER_ERROR_ASSERTION_FAILED,
+                       "Invalid tile mode '%s'", argv[2]);
+          return FALSE;
+        }
+
+      meta_window_tile (window, tile_mode);
+    }
+  else if (strcmp (argv[0], "untile") == 0)
+    {
+      if (argc != 2)
+        BAD_COMMAND("usage: %s <client-id>/<window-id>", argv[0]);
+
+      TestClient *client;
+      const char *window_id;
+      if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
+        return FALSE;
+
+      MetaWindow *window = test_client_find_window (client, window_id, error);
+      if (!window)
+        return FALSE;
+
+      meta_window_untile (window);
     }
   else if (strcmp (argv[0], "hide") == 0 ||
            strcmp (argv[0], "activate") == 0 ||
@@ -477,6 +673,12 @@ test_case_do (TestCase *test,
            strcmp (argv[0], "lower") == 0 ||
            strcmp (argv[0], "minimize") == 0 ||
            strcmp (argv[0], "unminimize") == 0 ||
+           strcmp (argv[0], "maximize") == 0 ||
+           strcmp (argv[0], "unmaximize") == 0 ||
+           strcmp (argv[0], "fullscreen") == 0 ||
+           strcmp (argv[0], "unfullscreen") == 0 ||
+           strcmp (argv[0], "freeze") == 0 ||
+           strcmp (argv[0], "thaw") == 0 ||
            strcmp (argv[0], "destroy") == 0)
     {
       if (argc != 2)
@@ -514,6 +716,46 @@ test_case_do (TestCase *test,
       if (!test_case_wait (test, error))
         return FALSE;
     }
+  else if (strcmp (argv[0], "wait_reconfigure") == 0)
+    {
+      if (argc != 1)
+        BAD_COMMAND("usage: %s", argv[0]);
+
+      /*
+       * Wait twice, so that we
+       *  1) First wait for any requests to configure being made
+       *  2) Then wait until the new configuration has been applied
+       */
+
+      if (!test_case_wait (test, error))
+        return FALSE;
+      if (!test_case_dispatch (test, error))
+        return FALSE;
+      if (!test_case_wait (test, error))
+        return FALSE;
+    }
+  else if (strcmp (argv[0], "dispatch") == 0)
+    {
+      if (argc != 1)
+        BAD_COMMAND("usage: %s", argv[0]);
+
+      if (!test_case_dispatch (test, error))
+        return FALSE;
+    }
+  else if (strcmp (argv[0], "sleep") == 0)
+    {
+      guint64 interval;
+
+      if (argc != 2)
+        BAD_COMMAND("usage: %s <milliseconds>", argv[0]);
+
+      if (!g_ascii_string_to_unsigned (argv[1], 10, 0, G_MAXUINT32,
+                                       &interval, error))
+        return FALSE;
+
+      if (!test_case_sleep (test, (guint32) interval, error))
+        return FALSE;
+    }
   else if (strcmp (argv[0], "assert_stacking") == 0)
     {
       if (!test_case_assert_stacking (test, argv + 1, argc - 1, error))
@@ -522,12 +764,91 @@ test_case_do (TestCase *test,
       if (!test_case_check_xserver_stacking (test, error))
         return FALSE;
     }
+  else if (strcmp (argv[0], "assert_focused") == 0)
+    {
+      if (!test_case_assert_focused (test, argv[1], error))
+        return FALSE;
+    }
+  else if (strcmp (argv[0], "assert_size") == 0)
+    {
+      if (argc != 4)
+        {
+          BAD_COMMAND("usage: %s <client-id>/<window-id> <width> <height>",
+                      argv[0]);
+        }
+
+      TestClient *client;
+      const char *window_id;
+      if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
+        return FALSE;
+
+      MetaWindow *window = test_client_find_window (client, window_id, error);
+      if (!window)
+        return FALSE;
+
+      if (meta_window_get_frame (window))
+        {
+          g_set_error (error,
+                       TEST_RUNNER_ERROR,
+                       TEST_RUNNER_ERROR_ASSERTION_FAILED,
+                       "Can only assert size of CSD window");
+          return FALSE;
+        }
+
+      int width = parse_window_size (window, argv[2]);
+      int height = parse_window_size (window, argv[3]);
+      g_autofree char *width_str = g_strdup_printf ("%d", width);
+      g_autofree char *height_str = g_strdup_printf ("%d", height);
+
+      if (!test_client_do (client, error, argv[0],
+                           window_id,
+                           width_str,
+                           height_str,
+                           NULL))
+        return FALSE;
+
+      if (!test_case_assert_size (test, window,
+                                  width, height,
+                                  error))
+        return FALSE;
+    }
+  else if (strcmp (argv[0], "assert_position") == 0)
+    {
+      if (argc != 4)
+        {
+          BAD_COMMAND("usage: %s <client-id>/<window-id> <x> <y>",
+                      argv[0]);
+        }
+
+      TestClient *client;
+      const char *window_id;
+      if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
+        return FALSE;
+
+      MetaWindow *window = test_client_find_window (client, window_id, error);
+      if (!window)
+        return FALSE;
+
+      MetaRectangle frame_rect;
+      meta_window_get_frame_rect (window, &frame_rect);
+      int x = atoi (argv[2]);
+      int y = atoi (argv[3]);
+      if (frame_rect.x != x || frame_rect.y != y)
+        {
+          g_set_error (error,
+                       TEST_RUNNER_ERROR,
+                       TEST_RUNNER_ERROR_ASSERTION_FAILED,
+                       "Expected window position (%d, %d) doesn't match (%d, %d)",
+                       x, y, frame_rect.x, frame_rect.y);
+          return FALSE;
+        }
+    }
   else
     {
       BAD_COMMAND("Unknown command %s", argv[0]);
     }
 
-  return test_case_check_warnings (test, error);
+  return TRUE;
 }
 
 static gboolean
@@ -555,9 +876,6 @@ test_case_destroy (TestCase *test,
   if (!test_case_assert_stacking (test, NULL, 0, error))
     return FALSE;
 
-  if (!test_case_check_warnings (test, error))
-    return FALSE;
-
   g_hash_table_iter_init (&iter, test->clients);
   while (g_hash_table_iter_next (&iter, &key, &value))
     test_client_destroy (value);
@@ -569,8 +887,6 @@ test_case_destroy (TestCase *test,
 
   g_hash_table_destroy (test->clients);
   g_free (test);
-
-  g_log_remove_handler ("mutter", test->log_handler_id);
 
   return TRUE;
 }
@@ -793,7 +1109,7 @@ main (int argc, char **argv)
 
   g_option_context_free (ctx);
 
-  test_init (argc, argv);
+  test_init (&argc, &argv);
 
   GPtrArray *tests = g_ptr_array_new ();
 
@@ -823,7 +1139,7 @@ main (int argc, char **argv)
       g_free (curdir);
     }
 
-  /* Then initalize mutter with a different set of arguments */
+  /* Then initialize mutter with a different set of arguments */
 
   char *fake_args[] = { NULL, (char *)"--wayland", (char *)"--nested" };
   fake_args[0] = argv[0];
@@ -838,8 +1154,7 @@ main (int argc, char **argv)
     }
   g_option_context_free (ctx);
 
-  meta_plugin_manager_load ("default");
-  meta_wayland_override_display_name ("mutter-test-display");
+  meta_plugin_manager_load (test_get_plugin_name ());
 
   meta_init ();
   meta_register_with_session ();

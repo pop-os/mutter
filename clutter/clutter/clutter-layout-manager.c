@@ -32,8 +32,7 @@
  * it has been paired, and it controls the allocation of its children.
  *
  * Any composite or container #ClutterActor subclass can delegate the
- * layouting of its children to a #ClutterLayoutManager. Clutter provides
- * a generic container using #ClutterLayoutManager called #ClutterBox.
+ * layouting of its children to a #ClutterLayoutManager.
  *
  * Clutter provides some simple #ClutterLayoutManager sub-classes, like
  * #ClutterFlowLayout and #ClutterBinLayout.
@@ -42,7 +41,7 @@
  * The implementation of a layout manager does not differ from  the
  * implementation of the size requisition and allocation bits of
  * #ClutterActor, so you should read the relative documentation
- * forr subclassing #ClutterActor.
+ * for subclassing #ClutterActor.
  *
  * The layout manager implementation can hold a back pointer to the
  * #ClutterContainer by implementing the #ClutterLayoutManagerClass.set_container()
@@ -97,12 +96,12 @@
  *
  * |[
  * {
- *   "type" : "ClutterBox",
- *   "layout-manager" : { "type" : "ClutterTableLayout" },
+ *   "type" : "ClutterActor",
+ *   "layout-manager" : { "type" : "ClutterGridLayout" },
  *   "children" : [
  *     {
- *       "type" : "ClutterTexture",
- *       "filename" : "image-00.png",
+ *       "type" : "ClutterText",
+ *       "text" : "Some text",
  *
  *       "layout::row" : 0,
  *       "layout::column" : 0,
@@ -112,8 +111,8 @@
  *       "layout::y-expand" : true
  *     },
  *     {
- *       "type" : "ClutterTexture",
- *       "filename" : "image-01.png",
+ *       "type" : "ClutterText",
+ *       "text" : "Some more text",
  *
  *       "layout::row" : 0,
  *       "layout::column" : 1,
@@ -129,16 +128,13 @@
  * #ClutterLayoutManager is available since Clutter 1.2
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #include <glib-object.h>
 #include <gobject/gvaluecollector.h>
 
 #define CLUTTER_DISABLE_DEPRECATION_WARNINGS
 #include "deprecated/clutter-container.h"
-#include "deprecated/clutter-alpha.h"
 
 #include "clutter-debug.h"
 #include "clutter-layout-manager.h"
@@ -166,7 +162,6 @@ G_DEFINE_ABSTRACT_TYPE (ClutterLayoutManager,
                         G_TYPE_INITIALLY_UNOWNED)
 
 static GQuark quark_layout_meta  = 0;
-static GQuark quark_layout_alpha = 0;
 
 static guint manager_signals[LAST_SIGNAL] = { 0, };
 
@@ -257,8 +252,7 @@ layout_manager_real_get_preferred_height (ClutterLayoutManager *manager,
 static void
 layout_manager_real_allocate (ClutterLayoutManager   *manager,
                               ClutterContainer       *container,
-                              const ClutterActorBox  *allocation,
-                              ClutterAllocationFlags  flags)
+                              const ClutterActorBox  *allocation)
 {
   LAYOUT_MANAGER_WARN_NOT_IMPLEMENTED (manager, "allocate");
 }
@@ -303,101 +297,11 @@ layout_manager_real_get_child_meta_type (ClutterLayoutManager *manager)
   return G_TYPE_INVALID;
 }
 
-/* XXX:2.0 - Remove */
-static ClutterAlpha *
-layout_manager_real_begin_animation (ClutterLayoutManager *manager,
-                                     guint                 duration,
-                                     gulong                mode)
-{
-  ClutterTimeline *timeline;
-  ClutterAlpha *alpha;
-
-  alpha = g_object_get_qdata (G_OBJECT (manager), quark_layout_alpha);
-  if (alpha != NULL)
-    {
-      clutter_alpha_set_mode (alpha, mode);
-
-      timeline = clutter_alpha_get_timeline (alpha);
-      clutter_timeline_set_duration (timeline, duration);
-      clutter_timeline_rewind (timeline);
-
-      return alpha;
-    };
-
-  timeline = clutter_timeline_new (duration);
-
-  alpha = clutter_alpha_new_full (timeline, mode);
-
-  /* let the alpha take ownership of the timeline */
-  g_object_unref (timeline);
-
-  g_signal_connect_swapped (timeline, "completed",
-                            G_CALLBACK (clutter_layout_manager_end_animation),
-                            manager);
-  g_signal_connect_swapped (timeline, "new-frame",
-                            G_CALLBACK (clutter_layout_manager_layout_changed),
-                            manager);
-
-  g_object_set_qdata_full (G_OBJECT (manager),
-                           quark_layout_alpha, alpha,
-                           (GDestroyNotify) g_object_unref);
-
-  clutter_timeline_start (timeline);
-
-  return alpha;
-}
-
-/* XXX:2.0 - Remove */
-static gdouble
-layout_manager_real_get_animation_progress (ClutterLayoutManager *manager)
-{
-  ClutterAlpha *alpha;
-
-  alpha = g_object_get_qdata (G_OBJECT (manager), quark_layout_alpha);
-  if (alpha == NULL)
-    return 1.0;
-
-  return clutter_alpha_get_alpha (alpha);
-}
-
-/* XXX:2.0 - Remove */
-static void
-layout_manager_real_end_animation (ClutterLayoutManager *manager)
-{
-  ClutterTimeline *timeline;
-  ClutterAlpha *alpha;
-
-  alpha = g_object_get_qdata (G_OBJECT (manager), quark_layout_alpha);
-  if (alpha == NULL)
-    return;
-
-  timeline = clutter_alpha_get_timeline (alpha);
-  g_assert (timeline != NULL);
-
-  if (clutter_timeline_is_playing (timeline))
-    clutter_timeline_stop (timeline);
-
-  g_signal_handlers_disconnect_by_func (timeline,
-                                        G_CALLBACK (clutter_layout_manager_end_animation),
-                                        manager);
-  g_signal_handlers_disconnect_by_func (timeline,
-                                        G_CALLBACK (clutter_layout_manager_layout_changed),
-                                        manager);
-
-  g_object_set_qdata (G_OBJECT (manager), quark_layout_alpha, NULL);
-
-  clutter_layout_manager_layout_changed (manager);
-}
-
 static void
 clutter_layout_manager_class_init (ClutterLayoutManagerClass *klass)
 {
   quark_layout_meta =
     g_quark_from_static_string ("clutter-layout-manager-child-meta");
-
-  /* XXX:2.0 - Remove */
-  quark_layout_alpha =
-    g_quark_from_static_string ("clutter-layout-manager-alpha");
 
   klass->get_preferred_width = layout_manager_real_get_preferred_width;
   klass->get_preferred_height = layout_manager_real_get_preferred_height;
@@ -406,9 +310,6 @@ clutter_layout_manager_class_init (ClutterLayoutManagerClass *klass)
   klass->get_child_meta_type = layout_manager_real_get_child_meta_type;
 
   /* XXX:2.0 - Remove */
-  klass->begin_animation = layout_manager_real_begin_animation;
-  klass->get_animation_progress = layout_manager_real_get_animation_progress;
-  klass->end_animation = layout_manager_real_end_animation;
   klass->set_container = layout_manager_real_set_container;
 
   /**
@@ -446,8 +347,7 @@ clutter_layout_manager_class_init (ClutterLayoutManagerClass *klass)
                   G_SIGNAL_RUN_LAST,
                   G_STRUCT_OFFSET (ClutterLayoutManagerClass,
                                    layout_changed),
-                  NULL, NULL,
-                  _clutter_marshal_VOID__VOID,
+                  NULL, NULL, NULL,
                   G_TYPE_NONE, 0);
 }
 
@@ -532,7 +432,6 @@ clutter_layout_manager_get_preferred_height (ClutterLayoutManager *manager,
  * @container: the #ClutterContainer using @manager
  * @allocation: the #ClutterActorBox containing the allocated area
  *   of @container
- * @flags: the allocation flags
  *
  * Allocates the children of @container given an area
  *
@@ -543,8 +442,7 @@ clutter_layout_manager_get_preferred_height (ClutterLayoutManager *manager,
 void
 clutter_layout_manager_allocate (ClutterLayoutManager   *manager,
                                  ClutterContainer       *container,
-                                 const ClutterActorBox  *allocation,
-                                 ClutterAllocationFlags  flags)
+                                 const ClutterActorBox  *allocation)
 {
   ClutterLayoutManagerClass *klass;
 
@@ -553,7 +451,7 @@ clutter_layout_manager_allocate (ClutterLayoutManager   *manager,
   g_return_if_fail (allocation != NULL);
 
   klass = CLUTTER_LAYOUT_MANAGER_GET_CLASS (manager);
-  klass->allocate (manager, container, allocation, flags);
+  klass->allocate (manager, container, allocation);
 }
 
 /**

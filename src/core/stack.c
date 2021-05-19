@@ -25,77 +25,243 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <config.h>
-#include "stack.h"
-#include "meta-workspace-manager-private.h"
-#include "window-private.h"
-#include <meta/meta-x11-errors.h>
-#include "frame.h"
-#include <meta/group.h>
-#include <meta/prefs.h>
-#include <meta/workspace.h>
+#include "config.h"
+
+#include "core/stack.h"
+
 #include "backends/meta-logical-monitor.h"
-
-#include <X11/Xatom.h>
-
+#include "cogl/cogl.h"
+#include "core/frame.h"
+#include "core/main-private.h"
+#include "core/meta-workspace-manager-private.h"
+#include "core/window-private.h"
+#include "meta/group.h"
+#include "meta/prefs.h"
+#include "meta/workspace.h"
 #include "x11/meta-x11-display-private.h"
-#include "x11/group-private.h"
 
-#define WINDOW_HAS_TRANSIENT_TYPE(w)                    \
-          (w->type == META_WINDOW_DIALOG ||             \
-	   w->type == META_WINDOW_MODAL_DIALOG ||       \
-           w->type == META_WINDOW_TOOLBAR ||            \
-           w->type == META_WINDOW_MENU ||               \
-           w->type == META_WINDOW_UTILITY)
+#define WINDOW_TRANSIENT_FOR_WHOLE_GROUP(w)        \
+  (meta_window_has_transient_type (w) && w->transient_for == NULL)
 
-#define WINDOW_TRANSIENT_FOR_WHOLE_GROUP(w)                     \
-  (WINDOW_HAS_TRANSIENT_TYPE (w) && w->transient_for == NULL)
-
-static void stack_sync_to_xserver (MetaStack *stack);
 static void meta_window_set_stack_position_no_sync (MetaWindow *window,
                                                     int         position);
-static void stack_do_window_deletions (MetaStack *stack);
-static void stack_do_window_additions (MetaStack *stack);
-static void stack_do_relayer          (MetaStack *stack);
-static void stack_do_constrain        (MetaStack *stack);
-static void stack_do_resort           (MetaStack *stack);
-
+static void stack_do_relayer (MetaStack *stack);
+static void stack_do_constrain (MetaStack *stack);
+static void stack_do_resort (MetaStack *stack);
 static void stack_ensure_sorted (MetaStack *stack);
+
+enum
+{
+  PROP_DISPLAY = 1,
+  N_PROPS
+};
+
+enum
+{
+  CHANGED,
+  WINDOW_ADDED,
+  WINDOW_REMOVED,
+  N_SIGNALS
+};
+
+static GParamSpec *pspecs[N_PROPS] = { 0 };
+static guint signals[N_SIGNALS] = { 0 };
+
+G_DEFINE_TYPE (MetaStack, meta_stack, G_TYPE_OBJECT)
+
+static void
+on_stack_changed (MetaStack *stack)
+{
+  MetaDisplay *display = stack->display;
+  GArray *all_root_children_stacked;
+  GList *l;
+  GArray *hidden_stack_ids;
+  GList *sorted;
+
+  meta_topic (META_DEBUG_STACK, "Syncing window stack to server\n");
+
+  all_root_children_stacked = g_array_new (FALSE, FALSE, sizeof (uint64_t));
+  hidden_stack_ids = g_array_new (FALSE, FALSE, sizeof (uint64_t));
+
+  meta_topic (META_DEBUG_STACK, "Bottom to top: ");
+  meta_push_no_msg_prefix ();
+
+  sorted = meta_stack_list_windows (stack, NULL);
+
+  for (l = sorted; l; l = l->next)
+    {
+      MetaWindow *w = l->data;
+      uint64_t top_level_window;
+      uint64_t stack_id;
+
+      if (w->unmanaging)
+        continue;
+
+      meta_topic (META_DEBUG_STACK, "%u:%d - %s ",
+		  w->layer, w->stack_position, w->desc);
+
+      if (w->frame)
+	top_level_window = w->frame->xwindow;
+      else
+	top_level_window = w->xwindow;
+
+      if (w->client_type == META_WINDOW_CLIENT_TYPE_X11)
+        stack_id = top_level_window;
+      else
+        stack_id = w->stamp;
+
+      /* We don't restack hidden windows along with the rest, though they are
+       * reflected in the _NET hints. Hidden windows all get pushed below
+       * the screens fullscreen guard_window. */
+      if (w->hidden)
+	{
+          g_array_append_val (hidden_stack_ids, stack_id);
+	  continue;
+	}
+
+      g_array_append_val (all_root_children_stacked, stack_id);
+    }
+
+  meta_topic (META_DEBUG_STACK, "\n");
+  meta_pop_no_msg_prefix ();
+
+  if (display->x11_display)
+    {
+      uint64_t guard_window_id;
+
+      /* The screen guard window sits above all hidden windows and acts as
+       * a barrier to input reaching these windows. */
+      guard_window_id = display->x11_display->guard_window;
+      g_array_append_val (hidden_stack_ids, guard_window_id);
+    }
+
+  /* Sync to server */
+
+  meta_topic (META_DEBUG_STACK, "Restacking %u windows\n",
+              all_root_children_stacked->len);
+
+  meta_stack_tracker_restack_managed (display->stack_tracker,
+                                      (uint64_t *)all_root_children_stacked->data,
+                                      all_root_children_stacked->len);
+  meta_stack_tracker_restack_at_bottom (display->stack_tracker,
+                                        (uint64_t *)hidden_stack_ids->data,
+                                        hidden_stack_ids->len);
+
+  g_array_free (hidden_stack_ids, TRUE);
+  g_array_free (all_root_children_stacked, TRUE);
+  g_list_free (sorted);
+}
+
+static void
+meta_stack_init (MetaStack *stack)
+{
+  g_signal_connect (stack, "changed",
+                    G_CALLBACK (on_stack_changed), NULL);
+}
+
+static void
+meta_stack_finalize (GObject *object)
+{
+  MetaStack *stack = META_STACK (object);
+
+  g_list_free (stack->sorted);
+
+  G_OBJECT_CLASS (meta_stack_parent_class)->finalize (object);
+}
+
+static void
+meta_stack_set_property (GObject      *object,
+                         guint         prop_id,
+                         const GValue *value,
+                         GParamSpec   *pspec)
+{
+  MetaStack *stack = META_STACK (object);
+
+  switch (prop_id)
+    {
+    case PROP_DISPLAY:
+      stack->display = g_value_get_object (value);
+      break;
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+    }
+}
+
+static void
+meta_stack_get_property (GObject    *object,
+                         guint       prop_id,
+                         GValue     *value,
+                         GParamSpec *pspec)
+{
+  MetaStack *stack = META_STACK (object);
+
+  switch (prop_id)
+    {
+    case PROP_DISPLAY:
+      g_value_set_object (value, stack->display);
+      break;
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+    }
+}
+
+static void
+meta_stack_class_init (MetaStackClass *klass)
+{
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
+
+  object_class->set_property = meta_stack_set_property;
+  object_class->get_property = meta_stack_get_property;
+  object_class->finalize = meta_stack_finalize;
+
+  signals[CHANGED] =
+    g_signal_new ("changed",
+                  G_TYPE_FROM_CLASS (klass),
+                  G_SIGNAL_RUN_LAST,
+                  0, NULL, NULL, NULL,
+                  G_TYPE_NONE, 0);
+  signals[WINDOW_ADDED] =
+    g_signal_new ("window-added",
+                  G_TYPE_FROM_CLASS (klass),
+                  G_SIGNAL_RUN_LAST,
+                  0, NULL, NULL,
+                  g_cclosure_marshal_VOID__OBJECT,
+                  G_TYPE_NONE, 1, META_TYPE_WINDOW);
+  signals[WINDOW_REMOVED] =
+    g_signal_new ("window-removed",
+                  G_TYPE_FROM_CLASS (klass),
+                  G_SIGNAL_RUN_LAST,
+                  0, NULL, NULL,
+                  g_cclosure_marshal_VOID__OBJECT,
+                  G_TYPE_NONE, 1, META_TYPE_WINDOW);
+
+  pspecs[PROP_DISPLAY] =
+    g_param_spec_object ("display",
+                         "Display",
+                         "Display",
+                         META_TYPE_DISPLAY,
+                         G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY);
+
+  g_object_class_install_properties (object_class, N_PROPS, pspecs);
+}
 
 MetaStack *
 meta_stack_new (MetaDisplay *display)
 {
-  MetaStack *stack;
-
-  stack = g_new (MetaStack, 1);
-
-  stack->display = display;
-  stack->xwindows = g_array_new (FALSE, FALSE, sizeof (Window));
-
-  stack->sorted = NULL;
-  stack->added = NULL;
-  stack->removed = NULL;
-
-  stack->freeze_count = 0;
-  stack->n_positions = 0;
-
-  stack->need_resort = FALSE;
-  stack->need_relayer = FALSE;
-  stack->need_constrain = FALSE;
-
-  return stack;
+  return g_object_new (META_TYPE_STACK,
+                       "display", display,
+                       NULL);
 }
 
-void
-meta_stack_free (MetaStack *stack)
+static void
+meta_stack_changed (MetaStack *stack)
 {
-  g_array_free (stack->xwindows, TRUE);
+  /* Bail out if frozen */
+  if (stack->freeze_count > 0)
+    return;
 
-  g_list_free (stack->sorted);
-  g_list_free (stack->added);
-  g_list_free (stack->removed);
-
-  g_free (stack);
+  stack_ensure_sorted (stack);
+  g_signal_emit (stack, signals[CHANGED], 0);
 }
 
 void
@@ -104,6 +270,9 @@ meta_stack_add (MetaStack  *stack,
 {
   MetaWorkspaceManager *workspace_manager = window->display->workspace_manager;
 
+  COGL_TRACE_BEGIN_SCOPED (MetaStackAdd,
+                           "Stack (add window)");
+
   g_return_if_fail (meta_window_is_stackable (window));
 
   meta_topic (META_DEBUG_STACK, "Adding window %s to the stack\n", window->desc);
@@ -111,7 +280,12 @@ meta_stack_add (MetaStack  *stack,
   if (meta_window_is_in_stack (window))
     meta_bug ("Window %s had stack position already\n", window->desc);
 
-  stack->added = g_list_prepend (stack->added, window);
+  stack->sorted = g_list_prepend (stack->sorted, window);
+  stack->need_resort = TRUE; /* may not be needed as we add to top */
+  stack->need_constrain = TRUE;
+  stack->need_relayer = TRUE;
+
+  g_signal_emit (stack, signals[WINDOW_ADDED], 0, window);
 
   window->stack_position = stack->n_positions;
   stack->n_positions += 1;
@@ -119,7 +293,7 @@ meta_stack_add (MetaStack  *stack,
               "Window %s has stack_position initialized to %d\n",
               window->desc, window->stack_position);
 
-  stack_sync_to_xserver (stack);
+  meta_stack_changed (stack);
   meta_stack_update_window_tile_matches (stack, workspace_manager->active_workspace);
 }
 
@@ -128,6 +302,9 @@ meta_stack_remove (MetaStack  *stack,
                    MetaWindow *window)
 {
   MetaWorkspaceManager *workspace_manager = window->display->workspace_manager;
+
+  COGL_TRACE_BEGIN_SCOPED (MetaStackRemove,
+                           "Stack (remove window)");
 
   meta_topic (META_DEBUG_STACK, "Removing window %s from the stack\n", window->desc);
 
@@ -139,25 +316,11 @@ meta_stack_remove (MetaStack  *stack,
   window->stack_position = -1;
   stack->n_positions -= 1;
 
-  /* We don't know if it's been moved from "added" to "stack" yet */
-  stack->added = g_list_remove (stack->added, window);
   stack->sorted = g_list_remove (stack->sorted, window);
 
-  /* stack->removed is only used to update stack->xwindows */
-  if (window->client_type == META_WINDOW_CLIENT_TYPE_X11)
-    {
-      /* Remember the window ID to remove it from the stack array.
-       * The macro is safe to use: Window is guaranteed to be 32 bits, and
-       * GUINT_TO_POINTER says it only works on 32 bits.
-       */
-      stack->removed = g_list_prepend (stack->removed,
-                                       GUINT_TO_POINTER (window->xwindow));
-      if (window->frame)
-        stack->removed = g_list_prepend (stack->removed,
-                                         GUINT_TO_POINTER (window->frame->xwindow));
-    }
+  g_signal_emit (stack, signals[WINDOW_REMOVED], 0, window);
 
-  stack_sync_to_xserver (stack);
+  meta_stack_changed (stack);
   meta_stack_update_window_tile_matches (stack, workspace_manager->active_workspace);
 }
 
@@ -168,7 +331,7 @@ meta_stack_update_layer (MetaStack  *stack,
   MetaWorkspaceManager *workspace_manager = window->display->workspace_manager;
   stack->need_relayer = TRUE;
 
-  stack_sync_to_xserver (stack);
+  meta_stack_changed (stack);
   meta_stack_update_window_tile_matches (stack, workspace_manager->active_workspace);
 }
 
@@ -179,7 +342,7 @@ meta_stack_update_transient (MetaStack  *stack,
   MetaWorkspaceManager *workspace_manager = window->display->workspace_manager;
   stack->need_constrain = TRUE;
 
-  stack_sync_to_xserver (stack);
+  meta_stack_changed (stack);
   meta_stack_update_window_tile_matches (stack, workspace_manager->active_workspace);
 }
 
@@ -209,7 +372,7 @@ meta_stack_raise (MetaStack  *stack,
 
   meta_window_set_stack_position_no_sync (window, max_stack_position);
 
-  stack_sync_to_xserver (stack);
+  meta_stack_changed (stack);
   meta_stack_update_window_tile_matches (stack, workspace_manager->active_workspace);
 }
 
@@ -238,7 +401,7 @@ meta_stack_lower (MetaStack  *stack,
 
   meta_window_set_stack_position_no_sync (window, min_stack_position);
 
-  stack_sync_to_xserver (stack);
+  meta_stack_changed (stack);
   meta_stack_update_window_tile_matches (stack, workspace_manager->active_workspace);
 }
 
@@ -254,7 +417,7 @@ meta_stack_thaw (MetaStack *stack)
   g_return_if_fail (stack->freeze_count > 0);
 
   stack->freeze_count -= 1;
-  stack_sync_to_xserver (stack);
+  meta_stack_changed (stack);
   meta_stack_update_window_tile_matches (stack, NULL);
 }
 
@@ -276,127 +439,6 @@ meta_stack_update_window_tile_matches (MetaStack     *stack,
     }
 
   g_list_free (windows);
-}
-
-/* Get layer ignoring any transient or group relationships */
-static MetaStackLayer
-get_standalone_layer (MetaWindow *window)
-{
-  MetaStackLayer layer;
-
-  switch (window->type)
-    {
-    case META_WINDOW_DESKTOP:
-      layer = META_LAYER_DESKTOP;
-      break;
-
-    case META_WINDOW_DOCK:
-      if (window->wm_state_below ||
-          (window->monitor && window->monitor->in_fullscreen))
-        layer = META_LAYER_BOTTOM;
-      else
-        layer = META_LAYER_DOCK;
-      break;
-
-    case META_WINDOW_DROPDOWN_MENU:
-    case META_WINDOW_POPUP_MENU:
-    case META_WINDOW_TOOLTIP:
-    case META_WINDOW_NOTIFICATION:
-    case META_WINDOW_COMBO:
-    case META_WINDOW_OVERRIDE_OTHER:
-      layer = META_LAYER_OVERRIDE_REDIRECT;
-      break;
-    default:
-      if (window->wm_state_below)
-        layer = META_LAYER_BOTTOM;
-      else if (window->wm_state_above && !META_WINDOW_MAXIMIZED (window))
-        layer = META_LAYER_TOP;
-      else
-        layer = META_LAYER_NORMAL;
-      break;
-    }
-
-  return layer;
-}
-
-/* Note that this function can never use window->layer only
- * get_standalone_layer, or we'd have issues.
- */
-static MetaStackLayer
-get_maximum_layer_in_group (MetaWindow *window)
-{
-  GSList *members;
-  MetaGroup *group;
-  GSList *tmp;
-  MetaStackLayer max;
-  MetaStackLayer layer;
-
-  max = META_LAYER_DESKTOP;
-
-  group = meta_window_get_group (window);
-
-  if (group != NULL)
-    members = meta_group_list_windows (group);
-  else
-    members = NULL;
-
-  tmp = members;
-  while (tmp != NULL)
-    {
-      MetaWindow *w = tmp->data;
-
-      if (!w->override_redirect)
-        {
-          layer = get_standalone_layer (w);
-          if (layer > max)
-            max = layer;
-        }
-
-      tmp = tmp->next;
-    }
-
-  g_slist_free (members);
-
-  return max;
-}
-
-static void
-compute_layer (MetaWindow *window)
-{
-  window->layer = get_standalone_layer (window);
-
-  /* We can only do promotion-due-to-group for dialogs and other
-   * transients, or weird stuff happens like the desktop window and
-   * nautilus windows getting in the same layer, or all gnome-terminal
-   * windows getting in fullscreen layer if any terminal is
-   * fullscreen.
-   */
-  if (window->layer != META_LAYER_DESKTOP &&
-      WINDOW_HAS_TRANSIENT_TYPE(window) &&
-      window->transient_for == NULL)
-    {
-      /* We only do the group thing if the dialog is NOT transient for
-       * a particular window. Imagine a group with a normal window, a dock,
-       * and a dialog transient for the normal window; you don't want the dialog
-       * above the dock if it wouldn't normally be.
-       */
-
-      MetaStackLayer group_max;
-
-      group_max = get_maximum_layer_in_group (window);
-
-      if (group_max > window->layer)
-        {
-          meta_topic (META_DEBUG_STACK,
-                      "Promoting window %s from layer %u to %u due to group membership\n",
-                      window->desc, window->layer, group_max);
-          window->layer = group_max;
-        }
-    }
-
-  meta_topic (META_DEBUG_STACK, "Window %s on layer %u type = %u has_focus = %d\n",
-              window->desc, window->layer,
-              window->type, window->has_focus);
 }
 
 /* Front of the layer list is the topmost window,
@@ -574,7 +616,7 @@ create_constraints (Constraint **constraints,
               /* better way I think, so transient-for-group are constrained
                * only above non-transient-type windows in their group
                */
-              if (!WINDOW_HAS_TRANSIENT_TYPE (group_window))
+              if (!meta_window_has_transient_type (group_window))
 #endif
                 {
                   meta_topic (META_DEBUG_STACK, "Constraining %s above %s as it's transient for its group\n",
@@ -679,11 +721,14 @@ static void
 ensure_above (MetaWindow *above,
               MetaWindow *below)
 {
-  if (WINDOW_HAS_TRANSIENT_TYPE(above) &&
-      above->layer < below->layer)
+  gboolean is_transient;
+
+  is_transient = meta_window_has_transient_type (above) ||
+                 above->transient_for == below;
+  if (is_transient && above->layer < below->layer)
     {
       meta_topic (META_DEBUG_STACK,
-		  "Promoting window %s from layer %u to %u due to contraint\n",
+		  "Promoting window %s from layer %u to %u due to constraint\n",
 		  above->desc, above->layer, below->layer);
       above->layer = below->layer;
     }
@@ -761,99 +806,6 @@ apply_constraints (Constraint **constraints,
 }
 
 /**
- * stack_do_window_deletions:
- *
- * Go through "deleted" and take the matching windows
- * out of "windows".
- */
-static void
-stack_do_window_deletions (MetaStack *stack)
-{
-  /* Do removals before adds, with paranoid idea that we might re-add
-   * the same window IDs.
-   */
-  GList *tmp;
-  int i;
-
-  tmp = stack->removed;
-  while (tmp != NULL)
-    {
-      Window xwindow;
-      xwindow = GPOINTER_TO_UINT (tmp->data);
-
-      /* We go from the end figuring removals are more
-       * likely to be recent.
-       */
-      i = stack->xwindows->len;
-      while (i > 0)
-        {
-          --i;
-
-          /* there's no guarantee we'll actually find windows to
-           * remove, e.g. the same xwindow could have been
-           * added/removed before we ever synced, and we put
-           * both the window->xwindow and window->frame->xwindow
-           * in the removal list.
-           */
-          if (xwindow == g_array_index (stack->xwindows, Window, i))
-            {
-              g_array_remove_index (stack->xwindows, i);
-              goto next;
-            }
-        }
-
-    next:
-      tmp = tmp->next;
-    }
-
-  g_list_free (stack->removed);
-  stack->removed = NULL;
-}
-
-static void
-stack_do_window_additions (MetaStack *stack)
-{
-  GList *tmp;
-  gint n_added;
-
-  n_added = g_list_length (stack->added);
-  if (n_added > 0)
-    {
-      meta_topic (META_DEBUG_STACK,
-                  "Adding %d windows to sorted list\n",
-                  n_added);
-
-      /* stack->added has the most recent additions at the
-       * front of the list, so we need to reverse it
-       */
-      stack->added = g_list_reverse (stack->added);
-
-      tmp = stack->added;
-      while (tmp != NULL)
-        {
-          MetaWindow *w;
-
-          w = tmp->data;
-
-          if (w->client_type == META_WINDOW_CLIENT_TYPE_X11)
-            g_array_append_val (stack->xwindows, w->xwindow);
-
-          /* add to the main list */
-          stack->sorted = g_list_prepend (stack->sorted, w);
-
-          tmp = tmp->next;
-        }
-
-      stack->need_resort = TRUE; /* may not be needed as we add to top */
-      stack->need_constrain = TRUE;
-      stack->need_relayer = TRUE;
-    }
-
-  g_list_free (stack->added);
-  stack->added = NULL;
-}
-
-/**
  * stack_do_relayer:
  *
  * Update the layers that windows are in
@@ -879,7 +831,7 @@ stack_do_relayer (MetaStack *stack)
       w = tmp->data;
       old_layer = w->layer;
 
-      compute_layer (w);
+      w->layer = meta_window_calculate_layer (w);
 
       if (w->layer != old_layer)
         {
@@ -970,132 +922,12 @@ stack_do_resort (MetaStack *stack)
 static void
 stack_ensure_sorted (MetaStack *stack)
 {
-  stack_do_window_deletions (stack);
-  stack_do_window_additions (stack);
   stack_do_relayer (stack);
   stack_do_constrain (stack);
   stack_do_resort (stack);
 }
 
-/**
- * stack_sync_to_server:
- *
- * Order the windows on the X server to be the same as in our structure.
- * We do this using XRestackWindows if we don't know the previous order,
- * or XConfigureWindow on a few particular windows if we do and can figure
- * out the minimum set of changes.  After that, we set __NET_CLIENT_LIST
- * and __NET_CLIENT_LIST_STACKING.
- *
- * FIXME: Now that we have a good view of the stacking order on the server
- * with MetaStackTracker it should be possible to do a simpler and better
- * job of computing the minimal set of stacking requests needed.
- */
-static void
-stack_sync_to_xserver (MetaStack *stack)
-{
-  GArray *x11_stacked;
-  GArray *all_root_children_stacked; /* wayland OR x11 */
-  GList *tmp;
-  GArray *hidden_stack_ids;
-
-  /* Bail out if frozen */
-  if (stack->freeze_count > 0)
-    return;
-
-  meta_topic (META_DEBUG_STACK, "Syncing window stack to server\n");
-
-  stack_ensure_sorted (stack);
-
-  /* Create stacked xwindow arrays, in bottom-to-top order
-   */
-  x11_stacked = g_array_new (FALSE, FALSE, sizeof (Window));
-
-  all_root_children_stacked = g_array_new (FALSE, FALSE, sizeof (guint64));
-  hidden_stack_ids = g_array_new (FALSE, FALSE, sizeof (guint64));
-
-  meta_topic (META_DEBUG_STACK, "Bottom to top: ");
-  meta_push_no_msg_prefix ();
-
-  for (tmp = g_list_last(stack->sorted); tmp != NULL; tmp = tmp->prev)
-    {
-      MetaWindow *w = tmp->data;
-      guint64 top_level_window;
-      guint64 stack_id;
-
-      if (w->unmanaging)
-        continue;
-
-      meta_topic (META_DEBUG_STACK, "%u:%d - %s ",
-		  w->layer, w->stack_position, w->desc);
-
-      if (w->client_type == META_WINDOW_CLIENT_TYPE_X11)
-        g_array_append_val (x11_stacked, w->xwindow);
-
-      if (w->frame)
-	top_level_window = w->frame->xwindow;
-      else
-	top_level_window = w->xwindow;
-
-      if (w->client_type == META_WINDOW_CLIENT_TYPE_X11)
-        stack_id = top_level_window;
-      else
-        stack_id = w->stamp;
-
-      /* We don't restack hidden windows along with the rest, though they are
-       * reflected in the _NET hints. Hidden windows all get pushed below
-       * the screens fullscreen guard_window. */
-      if (w->hidden)
-	{
-          g_array_append_val (hidden_stack_ids, stack_id);
-	  continue;
-	}
-
-      g_array_append_val (all_root_children_stacked, stack_id);
-    }
-
-  meta_topic (META_DEBUG_STACK, "\n");
-  meta_pop_no_msg_prefix ();
-
-  /* The screen guard window sits above all hidden windows and acts as
-   * a barrier to input reaching these windows. */
-  guint64 guard_window_id = stack->display->x11_display->guard_window;
-  g_array_append_val (hidden_stack_ids, guard_window_id);
-
-  /* Sync to server */
-
-  meta_topic (META_DEBUG_STACK, "Restacking %u windows\n",
-              all_root_children_stacked->len);
-
-  meta_stack_tracker_restack_managed (stack->display->stack_tracker,
-                                      (guint64 *)all_root_children_stacked->data,
-                                      all_root_children_stacked->len);
-  meta_stack_tracker_restack_at_bottom (stack->display->stack_tracker,
-                                        (guint64 *)hidden_stack_ids->data,
-                                        hidden_stack_ids->len);
-
-  /* Sync _NET_CLIENT_LIST and _NET_CLIENT_LIST_STACKING */
-
-  XChangeProperty (stack->display->x11_display->xdisplay,
-                   stack->display->x11_display->xroot,
-                   stack->display->x11_display->atom__NET_CLIENT_LIST,
-                   XA_WINDOW,
-                   32, PropModeReplace,
-                   (unsigned char *)stack->xwindows->data,
-                   stack->xwindows->len);
-  XChangeProperty (stack->display->x11_display->xdisplay,
-                   stack->display->x11_display->xroot,
-                   stack->display->x11_display->atom__NET_CLIENT_LIST_STACKING,
-                   XA_WINDOW,
-                   32, PropModeReplace,
-                   (unsigned char *)x11_stacked->data,
-                   x11_stacked->len);
-
-  g_array_free (x11_stacked, TRUE);
-  g_array_free (hidden_stack_ids, TRUE);
-  g_array_free (all_root_children_stacked, TRUE);
-}
-
-MetaWindow*
+MetaWindow *
 meta_stack_get_top (MetaStack *stack)
 {
   stack_ensure_sorted (stack);
@@ -1106,7 +938,7 @@ meta_stack_get_top (MetaStack *stack)
     return NULL;
 }
 
-MetaWindow*
+MetaWindow *
 meta_stack_get_bottom (MetaStack  *stack)
 {
   GList *link;
@@ -1120,10 +952,10 @@ meta_stack_get_bottom (MetaStack  *stack)
     return NULL;
 }
 
-MetaWindow*
-meta_stack_get_above (MetaStack      *stack,
-                      MetaWindow     *window,
-                      gboolean        only_within_layer)
+MetaWindow *
+meta_stack_get_above (MetaStack  *stack,
+                      MetaWindow *window,
+                      gboolean    only_within_layer)
 {
   GList *link;
   MetaWindow *above;
@@ -1145,10 +977,10 @@ meta_stack_get_above (MetaStack      *stack,
     return above;
 }
 
-MetaWindow*
-meta_stack_get_below (MetaStack      *stack,
-                      MetaWindow     *window,
-                      gboolean        only_within_layer)
+MetaWindow *
+meta_stack_get_below (MetaStack  *stack,
+                      MetaWindow *window,
+                      gboolean    only_within_layer)
 {
   GList *link;
   MetaWindow *below;
@@ -1180,10 +1012,31 @@ window_contains_point (MetaWindow *window,
 
   meta_window_get_frame_rect (window, &rect);
 
-  return POINT_IN_RECT (root_x, root_y, rect);
+  return META_POINT_IN_RECT (root_x, root_y, rect);
 }
 
-static MetaWindow*
+static gboolean
+window_can_get_default_focus (MetaWindow *window)
+{
+  if (window->unmaps_pending > 0)
+    return FALSE;
+
+  if (window->unmanaging)
+    return FALSE;
+
+  if (!meta_window_is_focusable (window))
+    return FALSE;
+
+  if (!meta_window_should_be_showing (window))
+    return FALSE;
+
+  if (window->type == META_WINDOW_DOCK)
+    return FALSE;
+
+  return TRUE;
+}
+
+static MetaWindow *
 get_default_focus_window (MetaStack     *stack,
                           MetaWorkspace *workspace,
                           MetaWindow    *not_this_one,
@@ -1210,22 +1063,10 @@ get_default_focus_window (MetaStack     *stack,
       if (window == not_this_one)
         continue;
 
-      if (window->unmaps_pending > 0)
-        continue;
-
-      if (window->unmanaging)
-        continue;
-
-      if (!(window->input || window->take_focus))
-        continue;
-
-      if (!meta_window_should_be_showing (window))
+      if (!window_can_get_default_focus (window))
         continue;
 
       if (must_be_at_point && !window_contains_point (window, root_x, root_y))
-        continue;
-
-      if (window->type == META_WINDOW_DOCK)
         continue;
 
       return window;
@@ -1234,7 +1075,7 @@ get_default_focus_window (MetaStack     *stack,
   return NULL;
 }
 
-MetaWindow*
+MetaWindow *
 meta_stack_get_default_focus_window_at_point (MetaStack     *stack,
                                               MetaWorkspace *workspace,
                                               MetaWindow    *not_this_one,
@@ -1245,7 +1086,7 @@ meta_stack_get_default_focus_window_at_point (MetaStack     *stack,
                                    TRUE, root_x, root_y);
 }
 
-MetaWindow*
+MetaWindow *
 meta_stack_get_default_focus_window (MetaStack     *stack,
                                      MetaWorkspace *workspace,
                                      MetaWindow    *not_this_one)
@@ -1254,7 +1095,7 @@ meta_stack_get_default_focus_window (MetaStack     *stack,
                                    FALSE, 0, 0);
 }
 
-GList*
+GList *
 meta_stack_list_windows (MetaStack     *stack,
                          MetaWorkspace *workspace)
 {
@@ -1282,10 +1123,30 @@ meta_stack_list_windows (MetaStack     *stack,
   return workspace_windows;
 }
 
+GList *
+meta_stack_get_default_focus_candidates (MetaStack     *stack,
+                                         MetaWorkspace *workspace)
+{
+  GList *windows = meta_stack_list_windows (stack, workspace);
+  GList *l;
+
+  for (l = windows; l;)
+    {
+      GList *next = l->next;
+
+      if (!window_can_get_default_focus (l->data))
+        windows = g_list_delete_link (windows, l);
+
+      l = next;
+    }
+
+  return windows;
+}
+
 int
-meta_stack_windows_cmp  (MetaStack  *stack,
-                         MetaWindow *window_a,
-                         MetaWindow *window_b)
+meta_stack_windows_cmp (MetaStack  *stack,
+                        MetaWindow *window_a,
+                        MetaWindow *window_b)
 {
   /* -1 means a below b */
 
@@ -1318,7 +1179,7 @@ compare_just_window_stack_position (void *a,
     return 0; /* not reached */
 }
 
-GList*
+GList *
 meta_stack_get_positions (MetaStack *stack)
 {
   GList *tmp;
@@ -1404,7 +1265,7 @@ meta_stack_set_positions (MetaStack *stack,
   meta_topic (META_DEBUG_STACK,
               "Reset the stack positions of (nearly) all windows\n");
 
-  stack_sync_to_xserver (stack);
+  meta_stack_changed (stack);
   meta_stack_update_window_tile_matches (stack, NULL);
 }
 
@@ -1469,7 +1330,7 @@ meta_window_set_stack_position (MetaWindow *window,
   MetaWorkspaceManager *workspace_manager = window->display->workspace_manager;
 
   meta_window_set_stack_position_no_sync (window, position);
-  stack_sync_to_xserver (window->display->stack);
+  meta_stack_changed (window->display->stack);
   meta_stack_update_window_tile_matches (window->display->stack,
                                          workspace_manager->active_workspace);
 }

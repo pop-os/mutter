@@ -20,20 +20,21 @@
  */
 
 #include "config.h"
-#include "compositor-private.h"
-#include "meta-plugin-manager.h"
-#include <meta/prefs.h>
-#include <meta/meta-x11-errors.h>
-#include <meta/workspace.h>
-#include "meta-module.h"
-#include "window-private.h"
-#include "meta-close-dialog-default-private.h"
-#include "meta-inhibit-shortcuts-dialog-default-private.h"
 
-#include <string.h>
+#include "compositor/meta-plugin-manager.h"
+
 #include <stdlib.h>
+#include <string.h>
 
-#include <clutter/x11/clutter-x11.h>
+#include "clutter/x11/clutter-x11.h"
+#include "compositor/compositor-private.h"
+#include "compositor/meta-module.h"
+#include "core/meta-close-dialog-default-private.h"
+#include "core/meta-inhibit-shortcuts-dialog-default-private.h"
+#include "core/window-private.h"
+#include "meta/meta-x11-errors.h"
+#include "meta/prefs.h"
+#include "meta/workspace.h"
 
 static GType plugin_type = G_TYPE_NONE;
 
@@ -155,7 +156,7 @@ meta_plugin_manager_event_simple (MetaPluginManager *plugin_mgr,
 {
   MetaPlugin *plugin = plugin_mgr->plugin;
   MetaPluginClass *klass = META_PLUGIN_GET_CLASS (plugin);
-  MetaDisplay *display = plugin_mgr->compositor->display;
+  MetaDisplay *display = meta_compositor_get_display (plugin_mgr->compositor);
   gboolean retval = FALSE;
 
   if (display->display_opening)
@@ -194,6 +195,8 @@ meta_plugin_manager_event_simple (MetaPluginManager *plugin_mgr,
       if (klass->destroy)
         {
           retval = TRUE;
+          meta_plugin_manager_kill_window_effects (plugin_mgr,
+                                                   actor);
           klass->destroy (plugin, actor);
         }
       break;
@@ -224,7 +227,7 @@ meta_plugin_manager_event_size_change (MetaPluginManager *plugin_mgr,
 {
   MetaPlugin *plugin = plugin_mgr->plugin;
   MetaPluginClass *klass = META_PLUGIN_GET_CLASS (plugin);
-  MetaDisplay *display = plugin_mgr->compositor->display;
+  MetaDisplay *display = meta_compositor_get_display (plugin_mgr->compositor);
 
   if (display->display_opening)
     return FALSE;
@@ -253,7 +256,7 @@ meta_plugin_manager_switch_workspace (MetaPluginManager   *plugin_mgr,
 {
   MetaPlugin *plugin = plugin_mgr->plugin;
   MetaPluginClass *klass = META_PLUGIN_GET_CLASS (plugin);
-  MetaDisplay *display = plugin_mgr->compositor->display;
+  MetaDisplay *display = meta_compositor_get_display (plugin_mgr->compositor);
   gboolean retval = FALSE;
 
   if (display->display_opening)
@@ -298,9 +301,9 @@ meta_plugin_manager_confirm_display_change (MetaPluginManager *plugin_mgr)
   MetaPluginClass *klass = META_PLUGIN_GET_CLASS (plugin);
 
   if (klass->confirm_display_change)
-    return klass->confirm_display_change (plugin);
+    klass->confirm_display_change (plugin);
   else
-    return meta_plugin_complete_display_change (plugin, TRUE);
+    meta_plugin_complete_display_change (plugin, TRUE);
 }
 
 gboolean
@@ -311,7 +314,7 @@ meta_plugin_manager_show_tile_preview (MetaPluginManager *plugin_mgr,
 {
   MetaPlugin *plugin = plugin_mgr->plugin;
   MetaPluginClass *klass = META_PLUGIN_GET_CLASS (plugin);
-  MetaDisplay *display = plugin_mgr->compositor->display;
+  MetaDisplay *display = meta_compositor_get_display (plugin_mgr->compositor);
 
   if (display->display_opening)
     return FALSE;
@@ -330,7 +333,7 @@ meta_plugin_manager_hide_tile_preview (MetaPluginManager *plugin_mgr)
 {
   MetaPlugin *plugin = plugin_mgr->plugin;
   MetaPluginClass *klass = META_PLUGIN_GET_CLASS (plugin);
-  MetaDisplay *display = plugin_mgr->compositor->display;
+  MetaDisplay *display = meta_compositor_get_display (plugin_mgr->compositor);
 
   if (display->display_opening)
     return FALSE;
@@ -353,7 +356,7 @@ meta_plugin_manager_show_window_menu (MetaPluginManager  *plugin_mgr,
 {
   MetaPlugin *plugin = plugin_mgr->plugin;
   MetaPluginClass *klass = META_PLUGIN_GET_CLASS (plugin);
-  MetaDisplay *display = plugin_mgr->compositor->display;
+  MetaDisplay *display = meta_compositor_get_display (plugin_mgr->compositor);
 
   if (display->display_opening)
     return;
@@ -370,7 +373,7 @@ meta_plugin_manager_show_window_menu_for_rect (MetaPluginManager  *plugin_mgr,
 {
   MetaPlugin *plugin = plugin_mgr->plugin;
   MetaPluginClass *klass = META_PLUGIN_GET_CLASS (plugin);
-  MetaDisplay *display = plugin_mgr->compositor->display;
+  MetaDisplay *display = meta_compositor_get_display (plugin_mgr->compositor);
 
   if (display->display_opening)
     return;
@@ -403,4 +406,14 @@ meta_plugin_manager_create_inhibit_shortcuts_dialog (MetaPluginManager *plugin_m
     return klass->create_inhibit_shortcuts_dialog (plugin, window);
 
   return meta_inhibit_shortcuts_dialog_default_new (window);
+}
+
+void
+meta_plugin_manager_locate_pointer (MetaPluginManager *plugin_mgr)
+{
+  MetaPlugin *plugin = plugin_mgr->plugin;
+  MetaPluginClass *klass = META_PLUGIN_GET_CLASS (plugin);
+
+  if (klass->locate_pointer)
+    klass->locate_pointer (plugin);
 }

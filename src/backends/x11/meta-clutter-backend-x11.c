@@ -29,15 +29,19 @@
 #include "backends/meta-backend-private.h"
 #include "backends/meta-renderer.h"
 #include "backends/x11/meta-clutter-backend-x11.h"
-#include "backends/x11/meta-stage-x11-nested.h"
-#include "clutter/clutter.h"
+#include "backends/x11/meta-keymap-x11.h"
+#include "backends/x11/meta-seat-x11.h"
+#include "backends/x11/meta-xkb-a11y-x11.h"
+#include "backends/x11/nested/meta-stage-x11-nested.h"
 #include "clutter/clutter-mutter.h"
-#include "meta/meta-backend.h"
+#include "clutter/clutter.h"
 #include "core/bell.h"
+#include "meta/meta-backend.h"
 
 struct _MetaClutterBackendX11
 {
   ClutterBackendX11 parent;
+  MetaSeatX11 *core_seat;
 };
 
 G_DEFINE_TYPE (MetaClutterBackendX11, meta_clutter_backend_x11,
@@ -58,33 +62,86 @@ meta_clutter_backend_x11_create_stage (ClutterBackend  *backend,
                                        ClutterStage    *wrapper,
                                        GError         **error)
 {
-  ClutterEventTranslator *translator;
   ClutterStageWindow *stage;
   GType stage_type;
 
   if (meta_is_wayland_compositor ())
     stage_type = META_TYPE_STAGE_X11_NESTED;
   else
-    stage_type  = CLUTTER_TYPE_STAGE_X11;
+    stage_type  = META_TYPE_STAGE_X11;
 
   stage = g_object_new (stage_type,
 			"backend", backend,
 			"wrapper", wrapper,
 			NULL);
-
-  /* the X11 stage does event translation */
-  translator = CLUTTER_EVENT_TRANSLATOR (stage);
-  _clutter_backend_add_event_translator (backend, translator);
-
   return stage;
 }
 
-static void
-meta_clutter_backend_x11_bell_notify (ClutterBackend  *backend)
+static gboolean
+meta_clutter_backend_x11_translate_event (ClutterBackend *backend,
+                                          gpointer        native,
+                                          ClutterEvent   *event)
 {
-  MetaDisplay *display = meta_get_display ();
+  MetaClutterBackendX11 *backend_x11 = META_CLUTTER_BACKEND_X11 (backend);
+  MetaStageX11 *stage_x11;
+  ClutterBackendClass *clutter_backend_class;
 
-  meta_bell_notify (display, NULL);
+  clutter_backend_class =
+    CLUTTER_BACKEND_CLASS (meta_clutter_backend_x11_parent_class);
+  if (clutter_backend_class->translate_event (backend, native, event))
+    return TRUE;
+
+  stage_x11 = META_STAGE_X11 (clutter_backend_get_stage_window (backend));
+  if (meta_stage_x11_translate_event (stage_x11, native, event))
+    return TRUE;
+
+  if (meta_seat_x11_translate_event (backend_x11->core_seat, native, event))
+    return TRUE;
+
+  return FALSE;
+}
+
+static void
+meta_clutter_backend_x11_init_events (ClutterBackend *backend)
+{
+  MetaClutterBackendX11 *backend_x11 = META_CLUTTER_BACKEND_X11 (backend);
+  int event_base, first_event, first_error;
+
+  if (XQueryExtension (clutter_x11_get_default_display (),
+                       "XInputExtension",
+                       &event_base,
+                       &first_event,
+                       &first_error))
+    {
+      int major = 2;
+      int minor = 3;
+
+      if (XIQueryVersion (clutter_x11_get_default_display (),
+                          &major, &minor) != BadRequest)
+        {
+          backend_x11->core_seat =
+            meta_seat_x11_new (event_base,
+                               META_VIRTUAL_CORE_POINTER_ID,
+                               META_VIRTUAL_CORE_KEYBOARD_ID);
+        }
+    }
+
+  if (!backend_x11->core_seat)
+    g_error ("No XInput 2.3 support");
+}
+
+static ClutterSeat *
+meta_clutter_backend_x11_get_default_seat (ClutterBackend *backend)
+{
+  MetaClutterBackendX11 *backend_x11 = META_CLUTTER_BACKEND_X11 (backend);
+
+  return CLUTTER_SEAT (backend_x11->core_seat);
+}
+
+static gboolean
+meta_clutter_backend_x11_is_display_server (ClutterBackend *backend)
+{
+  return meta_is_wayland_compositor ();
 }
 
 static void
@@ -99,5 +156,8 @@ meta_clutter_backend_x11_class_init (MetaClutterBackendX11Class *klass)
 
   clutter_backend_class->get_renderer = meta_clutter_backend_x11_get_renderer;
   clutter_backend_class->create_stage = meta_clutter_backend_x11_create_stage;
-  clutter_backend_class->bell_notify = meta_clutter_backend_x11_bell_notify;
+  clutter_backend_class->translate_event = meta_clutter_backend_x11_translate_event;
+  clutter_backend_class->init_events = meta_clutter_backend_x11_init_events;
+  clutter_backend_class->get_default_seat = meta_clutter_backend_x11_get_default_seat;
+  clutter_backend_class->is_display_server = meta_clutter_backend_x11_is_display_server;
 }

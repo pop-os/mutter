@@ -22,7 +22,7 @@
 #ifndef META_EDGE_RESISTANCE_H
 #define META_EDGE_RESISTANCE_H
 
-#include "window-private.h"
+#include "core/window-private.h"
 
 void        meta_window_edge_resistance_for_move   (MetaWindow  *window,
                                                     int         *new_x,
@@ -33,7 +33,7 @@ void        meta_window_edge_resistance_for_move   (MetaWindow  *window,
 void        meta_window_edge_resistance_for_resize (MetaWindow  *window,
                                                     int         *new_width,
                                                     int         *new_height,
-                                                    int          gravity,
+                                                    MetaGravity  gravity,
                                                     GSourceFunc  timeout_func,
                                                     gboolean     snap,
                                                     gboolean     is_keyboard_op);

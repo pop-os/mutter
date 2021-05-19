@@ -20,6 +20,8 @@
 #ifndef META_MAIN_PRIVATE_H
 #define META_MAIN_PRIVATE_H
 
+#include "core/util-private.h"
+
 typedef enum _MetaCompositorType
 {
 #ifdef HAVE_WAYLAND
@@ -28,9 +30,31 @@ typedef enum _MetaCompositorType
   META_COMPOSITOR_TYPE_X11,
 } MetaCompositorType;
 
+typedef enum _MetaDisplayPolicy
+{
+  META_DISPLAY_POLICY_MANDATORY,
+  META_DISPLAY_POLICY_ON_DEMAND,
+  META_DISPLAY_POLICY_DISABLED,
+} MetaDisplayPolicy;
+
+#define META_POINT_IN_RECT(xcoord, ycoord, rect) \
+ ((xcoord) >= (rect).x &&                   \
+  (xcoord) <  ((rect).x + (rect).width) &&  \
+  (ycoord) >= (rect).y &&                   \
+  (ycoord) <  ((rect).y + (rect).height))
+
+#define META_GRAB_OP_GET_BASE_TYPE(op) (op & 0x00FF)
+
+META_EXPORT_TEST
 void meta_override_compositor_configuration (MetaCompositorType compositor_type,
                                              GType              backend_gtype);
 
-gboolean meta_should_autostart_x11_display (void);
+MetaDisplayPolicy meta_get_x11_display_policy (void);
+
+META_EXPORT_TEST
+void meta_start (void);
+
+META_EXPORT_TEST
+void meta_run_main_loop (void);
 
 #endif /* META_MAIN_PRIVATE_H */

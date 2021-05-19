@@ -27,21 +27,37 @@
 #include <glib-object.h>
 
 #include <meta/common.h>
+#include <meta/meta-later.h>
 
+META_EXPORT
 gboolean meta_is_verbose  (void);
+
+META_EXPORT
 gboolean meta_is_debugging (void);
+
+META_EXPORT
 gboolean meta_is_syncing (void);
+
+META_EXPORT
 gboolean meta_is_wayland_compositor (void);
 
+META_EXPORT
 void meta_debug_spew_real (const char *format,
                            ...) G_GNUC_PRINTF (1, 2);
+
+META_EXPORT
 void meta_verbose_real    (const char *format,
                            ...) G_GNUC_PRINTF (1, 2);
 
+META_EXPORT
 void meta_bug        (const char *format,
                       ...) G_GNUC_PRINTF (1, 2);
+
+META_EXPORT
 void meta_warning    (const char *format,
                       ...) G_GNUC_PRINTF (1, 2);
+
+META_EXPORT
 void meta_fatal      (const char *format,
                       ...) G_GNUC_PRINTF (1, 2) G_GNUC_NORETURN G_ANALYZER_NORETURN;
 
@@ -96,31 +112,57 @@ typedef enum
   META_DEBUG_SHAPES          = 1 << 19,
   META_DEBUG_COMPOSITOR      = 1 << 20,
   META_DEBUG_EDGE_RESISTANCE = 1 << 21,
-  META_DEBUG_DBUS            = 1 << 22
+  META_DEBUG_DBUS            = 1 << 22,
+  META_DEBUG_INPUT           = 1 << 23
 } MetaDebugTopic;
 
+/**
+ * MetaDebugPaintFlag:
+ * @META_DEBUG_PAINT_NONE: default
+ * @META_DEBUG_PAINT_OPAQUE_REGION: paint opaque regions
+ */
+typedef enum
+{
+  META_DEBUG_PAINT_NONE          = 0,
+  META_DEBUG_PAINT_OPAQUE_REGION = 1 << 0,
+} MetaDebugPaintFlag;
+
+META_EXPORT
 void meta_topic_real      (MetaDebugTopic topic,
                            const char    *format,
                            ...) G_GNUC_PRINTF (2, 3);
+
+META_EXPORT
 void meta_add_verbose_topic    (MetaDebugTopic topic);
+
+META_EXPORT
 void meta_remove_verbose_topic (MetaDebugTopic topic);
 
+META_EXPORT
 void meta_push_no_msg_prefix (void);
+
+META_EXPORT
 void meta_pop_no_msg_prefix  (void);
 
+META_EXPORT
 gint  meta_unsigned_long_equal (gconstpointer v1,
                                 gconstpointer v2);
+
+META_EXPORT
 guint meta_unsigned_long_hash  (gconstpointer v);
 
+META_EXPORT
 const char* meta_frame_type_to_string (MetaFrameType type);
-const char* meta_gravity_to_string (int gravity);
+META_EXPORT
+const char* meta_gravity_to_string (MetaGravity gravity);
 
+META_EXPORT
 char* meta_external_binding_name_for_action (guint keybinding_action);
 
+META_EXPORT
 char* meta_g_utf8_strndup (const gchar *src, gsize n);
 
-void  meta_free_gslist_and_elements (GSList *list_to_deep_free);
-
+META_EXPORT
 GPid meta_show_dialog (const char *type,
                        const char *message,
                        const char *timeout,
@@ -155,40 +197,32 @@ GPid meta_show_dialog (const char *type,
 
 #endif /* !WITH_VERBOSE_MODE */
 
-/**
- * MetaLaterType:
- * @META_LATER_RESIZE: call in a resize processing phase that is done
- *   before GTK+ repainting (including window borders) is done.
- * @META_LATER_CALC_SHOWING: used by Mutter to compute which windows should be mapped
- * @META_LATER_CHECK_FULLSCREEN: used by Mutter to see if there's a fullscreen window
- * @META_LATER_SYNC_STACK: used by Mutter to send it's idea of the stacking order to the server
- * @META_LATER_BEFORE_REDRAW: call before the stage is redrawn
- * @META_LATER_IDLE: call at a very low priority (can be blocked
- *    by running animations or redrawing applications)
- **/
-typedef enum {
-  META_LATER_RESIZE,
-  META_LATER_CALC_SHOWING,
-  META_LATER_CHECK_FULLSCREEN,
-  META_LATER_SYNC_STACK,
-  META_LATER_BEFORE_REDRAW,
-  META_LATER_IDLE
-} MetaLaterType;
-
-guint meta_later_add    (MetaLaterType  when,
-                         GSourceFunc    func,
-                         gpointer       data,
-                         GDestroyNotify notify);
-void  meta_later_remove (guint          later_id);
-
 typedef enum
 {
   META_LOCALE_DIRECTION_LTR,
   META_LOCALE_DIRECTION_RTL,
 } MetaLocaleDirection;
 
+META_EXPORT
 MetaLocaleDirection meta_get_locale_direction (void);
 
+META_EXPORT
+void meta_add_clutter_debug_flags (ClutterDebugFlag     debug_flags,
+                                   ClutterDrawDebugFlag draw_flags,
+                                   ClutterPickDebugFlag pick_flags);
+
+META_EXPORT
+void meta_remove_clutter_debug_flags (ClutterDebugFlag     debug_flags,
+                                      ClutterDrawDebugFlag draw_flags,
+                                      ClutterPickDebugFlag pick_flags);
+
+META_EXPORT
+void meta_add_debug_paint_flag (MetaDebugPaintFlag flag);
+
+META_EXPORT
+void meta_remove_debug_paint_flag (MetaDebugPaintFlag flag);
+
+META_EXPORT
+MetaDebugPaintFlag meta_get_debug_paint_flags (void);
+
 #endif /* META_UTIL_H */
-
-

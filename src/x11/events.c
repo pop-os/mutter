@@ -21,6 +21,7 @@
  */
 
 #include "config.h"
+
 #include "x11/events.h"
 
 #include <X11/Xatom.h>
@@ -28,23 +29,30 @@
 #include <X11/extensions/Xdamage.h>
 #include <X11/extensions/shape.h>
 
-#include <meta/meta-x11-errors.h>
-#include "meta/meta-backend.h"
-#include "bell.h"
-#include "display-private.h"
-#include "meta-workspace-manager-private.h"
-#include "window-private.h"
-#include "workspace-private.h"
 #include "backends/meta-cursor-tracker-private.h"
 #include "backends/x11/meta-backend-x11.h"
+#include "backends/x11/meta-cursor-tracker-x11.h"
+#include "compositor/meta-compositor-x11.h"
+#include "cogl/cogl.h"
+#include "core/bell.h"
+#include "core/display-private.h"
+#include "core/meta-workspace-manager-private.h"
+#include "core/window-private.h"
+#include "core/workspace-private.h"
+#include "meta/meta-backend.h"
+#include "meta/meta-x11-errors.h"
+#include "x11/meta-startup-notification-x11.h"
 #include "x11/meta-x11-display-private.h"
+#include "x11/meta-x11-selection-private.h"
+#include "x11/meta-x11-selection-input-stream-private.h"
+#include "x11/meta-x11-selection-output-stream-private.h"
 #include "x11/window-x11.h"
 #include "x11/xprops.h"
 
 #ifdef HAVE_WAYLAND
-#include "wayland/meta-xwayland.h"
 #include "wayland/meta-wayland-private.h"
 #include "wayland/meta-xwayland-private.h"
+#include "wayland/meta-xwayland.h"
 #endif
 
 static XIEvent *
@@ -84,13 +92,11 @@ get_input_event (MetaX11Display *x11_display,
           if (((XIEnterEvent *) input_event)->deviceid == META_VIRTUAL_CORE_POINTER_ID)
             return input_event;
           break;
-#ifdef HAVE_XI23
         case XI_BarrierHit:
         case XI_BarrierLeave:
           if (((XIBarrierEvent *) input_event)->deviceid == META_VIRTUAL_CORE_POINTER_ID)
             return input_event;
           break;
-#endif /* HAVE_XI23 */
         default:
           break;
         }
@@ -116,11 +122,9 @@ xievent_get_modified_window (MetaX11Display *x11_display,
     case XI_Enter:
     case XI_Leave:
       return ((XIEnterEvent *) input_event)->event;
-#ifdef HAVE_XI23
     case XI_BarrierHit:
     case XI_BarrierLeave:
       return ((XIBarrierEvent *) input_event)->event;
-#endif /* HAVE_XI23 */
     }
 
   return None;
@@ -379,14 +383,12 @@ meta_spew_xi2_event (MetaX11Display *x11_display,
     case XI_Leave:
       name = "XI_Leave";
       break;
-#ifdef HAVE_XI23
     case XI_BarrierHit:
       name = "XI_BarrierHit";
       break;
     case XI_BarrierLeave:
       name = "XI_BarrierLeave";
       break;
-#endif /* HAVE_XI23 */
     }
 
   switch (input_event->evtype)
@@ -804,14 +806,15 @@ handle_window_focus_event (MetaX11Display *x11_display,
    * multiple focus events with the same serial.
    */
   if (x11_display->server_focus_serial > x11_display->focus_serial ||
-      (!display->focused_by_us &&
+      (!x11_display->focused_by_us &&
        x11_display->server_focus_serial == x11_display->focus_serial))
     {
-      meta_display_update_focus_window (display,
-                                        focus_window,
-                                        focus_window ? focus_window->xwindow : None,
-                                        x11_display->server_focus_serial,
-                                        FALSE);
+      meta_x11_display_update_focus_window (x11_display,
+                                            focus_window ?
+                                            focus_window->xwindow : None,
+                                            x11_display->server_focus_serial,
+                                            FALSE);
+      meta_display_update_focus_window (display, focus_window);
       return TRUE;
     }
   else
@@ -883,7 +886,7 @@ handle_input_xevent (MetaX11Display *x11_display,
           enter_event->mode != XINotifyGrab &&
           enter_event->mode != XINotifyUngrab &&
           enter_event->detail != XINotifyInferior &&
-          meta_display_focus_sentinel_clear (display))
+          meta_x11_display_focus_sentinel_clear (x11_display))
         {
           meta_window_handle_enter (window,
                                     enter_event->time,
@@ -987,7 +990,7 @@ process_request_frame_extents (MetaX11Display *x11_display,
                    32, PropModeReplace, (guchar*) data, 4);
   meta_x11_error_trap_pop (x11_display);
 
-  meta_XFree (hints);
+  g_free (hints);
 }
 
 /* from fvwm2, Copyright Matthias Clasen, Dominik Vogt */
@@ -1383,7 +1386,7 @@ handle_other_xevent (MetaX11Display *x11_display,
         }
       break;
     case MapNotify:
-      /* NB: override redirect windows wont cause a map request so we
+      /* NB: override redirect windows won't cause a map request so we
        * watch out for map notifies against any root windows too if a
        * compositor is enabled: */
       if (window == NULL && event->xmap.event == x11_display->xroot)
@@ -1391,7 +1394,8 @@ handle_other_xevent (MetaX11Display *x11_display,
           window = meta_window_x11_new (display, event->xmap.window,
                                         FALSE, META_COMP_EFFECT_CREATE);
         }
-      else if (window && window->restore_focus_on_map)
+      else if (window && window->restore_focus_on_map &&
+               window->reparents_pending == 0)
         {
           meta_window_focus (window,
                              meta_display_get_current_time_roundtrip (display));
@@ -1435,6 +1439,8 @@ handle_other_xevent (MetaX11Display *x11_display,
       break;
     case ReparentNotify:
       {
+        if (window && window->reparents_pending > 0)
+          window->reparents_pending -= 1;
         if (event->xreparent.event == x11_display->xroot)
           meta_stack_tracker_reparent_event (display->stack_tracker,
                                              &event->xreparent);
@@ -1526,7 +1532,7 @@ handle_other_xevent (MetaX11Display *x11_display,
             if (event->xproperty.atom ==
                 x11_display->atom__MUTTER_SENTINEL)
               {
-                meta_display_decrement_focus_sentinel (display);
+                meta_x11_display_decrement_focus_sentinel (x11_display);
               }
           }
       }
@@ -1580,19 +1586,18 @@ handle_other_xevent (MetaX11Display *x11_display,
 
                   workspace = meta_workspace_manager_get_workspace_by_index (workspace_manager, space);
 
-                  /* Handle clients using the older version of the spec... */
-                  if (time == 0 && workspace)
-                    {
-                      meta_warning ("Received a NET_CURRENT_DESKTOP message "
-                                    "from a broken (outdated) client who sent "
-                                    "a 0 timestamp\n");
-                      time = meta_x11_display_get_current_time_roundtrip (x11_display);
-                    }
-
                   if (workspace)
-                    meta_workspace_activate (workspace, time);
+                    {
+                      /* Handle clients using the older version of the spec... */
+                      if (time == 0)
+                        time = meta_x11_display_get_current_time_roundtrip (x11_display);
+
+                      meta_workspace_activate (workspace, time);
+                    }
                   else
-                    meta_verbose ("Don't know about workspace %d\n", space);
+                    {
+                      meta_verbose ("Don't know about workspace %d\n", space);
+                    }
                 }
               else if (event->xclient.message_type ==
                        x11_display->atom__NET_NUMBER_OF_DESKTOPS)
@@ -1721,6 +1726,34 @@ window_has_xwindow (MetaWindow *window,
   return FALSE;
 }
 
+static gboolean
+process_selection_event (MetaX11Display *x11_display,
+                         XEvent         *event)
+{
+  gboolean handled = FALSE;
+  GList *l;
+
+  handled |= meta_x11_selection_handle_event (x11_display, event);
+
+  for (l = x11_display->selection.input_streams; l && !handled;)
+    {
+      GList *next = l->next;
+
+      handled |= meta_x11_selection_input_stream_xevent (l->data, event);
+      l = next;
+    }
+
+  for (l = x11_display->selection.output_streams; l && !handled;)
+    {
+      GList *next = l->next;
+
+      handled |= meta_x11_selection_output_stream_xevent (l->data, event);
+      l = next;
+    }
+
+  return handled;
+}
+
 /**
  * meta_display_handle_xevent:
  * @display: The MetaDisplay that events are coming from
@@ -1745,12 +1778,14 @@ meta_x11_display_handle_xevent (MetaX11Display *x11_display,
   XIEvent *input_event;
   MetaCursorTracker *cursor_tracker;
 
+  COGL_TRACE_BEGIN_SCOPED (MetaX11DisplayHandleXevent,
+                           "X11Display (handle X11 event)");
+
 #if 0
   meta_spew_event_print (x11_display, event);
 #endif
 
-  if (meta_startup_notification_handle_xevent (display->startup_notification,
-                                               event))
+  if (meta_x11_startup_notification_handle_xevent (x11_display, event))
     {
       bypass_gtk = bypass_compositor = TRUE;
       goto out;
@@ -1758,40 +1793,53 @@ meta_x11_display_handle_xevent (MetaX11Display *x11_display,
 
 #ifdef HAVE_WAYLAND
   if (meta_is_wayland_compositor () &&
-      meta_xwayland_selection_handle_event (event))
+      meta_xwayland_handle_xevent (event))
     {
       bypass_gtk = bypass_compositor = TRUE;
       goto out;
     }
 #endif
 
+  if (process_selection_event (x11_display, event))
+    {
+      bypass_gtk = bypass_compositor = TRUE;
+      goto out;
+    }
+
   display->current_time = event_get_time (x11_display, event);
 
   if (META_IS_BACKEND_X11 (backend))
     meta_backend_x11_handle_event (META_BACKEND_X11 (backend), event);
 
-  if (display->focused_by_us &&
+  if (x11_display->focused_by_us &&
       event->xany.serial > x11_display->focus_serial &&
       display->focus_window &&
       !window_has_xwindow (display->focus_window, x11_display->server_focus_window))
     {
       meta_topic (META_DEBUG_FOCUS, "Earlier attempt to focus %s failed\n",
                   display->focus_window->desc);
+      meta_x11_display_update_focus_window (x11_display,
+                                            x11_display->server_focus_window,
+                                            x11_display->server_focus_serial,
+                                            FALSE);
       meta_display_update_focus_window (display,
                                         meta_x11_display_lookup_x_window (x11_display,
-                                                                          x11_display->server_focus_window),
-                                        x11_display->server_focus_window,
-                                        x11_display->server_focus_serial,
-                                        FALSE);
+                                                                          x11_display->server_focus_window));
     }
 
   if (event->xany.window == x11_display->xroot)
     {
       cursor_tracker = meta_backend_get_cursor_tracker (backend);
-      if (meta_cursor_tracker_handle_xevent (cursor_tracker, event))
+      if (META_IS_CURSOR_TRACKER_X11 (cursor_tracker))
         {
-          bypass_gtk = bypass_compositor = TRUE;
-          goto out;
+          MetaCursorTrackerX11 *cursor_tracker_x11 =
+            META_CURSOR_TRACKER_X11 (cursor_tracker);
+
+          if (meta_cursor_tracker_x11_handle_xevent (cursor_tracker_x11, event))
+            {
+              bypass_gtk = bypass_compositor = TRUE;
+              goto out;
+            }
         }
     }
 
@@ -1811,13 +1859,11 @@ meta_x11_display_handle_xevent (MetaX11Display *x11_display,
         }
     }
 
-#ifdef HAVE_XI23
   if (meta_x11_display_process_barrier_xevent (x11_display, input_event))
     {
       bypass_gtk = bypass_compositor = TRUE;
       goto out;
     }
-#endif /* HAVE_XI23 */
 
   if (handle_input_xevent (x11_display, input_event, event->xany.serial))
     {
@@ -1841,14 +1887,18 @@ meta_x11_display_handle_xevent (MetaX11Display *x11_display,
     }
 
  out:
-  if (!bypass_compositor)
+  if (!bypass_compositor && META_IS_COMPOSITOR_X11 (display->compositor))
     {
-      MetaWindow *window = modified != None ?
-                           meta_x11_display_lookup_x_window (x11_display, modified) :
-                           NULL;
+      MetaCompositorX11 *compositor_x11 =
+        META_COMPOSITOR_X11 (display->compositor);
+      MetaWindow *window;
 
-      if (meta_compositor_process_event (display->compositor, event, window))
-        bypass_gtk = TRUE;
+      if (modified != None)
+        window = meta_x11_display_lookup_x_window (x11_display, modified);
+      else
+        window = NULL;
+
+      meta_compositor_x11_process_xevent (compositor_x11, event, window);
     }
 
   display->current_time = META_CURRENT_TIME;

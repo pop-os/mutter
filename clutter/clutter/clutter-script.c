@@ -36,7 +36,7 @@
  * parse it and build all the objects defined into it. Each object must
  * have an "id" and a "type" properties defining the name to be used
  * to retrieve it from #ClutterScript with clutter_script_get_object(),
- * and the class type to be instanciated. Every other attribute will
+ * and the class type to be instantiated. Every other attribute will
  * be mapped to the class properties.
  *
  * A #ClutterScript holds a reference on every object it creates from
@@ -50,14 +50,14 @@
  * <informalexample><programlisting><![CDATA[
  * {
  *   "id"     : "red-button",
- *   "type"   : "ClutterRectangle",
+ *   "type"   : "ClutterActor",
  *   "width"  : 100,
  *   "height" : 100,
- *   "color"  : "&num;ff0000ff"
+ *   "background-color" : "&num;ff0000ff"
  * }
  * ]]></programlisting></informalexample>
  *
- * This will produce a red #ClutterRectangle, 100x100 pixels wide, and
+ * This will produce a red #ClutterActor, 100x100 pixels wide, and
  * with a ClutterScript id of "red-button"; it can be retrieved by calling:
  *
  * |[
@@ -74,65 +74,6 @@
  * array of objects or ids of objects already defined (but not packed: the
  * packing rules of Clutter still apply, and an actor cannot be packed
  * in multiple containers without unparenting it in between).
- *
- * Behaviours and timelines can also be defined inside a UI definition
- * buffer:
- *
- * <informalexample><programlisting><![CDATA[
- * {
- *   "id"          : "rotate-behaviour",
- *   "type"        : "ClutterBehaviourRotate",
- *   "angle-start" : 0.0,
- *   "angle-end"   : 360.0,
- *   "axis"        : "z-axis",
- *   "alpha"       : {
- *     "timeline" : { "duration" : 4000, "loop" : true },
- *     "mode"     : "easeInSine"
- *   }
- * }
- * ]]></programlisting></informalexample>
- *
- * And then to apply a defined behaviour to an actor defined inside the
- * definition of an actor, the "behaviour" member can be used:
- *
- * <informalexample><programlisting><![CDATA[
- * {
- *   "id" : "my-rotating-actor",
- *   "type" : "ClutterTexture",
- *   ...
- *   "behaviours" : [ "rotate-behaviour" ]
- * }
- * ]]></programlisting></informalexample>
- *
- * A #ClutterAlpha belonging to a #ClutterBehaviour can only be defined
- * implicitly like in the example above, or explicitly by setting the
- * "alpha" property to point to a previously defined #ClutterAlpha, e.g.:
- *
- * <informalexample><programlisting><![CDATA[
- * {
- *   "id"          : "rotate-behaviour",
- *   "type"        : "ClutterBehaviourRotate",
- *   "angle-start" : 0.0,
- *   "angle-end"   : 360.0,
- *   "axis"        : "z-axis",
- *   "alpha"       : {
- *     "id"       : "rotate-alpha",
- *     "type"     : "ClutterAlpha",
- *     "timeline" : {
- *       "id"       : "rotate-timeline",
- *       "type      : "ClutterTimeline",
- *       "duration" : 4000,
- *       "loop"     : true
- *     },
- *     "function" : "custom_sine_alpha"
- *   }
- * }
- * ]]></programlisting></informalexample>
- *
- * Implicitely defined #ClutterAlpha<!-- -->s and #ClutterTimeline<!-- -->s
- * can omit the `id`, as well as the `type` members, but will not be available
- * using clutter_script_get_object() (they can, however, be extracted using the
- * #ClutterBehaviour and #ClutterAlpha API respectively).
  *
  * Signal handlers can be defined inside a Clutter UI definition file and
  * then autoconnected to their respective signals using the
@@ -157,49 +98,6 @@
  * respectively) and the "object" string member for calling
  * g_signal_connect_object() instead of g_signal_connect().
  *
- * Signals can also be directly attached to a specific state defined
- * inside a #ClutterState instance, for instance:
- *
- * |[
- *   ...
- *   "signals" : [
- *     {
- *       "name" : "enter-event",
- *       "states" : "button-states",
- *       "target-state" : "hover"
- *     },
- *     {
- *       "name" : "leave-event",
- *       "states" : "button-states",
- *       "target-state" : "base"
- *     },
- *     {
- *       "name" : "button-press-event",
- *       "states" : "button-states",
- *       "target-state" : "active",
- *     },
- *     {
- *       "name" : "key-press-event",
- *       "states" : "button-states",
- *       "target-state" : "key-focus",
- *       "warp" : true
- *     }
- *   ],
- *   ...
- * ]|
- *
- * The "states" key defines the #ClutterState instance to be used to
- * resolve the "target-state" key; it can be either a script id for a
- * #ClutterState built by the same #ClutterScript instance, or to a
- * #ClutterState built in code and associated to the #ClutterScript
- * instance through the clutter_script_add_states() function. If no
- * "states" key is present, then the default #ClutterState associated to
- * the #ClutterScript instance will be used; the default #ClutterState
- * can be set using clutter_script_add_states() using a %NULL name. The
- * "warp" key can be used to warp to a specific state instead of
- * animating to it. State changes on signal emission will not affect
- * the signal emission chain.
- *
  * Clutter reserves the following names, so classes defining properties
  * through the usual GObject registration process should avoid using these
  * names to avoid collisions:
@@ -210,7 +108,6 @@
  *                   function
  *   "type_func"  := the GType function name, for non-standard classes
  *   "children"   := an array of names or objects to add as children
- *   "behaviours" := an array of names or objects to apply to an actor
  *   "signals"    := an array of signal definitions to connect to an object
  *   "is-default" := a boolean flag used when defining the #ClutterStage;
  *                   if set to "true" the default stage will be used instead
@@ -220,9 +117,7 @@
  * #ClutterScript is available since Clutter 0.6
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #include <stdlib.h>
 #include <string.h>
@@ -237,7 +132,6 @@
 
 #include "clutter-actor.h"
 #include "clutter-stage.h"
-#include "clutter-texture.h"
 
 #include "clutter-script.h"
 #include "clutter-script-private.h"
@@ -247,10 +141,7 @@
 #include "clutter-private.h"
 #include "clutter-debug.h"
 
-#include "deprecated/clutter-alpha.h"
-#include "deprecated/clutter-behaviour.h"
 #include "deprecated/clutter-container.h"
-#include "deprecated/clutter-state.h"
 
 enum
 {
@@ -265,8 +156,6 @@ enum
 
 static GParamSpec *obj_props[PROP_LAST];
 
-#define CLUTTER_SCRIPT_GET_PRIVATE(obj) (G_TYPE_INSTANCE_GET_PRIVATE ((obj), CLUTTER_TYPE_SCRIPT, ClutterScriptPrivate))
-
 struct _ClutterScriptPrivate
 {
   GHashTable *objects;
@@ -275,8 +164,6 @@ struct _ClutterScriptPrivate
   guint last_unknown;
 
   ClutterScriptParser *parser;
-
-  GHashTable *states;
 
   gchar **search_paths;
 
@@ -330,7 +217,6 @@ signal_info_free (gpointer data)
       g_free (sinfo->name);
       g_free (sinfo->handler);
       g_free (sinfo->object);
-      g_free (sinfo->state);
       g_free (sinfo->target);
 
       g_slice_free (SignalInfo, sinfo);
@@ -348,15 +234,12 @@ object_info_free (gpointer data)
       g_free (oinfo->class_name);
       g_free (oinfo->type_func);
 
-      g_list_foreach (oinfo->properties, (GFunc) property_info_free, NULL);
-      g_list_free (oinfo->properties);
+      g_list_free_full (oinfo->properties, property_info_free);
 
-      g_list_foreach (oinfo->signals, (GFunc) signal_info_free, NULL);
-      g_list_free (oinfo->signals);
+      g_list_free_full (oinfo->signals, signal_info_free);
 
       /* these are ids */
-      g_list_foreach (oinfo->children, (GFunc) g_free, NULL);
-      g_list_free (oinfo->children);
+      g_list_free_full (oinfo->children, g_free);
 
       /* we unref top-level objects and leave the actors alone,
        * unless we are unmerging in which case we have to destroy
@@ -382,13 +265,12 @@ object_info_free (gpointer data)
 static void
 clutter_script_finalize (GObject *gobject)
 {
-  ClutterScriptPrivate *priv = CLUTTER_SCRIPT_GET_PRIVATE (gobject);
+  ClutterScriptPrivate *priv = CLUTTER_SCRIPT (gobject)->priv;
 
   g_object_unref (priv->parser);
   g_hash_table_destroy (priv->objects);
   g_strfreev (priv->search_paths);
   g_free (priv->filename);
-  g_hash_table_destroy (priv->states);
   g_free (priv->translation_domain);
 
   G_OBJECT_CLASS (clutter_script_parent_class)->finalize (gobject);
@@ -523,19 +405,15 @@ clutter_script_init (ClutterScript *script)
   priv->objects = g_hash_table_new_full (g_str_hash, g_str_equal,
                                          NULL,
                                          object_info_free);
-  priv->states = g_hash_table_new_full (g_str_hash, g_str_equal,
-                                        g_free,
-                                        (GDestroyNotify) g_object_unref);
 }
 
 /**
  * clutter_script_new:
  *
- * Creates a new #ClutterScript instance. #ClutterScript can be used
- * to load objects definitions for scenegraph elements, like actors,
- * or behavioural elements, like behaviours and timelines. The
- * definitions must be encoded using the JavaScript Object Notation (JSON)
- * language.
+ * Creates a new #ClutterScript instance. #ClutterScript can be used to load
+ * objects definitions for scenegraph elements, like actors, or behavioural
+ * elements, like timelines. The definitions must be encoded using the
+ * JavaScript Object Notation (JSON) language.
  *
  * Return value: the newly created #ClutterScript instance. Use
  *   g_object_unref() when done.
@@ -848,8 +726,7 @@ clutter_script_unmerge_objects (ClutterScript *script,
   for (l = data.ids; l != NULL; l = l->next)
     g_hash_table_remove (priv->objects, l->data);
 
-  g_slist_foreach (data.ids, (GFunc) g_free, NULL);
-  g_slist_free (data.ids);
+  g_slist_free_full (data.ids, g_free);
 
   clutter_script_ensure_objects (script);
 }
@@ -871,9 +748,7 @@ construct_each_objects (gpointer key,
       if (oinfo->object == NULL)
         _clutter_script_construct_object (script, oinfo);
 
-      /* this will take care of setting up properties,
-       * adding children and applying behaviours
-       */
+      /* this will take care of setting up properties and adding children */
       _clutter_script_apply_properties (script, oinfo);
     }
 }
@@ -977,7 +852,7 @@ clutter_script_default_connect (ClutterScript *script,
     }
 
   CLUTTER_NOTE (SCRIPT,
-                "connecting %s::%s to %s (afetr:%s, swapped:%s, object:%s)",
+                "connecting %s::%s to %s (after:%s, swapped:%s, object:%s)",
                 (connect_gobject ? G_OBJECT_TYPE_NAME (connect_gobject)
                                  : G_OBJECT_TYPE_NAME (gobject)),
                 signal_name,
@@ -1046,63 +921,10 @@ clutter_script_connect_signals (ClutterScript *script,
 }
 
 typedef struct {
-  ClutterState *state;
-  GObject *emitter;
-  gchar *target;
-  gulong signal_id;
-  gulong hook_id;
-  gboolean warp_to;
-} HookData;
-
-typedef struct {
   ClutterScript *script;
   ClutterScriptConnectFunc func;
   gpointer user_data;
 } SignalConnectData;
-
-static void
-hook_data_free (gpointer data)
-{
-  if (G_LIKELY (data != NULL))
-    {
-      HookData *hook_data = data;
-
-      g_free (hook_data->target);
-      g_slice_free (HookData, hook_data);
-    }
-}
-
-static gboolean
-clutter_script_state_change_hook (GSignalInvocationHint *ihint,
-                                  guint                  n_params,
-                                  const GValue          *params,
-                                  gpointer               user_data)
-{
-  HookData *hook_data = user_data;
-  GObject *emitter;
-
-  emitter = g_value_get_object (&params[0]);
-
-  if (emitter == hook_data->emitter)
-    {
-      if (hook_data->warp_to)
-        clutter_state_warp_to_state (hook_data->state, hook_data->target);
-      else
-        clutter_state_set_state (hook_data->state, hook_data->target);
-    }
-
-  return TRUE;
-}
-
-static void
-clutter_script_remove_state_change_hook (gpointer  user_data,
-                                         GObject  *object_p)
-{
-  HookData *hook_data = user_data;
-
-  g_signal_remove_emission_hook (hook_data->signal_id,
-                                 hook_data->hook_id);
-}
 
 static void
 connect_each_object (gpointer key,
@@ -1143,64 +965,7 @@ connect_each_object (gpointer key,
         }
       else
         {
-          GObject *state_object = NULL;
-          const gchar *signal_name, *signal_detail;
-          gchar **components;
-          GQuark signal_quark;
-          guint signal_id;
-          HookData *hook_data;
-
-          if (sinfo->state == NULL)
-            state_object = (GObject *) clutter_script_get_states (script, NULL);
-          else
-            {
-              state_object = clutter_script_get_object (script, sinfo->state);
-              if (state_object == NULL)
-                state_object = (GObject *) clutter_script_get_states (script, sinfo->state);
-            }
-
-          if (state_object == NULL)
-            continue;
-
-          components = g_strsplit (sinfo->name, "::", 2);
-          if (g_strv_length (components) == 2)
-            {
-              signal_name = components[0];
-              signal_detail = components[1];
-            }
-          else
-            {
-              signal_name = components[0];
-              signal_detail = NULL;
-            }
-
-          signal_id = g_signal_lookup (signal_name, G_OBJECT_TYPE (object));
-          if (signal_id == 0)
-            {
-              g_strfreev (components);
-              continue;
-            }
-
-          if (signal_detail != NULL)
-            signal_quark = g_quark_from_string (signal_detail);
-          else
-            signal_quark = 0;
-
-          hook_data = g_slice_new (HookData);
-          hook_data->emitter = object;
-          hook_data->state = CLUTTER_STATE (state_object);
-          hook_data->target = g_strdup (sinfo->target);
-          hook_data->warp_to = sinfo->warp_to;
-          hook_data->signal_id = signal_id;
-          hook_data->hook_id =
-            g_signal_add_emission_hook (signal_id, signal_quark,
-                                        clutter_script_state_change_hook,
-                                        hook_data,
-                                        hook_data_free);
-
-          g_object_weak_ref (hook_data->emitter,
-                             clutter_script_remove_state_change_hook,
-                             hook_data);
+          g_warn_if_reached ();
         }
 
       signal_info_free (sinfo);
@@ -1423,72 +1188,6 @@ clutter_script_list_objects (ClutterScript *script)
   g_list_free (objects);
 
   return retval;
-}
-
-/**
- * clutter_script_add_states:
- * @script: a #ClutterScript
- * @name: (allow-none): a name for the @state, or %NULL to
- *   set the default #ClutterState
- * @state: a #ClutterState
- *
- * Associates a #ClutterState to the #ClutterScript instance using the given
- * name.
- *
- * The #ClutterScript instance will use @state to resolve target states when
- * connecting signal handlers.
- *
- * The #ClutterScript instance will take a reference on the #ClutterState
- * passed to this function.
- *
- * Since: 1.8
- *
- * Deprecated: 1.12
- */
-void
-clutter_script_add_states (ClutterScript *script,
-                           const gchar   *name,
-                           ClutterState  *state)
-{
-  g_return_if_fail (CLUTTER_IS_SCRIPT (script));
-  g_return_if_fail (CLUTTER_IS_STATE (state));
-
-  if (name == NULL || *name == '\0')
-    name = "__clutter_script_default_state";
-
-  g_hash_table_replace (script->priv->states,
-                        g_strdup (name),
-                        g_object_ref (state));
-}
-
-/**
- * clutter_script_get_states:
- * @script: a #ClutterScript
- * @name: (allow-none): the name of the #ClutterState, or %NULL
- *
- * Retrieves the #ClutterState for the given @state_name.
- *
- * If @name is %NULL, this function will return the default
- * #ClutterState instance.
- *
- * Return value: (transfer none): a pointer to the #ClutterState for the
- *   given name. The #ClutterState is owned by the #ClutterScript instance
- *   and it should not be unreferenced
- *
- * Since: 1.8
- *
- * Deprecated: 1.12
- */
-ClutterState *
-clutter_script_get_states (ClutterScript *script,
-                           const gchar   *name)
-{
-  g_return_val_if_fail (CLUTTER_IS_SCRIPT (script), NULL);
-
-  if (name == NULL || *name == '\0')
-    name = "__clutter_script_default_state";
-
-  return g_hash_table_lookup (script->priv->states, name);
 }
 
 /**

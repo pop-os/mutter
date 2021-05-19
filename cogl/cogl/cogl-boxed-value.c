@@ -28,17 +28,14 @@
  *
  */
 
-#ifdef HAVE_CONFIG_H
 #include "cogl-config.h"
-#endif
 
 #include <string.h>
 
 #include "cogl-boxed-value.h"
 #include "cogl-context-private.h"
-#include "cogl-util-gl-private.h"
 
-CoglBool
+gboolean
 _cogl_boxed_value_equal (const CoglBoxedValue *bva,
                          const CoglBoxedValue *bvb)
 {
@@ -136,7 +133,7 @@ _cogl_boxed_value_set_x (CoglBoxedValue *bv,
                          CoglBoxedType type,
                          size_t value_size,
                          const void *value,
-                         CoglBool transpose)
+                         gboolean transpose)
 {
   if (count == 1)
     {
@@ -231,7 +228,7 @@ void
 _cogl_boxed_value_set_matrix (CoglBoxedValue *bv,
                               int dimensions,
                               int count,
-                              CoglBool transpose,
+                              gboolean transpose,
                               const float *value)
 {
   _cogl_boxed_value_set_x (bv,
@@ -288,90 +285,5 @@ _cogl_boxed_value_set_uniform (CoglContext *ctx,
                                GLint location,
                                const CoglBoxedValue *value)
 {
-  switch (value->type)
-    {
-    case COGL_BOXED_NONE:
-      break;
-
-    case COGL_BOXED_INT:
-      {
-        const int *ptr;
-
-        if (value->count == 1)
-          ptr = value->v.int_value;
-        else
-          ptr = value->v.int_array;
-
-        switch (value->size)
-          {
-          case 1:
-            GE( ctx, glUniform1iv (location, value->count, ptr) );
-            break;
-          case 2:
-            GE( ctx, glUniform2iv (location, value->count, ptr) );
-            break;
-          case 3:
-            GE( ctx, glUniform3iv (location, value->count, ptr) );
-            break;
-          case 4:
-            GE( ctx, glUniform4iv (location, value->count, ptr) );
-            break;
-          }
-      }
-      break;
-
-    case COGL_BOXED_FLOAT:
-      {
-        const float *ptr;
-
-        if (value->count == 1)
-          ptr = value->v.float_value;
-        else
-          ptr = value->v.float_array;
-
-        switch (value->size)
-          {
-          case 1:
-            GE( ctx, glUniform1fv (location, value->count, ptr) );
-            break;
-          case 2:
-            GE( ctx, glUniform2fv (location, value->count, ptr) );
-            break;
-          case 3:
-            GE( ctx, glUniform3fv (location, value->count, ptr) );
-            break;
-          case 4:
-            GE( ctx, glUniform4fv (location, value->count, ptr) );
-            break;
-          }
-      }
-      break;
-
-    case COGL_BOXED_MATRIX:
-      {
-        const float *ptr;
-
-        if (value->count == 1)
-          ptr = value->v.matrix;
-        else
-          ptr = value->v.float_array;
-
-        switch (value->size)
-          {
-          case 2:
-            GE( ctx, glUniformMatrix2fv (location, value->count,
-                                         FALSE, ptr) );
-            break;
-          case 3:
-            GE( ctx, glUniformMatrix3fv (location, value->count,
-                                         FALSE, ptr) );
-            break;
-          case 4:
-            GE( ctx, glUniformMatrix4fv (location, value->count,
-                                         FALSE, ptr) );
-            break;
-          }
-      }
-      break;
-    }
+  ctx->driver_vtable->set_uniform (ctx, location, value);
 }

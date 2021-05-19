@@ -25,20 +25,22 @@
 #ifndef META_WAYLAND_BUFFER_H
 #define META_WAYLAND_BUFFER_H
 
-#include <cogl/cogl.h>
 #include <cairo.h>
 #include <wayland-server.h>
 
-#include "meta-wayland-types.h"
-#include "meta-wayland-egl-stream.h"
-#include "meta-wayland-dma-buf.h"
+#include "cogl/cogl.h"
+#include "wayland/meta-wayland-types.h"
+#include "wayland/meta-wayland-egl-stream.h"
+#include "wayland/meta-wayland-dma-buf.h"
 
 typedef enum _MetaWaylandBufferType
 {
   META_WAYLAND_BUFFER_TYPE_UNKNOWN,
   META_WAYLAND_BUFFER_TYPE_SHM,
   META_WAYLAND_BUFFER_TYPE_EGL_IMAGE,
+#ifdef HAVE_WAYLAND_EGLSTREAM
   META_WAYLAND_BUFFER_TYPE_EGL_STREAM,
+#endif
   META_WAYLAND_BUFFER_TYPE_DMA_BUF,
 } MetaWaylandBufferType;
 
@@ -49,17 +51,24 @@ struct _MetaWaylandBuffer
   struct wl_resource *resource;
   struct wl_listener destroy_listener;
 
-  CoglTexture *texture;
   gboolean is_y_inverted;
 
   MetaWaylandBufferType type;
 
   struct {
+    CoglTexture *texture;
+  } egl_image;
+
+#ifdef HAVE_WAYLAND_EGLSTREAM
+  struct {
     MetaWaylandEglStream *stream;
+    CoglTexture *texture;
   } egl_stream;
+#endif
 
   struct {
     MetaWaylandDmaBufBuffer *dma_buf;
+    CoglTexture *texture;
   } dma_buf;
 };
 
@@ -72,11 +81,16 @@ struct wl_resource *    meta_wayland_buffer_get_resource        (MetaWaylandBuff
 gboolean                meta_wayland_buffer_is_realized         (MetaWaylandBuffer     *buffer);
 gboolean                meta_wayland_buffer_realize             (MetaWaylandBuffer     *buffer);
 gboolean                meta_wayland_buffer_attach              (MetaWaylandBuffer     *buffer,
+                                                                 CoglTexture          **texture,
                                                                  GError               **error);
-CoglTexture *           meta_wayland_buffer_get_texture         (MetaWaylandBuffer     *buffer);
 CoglSnippet *           meta_wayland_buffer_create_snippet      (MetaWaylandBuffer     *buffer);
 gboolean                meta_wayland_buffer_is_y_inverted       (MetaWaylandBuffer     *buffer);
 void                    meta_wayland_buffer_process_damage      (MetaWaylandBuffer     *buffer,
+                                                                 CoglTexture           *texture,
                                                                  cairo_region_t        *region);
+CoglScanout *           meta_wayland_buffer_try_acquire_scanout (MetaWaylandBuffer     *buffer,
+                                                                 CoglOnscreen          *onscreen);
+
+void meta_wayland_init_shm (MetaWaylandCompositor *compositor);
 
 #endif /* META_WAYLAND_BUFFER_H */

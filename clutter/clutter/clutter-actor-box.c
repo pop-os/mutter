@@ -1,12 +1,11 @@
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #include <math.h>
 
 #include "clutter-types.h"
 #include "clutter-interval.h"
 #include "clutter-private.h"
+#include "clutter-actor-box-private.h"
 
 /**
  * clutter_actor_box_new:
@@ -321,7 +320,7 @@ clutter_actor_box_get_area (const ClutterActorBox *box)
  * @y: Y coordinate of the point
  *
  * Checks whether a point with @x, @y coordinates is contained
- * withing @box
+ * within @box
  *
  * Return value: %TRUE if the point is contained by the #ClutterActorBox
  *
@@ -341,7 +340,7 @@ clutter_actor_box_contains (const ClutterActorBox *box,
 /**
  * clutter_actor_box_from_vertices:
  * @box: a #ClutterActorBox
- * @verts: (array fixed-size=4): array of four #ClutterVertex
+ * @verts: (array fixed-size=4): array of four #graphene_point3d_t
  *
  * Calculates the bounding box represented by the four vertices; for details
  * of the vertex array see clutter_actor_get_abs_allocation_vertices().
@@ -349,8 +348,8 @@ clutter_actor_box_contains (const ClutterActorBox *box,
  * Since: 1.0
  */
 void
-clutter_actor_box_from_vertices (ClutterActorBox     *box,
-                                 const ClutterVertex  verts[])
+clutter_actor_box_from_vertices (ClutterActorBox          *box,
+                                 const graphene_point3d_t  verts[])
 {
   gfloat x_1, x_2, y_1, y_2;
 
@@ -542,6 +541,104 @@ clutter_actor_box_set_size (ClutterActorBox *box,
 
   box->x2 = box->x1 + width;
   box->y2 = box->y1 + height;
+}
+
+void
+_clutter_actor_box_enlarge_for_effects (ClutterActorBox *box)
+{
+  float width, height;
+
+  /* The aim here is that for a given rectangle defined with floating point
+   * coordinates we want to determine a stable quantized size in pixels
+   * that doesn't vary due to the original box's sub-pixel position.
+   *
+   * The reason this is important is because effects will use this
+   * API to determine the size of offscreen framebuffers and so for
+   * a fixed-size object that may be animated across the screen we
+   * want to make sure that the stage paint-box has an equally stable
+   * size so that effects aren't made to continuously re-allocate
+   * a corresponding fbo.
+   *
+   * The other thing we consider is that the calculation of this box is
+   * subject to floating point precision issues that might be slightly
+   * different to the precision issues involved with actually painting the
+   * actor, which might result in painting slightly leaking outside the
+   * user's calculated paint-volume. For this we simply aim to pad out the
+   * paint-volume by at least half a pixel all the way around.
+   */
+  width = box->x2 - box->x1;
+  height = box->y2 - box->y1;
+  width = CLUTTER_NEARBYINT (width);
+  height = CLUTTER_NEARBYINT (height);
+  /* XXX: NB the width/height may now be up to 0.5px too small so we
+   * must also pad by 0.25px all around to account for this. In total we
+   * must padd by at least 0.75px around all sides. */
+
+  /* XXX: The furthest that we can overshoot the bottom right corner by
+   * here is 1.75px in total if you consider that the 0.75 padding could
+   * just cross an integer boundary and so ceil will effectively add 1.
+   */
+  box->x2 = ceilf (box->x2 + 0.75);
+  box->y2 = ceilf (box->y2 + 0.75);
+
+  /* Now we redefine the top-left relative to the bottom right based on the
+   * rounded width/height determined above + a constant so that the overall
+   * size of the box will be stable and not dependent on the box's
+   * position.
+   *
+   * Adding 3px to the width/height will ensure we cover the maximum of
+   * 1.75px padding on the bottom/right and still ensure we have > 0.75px
+   * padding on the top/left.
+   */
+  box->x1 = box->x2 - width - 3;
+  box->y1 = box->y2 - height - 3;
+}
+
+/**
+ * clutter_actor_box_scale:
+ * @box: a #ClutterActorBox
+ * @scale: scale factor for resizing this box
+ *
+ * Rescale the @box by provided @scale factor.
+ *
+ * Since: 1.6
+ */
+void
+clutter_actor_box_scale (ClutterActorBox *box,
+                         gfloat           scale)
+{
+  g_return_if_fail (box != NULL);
+
+  box->x1 *= scale;
+  box->x2 *= scale;
+  box->y1 *= scale;
+  box->y2 *= scale;
+}
+
+/**
+ * clutter_actor_box_is_initialized:
+ * @box: a #ClutterActorBox
+ *
+ * Checks if @box has been initialized, a #ClutterActorBox is uninitialized
+ * if it has a size of -1 at an origin of 0, 0.
+ *
+ * Returns: %TRUE if the box is uninitialized, %FALSE if it isn't
+ */
+gboolean
+clutter_actor_box_is_initialized (ClutterActorBox *box)
+{
+  gboolean x1_uninitialized, x2_uninitialized;
+  gboolean y1_uninitialized, y2_uninitialized;
+
+  g_return_val_if_fail (box != NULL, TRUE);
+
+  x1_uninitialized = isinf (box->x1);
+  x2_uninitialized = isinf (box->x2) && signbit (box->x2);
+  y1_uninitialized = isinf (box->y1);
+  y2_uninitialized = isinf (box->y2) && signbit (box->y2);
+
+  return !x1_uninitialized || !x2_uninitialized ||
+         !y1_uninitialized || !y2_uninitialized;
 }
 
 G_DEFINE_BOXED_TYPE_WITH_CODE (ClutterActorBox, clutter_actor_box,

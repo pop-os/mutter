@@ -24,13 +24,13 @@
 
 #include "config.h"
 
-#include "meta-cursor-renderer-x11.h"
+#include "backends/x11/meta-cursor-renderer-x11.h"
 
 #include <X11/extensions/Xfixes.h>
 
-#include "meta-backend-x11.h"
-#include "meta-stage-private.h"
 #include "backends/meta-cursor-sprite-xcursor.h"
+#include "backends/meta-stage-private.h"
+#include "backends/x11/meta-backend-x11.h"
 
 struct _MetaCursorRendererX11Private
 {
@@ -90,7 +90,7 @@ meta_cursor_renderer_x11_update_cursor (MetaCursorRenderer *renderer,
       priv->server_cursor_visible = has_server_cursor;
     }
 
-  if (!priv->server_cursor_visible && cursor_sprite)
+  if (cursor_sprite)
     meta_cursor_sprite_realize_texture (cursor_sprite);
 
   return priv->server_cursor_visible;

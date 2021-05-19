@@ -27,20 +27,17 @@
 #define META_BACKEND_PRIVATE_H
 
 #include <glib-object.h>
-
 #include <xkbcommon/xkbcommon.h>
 
-#include <meta/meta-backend.h>
-#include <meta/meta-idle-monitor.h>
-#include "meta-cursor-renderer.h"
-#include "meta-monitor-manager-private.h"
-#include "meta-orientation-manager.h"
-#include "meta-input-settings-private.h"
+#include "meta/meta-backend.h"
+#include "meta/meta-idle-monitor.h"
+#include "backends/meta-backend-types.h"
+#include "backends/meta-cursor-renderer.h"
 #include "backends/meta-egl.h"
+#include "backends/meta-input-settings-private.h"
+#include "backends/meta-monitor-manager-private.h"
+#include "backends/meta-orientation-manager.h"
 #include "backends/meta-pointer-constraint.h"
-#ifdef HAVE_REMOTE_DESKTOP
-#include "backends/meta-remote-desktop.h"
-#endif
 #include "backends/meta-renderer.h"
 #include "backends/meta-settings-private.h"
 #include "core/util-private.h"
@@ -48,8 +45,13 @@
 #define DEFAULT_XKB_RULES_FILE "evdev"
 #define DEFAULT_XKB_MODEL "pc105+inet"
 
-#define META_TYPE_BACKEND (meta_backend_get_type ())
-G_DECLARE_DERIVABLE_TYPE (MetaBackend, meta_backend, META, BACKEND, GObject)
+typedef enum
+{
+  META_SEQUENCE_NONE,
+  META_SEQUENCE_ACCEPTED,
+  META_SEQUENCE_REJECTED,
+  META_SEQUENCE_PENDING_END
+} MetaSequenceState;
 
 struct _MetaBackendClass
 {
@@ -62,6 +64,7 @@ struct _MetaBackendClass
   MetaMonitorManager * (* create_monitor_manager) (MetaBackend *backend,
                                                    GError     **error);
   MetaCursorRenderer * (* create_cursor_renderer) (MetaBackend *backend);
+  MetaCursorTracker * (* create_cursor_tracker) (MetaBackend *backend);
   MetaRenderer * (* create_renderer) (MetaBackend *backend,
                                       GError     **error);
   MetaInputSettings * (* create_input_settings) (MetaBackend *backend);
@@ -73,10 +76,9 @@ struct _MetaBackendClass
                               int          device_id,
                               uint32_t     timestamp);
 
-  void (* warp_pointer) (MetaBackend *backend,
-                         int          x,
-                         int          y);
-
+  void (* finish_touch_sequence) (MetaBackend          *backend,
+                                  ClutterEventSequence *sequence,
+                                  MetaSequenceState     state);
   MetaLogicalMonitor * (* get_current_logical_monitor) (MetaBackend *backend);
 
   void (* set_keymap) (MetaBackend *backend,
@@ -96,12 +98,6 @@ struct _MetaBackendClass
   void (* update_screen_size) (MetaBackend *backend, int width, int height);
   void (* select_stage_events) (MetaBackend *backend);
 
-  gboolean (* get_relative_motion_deltas) (MetaBackend *backend,
-                                           const        ClutterEvent *event,
-                                           double       *dx,
-                                           double       *dy,
-                                           double       *dx_unaccel,
-                                           double       *dy_unaccel);
   void (* set_numlock) (MetaBackend *backend,
                         gboolean     numlock_state);
 
@@ -109,24 +105,35 @@ struct _MetaBackendClass
 
 void meta_init_backend (GType backend_gtype);
 
+#ifdef HAVE_WAYLAND
+MetaWaylandCompositor * meta_backend_get_wayland_compositor (MetaBackend *backend);
+
+void meta_backend_init_wayland_display (MetaBackend *backend);
+
+void meta_backend_init_wayland (MetaBackend *backend);
+#endif
+
 ClutterBackend * meta_backend_get_clutter_backend (MetaBackend *backend);
 
-MetaIdleMonitor * meta_backend_get_idle_monitor (MetaBackend *backend,
-                                                 int          device_id);
+MetaIdleMonitor * meta_backend_get_idle_monitor (MetaBackend        *backend,
+                                                 ClutterInputDevice *device);
 void meta_backend_foreach_device_monitor (MetaBackend *backend,
                                           GFunc        func,
                                           gpointer     user_data);
 
+META_EXPORT_TEST
 MetaMonitorManager * meta_backend_get_monitor_manager (MetaBackend *backend);
 MetaOrientationManager * meta_backend_get_orientation_manager (MetaBackend *backend);
 MetaCursorTracker * meta_backend_get_cursor_tracker (MetaBackend *backend);
 MetaCursorRenderer * meta_backend_get_cursor_renderer (MetaBackend *backend);
+META_EXPORT_TEST
 MetaRenderer * meta_backend_get_renderer (MetaBackend *backend);
 MetaEgl * meta_backend_get_egl (MetaBackend *backend);
-MetaSettings * meta_backend_get_settings (MetaBackend *backend);
 
 #ifdef HAVE_REMOTE_DESKTOP
 MetaRemoteDesktop * meta_backend_get_remote_desktop (MetaBackend *backend);
+
+MetaScreenCast * meta_backend_get_screen_cast (MetaBackend *backend);
 #endif
 
 gboolean meta_backend_grab_device (MetaBackend *backend,
@@ -136,9 +143,9 @@ gboolean meta_backend_ungrab_device (MetaBackend *backend,
                                      int          device_id,
                                      uint32_t     timestamp);
 
-void meta_backend_warp_pointer (MetaBackend *backend,
-                                int          x,
-                                int          y);
+void meta_backend_finish_touch_sequence (MetaBackend          *backend,
+                                         ClutterEventSequence *sequence,
+                                         MetaSequenceState     state);
 
 MetaLogicalMonitor * meta_backend_get_current_logical_monitor (MetaBackend *backend);
 
@@ -148,24 +155,16 @@ xkb_layout_index_t meta_backend_get_keymap_layout_group (MetaBackend *backend);
 
 gboolean meta_backend_is_lid_closed (MetaBackend *backend);
 
-void meta_backend_update_last_device (MetaBackend *backend,
-                                      int          device_id);
-
-gboolean meta_backend_get_relative_motion_deltas (MetaBackend *backend,
-                                                  const        ClutterEvent *event,
-                                                  double       *dx,
-                                                  double       *dy,
-                                                  double       *dx_unaccel,
-                                                  double       *dy_unaccel);
+void meta_backend_update_last_device (MetaBackend        *backend,
+                                      ClutterInputDevice *device);
 
 MetaPointerConstraint * meta_backend_get_client_pointer_constraint (MetaBackend *backend);
 void meta_backend_set_client_pointer_constraint (MetaBackend *backend,
                                                  MetaPointerConstraint *constraint);
 
-ClutterBackend * meta_backend_get_clutter_backend (MetaBackend *backend);
-
 void meta_backend_monitors_changed (MetaBackend *backend);
 
+META_EXPORT_TEST
 gboolean meta_is_stage_views_enabled (void);
 
 gboolean meta_is_stage_views_scaled (void);
@@ -178,5 +177,16 @@ void meta_backend_notify_keymap_layout_group_changed (MetaBackend *backend,
                                                       unsigned int locked_group);
 
 void meta_backend_notify_ui_scaling_factor_changed (MetaBackend *backend);
+
+META_EXPORT_TEST
+void meta_backend_add_gpu (MetaBackend *backend,
+                           MetaGpu     *gpu);
+
+META_EXPORT_TEST
+GList * meta_backend_get_gpus (MetaBackend *backend);
+
+#ifdef HAVE_LIBWACOM
+WacomDeviceDatabase * meta_backend_get_wacom_database (MetaBackend *backend);
+#endif
 
 #endif /* META_BACKEND_PRIVATE_H */

@@ -28,18 +28,18 @@
  * Authors: James Jones <jajones@nvidia.com>
  */
 
-#include <string.h>
+#include "config.h"
 
+#include "compositor/meta-sync-ring.h"
+
+#include <string.h>
 #include <GL/gl.h>
 #include <GL/glx.h>
 #include <X11/extensions/sync.h>
 
-#include <cogl/cogl.h>
-#include <clutter/clutter.h>
-
-#include <meta/util.h>
-
-#include "meta-sync-ring.h"
+#include "clutter/clutter.h"
+#include "cogl/cogl.h"
+#include "meta/util.h"
 
 /* Theory of operation:
  *
@@ -394,7 +394,7 @@ meta_sync_free (MetaSync *self)
         XIfEvent (self->xdisplay, &event, alarm_event_predicate, (XPointer) self);
         meta_sync_handle_event (self, (XSyncAlarmNotifyEvent *) &event);
       }
-      /* fall through */
+      G_GNUC_FALLTHROUGH;
     case META_SYNC_STATE_READY:
       XSyncTriggerFence (self->xdisplay, self->xfence);
       XFlush (self->xdisplay);

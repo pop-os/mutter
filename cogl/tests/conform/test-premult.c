@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "test-declarations.h"
 #include "test-utils.h"
 
 #define QUAD_WIDTH 32
@@ -49,6 +50,7 @@ make_texture (uint32_t color,
 	      CoglPixelFormat src_format,
               MakeTextureFlags flags)
 {
+  static CoglUserDataKey bitmap_free_key;
   CoglTexture2D *tex_2d;
   guchar *tex_data = gen_tex_data (color);
   CoglBitmap *bmp = cogl_bitmap_new_for_data (test_ctx,
@@ -57,6 +59,10 @@ make_texture (uint32_t color,
                                               src_format,
                                               QUAD_WIDTH * 4,
                                               tex_data);
+  cogl_object_set_user_data (COGL_OBJECT (bmp),
+                             &bitmap_free_key,
+                             tex_data,
+                             g_free);
 
   tex_2d = cogl_texture_2d_new_from_bitmap (bmp);
 
@@ -66,7 +72,6 @@ make_texture (uint32_t color,
     cogl_texture_set_premultiplied (tex_2d, FALSE);
 
   cogl_object_unref (bmp);
-  g_free (tex_data);
 
   return tex_2d;
 }
@@ -90,23 +95,11 @@ set_region (CoglTexture *tex,
 
 static void
 check_texture (CoglPipeline *pipeline,
-	       CoglHandle material,
 	       int x,
 	       int y,
 	       CoglTexture *tex,
 	       uint32_t expected_result)
 {
-  /* Legacy */
-  cogl_push_framebuffer (test_fb);
-  cogl_material_set_layer (material, 0, tex);
-  cogl_set_source (material);
-  cogl_rectangle (x * QUAD_WIDTH,
-		  y * QUAD_WIDTH,
-		  x * QUAD_WIDTH + QUAD_WIDTH,
-		  y * QUAD_WIDTH + QUAD_WIDTH);
-  test_utils_check_pixel (test_fb, x * QUAD_WIDTH + QUAD_WIDTH / 2, y * QUAD_WIDTH + QUAD_WIDTH / 2, expected_result);
-  cogl_pop_framebuffer ();
-
   /* New API */
   cogl_pipeline_set_layer_texture (pipeline, 0, tex);
   cogl_framebuffer_draw_rectangle (test_fb, pipeline,
@@ -121,7 +114,6 @@ void
 test_premult (void)
 {
   CoglPipeline *pipeline;
-  CoglHandle material;
   CoglTexture *tex;
 
   cogl_framebuffer_orthographic (test_fb, 0, 0,
@@ -133,13 +125,6 @@ test_premult (void)
   cogl_framebuffer_clear4f (test_fb,
                             COGL_BUFFER_BIT_COLOR,
                             1.0f, 1.0f, 1.0f, 1.0f);
-
-  /* Legacy */
-  material = cogl_material_new ();
-  cogl_material_set_blend (material,
-                           "RGBA = ADD (SRC_COLOR, 0)", NULL);
-  cogl_material_set_layer_combine (material, 0,
-                                   "RGBA = REPLACE (TEXTURE)", NULL);
 
   /* New API */
   pipeline = cogl_pipeline_new (test_ctx);
@@ -156,7 +141,7 @@ test_premult (void)
   tex = make_texture (0xff00ff80,
                       COGL_PIXEL_FORMAT_RGBA_8888, /* src format */
                       TEXTURE_FLAG_SET_UNPREMULTIPLIED);
-  check_texture (pipeline, material, 0, 0, /* position */
+  check_texture (pipeline, 0, 0, /* position */
 		 tex,
 		 0xff00ff80); /* expected */
 
@@ -169,7 +154,7 @@ test_premult (void)
   tex = make_texture (0xff00ff80,
                       COGL_PIXEL_FORMAT_RGBA_8888, /* src format */
                       TEXTURE_FLAG_SET_PREMULTIPLIED);
-  check_texture (pipeline, material, 1, 0, /* position */
+  check_texture (pipeline, 1, 0, /* position */
 		 tex,
 		 0x80008080); /* expected */
 
@@ -183,7 +168,7 @@ test_premult (void)
   tex = make_texture (0xff00ff80,
                       COGL_PIXEL_FORMAT_RGBA_8888, /* src format */
                       0); /* default premultiplied status */
-  check_texture (pipeline, material, 2, 0, /* position */
+  check_texture (pipeline, 2, 0, /* position */
 		 tex,
 		 0x80008080); /* expected */
 
@@ -197,7 +182,7 @@ test_premult (void)
   tex = make_texture (0x80008080,
                       COGL_PIXEL_FORMAT_RGBA_8888_PRE, /* src format */
                       TEXTURE_FLAG_SET_PREMULTIPLIED);
-  check_texture (pipeline, material, 3, 0, /* position */
+  check_texture (pipeline, 3, 0, /* position */
 		 tex,
 		 0x80008080); /* expected */
 
@@ -210,7 +195,7 @@ test_premult (void)
   tex = make_texture (0x80008080,
                       COGL_PIXEL_FORMAT_RGBA_8888_PRE, /* src format */
                       TEXTURE_FLAG_SET_UNPREMULTIPLIED);
-  check_texture (pipeline, material, 4, 0, /* position */
+  check_texture (pipeline, 4, 0, /* position */
 		 tex,
 		 0xff00ff80); /* expected */
 
@@ -224,7 +209,7 @@ test_premult (void)
   tex = make_texture (0x80008080,
                       COGL_PIXEL_FORMAT_RGBA_8888_PRE, /* src format */
                       0); /* default premultiplied status */
-  check_texture (pipeline, material, 5, 0, /* position */
+  check_texture (pipeline, 5, 0, /* position */
 		 tex,
 		 0x80008080); /* expected */
 
@@ -241,7 +226,7 @@ test_premult (void)
   if (cogl_test_verbose ())
     g_print ("set_region (0xff00ff80, RGBA_8888)\n");
   set_region (tex, 0xff00ff80, COGL_PIXEL_FORMAT_RGBA_8888);
-  check_texture (pipeline, material, 6, 0, /* position */
+  check_texture (pipeline, 6, 0, /* position */
 		 tex,
 		 0xff00ff80); /* expected */
 
@@ -257,7 +242,7 @@ test_premult (void)
   if (cogl_test_verbose ())
     g_print ("set_region (0x80008080, RGBA_8888_PRE)\n");
   set_region (tex, 0x80008080, COGL_PIXEL_FORMAT_RGBA_8888_PRE);
-  check_texture (pipeline, material, 7, 0, /* position */
+  check_texture (pipeline, 7, 0, /* position */
 		 tex,
 		 0xff00ff80); /* expected */
 
@@ -272,7 +257,7 @@ test_premult (void)
   if (cogl_test_verbose ())
     g_print ("set_region (0x80008080, RGBA_8888_PRE)\n");
   set_region (tex, 0x80008080, COGL_PIXEL_FORMAT_RGBA_8888_PRE);
-  check_texture (pipeline, material, 8, 0, /* position */
+  check_texture (pipeline, 8, 0, /* position */
 		 tex,
 		 0x80008080); /* expected */
 
@@ -290,7 +275,7 @@ test_premult (void)
   if (cogl_test_verbose ())
     g_print ("set_region (0xff00ff80, RGBA_8888)\n");
   set_region (tex, 0xff00ff80, COGL_PIXEL_FORMAT_RGBA_8888);
-  check_texture (pipeline, material, 9, 0, /* position */
+  check_texture (pipeline, 9, 0, /* position */
 		 tex,
 		 0x80008080); /* expected */
 

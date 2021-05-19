@@ -25,6 +25,7 @@
 #include "clutter/clutter.h"
 #include "cogl/cogl.h"
 #include "meta/prefs.h"
+#include "meta/util.h"
 
 struct _MetaCursorSpriteXcursor
 {
@@ -83,6 +84,7 @@ translate_meta_cursor (MetaCursor cursor)
       return "crosshair";
     case META_CURSOR_IBEAM:
       return "xterm";
+    case META_CURSOR_BLANK:
     case META_CURSOR_NONE:
     case META_CURSOR_LAST:
       break;
@@ -90,6 +92,48 @@ translate_meta_cursor (MetaCursor cursor)
 
   g_assert_not_reached ();
   return NULL;
+}
+
+static Cursor
+create_blank_cursor (Display *xdisplay)
+{
+  Pixmap pixmap;
+  XColor color;
+  Cursor cursor;
+  XGCValues gc_values;
+  GC gc;
+
+  pixmap = XCreatePixmap (xdisplay, DefaultRootWindow (xdisplay), 1, 1, 1);
+
+  gc_values.foreground = BlackPixel (xdisplay, DefaultScreen (xdisplay));
+  gc = XCreateGC (xdisplay, pixmap, GCForeground, &gc_values);
+
+  XFillRectangle (xdisplay, pixmap, gc, 0, 0, 1, 1);
+
+  color.pixel = 0;
+  color.red = color.blue = color.green = 0;
+
+  cursor = XCreatePixmapCursor (xdisplay, pixmap, pixmap, &color, &color, 1, 1);
+
+  XFreeGC (xdisplay, gc);
+  XFreePixmap (xdisplay, pixmap);
+
+  return cursor;
+}
+
+static XcursorImages *
+create_blank_cursor_images (void)
+{
+  XcursorImages *images;
+
+  images = XcursorImagesCreate (1);
+  images->images[0] = XcursorImageCreate (1, 1);
+
+  images->images[0]->xhot = 0;
+  images->images[0]->yhot = 0;
+  memset (images->images[0]->pixels, 0, sizeof(int32_t));
+
+  return images;
 }
 
 MetaCursor
@@ -102,15 +146,38 @@ Cursor
 meta_create_x_cursor (Display    *xdisplay,
                       MetaCursor  cursor)
 {
+  if (cursor == META_CURSOR_BLANK)
+    return create_blank_cursor (xdisplay);
+
   return XcursorLibraryLoadCursor (xdisplay, translate_meta_cursor (cursor));
 }
 
 static XcursorImages *
 load_cursor_on_client (MetaCursor cursor, int scale)
 {
-  return XcursorLibraryLoadImages (translate_meta_cursor (cursor),
-                                   meta_prefs_get_cursor_theme (),
-                                   meta_prefs_get_cursor_size () * scale);
+  XcursorImages *xcursor_images;
+  int fallback_size;
+
+  if (cursor == META_CURSOR_BLANK)
+    return create_blank_cursor_images ();
+
+  xcursor_images =
+    XcursorLibraryLoadImages (translate_meta_cursor (cursor),
+                              meta_prefs_get_cursor_theme (),
+                              meta_prefs_get_cursor_size () * scale);
+  if (xcursor_images)
+    return xcursor_images;
+
+  g_warning_once ("No cursor theme available, please install a cursor theme");
+
+  fallback_size = 24 * scale;
+  xcursor_images = XcursorImagesCreate (1);
+  xcursor_images->images[0] = XcursorImageCreate (fallback_size, fallback_size);
+  xcursor_images->images[0]->xhot = 0;
+  xcursor_images->images[0]->yhot = 0;
+  memset (xcursor_images->images[0]->pixels, 0xc0,
+          fallback_size * fallback_size * sizeof (int32_t));
+  return xcursor_images;
 }
 
 static void
@@ -123,7 +190,8 @@ load_from_current_xcursor_image (MetaCursorSpriteXcursor *sprite_xcursor)
   ClutterBackend *clutter_backend;
   CoglContext *cogl_context;
   CoglTexture2D *texture;
-  CoglError *error = NULL;
+  GError *error = NULL;
+  int hotspot_x, hotspot_y;
 
   g_assert (!meta_cursor_sprite_get_cogl_texture (sprite));
 
@@ -149,12 +217,24 @@ load_from_current_xcursor_image (MetaCursorSpriteXcursor *sprite_xcursor)
   if (!texture)
     {
       g_warning ("Failed to allocate cursor texture: %s\n", error->message);
-      cogl_error_free (error);
+      g_error_free (error);
     }
 
+  if (meta_is_wayland_compositor ())
+    {
+      hotspot_x = ((int) (xc_image->xhot / sprite_xcursor->theme_scale) *
+                   sprite_xcursor->theme_scale);
+      hotspot_y = ((int) (xc_image->yhot / sprite_xcursor->theme_scale) *
+                   sprite_xcursor->theme_scale);
+    }
+  else
+    {
+      hotspot_x = xc_image->xhot;
+      hotspot_y = xc_image->yhot;
+    }
   meta_cursor_sprite_set_texture (sprite,
                                   COGL_TEXTURE (texture),
-                                  xc_image->xhot, xc_image->yhot);
+                                  hotspot_x, hotspot_y);
 
   g_clear_pointer (&texture, cogl_object_unref);
 }
@@ -232,8 +312,6 @@ load_cursor_from_theme (MetaCursorSprite *sprite)
   sprite_xcursor->xcursor_images =
     load_cursor_on_client (sprite_xcursor->cursor,
                            sprite_xcursor->theme_scale);
-  if (!sprite_xcursor->xcursor_images)
-    g_error ("Could not find cursor. Perhaps set XCURSOR_PATH?");
 
   load_from_current_xcursor_image (sprite_xcursor);
 }
@@ -272,6 +350,7 @@ meta_cursor_sprite_xcursor_finalize (GObject *object)
 static void
 meta_cursor_sprite_xcursor_init (MetaCursorSpriteXcursor *sprite_xcursor)
 {
+  sprite_xcursor->theme_scale = 1;
   sprite_xcursor->theme_dirty = TRUE;
 }
 

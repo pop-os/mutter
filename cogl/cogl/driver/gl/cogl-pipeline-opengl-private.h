@@ -45,7 +45,7 @@
  *
  * Roughly speaking the members in this structure are of two kinds:
  * either they are a low level reflection of the state we send to
- * OpenGL or they are for high level meta data assoicated with the
+ * OpenGL or they are for high level meta data associated with the
  * texture unit when flushing CoglPipelineLayers that is typically
  * used to optimize subsequent re-flushing of the same layer.
  *
@@ -71,13 +71,6 @@ typedef struct _CoglTextureUnit
    * dirty_gl_texture == TRUE */
   GLenum             gl_target;
 
-  /* Foreign textures are those not created or deleted by Cogl. If we ever
-   * call glBindTexture for a foreign texture then the next time we are
-   * asked to glBindTexture we can't try and optimize a redundant state
-   * change because we don't know if the original texture name was deleted
-   * and now we are being asked to bind a recycled name. */
-  CoglBool           is_foreign;
-
   /* We have many components in Cogl that need to temporarily bind arbitrary
    * textures e.g. to query texture object parameters and since we don't
    * want that to result in too much redundant reflushing of layer state
@@ -89,7 +82,7 @@ typedef struct _CoglTextureUnit
    * of always using texture unit 1 for these transient bindings so we
    * can assume this is only ever TRUE for unit 1.
    */
-  CoglBool           dirty_gl_texture;
+  gboolean           dirty_gl_texture;
 
   /* A matrix stack giving us the means to associate a texture
    * transform matrix with the texture unit. */
@@ -99,7 +92,7 @@ typedef struct _CoglTextureUnit
    * Higher level layer state associated with the unit...
    */
 
-  /* The CoglPipelineLayer whos state was flushed to update this
+  /* The CoglPipelineLayer whose state was flushed to update this
    * texture unit last.
    *
    * This will be set to NULL if the layer is modified or freed which
@@ -109,7 +102,7 @@ typedef struct _CoglTextureUnit
   CoglPipelineLayer *layer;
 
   /* To help minimize the state changes required we track the
-   * difference flags associated with the layer whos state was last
+   * difference flags associated with the layer whose state was last
    * flushed to update this texture unit.
    *
    * Note: we track this explicitly because .layer may get invalidated
@@ -126,7 +119,7 @@ typedef struct _CoglTextureUnit
    * too. When we later come to flush some pipeline state then we will
    * always check this to potentially force an update of the texture
    * state even if the pipeline hasn't changed. */
-  CoglBool           texture_storage_changed;
+  gboolean           texture_storage_changed;
 
 } CoglTextureUnit;
 
@@ -134,15 +127,14 @@ CoglTextureUnit *
 _cogl_get_texture_unit (int index_);
 
 void
-_cogl_destroy_texture_units (void);
+_cogl_destroy_texture_units (CoglContext *ctx);
 
 void
 _cogl_set_active_texture_unit (int unit_index);
 
 void
 _cogl_bind_gl_texture_transient (GLenum gl_target,
-                                 GLuint gl_texture,
-                                 CoglBool is_foreign);
+                                 GLuint gl_texture);
 
 void
 _cogl_delete_gl_texture (GLuint gl_texture);
@@ -151,8 +143,30 @@ void
 _cogl_pipeline_flush_gl_state (CoglContext *context,
                                CoglPipeline *pipeline,
                                CoglFramebuffer *framebuffer,
-                               CoglBool skip_gl_state,
-                               CoglBool unknown_color_alpha);
+                               gboolean skip_gl_state,
+                               gboolean unknown_color_alpha);
+
+void
+_cogl_glsl_shader_set_source_with_boilerplate (CoglContext *ctx,
+                                               GLuint shader_gl_handle,
+                                               GLenum shader_gl_type,
+                                               CoglPipeline *pipeline,
+                                               GLsizei count_in,
+                                               const char **strings_in,
+                                               const GLint *lengths_in);
+
+void
+_cogl_sampler_gl_init (CoglContext *context,
+                       CoglSamplerCacheEntry *entry);
+
+void
+_cogl_sampler_gl_free (CoglContext *context,
+                       CoglSamplerCacheEntry *entry);
+
+void
+_cogl_gl_set_uniform (CoglContext *ctx,
+                      GLint location,
+                      const CoglBoxedValue *value);
 
 #endif /* __COGL_PIPELINE_OPENGL_PRIVATE_H */
 

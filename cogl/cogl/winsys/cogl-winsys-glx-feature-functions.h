@@ -43,7 +43,7 @@
  * COGL_WINSYS_FEATURE_END ()
  *
  * Note: You can list multiple namespace and extension names if the
- * corresponding _FEATURE_FUNCTIONS have the same semantics accross
+ * corresponding _FEATURE_FUNCTIONS have the same semantics across
  * the different extension variants.
  *
  * XXX: NB: Don't add a trailing semicolon when using these macros
@@ -130,7 +130,7 @@ COGL_WINSYS_FEATURE_BEGIN (255, 255,
                            "SGI\0",
                            "swap_control\0",
                            0,
-                           COGL_WINSYS_FEATURE_SWAP_THROTTLE)
+                           0)
 COGL_WINSYS_FEATURE_FUNCTION (int, glXSwapInterval,
                               (int interval))
 COGL_WINSYS_FEATURE_END ()

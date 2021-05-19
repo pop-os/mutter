@@ -31,9 +31,7 @@
  *   Robert Bragg <robert@linux.intel.com>
  */
 
-#ifdef HAVE_CONFIG_H
 #include "cogl-config.h"
-#endif
 
 #include <test-fixtures/test-unit.h>
 
@@ -52,7 +50,7 @@ struct _CoglPipelineCache
 CoglPipelineCache *
 _cogl_pipeline_cache_new (void)
 {
-  CoglPipelineCache *cache = g_new (CoglPipelineCache, 1);
+  g_autofree CoglPipelineCache *cache = g_new (CoglPipelineCache, 1);
   unsigned long vertex_state;
   unsigned long layer_vertex_state;
   unsigned int fragment_state;
@@ -82,7 +80,7 @@ _cogl_pipeline_cache_new (void)
                                   layer_vertex_state | layer_fragment_state,
                                   "programs");
 
-  return cache;
+  return g_steal_pointer (&cache);
 }
 
 void

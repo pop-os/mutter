@@ -23,17 +23,19 @@
 #define META_WAYLAND_SEAT_H
 
 #include <wayland-server.h>
-#include <clutter/clutter.h>
 
-#include "meta-wayland-types.h"
-#include "meta-wayland-input-device.h"
-#include "meta-wayland-pointer.h"
-#include "meta-wayland-keyboard.h"
-#include "meta-wayland-touch.h"
-#include "meta-wayland-data-device.h"
-#include "meta-wayland-tablet-tool.h"
-#include "meta-wayland-text-input.h"
-#include "meta-wayland-text-input-legacy.h"
+#include "clutter/clutter.h"
+#include "wayland/meta-wayland-data-device.h"
+#include "wayland/meta-wayland-data-device-primary.h"
+#include "wayland/meta-wayland-data-device-primary-legacy.h"
+#include "wayland/meta-wayland-input-device.h"
+#include "wayland/meta-wayland-keyboard.h"
+#include "wayland/meta-wayland-pointer.h"
+#include "wayland/meta-wayland-tablet-tool.h"
+#include "wayland/meta-wayland-text-input.h"
+#include "wayland/meta-wayland-text-input-legacy.h"
+#include "wayland/meta-wayland-touch.h"
+#include "wayland/meta-wayland-types.h"
 
 struct _MetaWaylandSeat
 {
@@ -45,6 +47,8 @@ struct _MetaWaylandSeat
   MetaWaylandTouch *touch;
 
   MetaWaylandDataDevice data_device;
+  MetaWaylandDataDevicePrimary primary_data_device;
+  MetaWaylandDataDevicePrimaryLegacy primary_legacy_data_device;
 
   MetaWaylandGtkTextInput *gtk_text_input;
   MetaWaylandTextInput *text_input;

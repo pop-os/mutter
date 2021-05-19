@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "test-declarations.h"
 #include "test-utils.h"
 
 #define LONG_ARRAY_SIZE 128
@@ -100,8 +101,8 @@ create_pipeline_for_shader (TestState *state, const char *shader_source)
 
   cogl_pipeline_set_user_program (pipeline, program);
 
-  cogl_handle_unref (shader);
-  cogl_handle_unref (program);
+  cogl_object_unref (shader);
+  cogl_object_unref (program);
 
   return pipeline;
 }
@@ -148,7 +149,7 @@ init_long_pipeline_state (TestState *state)
   state->long_pipeline = create_pipeline_for_shader (state, long_source);
 
   /* This tries to lookup a large number of uniform names to make sure
-     that the bitmask of overriden uniforms flows over the size of a
+     that the bitmask of overridden uniforms flows over the size of a
      single long so that it has to resort to allocating it */
   for (i = 0; i < LONG_ARRAY_SIZE; i++)
     {

@@ -19,11 +19,14 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <meta/meta-plugin.h>
-#include <meta/meta-version.h>
-#include "meta-module.h"
+#include "config.h"
+
+#include "compositor/meta-module.h"
 
 #include <gmodule.h>
+
+#include "meta/meta-plugin.h"
+#include "meta/meta-version.h"
 
 enum
 {
@@ -37,9 +40,6 @@ struct _MetaModulePrivate
   gchar        *path;
   GType         plugin_type;
 };
-
-#define META_MODULE_GET_PRIVATE(obj) \
-(G_TYPE_INSTANCE_GET_PRIVATE ((obj), META_TYPE_MODULE, MetaModulePrivate))
 
 G_DEFINE_TYPE_WITH_PRIVATE (MetaModule, meta_module, G_TYPE_TYPE_MODULE);
 
@@ -189,7 +189,7 @@ meta_module_class_init (MetaModuleClass *klass)
 static void
 meta_module_init (MetaModule *self)
 {
-  self->priv = META_MODULE_GET_PRIVATE (self);
+  self->priv = meta_module_get_instance_private (self);
 }
 
 GType

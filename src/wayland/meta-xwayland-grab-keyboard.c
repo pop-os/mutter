@@ -95,21 +95,17 @@ meta_xwayland_keyboard_grab_end (MetaXwaylandKeyboardActiveGrab *active_grab)
   if (!active_grab->surface)
     return;
 
-  g_signal_handler_disconnect (active_grab->surface,
-                               active_grab->surface_destroyed_handler);
+  g_clear_signal_handler (&active_grab->surface_destroyed_handler,
+                          active_grab->surface);
 
-  g_signal_handler_disconnect (active_grab->surface,
-                               active_grab->shortcuts_restored_handler);
+  g_clear_signal_handler (&active_grab->shortcuts_restored_handler,
+                          active_grab->surface);
 
   meta_wayland_surface_restore_shortcuts (active_grab->surface,
                                           active_grab->seat);
 
-  if (active_grab->window_associate_handler)
-    {
-      g_signal_handler_disconnect (active_grab->surface->role,
-                                   active_grab->window_associate_handler);
-      active_grab->window_associate_handler = 0;
-    }
+  g_clear_signal_handler (&active_grab->window_associate_handler,
+                          active_grab->surface->role);
 
   active_grab->surface = NULL;
 }
@@ -187,54 +183,65 @@ meta_xwayland_grab_is_granted (MetaWindow *window)
 {
   MetaBackend *backend;
   MetaSettings *settings;
-  GPtrArray *whitelist;
-  GPtrArray *blacklist;
+  GPtrArray *allow_list;
+  GPtrArray *deny_list;
   gboolean may_grab;
 
   backend = meta_get_backend ();
   settings = meta_backend_get_settings (backend);
-  if (!meta_settings_are_xwayland_grabs_allowed (settings))
+
+  /* Check whether the window is in the deny list */
+  meta_settings_get_xwayland_grab_patterns (settings, &allow_list, &deny_list);
+
+  if (deny_list && application_is_in_pattern_array (window, deny_list))
     return FALSE;
 
-  /* Check whether the window is blacklisted */
-  meta_settings_get_xwayland_grab_patterns (settings, &whitelist, &blacklist);
-
-  if (blacklist && application_is_in_pattern_array (window, blacklist))
-    return FALSE;
-
-  /* Check if we are dealing with good citizen Xwayland client whitelisting itself. */
+  /* Check if we are dealing with good citizen Xwayland client allowing itself. */
   g_object_get (G_OBJECT (window), "xwayland-may-grab-keyboard", &may_grab, NULL);
   if (may_grab)
     return TRUE;
 
-  /* Last resort, is it white listed. */
-  if (whitelist && application_is_in_pattern_array (window, whitelist))
+  /* Last resort, is it in the grant list. */
+  if (allow_list && application_is_in_pattern_array (window, allow_list))
     return TRUE;
 
   return FALSE;
+}
+
+static gboolean
+meta_xwayland_grab_should_lock_focus (MetaWindow *window)
+{
+  MetaBackend *backend;
+  MetaSettings *settings;
+
+  /* Lock focus applies to O-R windows which never receive keyboard focus otherwise */
+  if (!window->override_redirect)
+    return FALSE;
+
+  backend = meta_get_backend ();
+  settings = meta_backend_get_settings (backend);
+
+  return meta_settings_are_xwayland_grabs_allowed (settings);
 }
 
 static void
 meta_xwayland_keyboard_grab_activate (MetaXwaylandKeyboardActiveGrab *active_grab)
 {
   MetaWaylandSurface *surface = active_grab->surface;
-  MetaWindow *window = surface->window;
+  MetaWindow *window = meta_wayland_surface_get_window (surface);
   MetaWaylandSeat *seat = active_grab->seat;
 
   if (meta_xwayland_grab_is_granted (window))
     {
       meta_verbose ("XWayland window %s has a grab granted", window->desc);
       meta_wayland_surface_inhibit_shortcuts (surface, seat);
-      /* Use a grab for O-R windows which never receive keyboard focus otherwise */
-      if (window->override_redirect)
+
+      if (meta_xwayland_grab_should_lock_focus (window))
         meta_wayland_keyboard_start_grab (seat->keyboard, &active_grab->keyboard_grab);
     }
-  if (active_grab->window_associate_handler)
-    {
-      g_signal_handler_disconnect (active_grab->surface->role,
-                                   active_grab->window_associate_handler);
-      active_grab->window_associate_handler = 0;
-    }
+
+  g_clear_signal_handler (&active_grab->window_associate_handler,
+                          active_grab->surface->role);
 }
 
 static void
@@ -252,7 +259,7 @@ zwp_xwayland_keyboard_grab_manager_grab (struct wl_client   *client,
                                          struct wl_resource *seat_resource)
 {
   MetaWaylandSurface *surface = wl_resource_get_user_data (surface_resource);
-  MetaWindow *window = surface->window;
+  MetaWindow *window = meta_wayland_surface_get_window (surface);
   MetaWaylandSeat *seat = wl_resource_get_user_data (seat_resource);
   MetaXwaylandKeyboardActiveGrab *active_grab;
   struct wl_resource *grab_resource;

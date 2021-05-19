@@ -27,12 +27,12 @@
 #include <pipewire/pipewire.h>
 
 #include "backends/meta-backend-private.h"
-#include "backends/meta-screen-cast-session.h"
 #include "backends/meta-remote-desktop-session.h"
+#include "backends/meta-screen-cast-session.h"
 
 #define META_SCREEN_CAST_DBUS_SERVICE "org.gnome.Mutter.ScreenCast"
 #define META_SCREEN_CAST_DBUS_PATH "/org/gnome/Mutter/ScreenCast"
-#define META_SCREEN_CAST_API_VERSION 1
+#define META_SCREEN_CAST_API_VERSION 4
 
 struct _MetaScreenCast
 {
@@ -40,9 +40,14 @@ struct _MetaScreenCast
 
   int dbus_name_id;
 
+  int inhibit_count;
+
   GList *sessions;
 
   MetaDbusSessionWatcher *session_watcher;
+  MetaBackend *backend;
+
+  gboolean disable_dma_bufs;
 };
 
 static void
@@ -53,6 +58,29 @@ G_DEFINE_TYPE_WITH_CODE (MetaScreenCast, meta_screen_cast,
                          G_IMPLEMENT_INTERFACE (META_DBUS_TYPE_SCREEN_CAST,
                                                 meta_screen_cast_init_iface))
 
+void
+meta_screen_cast_inhibit (MetaScreenCast *screen_cast)
+{
+  screen_cast->inhibit_count++;
+  if (screen_cast->inhibit_count == 1)
+    {
+      while (screen_cast->sessions)
+        {
+          MetaScreenCastSession *session = screen_cast->sessions->data;
+
+          meta_screen_cast_session_close (session);
+        }
+    }
+}
+
+void
+meta_screen_cast_uninhibit (MetaScreenCast *screen_cast)
+{
+  g_return_if_fail (screen_cast->inhibit_count > 0);
+
+  screen_cast->inhibit_count--;
+}
+
 GDBusConnection *
 meta_screen_cast_get_connection (MetaScreenCast *screen_cast)
 {
@@ -62,12 +90,57 @@ meta_screen_cast_get_connection (MetaScreenCast *screen_cast)
   return g_dbus_interface_skeleton_get_connection (interface_skeleton);
 }
 
+MetaBackend *
+meta_screen_cast_get_backend (MetaScreenCast *screen_cast)
+{
+  return screen_cast->backend;
+}
+
+void
+meta_screen_cast_disable_dma_bufs (MetaScreenCast *screen_cast)
+{
+  screen_cast->disable_dma_bufs = TRUE;
+}
+
+CoglDmaBufHandle *
+meta_screen_cast_create_dma_buf_handle (MetaScreenCast *screen_cast,
+                                        int             width,
+                                        int             height)
+{
+  ClutterBackend *clutter_backend =
+    meta_backend_get_clutter_backend (screen_cast->backend);
+  CoglContext *cogl_context =
+    clutter_backend_get_cogl_context (clutter_backend);
+  CoglRenderer *cogl_renderer = cogl_context_get_renderer (cogl_context);
+  g_autoptr (GError) error = NULL;
+  CoglDmaBufHandle *dmabuf_handle;
+
+  if (screen_cast->disable_dma_bufs)
+    return NULL;
+
+  dmabuf_handle = cogl_renderer_create_dma_buf (cogl_renderer,
+                                                width, height,
+                                                &error);
+  if (!dmabuf_handle)
+    {
+      g_warning ("Failed to allocate DMA buffer, "
+                 "disabling DMA buffer based screen casting: %s",
+                 error->message);
+      screen_cast->disable_dma_bufs = TRUE;
+      return NULL;
+    }
+
+  return dmabuf_handle;
+}
+
 static gboolean
 register_remote_desktop_screen_cast_session (MetaScreenCastSession  *session,
                                              const char             *remote_desktop_session_id,
                                              GError                **error)
 {
-  MetaBackend *backend = meta_get_backend ();
+  MetaScreenCast *screen_cast =
+    meta_screen_cast_session_get_screen_cast (session);
+  MetaBackend *backend = meta_screen_cast_get_backend (screen_cast);
   MetaRemoteDesktop *remote_desktop = meta_backend_get_remote_desktop (backend);
   MetaRemoteDesktopSession *remote_desktop_session;
 
@@ -107,7 +180,17 @@ handle_create_session (MetaDBusScreenCast    *skeleton,
   const char *session_path;
   const char *client_dbus_name;
   char *remote_desktop_session_id = NULL;
+  gboolean disable_animations;
   MetaScreenCastSessionType session_type;
+
+  if (screen_cast->inhibit_count > 0)
+    {
+      g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
+                                             G_DBUS_ERROR_ACCESS_DENIED,
+                                             "Session creation inhibited");
+
+      return TRUE;
+    }
 
   g_variant_lookup (properties, "remote-desktop-session-id", "s",
                     &remote_desktop_session_id);
@@ -149,6 +232,13 @@ handle_create_session (MetaDBusScreenCast    *skeleton,
           g_object_unref (session);
           return TRUE;
         }
+    }
+
+  if (g_variant_lookup (properties, "disable-animations", "b",
+                        &disable_animations))
+    {
+      meta_screen_cast_session_set_disable_animations (session,
+                                                       disable_animations);
     }
 
   client_dbus_name = g_dbus_method_invocation_get_sender (invocation);
@@ -244,11 +334,13 @@ meta_screen_cast_finalize (GObject *object)
 }
 
 MetaScreenCast *
-meta_screen_cast_new (MetaDbusSessionWatcher *session_watcher)
+meta_screen_cast_new (MetaBackend            *backend,
+                      MetaDbusSessionWatcher *session_watcher)
 {
   MetaScreenCast *screen_cast;
 
   screen_cast = g_object_new (META_TYPE_SCREEN_CAST, NULL);
+  screen_cast->backend = backend;
   screen_cast->session_watcher = session_watcher;
 
   return screen_cast;

@@ -37,14 +37,13 @@
  * #ClutterTransitionGroup is available since Clutter 1.12
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #include "clutter-transition-group.h"
 
 #include "clutter-debug.h"
 #include "clutter-private.h"
+#include "clutter-timeline-private.h"
 
 struct _ClutterTransitionGroupPrivate
 {

@@ -25,20 +25,23 @@
 
 #include "config.h"
 
-#include "meta-surface-actor-x11.h"
+#include "compositor/meta-surface-actor-x11.h"
 
 #include <X11/extensions/Xcomposite.h>
-#include <cogl/winsys/cogl-texture-pixmap-x11.h>
 
-#include <meta/meta-x11-errors.h>
-#include "window-private.h"
-#include "meta-shaped-texture-private.h"
-#include "meta-cullable.h"
-#include "x11/window-x11.h"
+#include "cogl/winsys/cogl-texture-pixmap-x11.h"
+#include "compositor/meta-cullable.h"
+#include "compositor/meta-shaped-texture-private.h"
+#include "compositor/meta-window-actor-private.h"
+#include "core/window-private.h"
+#include "meta/meta-x11-errors.h"
 #include "x11/meta-x11-display-private.h"
+#include "x11/window-x11.h"
 
-struct _MetaSurfaceActorX11Private
+struct _MetaSurfaceActorX11
 {
+  MetaSurfaceActor parent;
+
   MetaWindow *window;
 
   MetaDisplay *display;
@@ -60,36 +63,39 @@ struct _MetaSurfaceActorX11Private
 
   guint unredirected   : 1;
 };
-typedef struct _MetaSurfaceActorX11Private MetaSurfaceActorX11Private;
 
-G_DEFINE_TYPE_WITH_PRIVATE (MetaSurfaceActorX11, meta_surface_actor_x11, META_TYPE_SURFACE_ACTOR)
+G_DEFINE_TYPE (MetaSurfaceActorX11,
+               meta_surface_actor_x11,
+               META_TYPE_SURFACE_ACTOR)
 
 static void
 free_damage (MetaSurfaceActorX11 *self)
 {
-  MetaSurfaceActorX11Private *priv = meta_surface_actor_x11_get_instance_private (self);
-  MetaDisplay *display = priv->display;
-  Display *xdisplay = meta_x11_display_get_xdisplay (display->x11_display);
+  MetaDisplay *display = self->display;
+  Display *xdisplay;
 
-  if (priv->damage == None)
+  if (self->damage == None)
     return;
 
+  xdisplay = meta_x11_display_get_xdisplay (display->x11_display);
+
   meta_x11_error_trap_push (display->x11_display);
-  XDamageDestroy (xdisplay, priv->damage);
-  priv->damage = None;
+  XDamageDestroy (xdisplay, self->damage);
+  self->damage = None;
   meta_x11_error_trap_pop (display->x11_display);
 }
 
 static void
 detach_pixmap (MetaSurfaceActorX11 *self)
 {
-  MetaSurfaceActorX11Private *priv = meta_surface_actor_x11_get_instance_private (self);
-  MetaDisplay *display = priv->display;
-  Display *xdisplay = meta_x11_display_get_xdisplay (display->x11_display);
+  MetaDisplay *display = self->display;
   MetaShapedTexture *stex = meta_surface_actor_get_texture (META_SURFACE_ACTOR (self));
+  Display *xdisplay;
 
-  if (priv->pixmap == None)
+  if (self->pixmap == None)
     return;
+
+  xdisplay = meta_x11_display_get_xdisplay (display->x11_display);
 
   /* Get rid of all references to the pixmap before freeing it; it's unclear whether
    * you are supposed to be able to free a GLXPixmap after freeing the underlying
@@ -99,58 +105,55 @@ detach_pixmap (MetaSurfaceActorX11 *self)
   cogl_flush ();
 
   meta_x11_error_trap_push (display->x11_display);
-  XFreePixmap (xdisplay, priv->pixmap);
-  priv->pixmap = None;
+  XFreePixmap (xdisplay, self->pixmap);
+  self->pixmap = None;
   meta_x11_error_trap_pop (display->x11_display);
 
-  g_clear_pointer (&priv->texture, cogl_object_unref);
+  g_clear_pointer (&self->texture, cogl_object_unref);
 }
 
 static void
 set_pixmap (MetaSurfaceActorX11 *self,
             Pixmap               pixmap)
 {
-  MetaSurfaceActorX11Private *priv = meta_surface_actor_x11_get_instance_private (self);
-
   CoglContext *ctx = clutter_backend_get_cogl_context (clutter_get_default_backend ());
   MetaShapedTexture *stex = meta_surface_actor_get_texture (META_SURFACE_ACTOR (self));
-  CoglError *error = NULL;
+  GError *error = NULL;
   CoglTexture *texture;
 
-  g_assert (priv->pixmap == None);
-  priv->pixmap = pixmap;
+  g_assert (self->pixmap == None);
+  self->pixmap = pixmap;
 
-  texture = COGL_TEXTURE (cogl_texture_pixmap_x11_new (ctx, priv->pixmap, FALSE, &error));
+  texture = COGL_TEXTURE (cogl_texture_pixmap_x11_new (ctx, self->pixmap, FALSE, &error));
 
   if (error != NULL)
     {
       g_warning ("Failed to allocate stex texture: %s", error->message);
-      cogl_error_free (error);
+      g_error_free (error);
     }
   else if (G_UNLIKELY (!cogl_texture_pixmap_x11_is_using_tfp_extension (COGL_TEXTURE_PIXMAP_X11 (texture))))
     g_warning ("NOTE: Not using GLX TFP!\n");
 
-  priv->texture = texture;
+  self->texture = texture;
   meta_shaped_texture_set_texture (stex, texture);
 }
 
 static void
 update_pixmap (MetaSurfaceActorX11 *self)
 {
-  MetaSurfaceActorX11Private *priv = meta_surface_actor_x11_get_instance_private (self);
-  MetaDisplay *display = priv->display;
+  MetaDisplay *display = self->display;
   Display *xdisplay = meta_x11_display_get_xdisplay (display->x11_display);
 
-  if (priv->size_changed)
+  if (self->size_changed)
     {
       detach_pixmap (self);
-      priv->size_changed = FALSE;
+      self->size_changed = FALSE;
     }
 
-  if (priv->pixmap == None)
+  if (self->pixmap == None)
     {
       Pixmap new_pixmap;
-      Window xwindow = meta_window_x11_get_toplevel_xwindow (priv->window);
+      Window xwindow = meta_window_x11_get_toplevel_xwindow (self->window);
 
       meta_x11_error_trap_push (display->x11_display);
       new_pixmap = XCompositeNameWindowPixmap (xdisplay, xwindow);
@@ -170,7 +173,7 @@ update_pixmap (MetaSurfaceActorX11 *self)
       if (new_pixmap == None)
         {
           meta_verbose ("Unable to get named pixmap for %s\n",
-                        meta_window_get_description (priv->window));
+                        meta_window_get_description (self->window));
           return;
         }
 
@@ -178,11 +181,10 @@ update_pixmap (MetaSurfaceActorX11 *self)
     }
 }
 
-static gboolean
-is_visible (MetaSurfaceActorX11 *self)
+gboolean
+meta_surface_actor_x11_is_visible (MetaSurfaceActorX11 *self)
 {
-  MetaSurfaceActorX11Private *priv = meta_surface_actor_x11_get_instance_private (self);
-  return (priv->pixmap != None) && !priv->unredirected;
+  return (self->pixmap != None) && !self->unredirected;
 }
 
 static void
@@ -190,167 +192,124 @@ meta_surface_actor_x11_process_damage (MetaSurfaceActor *actor,
                                        int x, int y, int width, int height)
 {
   MetaSurfaceActorX11 *self = META_SURFACE_ACTOR_X11 (actor);
-  MetaSurfaceActorX11Private *priv = meta_surface_actor_x11_get_instance_private (self);
 
-  priv->received_damage = TRUE;
+  self->received_damage = TRUE;
 
-  if (meta_window_is_fullscreen (priv->window) && !priv->unredirected && !priv->does_full_damage)
+  if (meta_window_is_fullscreen (self->window) && !self->unredirected && !self->does_full_damage)
     {
       MetaRectangle window_rect;
-      meta_window_get_frame_rect (priv->window, &window_rect);
+      meta_window_get_frame_rect (self->window, &window_rect);
 
       if (x == 0 &&
           y == 0 &&
           window_rect.width == width &&
           window_rect.height == height)
-        priv->full_damage_frames_count++;
+        self->full_damage_frames_count++;
       else
-        priv->full_damage_frames_count = 0;
+        self->full_damage_frames_count = 0;
 
-      if (priv->full_damage_frames_count >= 100)
-        priv->does_full_damage = TRUE;
+      if (self->full_damage_frames_count >= 100)
+        self->does_full_damage = TRUE;
     }
 
-  if (!is_visible (self))
+  if (!meta_surface_actor_x11_is_visible (self))
     return;
 
-  cogl_texture_pixmap_x11_update_area (COGL_TEXTURE_PIXMAP_X11 (priv->texture),
+  cogl_texture_pixmap_x11_update_area (COGL_TEXTURE_PIXMAP_X11 (self->texture),
                                        x, y, width, height);
+  meta_surface_actor_update_area (actor, x, y, width, height);
 }
 
-static void
-meta_surface_actor_x11_pre_paint (MetaSurfaceActor *actor)
+void
+meta_surface_actor_x11_handle_updates (MetaSurfaceActorX11 *self)
 {
-  MetaSurfaceActorX11 *self = META_SURFACE_ACTOR_X11 (actor);
-  MetaSurfaceActorX11Private *priv = meta_surface_actor_x11_get_instance_private (self);
-  MetaDisplay *display = priv->display;
+  MetaDisplay *display = self->display;
   Display *xdisplay = meta_x11_display_get_xdisplay (display->x11_display);
 
-  if (priv->received_damage)
+  if (self->received_damage)
     {
       meta_x11_error_trap_push (display->x11_display);
-      XDamageSubtract (xdisplay, priv->damage, None, None);
+      XDamageSubtract (xdisplay, self->damage, None, None);
       meta_x11_error_trap_pop (display->x11_display);
 
-      priv->received_damage = FALSE;
+      self->received_damage = FALSE;
     }
 
   update_pixmap (self);
 }
 
 static gboolean
-meta_surface_actor_x11_is_visible (MetaSurfaceActor *actor)
-{
-  MetaSurfaceActorX11 *self = META_SURFACE_ACTOR_X11 (actor);
-  return is_visible (self);
-}
-
-static gboolean
 meta_surface_actor_x11_is_opaque (MetaSurfaceActor *actor)
 {
   MetaSurfaceActorX11 *self = META_SURFACE_ACTOR_X11 (actor);
-  MetaSurfaceActorX11Private *priv = meta_surface_actor_x11_get_instance_private (self);
+  MetaShapedTexture *stex = meta_surface_actor_get_texture (actor);
 
-  /* If we're not ARGB32, then we're opaque. */
-  if (!meta_surface_actor_is_argb32 (actor))
+  if (meta_surface_actor_x11_is_unredirected (self))
     return TRUE;
 
-  cairo_region_t *opaque_region = meta_surface_actor_get_opaque_region (actor);
-
-  /* If we have no opaque region, then no pixels are opaque. */
-  if (!opaque_region)
-    return FALSE;
-
-  MetaWindow *window = priv->window;
-  cairo_rectangle_int_t client_area;
-  meta_window_get_client_area_rect (window, &client_area);
-
-  /* Otherwise, check if our opaque region covers our entire surface. */
-  if (cairo_region_contains_rectangle (opaque_region, &client_area) == CAIRO_REGION_OVERLAP_IN)
-    return TRUE;
-
-  return FALSE;
+  return meta_shaped_texture_is_opaque (stex);
 }
 
-static gboolean
-meta_surface_actor_x11_should_unredirect (MetaSurfaceActor *actor)
+gboolean
+meta_surface_actor_x11_should_unredirect (MetaSurfaceActorX11 *self)
 {
-  MetaSurfaceActorX11 *self = META_SURFACE_ACTOR_X11 (actor);
-  MetaSurfaceActorX11Private *priv = meta_surface_actor_x11_get_instance_private (self);
-
-  MetaWindow *window = priv->window;
-
-  if (meta_window_requested_dont_bypass_compositor (window))
+  if (!meta_surface_actor_x11_is_opaque (META_SURFACE_ACTOR (self)))
     return FALSE;
 
-  if (window->opacity != 0xFF)
+  if (!self->does_full_damage &&
+      !meta_window_is_override_redirect (self->window))
     return FALSE;
 
-  if (window->shape_region != NULL)
-    return FALSE;
-
-  if (!meta_window_is_monitor_sized (window))
-    return FALSE;
-
-  if (meta_window_requested_bypass_compositor (window))
-    return TRUE;
-
-  if (!meta_surface_actor_x11_is_opaque (actor))
-    return FALSE;
-
-  if (meta_window_is_override_redirect (window))
-    return TRUE;
-
-  if (priv->does_full_damage)
-    return TRUE;
-
-  return FALSE;
+  return TRUE;
 }
 
 static void
 sync_unredirected (MetaSurfaceActorX11 *self)
 {
-  MetaSurfaceActorX11Private *priv = meta_surface_actor_x11_get_instance_private (self);
-  MetaDisplay *display = priv->display;
+  MetaDisplay *display = self->display;
   Display *xdisplay = meta_x11_display_get_xdisplay (display->x11_display);
-  Window xwindow = meta_window_x11_get_toplevel_xwindow (priv->window);
+  Window xwindow = meta_window_x11_get_toplevel_xwindow (self->window);
 
   meta_x11_error_trap_push (display->x11_display);
 
-  if (priv->unredirected)
+  if (self->unredirected)
     {
-      detach_pixmap (self);
       XCompositeUnredirectWindow (xdisplay, xwindow, CompositeRedirectManual);
+      XSync (xdisplay, False);
+      detach_pixmap (self);
     }
   else
     {
       XCompositeRedirectWindow (xdisplay, xwindow, CompositeRedirectManual);
+      XSync (xdisplay, False);
+      clutter_actor_queue_redraw (CLUTTER_ACTOR (self));
     }
 
   meta_x11_error_trap_pop (display->x11_display);
 }
 
-static void
-meta_surface_actor_x11_set_unredirected (MetaSurfaceActor *actor,
-                                         gboolean          unredirected)
+void
+meta_surface_actor_x11_set_unredirected (MetaSurfaceActorX11 *self,
+                                         gboolean             unredirected)
 {
-  MetaSurfaceActorX11 *self = META_SURFACE_ACTOR_X11 (actor);
-  MetaSurfaceActorX11Private *priv = meta_surface_actor_x11_get_instance_private (self);
-
-  if (priv->unredirected == unredirected)
+  if (self->unredirected == unredirected)
     return;
 
-  priv->unredirected = unredirected;
+  self->unredirected = unredirected;
   sync_unredirected (self);
 }
 
-static gboolean
-meta_surface_actor_x11_is_unredirected (MetaSurfaceActor *actor)
+gboolean
+meta_surface_actor_x11_is_unredirected (MetaSurfaceActorX11 *self)
 {
-  MetaSurfaceActorX11 *self = META_SURFACE_ACTOR_X11 (actor);
-  MetaSurfaceActorX11Private *priv = meta_surface_actor_x11_get_instance_private (self);
+  return self->unredirected;
+}
 
-  return priv->unredirected;
+static void
+release_x11_resources (MetaSurfaceActorX11 *self)
+{
+  detach_pixmap (self);
+  free_damage (self);
 }
 
 static void
@@ -358,18 +317,9 @@ meta_surface_actor_x11_dispose (GObject *object)
 {
   MetaSurfaceActorX11 *self = META_SURFACE_ACTOR_X11 (object);
 
-  detach_pixmap (self);
-  free_damage (self);
+  release_x11_resources (self);
 
   G_OBJECT_CLASS (meta_surface_actor_x11_parent_class)->dispose (object);
-}
-
-static MetaWindow *
-meta_surface_actor_x11_get_window (MetaSurfaceActor *actor)
-{
-  MetaSurfaceActorX11Private *priv = meta_surface_actor_x11_get_instance_private (META_SURFACE_ACTOR_X11 (actor));
-
-  return priv->window;
 }
 
 static void
@@ -381,33 +331,23 @@ meta_surface_actor_x11_class_init (MetaSurfaceActorX11Class *klass)
   object_class->dispose = meta_surface_actor_x11_dispose;
 
   surface_actor_class->process_damage = meta_surface_actor_x11_process_damage;
-  surface_actor_class->pre_paint = meta_surface_actor_x11_pre_paint;
-  surface_actor_class->is_visible = meta_surface_actor_x11_is_visible;
-
-  surface_actor_class->should_unredirect = meta_surface_actor_x11_should_unredirect;
-  surface_actor_class->set_unredirected = meta_surface_actor_x11_set_unredirected;
-  surface_actor_class->is_unredirected = meta_surface_actor_x11_is_unredirected;
-
-  surface_actor_class->get_window = meta_surface_actor_x11_get_window;
+  surface_actor_class->is_opaque = meta_surface_actor_x11_is_opaque;
 }
 
 static void
 meta_surface_actor_x11_init (MetaSurfaceActorX11 *self)
 {
-  MetaSurfaceActorX11Private *priv = meta_surface_actor_x11_get_instance_private (self);
-
-  priv->last_width = -1;
-  priv->last_height = -1;
+  self->last_width = -1;
+  self->last_height = -1;
 }
 
 static void
 create_damage (MetaSurfaceActorX11 *self)
 {
-  MetaSurfaceActorX11Private *priv = meta_surface_actor_x11_get_instance_private (self);
-  Display *xdisplay = meta_x11_display_get_xdisplay (priv->display->x11_display);
-  Window xwindow = meta_window_x11_get_toplevel_xwindow (priv->window);
+  Display *xdisplay = meta_x11_display_get_xdisplay (self->display->x11_display);
+  Window xwindow = meta_window_x11_get_toplevel_xwindow (self->window);
 
-  priv->damage = XDamageCreate (xdisplay, xwindow, XDamageReportBoundingBox);
+  self->damage = XDamageCreate (xdisplay, xwindow, XDamageReportBoundingBox);
 }
 
 static void
@@ -417,47 +357,48 @@ window_decorated_notify (MetaWindow *window,
 {
   MetaSurfaceActorX11 *self = META_SURFACE_ACTOR_X11 (user_data);
 
-  detach_pixmap (self);
-  free_damage (self);
+  release_x11_resources (self);
   create_damage (self);
 }
 
 static void
 reset_texture (MetaSurfaceActorX11 *self)
 {
-  MetaSurfaceActorX11Private *priv = meta_surface_actor_x11_get_instance_private (self);
   MetaShapedTexture *stex = meta_surface_actor_get_texture (META_SURFACE_ACTOR (self));
 
-  if (!priv->texture)
+  if (!self->texture)
     return;
 
   /* Setting the texture to NULL will cause all the FBO's cached by the
    * shaped texture's MetaTextureTower to be discarded and recreated.
    */
   meta_shaped_texture_set_texture (stex, NULL);
-  meta_shaped_texture_set_texture (stex, priv->texture);
+  meta_shaped_texture_set_texture (stex, self->texture);
 }
 
 MetaSurfaceActor *
 meta_surface_actor_x11_new (MetaWindow *window)
 {
   MetaSurfaceActorX11 *self = g_object_new (META_TYPE_SURFACE_ACTOR_X11, NULL);
-  MetaSurfaceActorX11Private *priv = meta_surface_actor_x11_get_instance_private (self);
   MetaDisplay *display = meta_window_get_display (window);
 
   g_assert (!meta_is_wayland_compositor ());
 
-  priv->window = window;
-  priv->display = display;
+  self->window = window;
+  self->display = display;
 
-  g_signal_connect_object (priv->display, "gl-video-memory-purged",
+  g_signal_connect_object (self->display, "gl-video-memory-purged",
                            G_CALLBACK (reset_texture), self, G_CONNECT_SWAPPED);
 
   create_damage (self);
-  g_signal_connect_object (priv->window, "notify::decorated",
+  g_signal_connect_object (self->window, "notify::decorated",
                            G_CALLBACK (window_decorated_notify), self, 0);
 
-  priv->unredirected = FALSE;
+  g_signal_connect_object (meta_window_actor_from_window (window), "destroy",
+                           G_CALLBACK (release_x11_resources), self,
+                           G_CONNECT_SWAPPED);
+
+  self->unredirected = FALSE;
   sync_unredirected (self);
 
   clutter_actor_set_reactive (CLUTTER_ACTOR (self), TRUE);
@@ -468,15 +409,14 @@ void
 meta_surface_actor_x11_set_size (MetaSurfaceActorX11 *self,
                                  int width, int height)
 {
-  MetaSurfaceActorX11Private *priv = meta_surface_actor_x11_get_instance_private (self);
   MetaShapedTexture *stex = meta_surface_actor_get_texture (META_SURFACE_ACTOR (self));
 
-  if (priv->last_width == width &&
-      priv->last_height == height)
+  if (self->last_width == width &&
+      self->last_height == height)
     return;
 
-  priv->size_changed = TRUE;
-  priv->last_width = width;
-  priv->last_height = height;
+  self->size_changed = TRUE;
+  self->last_width = width;
+  self->last_height = height;
   meta_shaped_texture_set_fallback_size (stex, width, height);
 }

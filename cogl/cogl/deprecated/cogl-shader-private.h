@@ -38,35 +38,13 @@
 
 typedef struct _CoglShader CoglShader;
 
-typedef enum
-{
-  COGL_SHADER_LANGUAGE_GLSL,
-  COGL_SHADER_LANGUAGE_ARBFP
-} CoglShaderLanguage;
-
 struct _CoglShader
 {
   CoglHandleObject _parent;
   GLuint gl_handle;
   CoglPipeline *compilation_pipeline;
   CoglShaderType type;
-  CoglShaderLanguage language;
   char *source;
 };
-
-void
-_cogl_shader_compile_real (CoglHandle handle,
-                           CoglPipeline *pipeline);
-
-CoglShaderLanguage
-_cogl_program_get_language (CoglHandle handle);
-
-void
-_cogl_shader_set_source_with_boilerplate (GLuint shader_gl_handle,
-                                          GLenum shader_gl_type,
-                                          int n_tex_coord_attribs,
-                                          GLsizei count_in,
-                                          const char **strings_in,
-                                          const GLint *lengths_in);
 
 #endif /* __COGL_SHADER_H */

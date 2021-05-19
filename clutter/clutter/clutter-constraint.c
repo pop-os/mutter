@@ -48,7 +48,7 @@
  * Constraints provide a way to build user interfaces by using
  * relations between #ClutterActors, without explicit fixed
  * positioning and sizing, similarly to how fluid layout managers like
- * #ClutterBoxLayout and #ClutterTableLayout lay out their children.
+ * #ClutterBoxLayout lay out their children.
  *
  * Constraints are attached to a #ClutterActor, and are available
  * for inspection using clutter_actor_get_constraints().
@@ -128,9 +128,7 @@
  * can be recovered at any point using clutter_actor_meta_get_actor().
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #include <string.h>
 
@@ -162,28 +160,26 @@ constraint_update_preferred_size (ClutterConstraint  *constraint,
 }
 
 static void
-clutter_constraint_notify (GObject    *gobject,
-                           GParamSpec *pspec)
+clutter_constraint_set_enabled (ClutterActorMeta *meta,
+                                gboolean          is_enabled)
 {
-  if (strcmp (pspec->name, "enabled") == 0)
-    {
-      ClutterActorMeta *meta = CLUTTER_ACTOR_META (gobject);
-      ClutterActor *actor = clutter_actor_meta_get_actor (meta);
+  ClutterActorMetaClass *parent_class =
+    CLUTTER_ACTOR_META_CLASS (clutter_constraint_parent_class);
+  ClutterActor *actor;
 
-      if (actor != NULL)
-        clutter_actor_queue_relayout (actor);
-    }
+  actor = clutter_actor_meta_get_actor (meta);
+  if (actor)
+    clutter_actor_queue_relayout (actor);
 
-  if (G_OBJECT_CLASS (clutter_constraint_parent_class)->notify != NULL)
-    G_OBJECT_CLASS (clutter_constraint_parent_class)->notify (gobject, pspec);
+  parent_class->set_enabled (meta, is_enabled);
 }
 
 static void
 clutter_constraint_class_init (ClutterConstraintClass *klass)
 {
-  GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
+  ClutterActorMetaClass *actor_meta_class = CLUTTER_ACTOR_META_CLASS (klass);
 
-  gobject_class->notify = clutter_constraint_notify;
+  actor_meta_class->set_enabled = clutter_constraint_set_enabled;
 
   klass->update_allocation = constraint_update_allocation;
   klass->update_preferred_size = constraint_update_preferred_size;
@@ -224,6 +220,17 @@ clutter_constraint_update_allocation (ClutterConstraint *constraint,
   return !clutter_actor_box_equal (allocation, &old_alloc);
 }
 
+/**
+ * clutter_constraint_update_preferred_size:
+ * @constraint: a #ClutterConstraint
+ * @actor: a #ClutterActor
+ * @direction: a #ClutterOrientation
+ * @for_size: the size in the opposite direction
+ * @minimum_size: (inout): the minimum size to modify
+ * @natural_size: (inout): the natural size to modify
+ *
+ * Asks the @constraint to update the size request of a #ClutterActor.
+ */
 void
 clutter_constraint_update_preferred_size (ClutterConstraint  *constraint,
                                           ClutterActor       *actor,

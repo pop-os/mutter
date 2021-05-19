@@ -33,28 +33,11 @@
 
 G_BEGIN_DECLS
 
-#define CLUTTER_TYPE_ACTION             (clutter_action_get_type ())
-#define CLUTTER_ACTION(obj)             (G_TYPE_CHECK_INSTANCE_CAST ((obj), CLUTTER_TYPE_ACTION, ClutterAction))
-#define CLUTTER_IS_ACTION(obj)          (G_TYPE_CHECK_INSTANCE_TYPE ((obj), CLUTTER_TYPE_ACTION))
-#define CLUTTER_ACTION_CLASS(klass)     (G_TYPE_CHECK_CLASS_CAST ((klass), CLUTTER_TYPE_ACTION, ClutterActionClass))
-#define CLUTTER_IS_ACTION_CLASS(klass)  (G_TYPE_CHECK_CLASS_TYPE ((klass), CLUTTER_TYPE_ACTION))
-#define CLUTTER_ACTION_GET_CLASS(obj)   (G_TYPE_INSTANCE_GET_CLASS ((obj), CLUTTER_TYPE_ACTION, ClutterActionClass))
+#define CLUTTER_TYPE_ACTION (clutter_action_get_type ())
 
-typedef struct _ClutterActionClass      ClutterActionClass;
-
-/**
- * ClutterAction:
- *
- * The #ClutterAction structure contains only private data and
- * should be accessed using the provided API.
- *
- * Since: 1.4
- */
-struct _ClutterAction
-{
-  /*< private >*/
-  ClutterActorMeta parent_instance;
-};
+CLUTTER_EXPORT
+G_DECLARE_DERIVABLE_TYPE (ClutterAction, clutter_action,
+                          CLUTTER, ACTION, ClutterActorMeta);
 
 /**
  * ClutterActionClass:
@@ -78,32 +61,29 @@ struct _ClutterActionClass
   void (* _clutter_action8) (void);
 };
 
-CLUTTER_AVAILABLE_IN_1_4
-GType clutter_action_get_type (void) G_GNUC_CONST;
-
 /* ClutterActor API */
-CLUTTER_AVAILABLE_IN_1_4
+CLUTTER_EXPORT
 void           clutter_actor_add_action            (ClutterActor  *self,
                                                     ClutterAction *action);
-CLUTTER_AVAILABLE_IN_1_4
+CLUTTER_EXPORT
 void           clutter_actor_add_action_with_name  (ClutterActor  *self,
                                                     const gchar   *name,
                                                     ClutterAction *action);
-CLUTTER_AVAILABLE_IN_1_4
+CLUTTER_EXPORT
 void           clutter_actor_remove_action         (ClutterActor  *self,
                                                     ClutterAction *action);
-CLUTTER_AVAILABLE_IN_1_4
+CLUTTER_EXPORT
 void           clutter_actor_remove_action_by_name (ClutterActor  *self,
                                                     const gchar   *name);
-CLUTTER_AVAILABLE_IN_1_4
+CLUTTER_EXPORT
 ClutterAction *clutter_actor_get_action            (ClutterActor  *self,
                                                     const gchar   *name);
-CLUTTER_AVAILABLE_IN_1_4
+CLUTTER_EXPORT
 GList *        clutter_actor_get_actions           (ClutterActor  *self);
-CLUTTER_AVAILABLE_IN_1_4
+CLUTTER_EXPORT
 void           clutter_actor_clear_actions         (ClutterActor  *self);
 
-CLUTTER_AVAILABLE_IN_1_10
+CLUTTER_EXPORT
 gboolean       clutter_actor_has_actions           (ClutterActor  *self);
 
 G_END_DECLS

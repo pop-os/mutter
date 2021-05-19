@@ -28,22 +28,21 @@
  *
  */
 
-#ifdef HAVE_CONFIG_H
 #include "cogl-config.h"
-#endif
 
 #include <string.h>
 
 #include "cogl-context-private.h"
-#include "cogl-util-gl-private.h"
 #include "cogl-feature-private.h"
 #include "cogl-renderer-private.h"
 #include "cogl-private.h"
-#include "cogl-framebuffer-gl-private.h"
-#include "cogl-texture-2d-gl-private.h"
-#include "cogl-attribute-gl-private.h"
-#include "cogl-clip-stack-gl-private.h"
-#include "cogl-buffer-gl-private.h"
+#include "driver/gl/cogl-util-gl-private.h"
+#include "driver/gl/cogl-framebuffer-gl-private.h"
+#include "driver/gl/cogl-texture-2d-gl-private.h"
+#include "driver/gl/cogl-attribute-gl-private.h"
+#include "driver/gl/cogl-clip-stack-gl-private.h"
+#include "driver/gl/cogl-buffer-gl-private.h"
+#include "driver/gl/cogl-pipeline-opengl-private.h"
 
 #ifndef GL_UNSIGNED_INT_24_8
 #define GL_UNSIGNED_INT_24_8 0x84FA
@@ -57,8 +56,14 @@
 #ifndef GL_RG8
 #define GL_RG8 0x822B
 #endif
+#ifndef GL_UNSIGNED_INT_2_10_10_10_REV_EXT
+#define GL_UNSIGNED_INT_2_10_10_10_REV_EXT 0x8368
+#endif
+#ifndef GL_HALF_FLOAT_OES
+#define GL_HALF_FLOAT_OES 0x8D61
+#endif
 
-static CoglBool
+static gboolean
 _cogl_driver_pixel_format_from_gl_internal (CoglContext *context,
                                             GLenum gl_int_format,
                                             CoglPixelFormat *out_format)
@@ -67,12 +72,11 @@ _cogl_driver_pixel_format_from_gl_internal (CoglContext *context,
 }
 
 static CoglPixelFormat
-_cogl_driver_pixel_format_to_gl_with_target (CoglContext *context,
-                                             CoglPixelFormat format,
-                                             CoglPixelFormat target_format,
-                                             GLenum *out_glintformat,
-                                             GLenum *out_glformat,
-                                             GLenum *out_gltype)
+_cogl_driver_pixel_format_to_gl (CoglContext     *context,
+                                 CoglPixelFormat  format,
+                                 GLenum          *out_glintformat,
+                                 GLenum          *out_glformat,
+                                 GLenum          *out_gltype)
 {
   CoglPixelFormat required_format;
   GLenum glintformat;
@@ -140,21 +144,44 @@ _cogl_driver_pixel_format_to_gl_with_target (CoglContext *context,
       required_format = COGL_PIXEL_FORMAT_RGB_888;
       break;
 
-      /* Just one 32-bit ordering supported */
-    case COGL_PIXEL_FORMAT_RGBA_8888:
-    case COGL_PIXEL_FORMAT_RGBA_8888_PRE:
-    case COGL_PIXEL_FORMAT_ARGB_8888:
-    case COGL_PIXEL_FORMAT_ARGB_8888_PRE:
-    case COGL_PIXEL_FORMAT_ABGR_8888:
-    case COGL_PIXEL_FORMAT_ABGR_8888_PRE:
     case COGL_PIXEL_FORMAT_RGBA_1010102:
     case COGL_PIXEL_FORMAT_RGBA_1010102_PRE:
+#if G_BYTE_ORDER == G_LITTLE_ENDIAN
+      if (_cogl_has_private_feature
+          (context,  COGL_PRIVATE_FEATURE_TEXTURE_FORMAT_RGBA1010102))
+        {
+          glintformat = GL_RGBA;
+          glformat = GL_RGBA;
+          gltype = GL_UNSIGNED_INT_2_10_10_10_REV_EXT;
+          break;
+        }
+#endif
     case COGL_PIXEL_FORMAT_BGRA_1010102:
     case COGL_PIXEL_FORMAT_BGRA_1010102_PRE:
     case COGL_PIXEL_FORMAT_ABGR_2101010:
     case COGL_PIXEL_FORMAT_ABGR_2101010_PRE:
     case COGL_PIXEL_FORMAT_ARGB_2101010:
     case COGL_PIXEL_FORMAT_ARGB_2101010_PRE:
+#if G_BYTE_ORDER == G_LITTLE_ENDIAN
+      if (_cogl_has_private_feature
+          (context,  COGL_PRIVATE_FEATURE_TEXTURE_FORMAT_RGBA1010102))
+        {
+          glintformat = GL_RGBA;
+          glformat = GL_RGBA;
+          gltype = GL_UNSIGNED_INT_2_10_10_10_REV_EXT;
+          required_format = COGL_PIXEL_FORMAT_RGBA_1010102;
+          required_format |= (format & COGL_PREMULT_BIT);
+          break;
+        }
+#endif
+
+      G_GNUC_FALLTHROUGH;
+    case COGL_PIXEL_FORMAT_RGBA_8888:
+    case COGL_PIXEL_FORMAT_RGBA_8888_PRE:
+    case COGL_PIXEL_FORMAT_ARGB_8888:
+    case COGL_PIXEL_FORMAT_ARGB_8888_PRE:
+    case COGL_PIXEL_FORMAT_ABGR_8888:
+    case COGL_PIXEL_FORMAT_ABGR_8888_PRE:
       glintformat = GL_RGBA;
       glformat = GL_RGBA;
       gltype = GL_UNSIGNED_BYTE;
@@ -181,6 +208,26 @@ _cogl_driver_pixel_format_to_gl_with_target (CoglContext *context,
       glintformat = GL_RGBA;
       glformat = GL_RGBA;
       gltype = GL_UNSIGNED_SHORT_5_5_5_1;
+      break;
+
+    case COGL_PIXEL_FORMAT_BGRA_FP_16161616:
+    case COGL_PIXEL_FORMAT_ARGB_FP_16161616:
+    case COGL_PIXEL_FORMAT_ABGR_FP_16161616:
+    case COGL_PIXEL_FORMAT_BGRA_FP_16161616_PRE:
+    case COGL_PIXEL_FORMAT_ARGB_FP_16161616_PRE:
+    case COGL_PIXEL_FORMAT_ABGR_FP_16161616_PRE:
+      g_warning ("Unhandled 16 bpc pixel format used");
+
+      G_GNUC_FALLTHROUGH;
+    case COGL_PIXEL_FORMAT_RGBA_FP_16161616:
+    case COGL_PIXEL_FORMAT_RGBA_FP_16161616_PRE:
+      if (!_cogl_has_private_feature
+          (context, COGL_PRIVATE_FEATURE_TEXTURE_FORMAT_HALF_FLOAT))
+        g_warning ("Missing 16 bpc half float extension");
+
+      glintformat = GL_RGBA;
+      glformat = GL_RGBA;
+      gltype = GL_HALF_FLOAT_OES;
       break;
 
     case COGL_PIXEL_FORMAT_DEPTH_16:
@@ -220,21 +267,7 @@ _cogl_driver_pixel_format_to_gl_with_target (CoglContext *context,
   return required_format;
 }
 
-static CoglPixelFormat
-_cogl_driver_pixel_format_to_gl (CoglContext *context,
-                                 CoglPixelFormat  format,
-                                 GLenum *out_glintformat,
-                                 GLenum *out_glformat,
-                                 GLenum *out_gltype)
-{
-  return _cogl_driver_pixel_format_to_gl_with_target (context,
-                                                      format, format,
-                                                      out_glintformat,
-                                                      out_glformat,
-                                                      out_gltype);
-}
-
-static CoglBool
+static gboolean
 _cogl_get_gl_version (CoglContext *ctx,
                       int *major_out,
                       int *minor_out)
@@ -253,13 +286,12 @@ _cogl_get_gl_version (CoglContext *ctx,
                                          minor_out);
 }
 
-static CoglBool
+static gboolean
 _cogl_driver_update_features (CoglContext *context,
-                              CoglError **error)
+                              GError **error)
 {
   unsigned long private_features
     [COGL_FLAGS_N_LONGS_FOR_SIZE (COGL_N_PRIVATE_FEATURES)] = { 0 };
-  CoglFeatureFlags flags = 0;
   char **gl_extensions;
   int gl_major, gl_minor;
   int i;
@@ -270,6 +302,10 @@ _cogl_driver_update_features (CoglContext *context,
   context->glGetString =
     (void *) _cogl_renderer_get_proc_address (context->display->renderer,
                                               "glGetString",
+                                              TRUE);
+  context->glGetStringi =
+    (void *) _cogl_renderer_get_proc_address (context->display->renderer,
+                                              "glGetStringi",
                                               TRUE);
 
   gl_extensions = _cogl_context_get_gl_extensions (context);
@@ -296,12 +332,19 @@ _cogl_driver_update_features (CoglContext *context,
   context->glsl_minor = 0;
   context->glsl_version_to_use = 100;
 
-  _cogl_gpu_info_init (context, &context->gpu);
-
   if (!_cogl_get_gl_version (context, &gl_major, &gl_minor))
     {
       gl_major = 1;
       gl_minor = 1;
+    }
+
+  if (!COGL_CHECK_GL_VERSION (gl_major, gl_minor, 2, 0))
+    {
+      g_set_error (error,
+                       COGL_DRIVER_ERROR,
+                       COGL_DRIVER_ERROR_INVALID_VERSION,
+                       "OpenGL ES 2.0 or better is required");
+      return FALSE;
     }
 
   _cogl_feature_check_ext_functions (context,
@@ -309,112 +352,33 @@ _cogl_driver_update_features (CoglContext *context,
                                      gl_minor,
                                      gl_extensions);
 
-#ifdef HAVE_COGL_GLES
-  if (context->driver == COGL_DRIVER_GLES1)
-    {
-      int max_clip_planes;
-      GE( context, glGetIntegerv (GL_MAX_CLIP_PLANES, &max_clip_planes) );
-      if (max_clip_planes >= 4)
-        COGL_FLAGS_SET (private_features,
-                        COGL_PRIVATE_FEATURE_FOUR_CLIP_PLANES, TRUE);
-    }
-#endif
+  if (_cogl_check_extension ("GL_ANGLE_pack_reverse_row_order", gl_extensions))
+    COGL_FLAGS_SET (private_features,
+                    COGL_PRIVATE_FEATURE_MESA_PACK_INVERT, TRUE);
 
-  if (context->driver == COGL_DRIVER_GLES2)
-    {
-      flags |= COGL_FEATURE_SHADERS_GLSL | COGL_FEATURE_OFFSCREEN;
-      /* Note GLES 2 core doesn't support mipmaps for npot textures or
-       * repeat modes other than CLAMP_TO_EDGE. */
-      flags |= COGL_FEATURE_TEXTURE_NPOT_BASIC;
-      flags |= COGL_FEATURE_DEPTH_RANGE;
-      COGL_FLAGS_SET (context->features, COGL_FEATURE_ID_GLSL, TRUE);
-      COGL_FLAGS_SET (context->features, COGL_FEATURE_ID_OFFSCREEN, TRUE);
-      COGL_FLAGS_SET (context->features,
-                      COGL_FEATURE_ID_TEXTURE_NPOT_BASIC, TRUE);
-      COGL_FLAGS_SET (context->features, COGL_FEATURE_ID_DEPTH_RANGE, TRUE);
-      COGL_FLAGS_SET (context->features,
-                      COGL_FEATURE_ID_MIRRORED_REPEAT, TRUE);
-      COGL_FLAGS_SET (context->features,
-                      COGL_FEATURE_ID_PER_VERTEX_POINT_SIZE, TRUE);
+  /* Note GLES 2 core doesn't support mipmaps for npot textures or
+   * repeat modes other than CLAMP_TO_EDGE. */
 
-      COGL_FLAGS_SET (private_features,
-                      COGL_PRIVATE_FEATURE_BLEND_CONSTANT, TRUE);
-    }
-  else if (context->driver == COGL_DRIVER_GLES1)
-    {
-      COGL_FLAGS_SET (private_features, COGL_PRIVATE_FEATURE_GL_FIXED, TRUE);
-      COGL_FLAGS_SET (private_features, COGL_PRIVATE_FEATURE_ALPHA_TEST, TRUE);
-      COGL_FLAGS_SET (private_features,
-                      COGL_PRIVATE_FEATURE_BUILTIN_POINT_SIZE_UNIFORM, TRUE);
-    }
-
-  COGL_FLAGS_SET (private_features, COGL_PRIVATE_FEATURE_VBOS, TRUE);
   COGL_FLAGS_SET (private_features, COGL_PRIVATE_FEATURE_ANY_GL, TRUE);
   COGL_FLAGS_SET (private_features, COGL_PRIVATE_FEATURE_ALPHA_TEXTURES, TRUE);
 
-  /* Both GLES 1.1 and GLES 2.0 support point sprites in core */
-  flags |= COGL_FEATURE_POINT_SPRITE;
-  COGL_FLAGS_SET (context->features, COGL_FEATURE_ID_POINT_SPRITE, TRUE);
-
-  if (context->glGenRenderbuffers)
-    {
-      flags |= COGL_FEATURE_OFFSCREEN;
-      COGL_FLAGS_SET (context->features, COGL_FEATURE_ID_OFFSCREEN, TRUE);
-    }
+  if (context->glGenSamplers)
+    COGL_FLAGS_SET (private_features, COGL_PRIVATE_FEATURE_SAMPLER_OBJECTS, TRUE);
 
   if (context->glBlitFramebuffer)
-    COGL_FLAGS_SET (private_features,
-                    COGL_PRIVATE_FEATURE_OFFSCREEN_BLIT, TRUE);
+    COGL_FLAGS_SET (context->features,
+                    COGL_FEATURE_ID_BLIT_FRAMEBUFFER, TRUE);
 
   if (_cogl_check_extension ("GL_OES_element_index_uint", gl_extensions))
     {
-      flags |= COGL_FEATURE_UNSIGNED_INT_INDICES;
       COGL_FLAGS_SET (context->features,
                       COGL_FEATURE_ID_UNSIGNED_INT_INDICES, TRUE);
-    }
-
-  if (_cogl_check_extension ("GL_OES_depth_texture", gl_extensions))
-    {
-      flags |= COGL_FEATURE_DEPTH_TEXTURE;
-      COGL_FLAGS_SET (context->features, COGL_FEATURE_ID_DEPTH_TEXTURE, TRUE);
-    }
-
-  if (_cogl_check_extension ("GL_OES_texture_npot", gl_extensions))
-    {
-      flags |= (COGL_FEATURE_TEXTURE_NPOT |
-                COGL_FEATURE_TEXTURE_NPOT_BASIC |
-                COGL_FEATURE_TEXTURE_NPOT_MIPMAP |
-                COGL_FEATURE_TEXTURE_NPOT_REPEAT);
-      COGL_FLAGS_SET (context->features,
-                      COGL_FEATURE_ID_TEXTURE_NPOT, TRUE);
-      COGL_FLAGS_SET (context->features,
-                      COGL_FEATURE_ID_TEXTURE_NPOT_BASIC, TRUE);
-      COGL_FLAGS_SET (context->features,
-                      COGL_FEATURE_ID_TEXTURE_NPOT_MIPMAP, TRUE);
-      COGL_FLAGS_SET (context->features,
-                      COGL_FEATURE_ID_TEXTURE_NPOT_REPEAT, TRUE);
-    }
-  else if (_cogl_check_extension ("GL_IMG_texture_npot", gl_extensions))
-    {
-      flags |= (COGL_FEATURE_TEXTURE_NPOT_BASIC |
-                COGL_FEATURE_TEXTURE_NPOT_MIPMAP);
-      COGL_FLAGS_SET (context->features,
-                      COGL_FEATURE_ID_TEXTURE_NPOT_BASIC, TRUE);
-      COGL_FLAGS_SET (context->features,
-                      COGL_FEATURE_ID_TEXTURE_NPOT_MIPMAP, TRUE);
-    }
-
-  if (context->glTexImage3D)
-    {
-      flags |= COGL_FEATURE_TEXTURE_3D;
-      COGL_FLAGS_SET (context->features, COGL_FEATURE_ID_TEXTURE_3D, TRUE);
     }
 
   if (context->glMapBuffer)
     {
       /* The GL_OES_mapbuffer extension doesn't support mapping for
          read */
-      flags |= COGL_FEATURE_MAP_BUFFER_FOR_WRITE;
       COGL_FLAGS_SET (context->features,
                       COGL_FEATURE_ID_MAP_BUFFER_FOR_WRITE, TRUE);
     }
@@ -422,8 +386,6 @@ _cogl_driver_update_features (CoglContext *context,
   if (context->glMapBufferRange)
     {
       /* MapBufferRange in ES3+ does support mapping for read */
-      flags |= (COGL_FEATURE_MAP_BUFFER_FOR_WRITE |
-                COGL_FEATURE_MAP_BUFFER_FOR_READ);
       COGL_FLAGS_SET(context->features,
                      COGL_FEATURE_ID_MAP_BUFFER_FOR_WRITE, TRUE);
       COGL_FLAGS_SET(context->features,
@@ -442,6 +404,14 @@ _cogl_driver_update_features (CoglContext *context,
     COGL_FLAGS_SET (private_features,
                     COGL_PRIVATE_FEATURE_TEXTURE_FORMAT_BGRA8888, TRUE);
 
+  if (_cogl_check_extension ("GL_EXT_texture_type_2_10_10_10_REV", gl_extensions))
+    COGL_FLAGS_SET (private_features,
+                    COGL_PRIVATE_FEATURE_TEXTURE_FORMAT_RGBA1010102, TRUE);
+
+  if (_cogl_check_extension ("GL_OES_texture_half_float", gl_extensions))
+    COGL_FLAGS_SET (private_features,
+                    COGL_PRIVATE_FEATURE_TEXTURE_FORMAT_HALF_FLOAT, TRUE);
+
   if (_cogl_check_extension ("GL_EXT_unpack_subimage", gl_extensions))
     COGL_FLAGS_SET (private_features,
                     COGL_PRIVATE_FEATURE_UNPACK_SUBIMAGE, TRUE);
@@ -452,6 +422,11 @@ _cogl_driver_update_features (CoglContext *context,
       _cogl_check_extension ("GL_OES_egl_sync", gl_extensions))
     COGL_FLAGS_SET (private_features, COGL_PRIVATE_FEATURE_OES_EGL_SYNC, TRUE);
 
+#ifdef GL_ARB_sync
+  if (context->glFenceSync)
+    COGL_FLAGS_SET (context->features, COGL_FEATURE_ID_FENCE, TRUE);
+#endif
+
   if (_cogl_check_extension ("GL_EXT_texture_rg", gl_extensions))
     COGL_FLAGS_SET (context->features,
                     COGL_FEATURE_ID_TEXTURE_RG,
@@ -460,19 +435,27 @@ _cogl_driver_update_features (CoglContext *context,
   /* Cache features */
   for (i = 0; i < G_N_ELEMENTS (private_features); i++)
     context->private_features[i] |= private_features[i];
-  context->feature_flags |= flags;
 
   g_strfreev (gl_extensions);
 
   return TRUE;
 }
 
+static gboolean
+_cogl_driver_texture_2d_is_get_data_supported (CoglTexture2D *tex_2d)
+{
+  return FALSE;
+}
+
 const CoglDriverVtable
 _cogl_driver_gles =
   {
+    _cogl_driver_gl_context_init,
+    _cogl_driver_gl_context_deinit,
+    _cogl_driver_gl_is_hardware_accelerated,
+    _cogl_gl_get_graphics_reset_status,
     _cogl_driver_pixel_format_from_gl_internal,
     _cogl_driver_pixel_format_to_gl,
-    _cogl_driver_pixel_format_to_gl_with_target,
     _cogl_driver_update_features,
     _cogl_offscreen_gl_allocate,
     _cogl_offscreen_gl_free,
@@ -480,6 +463,7 @@ _cogl_driver_gles =
     _cogl_framebuffer_gl_clear,
     _cogl_framebuffer_gl_query_bits,
     _cogl_framebuffer_gl_finish,
+    _cogl_framebuffer_gl_flush,
     _cogl_framebuffer_gl_discard_buffers,
     _cogl_framebuffer_gl_draw_attributes,
     _cogl_framebuffer_gl_draw_indexed_attributes,
@@ -492,6 +476,7 @@ _cogl_driver_gles =
     _cogl_texture_2d_gl_get_gl_handle,
     _cogl_texture_2d_gl_generate_mipmap,
     _cogl_texture_2d_gl_copy_from_bitmap,
+    _cogl_driver_texture_2d_is_get_data_supported,
     NULL, /* texture_2d_get_data */
     _cogl_gl_flush_attributes_state,
     _cogl_clip_stack_gl_flush,
@@ -500,4 +485,7 @@ _cogl_driver_gles =
     _cogl_buffer_gl_map_range,
     _cogl_buffer_gl_unmap,
     _cogl_buffer_gl_set_data,
+    _cogl_sampler_gl_init,
+    _cogl_sampler_gl_free,
+    _cogl_gl_set_uniform,
   };

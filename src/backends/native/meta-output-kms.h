@@ -2,6 +2,7 @@
 
 /*
  * Copyright (C) 2017 Red Hat
+ * Copyright (C) 2018 DisplayLink (UK) Ltd.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -24,20 +25,31 @@
 
 #include "backends/meta-output.h"
 #include "backends/native/meta-gpu-kms.h"
+#include "backends/native/meta-kms-types.h"
 
-void meta_output_kms_set_underscan (MetaOutput *output);
+#define META_TYPE_OUTPUT_KMS (meta_output_kms_get_type ())
+G_DECLARE_FINAL_TYPE (MetaOutputKms, meta_output_kms,
+                      META, OUTPUT_KMS,
+                      MetaOutput)
 
-void meta_output_kms_set_power_save_mode (MetaOutput *output,
-                                          uint64_t    state);
+void meta_output_kms_set_power_save_mode (MetaOutputKms *output_kms,
+                                          uint64_t       dpms_state,
+                                          MetaKmsUpdate *kms_update);
 
-gboolean meta_output_kms_can_clone (MetaOutput *output,
-                                    MetaOutput *other_output);
+void meta_output_kms_set_underscan (MetaOutputKms *output_kms,
+                                    MetaKmsUpdate *kms_update);
 
-GBytes * meta_output_kms_read_edid (MetaOutput *output);
+gboolean meta_output_kms_can_clone (MetaOutputKms *output_kms,
+                                    MetaOutputKms *other_output_kms);
 
-MetaOutput * meta_create_kms_output (MetaGpuKms        *gpu_kms,
-                                     drmModeConnector  *connector,
-                                     MetaKmsResources  *resources,
+MetaKmsConnector * meta_output_kms_get_kms_connector (MetaOutputKms *output_kms);
+
+uint32_t meta_output_kms_get_connector_id (MetaOutputKms *output_kms);
+
+GBytes * meta_output_kms_read_edid (MetaOutputKms *output_kms);
+
+MetaOutputKms * meta_output_kms_new (MetaGpuKms        *gpu_kms,
+                                     MetaKmsConnector  *kms_connector,
                                      MetaOutput        *old_output,
                                      GError           **error);
 

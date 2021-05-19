@@ -28,9 +28,7 @@
  *
  */
 
-#ifdef HAVE_CONFIG_H
 #include "cogl-config.h"
-#endif
 
 #include "cogl-frame-info-private.h"
 #include "cogl-gtype-private.h"
@@ -41,11 +39,12 @@ COGL_OBJECT_DEFINE (FrameInfo, frame_info);
 COGL_GTYPE_DEFINE_CLASS (FrameInfo, frame_info);
 
 CoglFrameInfo *
-_cogl_frame_info_new (void)
+cogl_frame_info_new (int64_t global_frame_counter)
 {
   CoglFrameInfo *info;
 
   info = g_slice_new0 (CoglFrameInfo);
+  info->global_frame_counter = global_frame_counter;
 
   return _cogl_frame_info_object_new (info);
 }
@@ -72,12 +71,6 @@ float
 cogl_frame_info_get_refresh_rate (CoglFrameInfo *info)
 {
   return info->refresh_rate;
-}
-
-CoglOutput *
-cogl_frame_info_get_output (CoglFrameInfo *info)
-{
-  return info->output;
 }
 
 int64_t

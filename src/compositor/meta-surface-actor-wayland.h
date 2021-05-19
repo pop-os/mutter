@@ -27,36 +27,18 @@
 
 #include <glib-object.h>
 
-#include "meta-surface-actor.h"
-
-#include "wayland/meta-wayland.h"
-#include "wayland/meta-wayland-private.h"
-
 #include "backends/meta-monitor-manager-private.h"
+#include "compositor/meta-surface-actor.h"
+#include "wayland/meta-wayland-private.h"
+#include "wayland/meta-wayland.h"
 
 G_BEGIN_DECLS
 
-#define META_TYPE_SURFACE_ACTOR_WAYLAND            (meta_surface_actor_wayland_get_type ())
-#define META_SURFACE_ACTOR_WAYLAND(obj)            (G_TYPE_CHECK_INSTANCE_CAST ((obj), META_TYPE_SURFACE_ACTOR_WAYLAND, MetaSurfaceActorWayland))
-#define META_SURFACE_ACTOR_WAYLAND_CLASS(klass)    (G_TYPE_CHECK_CLASS_CAST ((klass),  META_TYPE_SURFACE_ACTOR_WAYLAND, MetaSurfaceActorWaylandClass))
-#define META_IS_SURFACE_ACTOR_WAYLAND(obj)         (G_TYPE_CHECK_INSTANCE_TYPE ((obj), META_TYPE_SURFACE_ACTOR_WAYLAND))
-#define META_IS_SURFACE_ACTOR_WAYLAND_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE ((klass),  META_TYPE_SURFACE_ACTOR_WAYLAND))
-#define META_SURFACE_ACTOR_WAYLAND_GET_CLASS(obj)  (G_TYPE_INSTANCE_GET_CLASS ((obj),  META_TYPE_SURFACE_ACTOR_WAYLAND, MetaSurfaceActorWaylandClass))
-
-typedef struct _MetaSurfaceActorWayland      MetaSurfaceActorWayland;
-typedef struct _MetaSurfaceActorWaylandClass MetaSurfaceActorWaylandClass;
-
-struct _MetaSurfaceActorWayland
-{
-  MetaSurfaceActor parent;
-};
-
-struct _MetaSurfaceActorWaylandClass
-{
-  MetaSurfaceActorClass parent_class;
-};
-
-GType meta_surface_actor_wayland_get_type (void);
+#define META_TYPE_SURFACE_ACTOR_WAYLAND (meta_surface_actor_wayland_get_type ())
+G_DECLARE_FINAL_TYPE (MetaSurfaceActorWayland,
+                      meta_surface_actor_wayland,
+                      META, SURFACE_ACTOR_WAYLAND,
+                      MetaSurfaceActor)
 
 MetaSurfaceActor * meta_surface_actor_wayland_new (MetaWaylandSurface *surface);
 MetaWaylandSurface * meta_surface_actor_wayland_get_surface (MetaSurfaceActorWayland *self);
@@ -69,6 +51,12 @@ void meta_surface_actor_wayland_get_subsurface_rect (MetaSurfaceActorWayland *se
 
 void meta_surface_actor_wayland_add_frame_callbacks (MetaSurfaceActorWayland *self,
                                                      struct wl_list *frame_callbacks);
+
+CoglScanout * meta_surface_actor_wayland_try_acquire_scanout (MetaSurfaceActorWayland *self,
+                                                              CoglOnscreen            *onscreen);
+
+ClutterStageView * meta_surface_actor_wayland_get_current_primary_view (MetaSurfaceActor *actor,
+                                                                        ClutterStage     *stage);
 
 G_END_DECLS
 

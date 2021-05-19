@@ -21,16 +21,17 @@
 
 #include "config.h"
 
-#include <cogl/cogl.h>
-#include <cogl/cogl-wayland-server.h>
-#include "meta-wayland-cursor-surface.h"
-#include "meta-wayland-buffer.h"
-#include "meta-xwayland.h"
-#include "meta-wayland-private.h"
+#include "wayland/meta-wayland-cursor-surface.h"
+
 #include "backends/meta-backend-private.h"
 #include "backends/meta-logical-monitor.h"
+#include "cogl/cogl-wayland-server.h"
+#include "cogl/cogl.h"
 #include "core/boxes-private.h"
 #include "wayland/meta-cursor-sprite-wayland.h"
+#include "wayland/meta-wayland-buffer.h"
+#include "wayland/meta-wayland-private.h"
+#include "wayland/meta-xwayland.h"
 
 typedef struct _MetaWaylandCursorSurfacePrivate MetaWaylandCursorSurfacePrivate;
 
@@ -56,18 +57,17 @@ update_cursor_sprite_texture (MetaWaylandCursorSurface *cursor_surface)
     meta_wayland_cursor_surface_get_instance_private (cursor_surface);
   MetaWaylandSurface *surface =
     meta_wayland_surface_role_get_surface (META_WAYLAND_SURFACE_ROLE (cursor_surface));
-  MetaWaylandBuffer *buffer = meta_wayland_surface_get_buffer (surface);
   MetaCursorSprite *cursor_sprite = META_CURSOR_SPRITE (priv->cursor_sprite);
-
-  g_return_if_fail (!buffer || buffer->texture);
+  CoglTexture *texture;
 
   if (!priv->cursor_renderer)
     return;
 
-  if (buffer)
+  texture = meta_wayland_surface_get_texture (surface);
+  if (texture)
     {
       meta_cursor_sprite_set_texture (cursor_sprite,
-                                      buffer->texture,
+                                      texture,
                                       priv->hot_x * surface->scale,
                                       priv->hot_y * surface->scale);
     }
@@ -124,13 +124,13 @@ meta_wayland_cursor_surface_assigned (MetaWaylandSurfaceRole *surface_role)
     meta_wayland_cursor_surface_get_instance_private (cursor_surface);
 
   wl_list_insert_list (&priv->frame_callbacks,
-                       &surface->pending_frame_callback_list);
-  wl_list_init (&surface->pending_frame_callback_list);
+                       &surface->unassigned.pending_frame_callback_list);
+  wl_list_init (&surface->unassigned.pending_frame_callback_list);
 }
 
 static void
-meta_wayland_cursor_surface_pre_commit (MetaWaylandSurfaceRole  *surface_role,
-                                        MetaWaylandPendingState *pending)
+meta_wayland_cursor_surface_pre_apply_state (MetaWaylandSurfaceRole  *surface_role,
+                                             MetaWaylandSurfaceState *pending)
 {
   MetaWaylandCursorSurface *cursor_surface =
     META_WAYLAND_CURSOR_SURFACE (surface_role);
@@ -147,8 +147,8 @@ meta_wayland_cursor_surface_pre_commit (MetaWaylandSurfaceRole  *surface_role,
 }
 
 static void
-meta_wayland_cursor_surface_commit (MetaWaylandSurfaceRole  *surface_role,
-                                    MetaWaylandPendingState *pending)
+meta_wayland_cursor_surface_apply_state (MetaWaylandSurfaceRole  *surface_role,
+                                         MetaWaylandSurfaceState *pending)
 {
   MetaWaylandCursorSurface *cursor_surface =
     META_WAYLAND_CURSOR_SURFACE (surface_role);
@@ -169,7 +169,10 @@ meta_wayland_cursor_surface_commit (MetaWaylandSurfaceRole  *surface_role,
                        &pending->frame_callback_list);
   wl_list_init (&pending->frame_callback_list);
 
-  if (pending->newly_attached)
+  if (pending->newly_attached &&
+      ((!cairo_region_is_empty (pending->surface_damage) ||
+        !cairo_region_is_empty (pending->buffer_damage)) ||
+       !priv->buffer))
     update_cursor_sprite_texture (META_WAYLAND_CURSOR_SURFACE (surface_role));
 }
 
@@ -183,15 +186,18 @@ meta_wayland_cursor_surface_is_on_logical_monitor (MetaWaylandSurfaceRole *role,
     META_WAYLAND_CURSOR_SURFACE (surface->role);
   MetaWaylandCursorSurfacePrivate *priv =
     meta_wayland_cursor_surface_get_instance_private (cursor_surface);
-  ClutterPoint point;
-  ClutterRect logical_monitor_rect;
+  graphene_point_t point;
+  graphene_rect_t logical_monitor_rect;
+
+  if (!priv->cursor_renderer)
+    return FALSE;
 
   logical_monitor_rect =
-    meta_rectangle_to_clutter_rect (&logical_monitor->rect);
+    meta_rectangle_to_graphene_rect (&logical_monitor->rect);
 
   point = meta_cursor_renderer_get_position (priv->cursor_renderer);
 
-  return clutter_rect_contains_point (&logical_monitor_rect, &point);
+  return graphene_rect_contains_point (&logical_monitor_rect, &point);
 }
 
 static void
@@ -271,8 +277,9 @@ meta_wayland_cursor_surface_class_init (MetaWaylandCursorSurfaceClass *klass)
   GObjectClass *object_class = G_OBJECT_CLASS (klass);
 
   surface_role_class->assigned = meta_wayland_cursor_surface_assigned;
-  surface_role_class->pre_commit = meta_wayland_cursor_surface_pre_commit;
-  surface_role_class->commit = meta_wayland_cursor_surface_commit;
+  surface_role_class->pre_apply_state =
+    meta_wayland_cursor_surface_pre_apply_state;
+  surface_role_class->apply_state = meta_wayland_cursor_surface_apply_state;
   surface_role_class->is_on_logical_monitor =
     meta_wayland_cursor_surface_is_on_logical_monitor;
 
@@ -354,9 +361,8 @@ meta_wayland_cursor_surface_set_renderer (MetaWaylandCursorSurface *cursor_surfa
 
   if (priv->cursor_renderer)
     {
-      g_signal_handler_disconnect (priv->cursor_renderer,
-                                   priv->cursor_painted_handler_id);
-      priv->cursor_painted_handler_id = 0;
+      g_clear_signal_handler (&priv->cursor_painted_handler_id,
+                              priv->cursor_renderer);
       g_object_unref (priv->cursor_renderer);
     }
   if (renderer)

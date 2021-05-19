@@ -66,8 +66,11 @@ struct _MetaSettings
   gboolean experimental_features_overridden;
 
   gboolean xwayland_allow_grabs;
-  GPtrArray *xwayland_grab_whitelist_patterns;
-  GPtrArray *xwayland_grab_blacklist_patterns;
+  GPtrArray *xwayland_grab_allow_list_patterns;
+  GPtrArray *xwayland_grab_deny_list_patterns;
+
+  /* A bitmask of MetaXwaylandExtension enum */
+  int xwayland_disable_extensions;
 };
 
 G_DEFINE_TYPE (MetaSettings, meta_settings, G_TYPE_OBJECT)
@@ -248,7 +251,7 @@ experimental_features_handler (GVariant *features_variant,
 {
   MetaSettings *settings = data;
   GVariantIter features_iter;
-  char *feature;
+  char *feature_str;
   MetaExperimentalFeature features = META_EXPERIMENTAL_FEATURE_NONE;
 
   if (settings->experimental_features_overridden)
@@ -258,14 +261,27 @@ experimental_features_handler (GVariant *features_variant,
     }
 
   g_variant_iter_init (&features_iter, features_variant);
-  while (g_variant_iter_loop (&features_iter, "s", &feature))
+  while (g_variant_iter_loop (&features_iter, "s", &feature_str))
     {
-      if (g_str_equal (feature, "scale-monitor-framebuffer"))
-        features |= META_EXPERIMENTAL_FEATURE_SCALE_MONITOR_FRAMEBUFFER;
-      else if (g_str_equal (feature, "kms-modifiers"))
-        features |= META_EXPERIMENTAL_FEATURE_KMS_MODIFIERS;
+      MetaExperimentalFeature feature = META_EXPERIMENTAL_FEATURE_NONE;
+
+      if (g_str_equal (feature_str, "scale-monitor-framebuffer"))
+        feature = META_EXPERIMENTAL_FEATURE_SCALE_MONITOR_FRAMEBUFFER;
+      else if (g_str_equal (feature_str, "kms-modifiers"))
+        feature = META_EXPERIMENTAL_FEATURE_KMS_MODIFIERS;
+      else if (g_str_equal (feature_str, "rt-scheduler"))
+        feature = META_EXPERIMENTAL_FEATURE_RT_SCHEDULER;
+      else if (g_str_equal (feature_str, "autostart-xwayland"))
+        feature = META_EXPERIMENTAL_FEATURE_AUTOSTART_XWAYLAND;
+      else if (g_str_equal (feature_str, "dma-buf-screen-sharing"))
+        feature = META_EXPERIMENTAL_FEATURE_DMA_BUF_SCREEN_SHARING;
+
+      if (feature)
+        g_message ("Enabling experimental feature '%s'", feature_str);
       else
-        g_info ("Unknown experimental feature '%s'\n", feature);
+        g_warning ("Unknown experimental feature '%s'", feature_str);
+
+      features |= feature;
     }
 
   if (features != settings->experimental_features)
@@ -310,12 +326,12 @@ static void
 xwayland_grab_list_add_item (MetaSettings *settings,
                              char         *item)
 {
-  /* If first character is '!', it's a blacklisted item */
+  /* If first character is '!', it's a denied value */
   if (item[0] != '!')
-    g_ptr_array_add (settings->xwayland_grab_whitelist_patterns,
+    g_ptr_array_add (settings->xwayland_grab_allow_list_patterns,
                      g_pattern_spec_new (item));
   else if (item[1] != 0)
-    g_ptr_array_add (settings->xwayland_grab_blacklist_patterns,
+    g_ptr_array_add (settings->xwayland_grab_deny_list_patterns,
                      g_pattern_spec_new (&item[1]));
 }
 
@@ -345,14 +361,14 @@ update_xwayland_grab_access_rules (MetaSettings *settings)
   int i;
 
   /* Free previous patterns and create new arrays */
-  g_clear_pointer (&settings->xwayland_grab_whitelist_patterns,
+  g_clear_pointer (&settings->xwayland_grab_allow_list_patterns,
                    g_ptr_array_unref);
-  settings->xwayland_grab_whitelist_patterns =
+  settings->xwayland_grab_allow_list_patterns =
     g_ptr_array_new_with_free_func ((GDestroyNotify) g_pattern_spec_free);
 
-  g_clear_pointer (&settings->xwayland_grab_blacklist_patterns,
+  g_clear_pointer (&settings->xwayland_grab_deny_list_patterns,
                    g_ptr_array_unref);
-  settings->xwayland_grab_blacklist_patterns =
+  settings->xwayland_grab_deny_list_patterns =
     g_ptr_array_new_with_free_func ((GDestroyNotify) g_pattern_spec_free);
 
   /* Add system defaults values */
@@ -377,6 +393,14 @@ update_xwayland_allow_grabs (MetaSettings *settings)
 }
 
 static void
+update_xwayland_disable_extensions (MetaSettings *settings)
+{
+  settings->xwayland_disable_extensions =
+    g_settings_get_flags (settings->wayland_settings,
+                          "xwayland-disable-extension");
+}
+
+static void
 wayland_settings_changed (GSettings    *wayland_settings,
                           gchar        *key,
                           MetaSettings *settings)
@@ -390,21 +414,31 @@ wayland_settings_changed (GSettings    *wayland_settings,
     {
       update_xwayland_grab_access_rules (settings);
     }
+  else if (g_str_equal (key, "xwayland-disable-extension"))
+    {
+      update_xwayland_disable_extensions (settings);
+    }
 }
 
 void
 meta_settings_get_xwayland_grab_patterns (MetaSettings  *settings,
-                                          GPtrArray    **whitelist_patterns,
-                                          GPtrArray    **blacklist_patterns)
+                                          GPtrArray    **allow_list_patterns,
+                                          GPtrArray    **deny_list_patterns)
 {
-  *whitelist_patterns = settings->xwayland_grab_whitelist_patterns;
-  *blacklist_patterns = settings->xwayland_grab_blacklist_patterns;
+  *allow_list_patterns = settings->xwayland_grab_allow_list_patterns;
+  *deny_list_patterns = settings->xwayland_grab_deny_list_patterns;
 }
 
 gboolean
- meta_settings_are_xwayland_grabs_allowed (MetaSettings *settings)
+meta_settings_are_xwayland_grabs_allowed (MetaSettings *settings)
 {
   return (settings->xwayland_allow_grabs);
+}
+
+int
+meta_settings_get_xwayland_disable_extensions (MetaSettings *settings)
+{
+  return (settings->xwayland_disable_extensions);
 }
 
 MetaSettings *
@@ -426,9 +460,9 @@ meta_settings_dispose (GObject *object)
   g_clear_object (&settings->mutter_settings);
   g_clear_object (&settings->interface_settings);
   g_clear_object (&settings->wayland_settings);
-  g_clear_pointer (&settings->xwayland_grab_whitelist_patterns,
+  g_clear_pointer (&settings->xwayland_grab_allow_list_patterns,
                    g_ptr_array_unref);
-  g_clear_pointer (&settings->xwayland_grab_blacklist_patterns,
+  g_clear_pointer (&settings->xwayland_grab_deny_list_patterns,
                    g_ptr_array_unref);
 
   G_OBJECT_CLASS (meta_settings_parent_class)->dispose (object);
@@ -460,6 +494,7 @@ meta_settings_init (MetaSettings *settings)
   update_experimental_features (settings);
   update_xwayland_grab_access_rules (settings);
   update_xwayland_allow_grabs (settings);
+  update_xwayland_disable_extensions (settings);
 }
 
 static void

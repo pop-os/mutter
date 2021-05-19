@@ -19,18 +19,19 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <config.h>
-#include <meta/prefs.h>
-#include "ui.h"
-#include "frames.h"
-#include <meta/util.h>
-#include "core.h"
-#include "theme-private.h"
-#include "x11/meta-x11-display-private.h"
+#include "config.h"
 
-#include <string.h>
-#include <stdlib.h>
 #include <cairo-xlib.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "meta/prefs.h"
+#include "meta/util.h"
+#include "ui/frames.h"
+#include "ui/theme-private.h"
+#include "ui/ui.h"
+#include "x11/meta-x11-display-private.h"
+#include "x11/meta-x11-window-control.h"
 
 struct _MetaUI
 {
@@ -58,12 +59,12 @@ meta_ui_new (MetaX11Display *x11_display)
   ui = g_new0 (MetaUI, 1);
   ui->xdisplay = x11_display->xdisplay;
 
-  ui->frames = meta_frames_new ();
+  ui->frames = meta_frames_new (x11_display);
   /* GTK+ needs the frame-sync protocol to work in order to properly
    * handle style changes. This means that the dummy widget we create
    * to get the style for title bars actually needs to be mapped
    * and fully tracked as a MetaWindow. Horrible, but mostly harmless -
-   * the window is a 1x1 overide redirect window positioned offscreen.
+   * the window is a 1x1 override redirect window positioned offscreen.
    */
   gtk_widget_show (GTK_WIDGET (ui->frames));
 

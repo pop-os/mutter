@@ -179,6 +179,8 @@ typedef struct
   MetaMonitorConfig *current_monitor_config;
   MetaLogicalMonitorConfig *current_logical_monitor_config;
   GList *current_disabled_monitor_specs;
+
+  MetaMonitorsConfigFlag extra_config_flags;
 } ConfigParser;
 
 G_DEFINE_TYPE (MetaMonitorConfigStore, meta_monitor_config_store,
@@ -315,7 +317,7 @@ handle_start_element (GMarkupParseContext  *context,
           }
         else if (g_str_equal (element_name, "monitor"))
           {
-            parser->current_monitor_config = g_new0 (MetaMonitorConfig, 1);;
+            parser->current_monitor_config = g_new0 (MetaMonitorConfig, 1);
 
             parser->state = STATE_MONITOR;
           }
@@ -766,6 +768,8 @@ handle_end_element (GMarkupParseContext  *context,
         if (parser->current_was_migrated)
           config_flags |= META_MONITORS_CONFIG_FLAG_MIGRATED;
 
+        config_flags |= parser->extra_config_flags;
+
         config =
           meta_monitors_config_new_full (parser->current_logical_monitor_configs,
                                          parser->current_disabled_monitor_specs,
@@ -1078,9 +1082,10 @@ static const GMarkupParser config_parser = {
 };
 
 static gboolean
-read_config_file (MetaMonitorConfigStore *config_store,
-                  GFile                  *file,
-                  GError                **error)
+read_config_file (MetaMonitorConfigStore  *config_store,
+                  GFile                   *file,
+                  MetaMonitorsConfigFlag   extra_config_flags,
+                  GError                 **error)
 {
   char *buffer;
   gsize size;
@@ -1092,7 +1097,8 @@ read_config_file (MetaMonitorConfigStore *config_store,
 
   parser = (ConfigParser) {
     .state = STATE_INITIAL,
-    .config_store = config_store
+    .config_store = config_store,
+    .extra_config_flags = extra_config_flags,
   };
 
   parse_context = g_markup_parse_context_new (&config_parser,
@@ -1132,19 +1138,34 @@ append_monitor_spec (GString         *buffer,
                      MetaMonitorSpec *monitor_spec,
                      const char      *indentation)
 {
+  char *escaped;
+
   g_string_append_printf (buffer, "%s<monitorspec>\n", indentation);
+
+  escaped = g_markup_escape_text (monitor_spec->connector, -1);
   g_string_append_printf (buffer, "%s  <connector>%s</connector>\n",
                           indentation,
-                          monitor_spec->connector);
+                          escaped);
+  g_free (escaped);
+
+  escaped = g_markup_escape_text (monitor_spec->vendor, -1);
   g_string_append_printf (buffer, "%s  <vendor>%s</vendor>\n",
                           indentation,
-                          monitor_spec->vendor);
+                          escaped);
+  g_free (escaped);
+
+  escaped = g_markup_escape_text (monitor_spec->product, -1);
   g_string_append_printf (buffer, "%s  <product>%s</product>\n",
                           indentation,
-                          monitor_spec->product);
+                          escaped);
+  g_free (escaped);
+
+  escaped = g_markup_escape_text (monitor_spec->serial, -1);
   g_string_append_printf (buffer, "%s  <serial>%s</serial>\n",
                           indentation,
-                          monitor_spec->serial);
+                          escaped);
+  g_free (escaped);
+
   g_string_append_printf (buffer, "%s</monitorspec>\n", indentation);
 }
 
@@ -1273,6 +1294,9 @@ generate_config_xml (MetaMonitorConfigStore *config_store)
   while (g_hash_table_iter_next (&iter, NULL, (gpointer *) &config))
     {
       GList *l;
+
+      if (config->flags & META_MONITORS_CONFIG_FLAG_SYSTEM_CONFIG)
+        continue;
 
       g_string_append (buffer, "  <configuration>\n");
 
@@ -1425,6 +1449,12 @@ maybe_save_configs (MetaMonitorConfigStore *config_store)
     meta_monitor_config_store_save (config_store);
 }
 
+static gboolean
+is_system_config (MetaMonitorsConfig *config)
+{
+  return !!(config->flags & META_MONITORS_CONFIG_FLAG_SYSTEM_CONFIG);
+}
+
 void
 meta_monitor_config_store_add (MetaMonitorConfigStore *config_store,
                                MetaMonitorsConfig     *config)
@@ -1432,7 +1462,8 @@ meta_monitor_config_store_add (MetaMonitorConfigStore *config_store,
   g_hash_table_replace (config_store->configs,
                         config->key, g_object_ref (config));
 
-  maybe_save_configs (config_store);
+  if (!is_system_config (config))
+    maybe_save_configs (config_store);
 }
 
 void
@@ -1441,7 +1472,8 @@ meta_monitor_config_store_remove (MetaMonitorConfigStore *config_store,
 {
   g_hash_table_remove (config_store->configs, config->key);
 
-  maybe_save_configs (config_store);
+  if (!is_system_config (config))
+    maybe_save_configs (config_store);
 }
 
 gboolean
@@ -1458,7 +1490,10 @@ meta_monitor_config_store_set_custom (MetaMonitorConfigStore *config_store,
   if (write_path)
     config_store->custom_write_file = g_file_new_for_path (write_path);
 
-  return read_config_file (config_store, config_store->custom_read_file, error);
+  return read_config_file (config_store,
+                           config_store->custom_read_file,
+                           META_MONITORS_CONFIG_FLAG_NONE,
+                           error);
 }
 
 int
@@ -1485,8 +1520,41 @@ static void
 meta_monitor_config_store_constructed (GObject *object)
 {
   MetaMonitorConfigStore *config_store = META_MONITOR_CONFIG_STORE (object);
+  const char * const *system_dirs;
   char *user_file_path;
   GError *error = NULL;
+
+  for (system_dirs = g_get_system_config_dirs ();
+       system_dirs && *system_dirs;
+       system_dirs++)
+    {
+      g_autofree char *system_file_path = NULL;
+
+      system_file_path = g_build_filename (*system_dirs, "monitors.xml", NULL);
+      if (g_file_test (system_file_path, G_FILE_TEST_EXISTS))
+        {
+          g_autoptr (GFile) system_file = NULL;
+
+          system_file = g_file_new_for_path (system_file_path);
+          if (!read_config_file (config_store,
+                                 system_file,
+                                 META_MONITORS_CONFIG_FLAG_SYSTEM_CONFIG,
+                                 &error))
+            {
+              if (g_error_matches (error,
+                                   META_MONITOR_CONFIG_STORE_ERROR,
+                                   META_MONITOR_CONFIG_STORE_ERROR_NEEDS_MIGRATION))
+                g_warning ("System monitor configuration file (%s) is "
+                           "incompatible; ask your administrator to migrate "
+                           "the system monitor configuration.",
+                           system_file_path);
+              else
+                g_warning ("Failed to read monitors config file '%s': %s",
+                           system_file_path, error->message);
+              g_clear_error (&error);
+            }
+        }
+    }
 
   user_file_path = g_build_filename (g_get_user_config_dir (),
                                      "monitors.xml",
@@ -1495,7 +1563,10 @@ meta_monitor_config_store_constructed (GObject *object)
 
   if (g_file_test (user_file_path, G_FILE_TEST_EXISTS))
     {
-      if (!read_config_file (config_store, config_store->user_file, &error))
+      if (!read_config_file (config_store,
+                             config_store->user_file,
+                             META_MONITORS_CONFIG_FLAG_NONE,
+                             &error))
         {
           if (error->domain == META_MONITOR_CONFIG_STORE_ERROR &&
               error->code == META_MONITOR_CONFIG_STORE_ERROR_NEEDS_MIGRATION)

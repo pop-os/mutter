@@ -20,8 +20,6 @@
  *
  */
 
-#define _GNU_SOURCE
-
 #include "config.h"
 
 #include "backends/meta-remote-desktop.h"
@@ -32,12 +30,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "meta-dbus-remote-desktop.h"
 #include "backends/meta-backend-private.h"
 #include "backends/meta-cursor-renderer.h"
 #include "backends/meta-remote-desktop-session.h"
 #include "backends/native/meta-cursor-renderer-native.h"
 #include "meta/meta-backend.h"
+
+#include "meta-dbus-remote-desktop.h"
 
 #define META_REMOTE_DESKTOP_DBUS_SERVICE "org.gnome.Mutter.RemoteDesktop"
 #define META_REMOTE_DESKTOP_DBUS_PATH "/org/gnome/Mutter/RemoteDesktop"
@@ -57,6 +56,8 @@ struct _MetaRemoteDesktop
 
   int dbus_name_id;
 
+  int inhibit_count;
+
   GHashTable *sessions;
 
   MetaDbusSessionWatcher *session_watcher;
@@ -70,6 +71,34 @@ G_DEFINE_TYPE_WITH_CODE (MetaRemoteDesktop,
                          META_DBUS_TYPE_REMOTE_DESKTOP_SKELETON,
                          G_IMPLEMENT_INTERFACE (META_DBUS_TYPE_REMOTE_DESKTOP,
                                                 meta_remote_desktop_init_iface));
+
+void
+meta_remote_desktop_inhibit (MetaRemoteDesktop *remote_desktop)
+{
+  remote_desktop->inhibit_count++;
+  if (remote_desktop->inhibit_count == 1)
+    {
+      GHashTableIter iter;
+      gpointer key, value;
+
+      g_hash_table_iter_init (&iter, remote_desktop->sessions);
+      while (g_hash_table_iter_next (&iter, &key, &value))
+        {
+          MetaRemoteDesktopSession *session = value;
+
+          g_hash_table_iter_steal (&iter);
+          meta_remote_desktop_session_close (session);
+        }
+    }
+}
+
+void
+meta_remote_desktop_uninhibit (MetaRemoteDesktop *remote_desktop)
+{
+  g_return_if_fail (remote_desktop->inhibit_count > 0);
+
+  remote_desktop->inhibit_count--;
+}
 
 GDBusConnection *
 meta_remote_desktop_get_connection (MetaRemoteDesktop *remote_desktop)
@@ -108,6 +137,15 @@ handle_create_session (MetaDBusRemoteDesktop *skeleton,
   char *session_id;
   char *session_path;
   const char *client_dbus_name;
+
+  if (remote_desktop->inhibit_count > 0)
+    {
+      g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
+                                             G_DBUS_ERROR_ACCESS_DENIED,
+                                             "Session creation inhibited");
+
+      return TRUE;
+    }
 
   peer_name = g_dbus_method_invocation_get_sender (invocation);
   session = meta_remote_desktop_session_new (remote_desktop,
@@ -235,14 +273,14 @@ meta_remote_desktop_new (MetaDbusSessionWatcher *session_watcher)
 static MetaRemoteDesktopDeviceTypes
 calculate_supported_device_types (void)
 {
-  ClutterDeviceManager *device_manager =
-    clutter_device_manager_get_default ();
+  ClutterBackend *backend = clutter_get_default_backend ();
+  ClutterSeat *seat = clutter_backend_get_default_seat (backend);
   ClutterVirtualDeviceType device_types;
   MetaRemoteDesktopDeviceTypes supported_devices =
     META_REMOTE_DESKTOP_DEVICE_TYPE_NONE;
 
   device_types =
-    clutter_device_manager_get_supported_virtual_device_types (device_manager);
+    clutter_seat_get_supported_virtual_device_types (seat);
 
   if (device_types & CLUTTER_VIRTUAL_DEVICE_TYPE_KEYBOARD)
     supported_devices |= META_REMOTE_DESKTOP_DEVICE_TYPE_KEYBOARD;

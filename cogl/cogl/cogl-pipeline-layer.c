@@ -31,9 +31,7 @@
  *   Robert Bragg <robert@linux.intel.com>
  */
 
-#ifdef HAVE_CONFIG_H
 #include "cogl-config.h"
-#endif
 
 #include "cogl-util.h"
 #include "cogl-context-private.h"
@@ -44,7 +42,6 @@
 #include "cogl-pipeline-layer-state-private.h"
 #include "cogl-pipeline-layer-state.h"
 #include "cogl-node-private.h"
-#include "cogl-pipeline-opengl-private.h"
 #include "cogl-context-private.h"
 #include "cogl-texture-private.h"
 
@@ -78,7 +75,7 @@ _cogl_pipeline_layer_get_unit_index (CoglPipelineLayer *layer)
   return authority->unit_index;
 }
 
-CoglBool
+gboolean
 _cogl_pipeline_layer_has_alpha (CoglPipelineLayer *layer)
 {
   CoglPipelineLayer *combine_authority =
@@ -175,7 +172,7 @@ _cogl_pipeline_layer_copy_differences (CoglPipelineLayer *dest,
 
   while (differences)
     {
-      int index = _cogl_util_ffs (differences) - 1;
+      int index = ffs (differences) - 1;
 
       differences &= ~(1 << index);
 
@@ -187,10 +184,6 @@ _cogl_pipeline_layer_copy_differences (CoglPipelineLayer *dest,
         case COGL_PIPELINE_LAYER_STATE_COUNT:
         case COGL_PIPELINE_LAYER_STATE_UNIT_INDEX:
           g_warn_if_reached ();
-          break;
-
-        case COGL_PIPELINE_LAYER_STATE_TEXTURE_TYPE_INDEX:
-          dest->texture_type = src->texture_type;
           break;
 
         case COGL_PIPELINE_LAYER_STATE_TEXTURE_DATA_INDEX:
@@ -274,7 +267,6 @@ _cogl_pipeline_layer_init_multi_property_sparse_state (
     /* XXX: avoid using a default: label so we get a warning if we
      * don't explicitly handle a newly defined state-group here. */
     case COGL_PIPELINE_LAYER_STATE_UNIT:
-    case COGL_PIPELINE_LAYER_STATE_TEXTURE_TYPE:
     case COGL_PIPELINE_LAYER_STATE_TEXTURE_DATA:
     case COGL_PIPELINE_LAYER_STATE_POINT_SPRITE_COORDS:
     case COGL_PIPELINE_LAYER_STATE_USER_MATRIX:
@@ -349,8 +341,6 @@ _cogl_pipeline_layer_pre_change_notify (CoglPipeline *required_owner,
                                         CoglPipelineLayer *layer,
                                         CoglPipelineLayerState change)
 {
-  CoglTextureUnit *unit;
-
   /* Identify the case where the layer is new with no owner or
    * dependants and so we don't need to do anything. */
   if (_cogl_list_empty (&COGL_NODE (layer)->children) &&
@@ -358,7 +348,7 @@ _cogl_pipeline_layer_pre_change_notify (CoglPipeline *required_owner,
     goto init_layer_state;
 
   /* We only allow a NULL required_owner for new layers */
-  _COGL_RETURN_VAL_IF_FAIL (required_owner != NULL, layer);
+  g_return_val_if_fail (required_owner != NULL, layer);
 
   /* Chain up:
    * A modification of a layer is indirectly also a modification of
@@ -387,9 +377,9 @@ _cogl_pipeline_layer_pre_change_notify (CoglPipeline *required_owner,
       goto init_layer_state;
     }
 
-  /* Note: At this point we know there is only one pipeline dependant on
+  /* Note: At this point we know there is only one pipeline dependent on
    * this layer (required_owner), and there are no other layers
-   * dependant on this layer so it's ok to modify it. */
+   * dependent on this layer so it's ok to modify it. */
 
   /* NB: Although layers can have private state associated with them
    * by multiple backends we know that a layer can't be *changed* if
@@ -397,14 +387,10 @@ _cogl_pipeline_layer_pre_change_notify (CoglPipeline *required_owner,
    * have a single owner and can only be associated with a single
    * backend that needs to be notified of the layer change...
    */
-  if (required_owner->progend != COGL_PIPELINE_PROGEND_UNDEFINED)
     {
-      const CoglPipelineProgend *progend =
-        _cogl_pipeline_progends[required_owner->progend];
-      const CoglPipelineFragend *fragend =
-        _cogl_pipeline_fragends[progend->fragend];
-      const CoglPipelineVertend *vertend =
-        _cogl_pipeline_vertends[progend->vertend];
+      const CoglPipelineProgend *progend = _cogl_pipeline_progend;
+      const CoglPipelineFragend *fragend = _cogl_pipeline_fragend;
+      const CoglPipelineVertend *vertend = _cogl_pipeline_vertend;
 
       if (fragend->layer_pre_change_notify)
         fragend->layer_pre_change_notify (required_owner, layer, change);
@@ -413,15 +399,6 @@ _cogl_pipeline_layer_pre_change_notify (CoglPipeline *required_owner,
       if (progend->layer_pre_change_notify)
         progend->layer_pre_change_notify (required_owner, layer, change);
     }
-
-  /* If the layer being changed is the same as the last layer we
-   * flushed to the corresponding texture unit then we keep a track of
-   * the changes so we can try to minimize redundant OpenGL calls if
-   * the same layer is flushed again.
-   */
-  unit = _cogl_get_texture_unit (_cogl_pipeline_layer_get_unit_index (layer));
-  if (unit->layer == layer)
-    unit->layer_changes_since_flush |= change;
 
 init_layer_state:
 
@@ -594,13 +571,13 @@ _cogl_pipeline_layer_compare_differences (CoglPipelineLayer *layer0,
   return layers_difference;
 }
 
-static CoglBool
+static gboolean
 layer_state_equal (CoglPipelineLayerStateIndex state_index,
                    CoglPipelineLayer **authorities0,
                    CoglPipelineLayer **authorities1,
-                   CoglPipelineLayerStateComparitor comparitor)
+                   CoglPipelineLayerStateComparator comparator)
 {
-  return comparitor (authorities0[state_index], authorities1[state_index]);
+  return comparator (authorities0[state_index], authorities1[state_index]);
 }
 
 void
@@ -638,7 +615,7 @@ _cogl_pipeline_layer_resolve_authorities (CoglPipelineLayer *layer,
   g_assert (remaining == 0);
 }
 
-CoglBool
+gboolean
 _cogl_pipeline_layer_equal (CoglPipelineLayer *layer0,
                             CoglPipelineLayer *layer1,
                             unsigned long differences_mask,
@@ -663,16 +640,6 @@ _cogl_pipeline_layer_equal (CoglPipelineLayer *layer0,
   _cogl_pipeline_layer_resolve_authorities (layer1,
                                             layers_difference,
                                             authorities1);
-
-  if (layers_difference & COGL_PIPELINE_LAYER_STATE_TEXTURE_TYPE)
-    {
-      CoglPipelineLayerStateIndex state_index =
-        COGL_PIPELINE_LAYER_STATE_TEXTURE_TYPE_INDEX;
-      if (!_cogl_pipeline_layer_texture_type_equal (authorities0[state_index],
-                                                    authorities1[state_index],
-                                                    flags))
-        return FALSE;
-    }
 
   if (layers_difference & COGL_PIPELINE_LAYER_STATE_TEXTURE_DATA)
     {
@@ -769,7 +736,6 @@ _cogl_pipeline_init_default_layers (void)
   layer->unit_index = 0;
 
   layer->texture = NULL;
-  layer->texture_type = COGL_TEXTURE_TYPE_2D;
 
   layer->sampler_cache_entry =
     _cogl_sampler_cache_get_default_entry (ctx->sampler_cache);
@@ -830,7 +796,7 @@ _cogl_pipeline_init_default_layers (void)
   /* Since we passed a newly allocated layer we don't expect that
    * _set_layer_unit() will have to allocate *another* layer. */
 
-  /* Finally we create a dummy dependant for ->default_layer_n which
+  /* Finally we create a dummy dependent for ->default_layer_n which
    * effectively ensures that ->default_layer_n and ->default_layer_0
    * remain immutable.
    */
@@ -869,7 +835,7 @@ _cogl_pipeline_layer_pre_paint (CoglPipelineLayer *layer)
  * separately or is the same function used for both channel masks and
  * with the same arguments...
  */
-CoglBool
+gboolean
 _cogl_pipeline_layer_needs_combine_separate
                                        (CoglPipelineLayer *combine_authority)
 {

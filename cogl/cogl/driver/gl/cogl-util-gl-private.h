@@ -76,29 +76,62 @@ _cogl_gl_error_to_string (GLenum error_code);
 
 #endif /* COGL_GL_DEBUG */
 
+typedef struct _CoglGLContext {
+  GArray           *texture_units;
+  int               active_texture_unit;
+
+  /* This is used for generated fake unique sampler object numbers
+   when the sampler object extension is not supported */
+  GLuint next_fake_sampler_object_number;
+} CoglGLContext;
+
+CoglGLContext *
+_cogl_driver_gl_context (CoglContext *context);
+
+gboolean
+_cogl_driver_gl_context_init (CoglContext *context);
+
+void
+_cogl_driver_gl_context_deinit (CoglContext *context);
+
 GLenum
 _cogl_gl_util_get_error (CoglContext *ctx);
 
 void
 _cogl_gl_util_clear_gl_errors (CoglContext *ctx);
 
-CoglBool
-_cogl_gl_util_catch_out_of_memory (CoglContext *ctx, CoglError **error);
+gboolean
+_cogl_gl_util_catch_out_of_memory (CoglContext *ctx, GError **error);
 
-void
-_cogl_gl_util_get_texture_target_string (CoglTextureType texture_type,
-                                         const char **target_string_out,
-                                         const char **swizzle_out);
+gboolean
+_cogl_driver_gl_is_hardware_accelerated (CoglContext *context);
+
+/*
+ * _cogl_context_get_gl_extensions:
+ * @context: A CoglContext
+ *
+ * Return value: a NULL-terminated array of strings representing the
+ *   supported extensions by the current driver. This array is owned
+ *   by the caller and should be freed with g_strfreev().
+ */
+char **
+_cogl_context_get_gl_extensions (CoglContext *context);
+
+const char *
+_cogl_context_get_gl_version (CoglContext *context);
 
 /* Parses a GL version number stored in a string. @version_string must
  * point to the beginning of the version number (ie, it can't point to
  * the "OpenGL ES" part on GLES). The version number can be followed
  * by the end of the string, a space or a full stop. Anything else
  * will be treated as invalid. Returns TRUE and sets major_out and
- * minor_out if it is succesfully parsed or FALSE otherwise. */
-CoglBool
+ * minor_out if it is successfully parsed or FALSE otherwise. */
+gboolean
 _cogl_gl_util_parse_gl_version (const char *version_string,
                                 int *major_out,
                                 int *minor_out);
+
+CoglGraphicsResetStatus
+_cogl_gl_get_graphics_reset_status (CoglContext *context);
 
 #endif /* _COGL_UTIL_GL_PRIVATE_H_ */

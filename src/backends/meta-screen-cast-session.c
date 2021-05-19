@@ -26,15 +26,20 @@
 
 #include "backends/meta-backend-private.h"
 #include "backends/meta-dbus-session-watcher.h"
+#include "backends/meta-remote-access-controller-private.h"
+#include "backends/meta-screen-cast-area-stream.h"
 #include "backends/meta-screen-cast-monitor-stream.h"
 #include "backends/meta-screen-cast-stream.h"
-#include "backends/meta-remote-access-controller-private.h"
+#include "backends/meta-screen-cast-window-stream.h"
+#include "core/display-private.h"
 
 #define META_SCREEN_CAST_SESSION_DBUS_PATH "/org/gnome/Mutter/ScreenCast/Session"
 
 struct _MetaScreenCastSession
 {
   MetaDBusScreenCastSessionSkeleton parent;
+
+  MetaScreenCast *screen_cast;
 
   char *peer_name;
 
@@ -44,6 +49,8 @@ struct _MetaScreenCastSession
   GList *streams;
 
   MetaScreenCastSessionHandle *handle;
+
+  gboolean disable_animations;
 };
 
 static void
@@ -85,6 +92,10 @@ init_remote_access_handle (MetaScreenCastSession *session)
 
   remote_access_controller = meta_backend_get_remote_access_controller (backend);
   remote_access_handle = META_REMOTE_ACCESS_HANDLE (session->handle);
+
+  meta_remote_access_handle_set_disable_animations (remote_access_handle,
+                                                    session->disable_animations);
+
   meta_remote_access_controller_notify_new_handle (remote_access_controller,
                                                    remote_access_handle);
 }
@@ -157,10 +168,29 @@ meta_screen_cast_session_get_stream (MetaScreenCastSession *session,
   return NULL;
 }
 
+MetaScreenCast *
+meta_screen_cast_session_get_screen_cast (MetaScreenCastSession *session)
+{
+  return session->screen_cast;
+}
+
+void
+meta_screen_cast_session_set_disable_animations (MetaScreenCastSession *session,
+                                                 gboolean               disable_animations)
+{
+  session->disable_animations = disable_animations;
+}
+
 char *
 meta_screen_cast_session_get_object_path (MetaScreenCastSession *session)
 {
   return session->object_path;
+}
+
+char *
+meta_screen_cast_session_get_peer_name (MetaScreenCastSession *session)
+{
+  return session->peer_name;
 }
 
 static gboolean
@@ -253,6 +283,20 @@ on_stream_closed (MetaScreenCastStream  *stream,
 }
 
 static gboolean
+is_valid_cursor_mode (MetaScreenCastCursorMode cursor_mode)
+{
+  switch (cursor_mode)
+    {
+    case META_SCREEN_CAST_CURSOR_MODE_HIDDEN:
+    case META_SCREEN_CAST_CURSOR_MODE_EMBEDDED:
+    case META_SCREEN_CAST_CURSOR_MODE_METADATA:
+      return TRUE;
+    }
+
+  return FALSE;
+}
+
+static gboolean
 handle_record_monitor (MetaDBusScreenCastSession *skeleton,
                        GDBusMethodInvocation     *invocation,
                        const char                *connector,
@@ -265,6 +309,9 @@ handle_record_monitor (MetaDBusScreenCastSession *skeleton,
   MetaMonitorManager *monitor_manager =
     meta_backend_get_monitor_manager (backend);
   MetaMonitor *monitor;
+  MetaScreenCastCursorMode cursor_mode;
+  gboolean is_recording;
+  MetaScreenCastFlag flags;
   ClutterStage *stage;
   GError *error = NULL;
   MetaScreenCastMonitorStream *monitor_stream;
@@ -296,12 +343,36 @@ handle_record_monitor (MetaDBusScreenCastSession *skeleton,
       return TRUE;
     }
 
+  if (!g_variant_lookup (properties_variant, "cursor-mode", "u", &cursor_mode))
+    {
+      cursor_mode = META_SCREEN_CAST_CURSOR_MODE_HIDDEN;
+    }
+  else
+    {
+      if (!is_valid_cursor_mode (cursor_mode))
+        {
+          g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
+                                                 G_DBUS_ERROR_FAILED,
+                                                 "Unknown cursor mode");
+          return TRUE;
+        }
+    }
+
+  if (!g_variant_lookup (properties_variant, "is-recording", "b", &is_recording))
+    is_recording = FALSE;
+
   stage = CLUTTER_STAGE (meta_backend_get_stage (backend));
 
-  monitor_stream = meta_screen_cast_monitor_stream_new (connection,
-                                                        monitor_manager,
+  flags = META_SCREEN_CAST_FLAG_NONE;
+  if (is_recording)
+    flags |= META_SCREEN_CAST_FLAG_IS_RECORDING;
+
+  monitor_stream = meta_screen_cast_monitor_stream_new (session,
+                                                        connection,
                                                         monitor,
                                                         stage,
+                                                        cursor_mode,
+                                                        flags,
                                                         &error);
   if (!monitor_stream)
     {
@@ -333,6 +404,18 @@ handle_record_window (MetaDBusScreenCastSession *skeleton,
                       GVariant                  *properties_variant)
 {
   MetaScreenCastSession *session = META_SCREEN_CAST_SESSION (skeleton);
+  GDBusInterfaceSkeleton *interface_skeleton;
+  GDBusConnection *connection;
+  MetaWindow *window;
+  MetaScreenCastCursorMode cursor_mode;
+  gboolean is_recording;
+  MetaScreenCastFlag flags;
+  GError *error = NULL;
+  MetaDisplay *display;
+  GVariant *window_id_variant = NULL;
+  MetaScreenCastWindowStream *window_stream;
+  MetaScreenCastStream *stream;
+  char *stream_path;
 
   if (!check_permission (session, invocation))
     {
@@ -342,9 +425,178 @@ handle_record_window (MetaDBusScreenCastSession *skeleton,
       return TRUE;
     }
 
-  g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
-                                         G_DBUS_ERROR_FAILED,
-                                         "Recording a window not yet supported");
+  if (properties_variant)
+    window_id_variant = g_variant_lookup_value (properties_variant,
+                                                "window-id",
+                                                G_VARIANT_TYPE ("t"));
+
+  display = meta_get_display ();
+  if (window_id_variant)
+    {
+      uint64_t window_id;
+
+      g_variant_get (window_id_variant, "t", &window_id);
+      window = meta_display_get_window_from_id (display, window_id);
+    }
+  else
+    {
+      window = meta_display_get_focus_window (display);
+    }
+
+  if (!window)
+    {
+      g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
+                                             G_DBUS_ERROR_FAILED,
+                                             "Window not found");
+      return TRUE;
+    }
+
+  if (!g_variant_lookup (properties_variant, "cursor-mode", "u", &cursor_mode))
+    {
+      cursor_mode = META_SCREEN_CAST_CURSOR_MODE_HIDDEN;
+    }
+  else
+    {
+      if (!is_valid_cursor_mode (cursor_mode))
+        {
+          g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
+                                                 G_DBUS_ERROR_FAILED,
+                                                 "Unknown cursor mode");
+          return TRUE;
+        }
+    }
+
+  if (!g_variant_lookup (properties_variant, "is-recording", "b", &is_recording))
+    is_recording = FALSE;
+
+  interface_skeleton = G_DBUS_INTERFACE_SKELETON (skeleton);
+  connection = g_dbus_interface_skeleton_get_connection (interface_skeleton);
+
+  flags = META_SCREEN_CAST_FLAG_NONE;
+  if (is_recording)
+    flags |= META_SCREEN_CAST_FLAG_IS_RECORDING;
+
+  window_stream = meta_screen_cast_window_stream_new (session,
+                                                      connection,
+                                                      window,
+                                                      cursor_mode,
+                                                      flags,
+                                                      &error);
+  if (!window_stream)
+    {
+      g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
+                                             G_DBUS_ERROR_FAILED,
+                                             "Failed to record window: %s",
+                                             error->message);
+      g_error_free (error);
+      return TRUE;
+    }
+
+  stream = META_SCREEN_CAST_STREAM (window_stream);
+  stream_path = meta_screen_cast_stream_get_object_path (stream);
+
+  session->streams = g_list_append (session->streams, stream);
+
+  g_signal_connect (stream, "closed", G_CALLBACK (on_stream_closed), session);
+
+  meta_dbus_screen_cast_session_complete_record_window (skeleton,
+                                                        invocation,
+                                                        stream_path);
+
+  return TRUE;
+}
+
+static gboolean
+handle_record_area (MetaDBusScreenCastSession *skeleton,
+                    GDBusMethodInvocation     *invocation,
+                    int                        x,
+                    int                        y,
+                    int                        width,
+                    int                        height,
+                    GVariant                  *properties_variant)
+{
+  MetaScreenCastSession *session = META_SCREEN_CAST_SESSION (skeleton);
+  GDBusInterfaceSkeleton *interface_skeleton;
+  GDBusConnection *connection;
+  MetaBackend *backend;
+  ClutterStage *stage;
+  MetaScreenCastCursorMode cursor_mode;
+  gboolean is_recording;
+  MetaScreenCastFlag flags;
+  g_autoptr (GError) error = NULL;
+  MetaRectangle rect;
+  MetaScreenCastAreaStream *area_stream;
+  MetaScreenCastStream *stream;
+  char *stream_path;
+
+  if (!check_permission (session, invocation))
+    {
+      g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
+                                             G_DBUS_ERROR_ACCESS_DENIED,
+                                             "Permission denied");
+      return TRUE;
+    }
+
+  if (!g_variant_lookup (properties_variant, "cursor-mode", "u", &cursor_mode))
+    {
+      cursor_mode = META_SCREEN_CAST_CURSOR_MODE_HIDDEN;
+    }
+  else
+    {
+      if (!is_valid_cursor_mode (cursor_mode))
+        {
+          g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
+                                                 G_DBUS_ERROR_FAILED,
+                                                 "Unknown cursor mode");
+          return TRUE;
+        }
+    }
+
+  if (!g_variant_lookup (properties_variant, "is-recording", "b", &is_recording))
+    is_recording = FALSE;
+
+  interface_skeleton = G_DBUS_INTERFACE_SKELETON (skeleton);
+  connection = g_dbus_interface_skeleton_get_connection (interface_skeleton);
+  backend = meta_screen_cast_get_backend (session->screen_cast);
+  stage = CLUTTER_STAGE (meta_backend_get_stage (backend));
+
+  flags = META_SCREEN_CAST_FLAG_NONE;
+  if (is_recording)
+    flags |= META_SCREEN_CAST_FLAG_IS_RECORDING;
+
+  rect = (MetaRectangle) {
+    .x = x,
+    .y = y,
+    .width = width,
+    .height = height
+  };
+  area_stream = meta_screen_cast_area_stream_new (session,
+                                                  connection,
+                                                  &rect,
+                                                  stage,
+                                                  cursor_mode,
+                                                  flags,
+                                                  &error);
+  if (!area_stream)
+    {
+      g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
+                                             G_DBUS_ERROR_FAILED,
+                                             "Failed to record area: %s",
+                                             error->message);
+      return TRUE;
+    }
+
+  stream = META_SCREEN_CAST_STREAM (area_stream);
+  stream_path = meta_screen_cast_stream_get_object_path (stream);
+
+  session->streams = g_list_append (session->streams, stream);
+
+  g_signal_connect (stream, "closed", G_CALLBACK (on_stream_closed), session);
+
+  meta_dbus_screen_cast_session_complete_record_area (skeleton,
+                                                      invocation,
+                                                      stream_path);
+
   return TRUE;
 }
 
@@ -355,6 +607,7 @@ meta_screen_cast_session_init_iface (MetaDBusScreenCastSessionIface *iface)
   iface->handle_stop = handle_stop;
   iface->handle_record_monitor = handle_record_monitor;
   iface->handle_record_window = handle_record_window;
+  iface->handle_record_area = handle_record_area;
 }
 
 static void
@@ -381,6 +634,7 @@ meta_screen_cast_session_new (MetaScreenCast             *screen_cast,
   static unsigned int global_session_number = 0;
 
   session = g_object_new (META_TYPE_SCREEN_CAST_SESSION, NULL);
+  session->screen_cast = screen_cast;
   session->session_type = session_type;
   session->peer_name = g_strdup (peer_name);
   session->object_path =
@@ -423,12 +677,37 @@ meta_screen_cast_session_class_init (MetaScreenCastSessionClass *klass)
   object_class->finalize = meta_screen_cast_session_finalize;
 }
 
+static gboolean
+meta_screen_cast_session_is_recording (MetaScreenCastSession *session)
+{
+  GList *l;
+
+  if (!session->streams)
+    return FALSE;
+
+  for (l = session->streams; l; l = l->next)
+    {
+      MetaScreenCastStream *stream = l->data;
+      MetaScreenCastFlag flags;
+
+      flags = meta_screen_cast_stream_get_flags (stream);
+      if (!(flags & META_SCREEN_CAST_FLAG_IS_RECORDING))
+        return FALSE;
+    }
+
+  return TRUE;
+}
+
 static MetaScreenCastSessionHandle *
 meta_screen_cast_session_handle_new (MetaScreenCastSession *session)
 {
   MetaScreenCastSessionHandle *handle;
+  gboolean is_recording;
 
-  handle = g_object_new (META_TYPE_SCREEN_CAST_SESSION_HANDLE, NULL);
+  is_recording = meta_screen_cast_session_is_recording (session);
+  handle = g_object_new (META_TYPE_SCREEN_CAST_SESSION_HANDLE,
+                         "is-recording", is_recording,
+                         NULL);
   handle->session = session;
 
   return handle;

@@ -28,11 +28,14 @@
 #include "compositor/meta-plugin-manager.h"
 #include "core/boxes-private.h"
 #include "core/main-private.h"
+#include "tests/boxes-tests.h"
 #include "tests/meta-backend-test.h"
 #include "tests/monitor-config-migration-unit-tests.h"
 #include "tests/monitor-unit-tests.h"
 #include "tests/monitor-store-unit-tests.h"
+#include "tests/monitor-transform-tests.h"
 #include "tests/test-utils.h"
+#include "tests/wayland-unit-tests.h"
 #include "wayland/meta-wayland.h"
 
 typedef struct _MetaTestLaterOrderCallbackData
@@ -184,10 +187,10 @@ meta_test_util_later_schedule_from_later (void)
 }
 
 static void
-meta_test_adjecent_to (void)
+meta_test_adjacent_to (void)
 {
   MetaRectangle base = { .x = 10, .y = 10, .width = 10, .height = 10 };
-  MetaRectangle adjecent[] = {
+  MetaRectangle adjacent[] = {
     { .x = 20, .y = 10, .width = 10, .height = 10 },
     { .x = 0, .y = 10, .width = 10, .height = 10 },
     { .x = 0, .y = 1, .width = 10, .height = 10 },
@@ -195,7 +198,7 @@ meta_test_adjecent_to (void)
     { .x = 10, .y = 20, .width = 10, .height = 10 },
     { .x = 10, .y = 0, .width = 10, .height = 10 },
   };
-  MetaRectangle not_adjecent[] = {
+  MetaRectangle not_adjacent[] = {
     { .x = 0, .y = 0, .width = 10, .height = 10 },
     { .x = 20, .y = 20, .width = 10, .height = 10 },
     { .x = 21, .y = 10, .width = 10, .height = 10 },
@@ -206,11 +209,11 @@ meta_test_adjecent_to (void)
   };
   unsigned int i;
 
-  for (i = 0; i < G_N_ELEMENTS (adjecent); i++)
-    g_assert (meta_rectangle_is_adjecent_to (&base, &adjecent[i]));
+  for (i = 0; i < G_N_ELEMENTS (adjacent); i++)
+    g_assert (meta_rectangle_is_adjacent_to (&base, &adjacent[i]));
 
-  for (i = 0; i < G_N_ELEMENTS (not_adjecent); i++)
-    g_assert (!meta_rectangle_is_adjecent_to (&base, &not_adjecent[i]));
+  for (i = 0; i < G_N_ELEMENTS (not_adjacent); i++)
+    g_assert (!meta_rectangle_is_adjacent_to (&base, &not_adjacent[i]));
 }
 
 static gboolean
@@ -227,6 +230,7 @@ run_tests (gpointer data)
     META_EXPERIMENTAL_FEATURE_SCALE_MONITOR_FRAMEBUFFER);
 
   pre_run_monitor_tests ();
+  pre_run_wayland_tests ();
 
   ret = g_test_run ();
 
@@ -240,31 +244,30 @@ run_tests (gpointer data)
 static void
 init_tests (int argc, char **argv)
 {
-  g_test_init (&argc, &argv, NULL);
-  g_test_bug_base ("http://bugzilla.gnome.org/show_bug.cgi?id=");
-
   g_test_add_func ("/util/meta-later/order", meta_test_util_later_order);
   g_test_add_func ("/util/meta-later/schedule-from-later",
                    meta_test_util_later_schedule_from_later);
 
-  g_test_add_func ("/core/boxes/adjecent-to", meta_test_adjecent_to);
+  g_test_add_func ("/core/boxes/adjacent-to", meta_test_adjacent_to);
 
   init_monitor_store_tests ();
   init_monitor_config_migration_tests ();
   init_monitor_tests ();
+  init_boxes_tests ();
+  init_wayland_tests ();
+  init_monitor_transform_tests ();
 }
 
 int
 main (int argc, char *argv[])
 {
-  test_init (argc, argv);
+  test_init (&argc, &argv);
   init_tests (argc, argv);
 
-  meta_plugin_manager_load ("default");
+  meta_plugin_manager_load (test_get_plugin_name ());
 
   meta_override_compositor_configuration (META_COMPOSITOR_TYPE_WAYLAND,
                                           META_TYPE_BACKEND_TEST);
-  meta_wayland_override_display_name ("mutter-test-display");
 
   meta_init ();
   meta_register_with_session ();

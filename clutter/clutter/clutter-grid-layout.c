@@ -26,9 +26,7 @@
  *   Matthias Clasen
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #include <string.h>
 #include <math.h>
@@ -46,12 +44,12 @@
  * SECTION:clutter-grid-layout
  * @Short_description: A layout manager for a grid of actors
  * @Title: ClutterGridLayout
- * @See_also: #ClutterTableLayout, #ClutterBoxLayout
+ * @See_also: #ClutterBoxLayout
  *
  * #ClutterGridLayout is a layout manager which arranges its child widgets in
- * rows and columns. It is a very similar to #ClutterTableLayout and
- * #ClutterBoxLayout, but it consistently uses #ClutterActor's
- * alignment and expansion flags instead of custom child properties.
+ * rows and columns. It is a very similar to #ClutterBoxLayout, but it
+ * consistently uses #ClutterActor's alignment and expansion flags instead of
+ * custom child properties.
  *
  * Children are added using clutter_grid_layout_attach(). They can span
  * multiple rows or columns. It is also possible to add a child next to an
@@ -1393,8 +1391,7 @@ allocate_child (ClutterGridRequest *request,
 static void
 clutter_grid_layout_allocate (ClutterLayoutManager   *layout,
                               ClutterContainer       *container,
-                              const ClutterActorBox  *allocation,
-                              ClutterAllocationFlags  flags)
+                              const ClutterActorBox  *allocation)
 {
   ClutterGridLayout *self = CLUTTER_GRID_LAYOUT (layout);
   ClutterOrientation orientation;
@@ -1455,7 +1452,7 @@ clutter_grid_layout_allocate (ClutterLayoutManager   *layout,
       child_allocation.x2 = child_allocation.x1 + width;
       child_allocation.y2 = child_allocation.y1 + height;
 
-      clutter_actor_allocate (child, &child_allocation, flags);
+      clutter_actor_allocate (child, &child_allocation);
     }
 }
 

@@ -110,8 +110,6 @@ gboolean _clutter_script_parse_node        (ClutterScript *script,
 GType    _clutter_script_get_type_from_symbol (const gchar *symbol);
 GType    _clutter_script_get_type_from_class  (const gchar *name);
 
-gulong   _clutter_script_resolve_animation_mode (JsonNode *node);
-
 gboolean _clutter_script_enum_from_string  (GType          gtype,
                                             const gchar   *string,
                                             gint          *enum_value);
@@ -122,20 +120,18 @@ gboolean _clutter_script_flags_from_string (GType          gtype,
 gboolean _clutter_script_parse_knot        (ClutterScript   *script,
                                             JsonNode        *node,
                                             ClutterKnot     *knot);
-gboolean _clutter_script_parse_geometry    (ClutterScript   *script,
+gboolean _clutter_script_parse_rect        (ClutterScript   *script,
                                             JsonNode        *node,
-                                            ClutterGeometry *geometry);
+                                            graphene_rect_t *rect);
 gboolean _clutter_script_parse_color       (ClutterScript   *script,
                                             JsonNode        *node,
                                             ClutterColor    *color);
-GObject *_clutter_script_parse_alpha       (ClutterScript   *script,
-                                            JsonNode        *node);
-gboolean _clutter_script_parse_point       (ClutterScript   *script,
-                                            JsonNode        *node,
-                                            ClutterPoint    *point);
+gboolean _clutter_script_parse_point       (ClutterScript    *script,
+                                            JsonNode         *node,
+                                            graphene_point_t *point);
 gboolean _clutter_script_parse_size        (ClutterScript   *script,
                                             JsonNode        *node,
-                                            ClutterSize     *size);
+                                            graphene_size_t *size);
 
 gboolean _clutter_script_parse_translatable_string (ClutterScript *script,
                                                     JsonNode      *node,

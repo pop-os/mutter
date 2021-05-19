@@ -37,13 +37,12 @@
 
 #include <cogl/cogl-pipeline-layer-state.h>
 
-COGL_BEGIN_DECLS
+G_BEGIN_DECLS
 
 /**
  * SECTION:cogl-meta-texture
  * @short_description: Interface for high-level textures built from
- *                     low-level textures like #CoglTexture2D and
- *                     #CoglTexture3D.
+ *                     low-level textures like #CoglTexture2D.
  *
  * Cogl helps to make it easy to deal with high level textures such
  * as #CoglAtlasTexture<!-- -->s, #CoglSubTexture<!-- -->s,
@@ -52,12 +51,11 @@ COGL_BEGIN_DECLS
  *
  * A #CoglMetaTexture is a texture that might internally be
  * represented by one or more low-level #CoglTexture<!-- -->s
- * such as #CoglTexture2D or #CoglTexture3D. These low-level textures
- * are the only ones that a GPU really understands but because
- * applications often want more high-level texture abstractions
- * (such as storing multiple textures inside one larger "atlas"
- * texture) it's desirable to be able to deal with these
- * using a common interface.
+ * such as #CoglTexture2D. These low-level textures are the only ones
+ * that a GPU really understands but because applications often want
+ * more high-level texture abstractions (such as storing multiple
+ * textures inside one larger "atlas" texture) it's desirable to be
+ * able to deal with these using a common interface.
  *
  * For example the GPU is not able to automatically handle repeating a
  * texture that is part of a larger atlas texture but if you use
@@ -179,7 +177,7 @@ typedef void (*CoglMetaTextureCallback) (CoglTexture *sub_texture,
  * Since: 1.10
  * Stability: unstable
  */
-void
+COGL_EXPORT void
 cogl_meta_texture_foreach_in_region (CoglMetaTexture *meta_texture,
                                      float tx_1,
                                      float ty_1,
@@ -190,6 +188,6 @@ cogl_meta_texture_foreach_in_region (CoglMetaTexture *meta_texture,
                                      CoglMetaTextureCallback callback,
                                      void *user_data);
 
-COGL_END_DECLS
+G_END_DECLS
 
 #endif /* __COGL_META_TEXTURE_H__ */

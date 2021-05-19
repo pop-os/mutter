@@ -19,6 +19,25 @@
  * 02111-1307, USA.
  */
 
+/**
+ * SECTION:meta-logical-monitor
+ * @title: MetaLogicalMonitor
+ * @short_description: An abstraction for a monitor(set) and its configuration.
+ *
+ * A logical monitor is a group of one or more physical monitors that
+ * must behave and be treated as single one. This happens, for example,
+ * when 2 monitors are mirrored. Each physical monitor is represented
+ * by a #MetaMonitor.
+ *
+ * #MetaLogicalMonitor has a single viewport, with its owns transformations
+ * (such as scaling), that are applied to all the #MetaMonitor<!-- -->s that
+ * are grouped by it.
+ *
+ * #MetaLogicalMonitor provides an abstraction that makes it easy to handle
+ * the specifics of setting up different #MetaMonitor<!-- -->s. It then can
+ * be used more easily by #MetaRendererView.
+ */
+
 #include "config.h"
 
 #include "backends/meta-logical-monitor.h"
@@ -80,7 +99,7 @@ meta_logical_monitor_new (MetaMonitorManager       *monitor_manager,
   main_output = meta_monitor_get_main_output (first_monitor);
 
   logical_monitor->number = monitor_number;
-  logical_monitor->winsys_id = main_output->winsys_id;
+  logical_monitor->winsys_id = meta_output_get_id (main_output);
   logical_monitor->scale = logical_monitor_config->scale;
   logical_monitor->transform = logical_monitor_config->transform;
   logical_monitor->in_fullscreen = -1;
@@ -100,10 +119,14 @@ static MetaMonitorTransform
 derive_monitor_transform (MetaMonitor *monitor)
 {
   MetaOutput *main_output;
+  MetaCrtc *crtc;
+  const MetaCrtcConfig *crtc_config;
   MetaMonitorTransform transform;
 
   main_output = meta_monitor_get_main_output (monitor);
-  transform = meta_output_get_assigned_crtc (main_output)->transform;
+  crtc = meta_output_get_assigned_crtc (main_output);
+  crtc_config = meta_crtc_get_config (crtc);
+  transform = crtc_config->transform;
 
   return meta_monitor_crtc_to_logical_transform (monitor, transform);
 }
@@ -125,7 +148,7 @@ meta_logical_monitor_new_derived (MetaMonitorManager *monitor_manager,
 
   main_output = meta_monitor_get_main_output (monitor);
   logical_monitor->number = monitor_number;
-  logical_monitor->winsys_id = main_output->winsys_id;
+  logical_monitor->winsys_id = meta_output_get_id (main_output);
   logical_monitor->scale = scale;
   logical_monitor->transform = transform;
   logical_monitor->in_fullscreen = -1;
@@ -158,16 +181,15 @@ meta_logical_monitor_add_monitor (MetaLogicalMonitor *logical_monitor,
       for (l_output = outputs; l_output; l_output = l_output->next)
         {
           MetaOutput *output = l_output->data;
-          MetaCrtc *crtc;
 
-          is_presentation = is_presentation && output->is_presentation;
-          crtc = meta_output_get_assigned_crtc (output);
-          if (crtc)
-            crtc->logical_monitor = logical_monitor;
+          is_presentation = (is_presentation &&
+                             meta_output_is_presentation (output));
         }
     }
 
   logical_monitor->is_presentation = is_presentation;
+
+  meta_monitor_set_logical_monitor (monitor, logical_monitor);
 }
 
 gboolean
@@ -223,6 +245,8 @@ foreach_crtc (MetaMonitor         *monitor,
   ForeachCrtcData *data = user_data;
 
   data->func (data->logical_monitor,
+              monitor,
+              monitor_crtc_mode->output,
               meta_output_get_assigned_crtc (monitor_crtc_mode->output),
               data->user_data);
 

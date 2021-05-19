@@ -37,9 +37,6 @@
  * any object taking a reference on a #ClutterInterval instance should
  * also take ownership of the interval by using g_object_ref_sink().
  *
- * #ClutterInterval is used by #ClutterAnimation to define the
- * interval of values that an implicit animation should tween over.
- *
  * #ClutterInterval can be subclassed to override the validation
  * and value computation.
  *
@@ -1179,7 +1176,7 @@ clutter_interval_compute_value (ClutterInterval *interval,
  * g_object_set_property()
  *
  * Return value: (transfer none): a pointer to the computed value,
- *   or %NULL if the computation was not successfull
+ *   or %NULL if the computation was not successful
  *
  * Since: 1.4
  */

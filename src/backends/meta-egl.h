@@ -2,6 +2,7 @@
 
 /*
  * Copyright (C) 2016 Red Hat Inc.
+ * Copyright (C) 2019 DisplayLink (UK) Ltd.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -27,6 +28,7 @@
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#include <EGL/eglmesaext.h>
 #include <glib-object.h>
 
 #define META_EGL_ERROR meta_egl_error_quark ()
@@ -37,15 +39,15 @@ G_DECLARE_FINAL_TYPE (MetaEgl, meta_egl, META, EGL, GObject)
 GQuark meta_egl_error_quark (void);
 
 gboolean
-meta_extensions_string_has_extensions_valist (const char *extensions_str,
-                                              char     ***missing_extensions,
-                                              char       *first_extension,
-                                              va_list     var_args);
+meta_extensions_string_has_extensions_valist (const char   *extensions_str,
+                                              const char ***missing_extensions,
+                                              const char   *first_extension,
+                                              va_list       var_args);
 
-gboolean meta_egl_has_extensions (MetaEgl   *egl,
-                                  EGLDisplay display,
-                                  char    ***missing_extensions,
-                                  char      *first_extension,
+gboolean meta_egl_has_extensions (MetaEgl      *egl,
+                                  EGLDisplay    display,
+                                  const char ***missing_extensions,
+                                  const char   *first_extension,
                                   ...);
 
 gboolean meta_egl_initialize (MetaEgl   *egl,
@@ -99,6 +101,18 @@ gboolean meta_egl_destroy_image (MetaEgl    *egl,
                                  EGLDisplay  display,
                                  EGLImageKHR image,
                                  GError    **error);
+
+EGLImageKHR meta_egl_create_dmabuf_image (MetaEgl         *egl,
+                                          EGLDisplay       egl_display,
+                                          unsigned int     width,
+                                          unsigned int     height,
+                                          uint32_t         drm_format,
+                                          uint32_t         n_planes,
+                                          const int       *fds,
+                                          const uint32_t  *strides,
+                                          const uint32_t  *offsets,
+                                          const uint64_t  *modifiers,
+                                          GError         **error);
 
 EGLSurface meta_egl_create_window_surface (MetaEgl            *egl,
                                            EGLDisplay          display,
@@ -158,10 +172,10 @@ const char * meta_egl_query_device_string (MetaEgl     *egl,
                                            EGLint       name,
                                            GError     **error);
 
-gboolean meta_egl_egl_device_has_extensions (MetaEgl      *egl,
-                                             EGLDeviceEXT device,
-                                             char      ***missing_extensions,
-                                             char        *first_extension,
+gboolean meta_egl_egl_device_has_extensions (MetaEgl        *egl,
+                                             EGLDeviceEXT    device,
+                                             const char   ***missing_extensions,
+                                             const char     *first_extension,
                                              ...);
 
 gboolean meta_egl_get_output_layers (MetaEgl           *egl,

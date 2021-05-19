@@ -2,6 +2,7 @@
 
 /*
  * Copyright (C) 2013 Red Hat Inc.
+ * Copyright (C) 2018 DisplayLink (UK) Ltd.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -21,36 +22,46 @@
  * Author: Giovanni Campagna <gcampagn@redhat.com>
  */
 
+/**
+ * SECTION:meta-monitor-manager-kms
+ * @title: MetaMonitorManagerKms
+ * @short_description: A subclass of #MetaMonitorManager using Linux DRM
+ *
+ * #MetaMonitorManagerKms is a subclass of #MetaMonitorManager which
+ * implements its functionality "natively": it uses the appropriate
+ * functions of the Linux DRM kernel module and using a udev client.
+ *
+ * See also #MetaMonitorManagerXrandr for an implementation using XRandR.
+ */
+
 #include "config.h"
 
-#include "meta-monitor-manager-kms.h"
-#include "meta-monitor-config-manager.h"
-#include "meta-backend-native.h"
-#include "meta-crtc.h"
-#include "meta-launcher.h"
-#include "meta-output.h"
-#include "meta-backend-private.h"
-#include "meta-renderer-native.h"
-#include "meta-crtc-kms.h"
-#include "meta-gpu-kms.h"
-#include "meta-output-kms.h"
-
-#include <string.h>
-#include <stdlib.h>
-#include <clutter/clutter.h>
+#include "backends/native/meta-monitor-manager-kms.h"
 
 #include <drm.h>
 #include <errno.h>
+#include <gudev/gudev.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
-#include <meta/main.h>
-#include <meta/meta-x11-errors.h>
-
-#include <gudev/gudev.h>
-
-#define DRM_CARD_UDEV_DEVICE_TYPE "drm_minor"
+#include "backends/meta-backend-private.h"
+#include "backends/meta-crtc.h"
+#include "backends/meta-monitor-config-manager.h"
+#include "backends/meta-output.h"
+#include "backends/native/meta-backend-native.h"
+#include "backends/native/meta-crtc-kms.h"
+#include "backends/native/meta-gpu-kms.h"
+#include "backends/native/meta-kms-update.h"
+#include "backends/native/meta-kms.h"
+#include "backends/native/meta-launcher.h"
+#include "backends/native/meta-output-kms.h"
+#include "backends/native/meta-renderer-native.h"
+#include "clutter/clutter.h"
+#include "meta/main.h"
+#include "meta/meta-x11-errors.h"
 
 typedef struct
 {
@@ -64,10 +75,7 @@ struct _MetaMonitorManagerKms
 {
   MetaMonitorManager parent_instance;
 
-  MetaGpuKms *primary_gpu;
-
-  GUdevClient *udev;
-  guint uevent_handler_id;
+  gulong kms_resources_changed_handler_id;
 };
 
 struct _MetaMonitorManagerKmsClass
@@ -87,15 +95,35 @@ static GBytes *
 meta_monitor_manager_kms_read_edid (MetaMonitorManager *manager,
                                     MetaOutput         *output)
 {
-  return meta_output_kms_read_edid (output);
+  return meta_output_kms_read_edid (META_OUTPUT_KMS (output));
+}
+
+static void
+meta_monitor_manager_kms_read_current_state (MetaMonitorManager *manager)
+{
+  MetaMonitorManagerClass *parent_class =
+    META_MONITOR_MANAGER_CLASS (meta_monitor_manager_kms_parent_class);
+  MetaPowerSave power_save_mode;
+
+  power_save_mode = meta_monitor_manager_get_power_save_mode (manager);
+  if (power_save_mode != META_POWER_SAVE_ON)
+    meta_monitor_manager_power_save_mode_changed (manager,
+                                                  META_POWER_SAVE_ON);
+
+  parent_class->read_current_state (manager);
 }
 
 static void
 meta_monitor_manager_kms_set_power_save_mode (MetaMonitorManager *manager,
                                               MetaPowerSave       mode)
 {
+  MetaBackend *backend = meta_monitor_manager_get_backend (manager);
+  MetaBackendNative *backend_native = META_BACKEND_NATIVE (backend);
+  MetaKms *kms = meta_backend_native_get_kms (backend_native);
+  MetaKmsUpdate *kms_update;
   uint64_t state;
   GList *l;
+  g_autoptr (MetaKmsFeedback) kms_feedback = NULL;
 
   switch (mode) {
   case META_POWER_SAVE_ON:
@@ -114,11 +142,19 @@ meta_monitor_manager_kms_set_power_save_mode (MetaMonitorManager *manager,
     return;
   }
 
-  for (l = manager->gpus; l; l = l->next)
+  kms_update = meta_kms_ensure_pending_update (kms);
+  for (l = meta_backend_get_gpus (backend); l; l = l->next)
     {
       MetaGpuKms *gpu_kms = l->data;
 
-      meta_gpu_kms_set_power_save_mode (gpu_kms, state);
+      meta_gpu_kms_set_power_save_mode (gpu_kms, state, kms_update);
+    }
+
+  kms_feedback = meta_kms_post_pending_update_sync (kms);
+  if (meta_kms_feedback_get_result (kms_feedback) != META_KMS_FEEDBACK_PASSED)
+    {
+      g_warning ("Failed to set DPMS: %s",
+                 meta_kms_feedback_get_error (kms_feedback)->message);
     }
 }
 
@@ -133,126 +169,76 @@ meta_monitor_manager_kms_ensure_initial_config (MetaMonitorManager *manager)
 }
 
 static void
-apply_crtc_assignments (MetaMonitorManager *manager,
-                        MetaCrtcInfo       **crtcs,
-                        unsigned int         n_crtcs,
-                        MetaOutputInfo     **outputs,
-                        unsigned int         n_outputs)
+apply_crtc_assignments (MetaMonitorManager    *manager,
+                        MetaCrtcAssignment   **crtcs,
+                        unsigned int           n_crtcs,
+                        MetaOutputAssignment **outputs,
+                        unsigned int           n_outputs)
 {
+  MetaBackend *backend = meta_monitor_manager_get_backend (manager);
+  g_autoptr (GList) to_configure_outputs = NULL;
+  g_autoptr (GList) to_configure_crtcs = NULL;
   unsigned i;
+  GList *gpus;
   GList *l;
+
+  gpus = meta_backend_get_gpus (backend);
+  for (l = gpus; l; l = l->next)
+    {
+      MetaGpu *gpu = l->data;
+      GList *crtcs;
+      GList *outputs;
+
+      outputs = g_list_copy (meta_gpu_get_outputs (gpu));
+      to_configure_outputs = g_list_concat (to_configure_outputs, outputs);
+
+      crtcs = g_list_copy (meta_gpu_get_crtcs (gpu));
+      to_configure_crtcs = g_list_concat (to_configure_crtcs, crtcs);
+    }
 
   for (i = 0; i < n_crtcs; i++)
     {
-      MetaCrtcInfo *crtc_info = crtcs[i];
-      MetaCrtc *crtc = crtc_info->crtc;
+      MetaCrtcAssignment *crtc_assignment = crtcs[i];
+      MetaCrtc *crtc = crtc_assignment->crtc;
 
-      crtc->is_dirty = TRUE;
+      to_configure_crtcs = g_list_remove (to_configure_crtcs, crtc);
 
-      if (crtc_info->mode == NULL)
+      if (crtc_assignment->mode == NULL)
         {
-          crtc->rect.x = 0;
-          crtc->rect.y = 0;
-          crtc->rect.width = 0;
-          crtc->rect.height = 0;
-          crtc->current_mode = NULL;
+          meta_crtc_unset_config (crtc);
         }
       else
         {
-          MetaCrtcMode *mode;
           unsigned int j;
-          int width, height;
 
-          mode = crtc_info->mode;
+          meta_crtc_set_config (crtc,
+                                &crtc_assignment->layout,
+                                crtc_assignment->mode,
+                                crtc_assignment->transform);
 
-          if (meta_monitor_transform_is_rotated (crtc_info->transform))
+          for (j = 0; j < crtc_assignment->outputs->len; j++)
             {
-              width = mode->height;
-              height = mode->width;
-            }
-          else
-            {
-              width = mode->width;
-              height = mode->height;
-            }
+              MetaOutput *output = g_ptr_array_index (crtc_assignment->outputs,
+                                                      j);
+              MetaOutputAssignment *output_assignment;
 
-          crtc->rect.x = crtc_info->x;
-          crtc->rect.y = crtc_info->y;
-          crtc->rect.width = width;
-          crtc->rect.height = height;
-          crtc->current_mode = mode;
-          crtc->transform = crtc_info->transform;
+              to_configure_outputs = g_list_remove (to_configure_outputs,
+                                                    output);
 
-          for (j = 0; j < crtc_info->outputs->len; j++)
-            {
-              MetaOutput *output = g_ptr_array_index (crtc_info->outputs, j);
-
-              output->is_dirty = TRUE;
-              meta_output_assign_crtc (output, crtc);
+              output_assignment = meta_find_output_assignment (outputs,
+                                                               n_outputs,
+                                                               output);
+              meta_output_assign_crtc (output, crtc, output_assignment);
             }
         }
-
-      meta_crtc_kms_apply_transform (crtc);
-    }
-  /* Disable CRTCs not mentioned in the list (they have is_dirty == FALSE,
-     because they weren't seen in the first loop) */
-  for (l = manager->gpus; l; l = l->next)
-    {
-      MetaGpu *gpu = l->data;
-      GList *k;
-
-      for (k = meta_gpu_get_crtcs (gpu); k; k = k->next)
-        {
-          MetaCrtc *crtc = k->data;
-
-          crtc->logical_monitor = NULL;
-
-          if (crtc->is_dirty)
-            {
-              crtc->is_dirty = FALSE;
-              continue;
-            }
-
-          crtc->rect.x = 0;
-          crtc->rect.y = 0;
-          crtc->rect.width = 0;
-          crtc->rect.height = 0;
-          crtc->current_mode = NULL;
-        }
     }
 
-  for (i = 0; i < n_outputs; i++)
-    {
-      MetaOutputInfo *output_info = outputs[i];
-      MetaOutput *output = output_info->output;
-
-      output->is_primary = output_info->is_primary;
-      output->is_presentation = output_info->is_presentation;
-      output->is_underscanning = output_info->is_underscanning;
-
-      meta_output_kms_set_underscan (output);
-    }
-
-  /* Disable outputs not mentioned in the list */
-  for (l = manager->gpus; l; l = l->next)
-    {
-      MetaGpu *gpu = l->data;
-      GList *k;
-
-      for (k = meta_gpu_get_outputs (gpu); k; k = k->next)
-        {
-          MetaOutput *output = k->data;
-
-          if (output->is_dirty)
-            {
-              output->is_dirty = FALSE;
-              continue;
-            }
-
-          meta_output_unassign_crtc (output);
-          output->is_primary = FALSE;
-        }
-    }
+  g_list_foreach (to_configure_crtcs,
+                  (GFunc) meta_crtc_unset_config,
+                  NULL);
+  g_list_foreach (to_configure_outputs,
+                  (GFunc) meta_output_unassign_crtc,
+                  NULL);
 }
 
 static void
@@ -290,11 +276,19 @@ meta_monitor_manager_kms_apply_monitors_config (MetaMonitorManager      *manager
                                                 MetaMonitorsConfigMethod method,
                                                 GError                 **error)
 {
-  GPtrArray *crtc_infos;
-  GPtrArray *output_infos;
+  GPtrArray *crtc_assignments;
+  GPtrArray *output_assignments;
 
   if (!config)
     {
+      if (!manager->in_init)
+        {
+          MetaBackend *backend = meta_get_backend ();
+          MetaRenderer *renderer = meta_backend_get_renderer (backend);
+
+          meta_renderer_native_reset_modes (META_RENDERER_NATIVE (renderer));
+        }
+
       manager->screen_width = META_MONITOR_MANAGER_MIN_SCREEN_WIDTH;
       manager->screen_height = META_MONITOR_MANAGER_MIN_SCREEN_HEIGHT;
       meta_monitor_manager_rebuild (manager, NULL);
@@ -302,25 +296,26 @@ meta_monitor_manager_kms_apply_monitors_config (MetaMonitorManager      *manager
     }
 
   if (!meta_monitor_config_manager_assign (manager, config,
-                                           &crtc_infos, &output_infos,
+                                           &crtc_assignments,
+                                           &output_assignments,
                                            error))
     return FALSE;
 
   if (method == META_MONITORS_CONFIG_METHOD_VERIFY)
     {
-      g_ptr_array_free (crtc_infos, TRUE);
-      g_ptr_array_free (output_infos, TRUE);
+      g_ptr_array_free (crtc_assignments, TRUE);
+      g_ptr_array_free (output_assignments, TRUE);
       return TRUE;
     }
 
   apply_crtc_assignments (manager,
-                          (MetaCrtcInfo **) crtc_infos->pdata,
-                          crtc_infos->len,
-                          (MetaOutputInfo **) output_infos->pdata,
-                          output_infos->len);
+                          (MetaCrtcAssignment **) crtc_assignments->pdata,
+                          crtc_assignments->len,
+                          (MetaOutputAssignment **) output_assignments->pdata,
+                          output_assignments->len);
 
-  g_ptr_array_free (crtc_infos, TRUE);
-  g_ptr_array_free (output_infos, TRUE);
+  g_ptr_array_free (crtc_assignments, TRUE);
+  g_ptr_array_free (output_assignments, TRUE);
 
   update_screen_size (manager, config);
   meta_monitor_manager_rebuild (manager, config);
@@ -336,20 +331,78 @@ meta_monitor_manager_kms_get_crtc_gamma (MetaMonitorManager  *manager,
                                          unsigned short     **green,
                                          unsigned short     **blue)
 {
-  MetaGpu *gpu = meta_crtc_get_gpu (crtc);
-  int kms_fd = meta_gpu_kms_get_fd (META_GPU_KMS (gpu));
-  drmModeCrtc *kms_crtc;
+  MetaKmsCrtc *kms_crtc;
+  const MetaKmsCrtcState *crtc_state;
 
-  kms_crtc = drmModeGetCrtc (kms_fd, crtc->crtc_id);
+  kms_crtc = meta_crtc_kms_get_kms_crtc (META_CRTC_KMS (crtc));
+  crtc_state = meta_kms_crtc_get_current_state (kms_crtc);
 
-  *size = kms_crtc->gamma_size;
-  *red = g_new (unsigned short, *size);
-  *green = g_new (unsigned short, *size);
-  *blue = g_new (unsigned short, *size);
+  *size = crtc_state->gamma.size;
+  *red = g_memdup (crtc_state->gamma.red, *size * sizeof **red);
+  *green = g_memdup (crtc_state->gamma.green, *size * sizeof **green);
+  *blue = g_memdup (crtc_state->gamma.blue, *size * sizeof **blue);
+}
 
-  drmModeCrtcGetGamma (kms_fd, crtc->crtc_id, *size, *red, *green, *blue);
+static char *
+generate_gamma_ramp_string (size_t          size,
+                            unsigned short *red,
+                            unsigned short *green,
+                            unsigned short *blue)
+{
+  GString *string;
+  int color;
 
-  drmModeFreeCrtc (kms_crtc);
+  string = g_string_new ("[");
+  for (color = 0; color < 3; color++)
+    {
+      unsigned short **color_ptr;
+      char color_char;
+      size_t i;
+
+      switch (color)
+        {
+        case 0:
+          color_ptr = &red;
+          color_char = 'r';
+          break;
+        case 1:
+          color_ptr = &green;
+          color_char = 'g';
+          break;
+        case 2:
+          color_ptr = &blue;
+          color_char = 'b';
+          break;
+        }
+
+      g_string_append_printf (string, " %c: ", color_char);
+      for (i = 0; i < MIN (4, size); i++)
+        {
+          int j;
+
+          if (size > 4)
+            {
+              if (i == 2)
+                g_string_append (string, ",...");
+
+              if (i >= 2)
+                j = i + (size - 4);
+              else
+                j = i;
+            }
+          else
+            {
+              j = i;
+            }
+          g_string_append_printf (string, "%s%hu",
+                                  j == 0 ? "" : ",",
+                                  (*color_ptr)[i]);
+        }
+    }
+
+  g_string_append (string, " ]");
+
+  return g_string_free (string, FALSE);
 }
 
 static void
@@ -360,10 +413,30 @@ meta_monitor_manager_kms_set_crtc_gamma (MetaMonitorManager *manager,
                                          unsigned short     *green,
                                          unsigned short     *blue)
 {
-  MetaGpu *gpu = meta_crtc_get_gpu (crtc);
-  int kms_fd = meta_gpu_kms_get_fd (META_GPU_KMS (gpu));
+  MetaBackend *backend = meta_monitor_manager_get_backend (manager);
+  MetaBackendNative *backend_native = META_BACKEND_NATIVE (backend);
+  MetaKms *kms = meta_backend_native_get_kms (backend_native);
+  MetaKmsCrtc *kms_crtc;
+  g_autofree char *gamma_ramp_string = NULL;
+  MetaKmsUpdate *kms_update;
+  g_autoptr (MetaKmsFeedback) kms_feedback = NULL;
 
-  drmModeCrtcSetGamma (kms_fd, crtc->crtc_id, size, red, green, blue);
+  gamma_ramp_string = generate_gamma_ramp_string (size, red, green, blue);
+  g_debug ("Setting CRTC (%" G_GUINT64_FORMAT ") gamma to %s",
+           meta_crtc_get_id (crtc), gamma_ramp_string);
+
+  kms_update = meta_kms_ensure_pending_update (kms);
+
+  kms_crtc = meta_crtc_kms_get_kms_crtc (META_CRTC_KMS (crtc));
+  meta_kms_crtc_set_gamma (kms_crtc, kms_update,
+                           size, red, green, blue);
+
+  kms_feedback = meta_kms_post_pending_update_sync (kms);
+  if (meta_kms_feedback_get_result (kms_feedback) != META_KMS_FEEDBACK_PASSED)
+    {
+      g_warning ("Failed to set CRTC gamma: %s",
+                 meta_kms_feedback_get_error (kms_feedback)->message);
+    }
 }
 
 static void
@@ -374,50 +447,47 @@ handle_hotplug_event (MetaMonitorManager *manager)
 }
 
 static void
-on_uevent (GUdevClient *client,
-           const char  *action,
-           GUdevDevice *device,
-           gpointer     user_data)
+on_kms_resources_changed (MetaKms            *kms,
+                          MetaMonitorManager *manager)
 {
-  MetaMonitorManagerKms *manager_kms = META_MONITOR_MANAGER_KMS (user_data);
-  MetaMonitorManager *manager = META_MONITOR_MANAGER (manager_kms);
-
-  if (!g_udev_device_get_property_as_boolean (device, "HOTPLUG"))
-    return;
-
   handle_hotplug_event (manager);
 }
 
 static void
-meta_monitor_manager_kms_connect_uevent_handler (MetaMonitorManagerKms *manager_kms)
+meta_monitor_manager_kms_connect_hotplug_handler (MetaMonitorManagerKms *manager_kms)
 {
-  manager_kms->uevent_handler_id = g_signal_connect (manager_kms->udev,
-                                                     "uevent",
-                                                     G_CALLBACK (on_uevent),
-                                                     manager_kms);
+  MetaMonitorManager *manager = META_MONITOR_MANAGER (manager_kms);
+  MetaBackend *backend = meta_monitor_manager_get_backend (manager);
+  MetaBackendNative *backend_native = META_BACKEND_NATIVE (backend);
+  MetaKms *kms = meta_backend_native_get_kms (backend_native);
+
+  manager_kms->kms_resources_changed_handler_id =
+    g_signal_connect (kms, "resources-changed",
+                      G_CALLBACK (on_kms_resources_changed), manager);
 }
 
 static void
-meta_monitor_manager_kms_disconnect_uevent_handler (MetaMonitorManagerKms *manager_kms)
+meta_monitor_manager_kms_disconnect_hotplug_handler (MetaMonitorManagerKms *manager_kms)
 {
-  g_signal_handler_disconnect (manager_kms->udev,
-                               manager_kms->uevent_handler_id);
-  manager_kms->uevent_handler_id = 0;
+  MetaMonitorManager *manager = META_MONITOR_MANAGER (manager_kms);
+  MetaBackend *backend = meta_monitor_manager_get_backend (manager);
+  MetaBackendNative *backend_native = META_BACKEND_NATIVE (backend);
+  MetaKms *kms = meta_backend_native_get_kms (backend_native);
+
+  g_clear_signal_handler (&manager_kms->kms_resources_changed_handler_id, kms);
 }
 
 void
 meta_monitor_manager_kms_pause (MetaMonitorManagerKms *manager_kms)
 {
-  meta_monitor_manager_kms_disconnect_uevent_handler (manager_kms);
+  meta_monitor_manager_kms_disconnect_hotplug_handler (manager_kms);
 }
 
 void
 meta_monitor_manager_kms_resume (MetaMonitorManagerKms *manager_kms)
 {
-  MetaMonitorManager *manager = META_MONITOR_MANAGER (manager_kms);
-
-  meta_monitor_manager_kms_connect_uevent_handler (manager_kms);
-  handle_hotplug_event (manager);
+  meta_monitor_manager_kms_connect_hotplug_handler (manager_kms);
+  handle_hotplug_event (META_MONITOR_MANAGER (manager_kms));
 }
 
 static gboolean
@@ -425,7 +495,7 @@ meta_monitor_manager_kms_is_transform_handled (MetaMonitorManager  *manager,
                                                MetaCrtc            *crtc,
                                                MetaMonitorTransform transform)
 {
-  return meta_crtc_kms_is_transform_handled (crtc, transform);
+  return meta_crtc_kms_is_transform_handled (META_CRTC_KMS (crtc), transform);
 }
 
 static float
@@ -437,11 +507,11 @@ meta_monitor_manager_kms_calculate_monitor_mode_scale (MetaMonitorManager *manag
 }
 
 static float *
-meta_monitor_manager_kms_calculate_supported_scales (MetaMonitorManager          *manager,
-                                                     MetaLogicalMonitorLayoutMode layout_mode,
-                                                     MetaMonitor                 *monitor,
-                                                     MetaMonitorMode             *monitor_mode,
-                                                     int                         *n_supported_scales)
+meta_monitor_manager_kms_calculate_supported_scales (MetaMonitorManager           *manager,
+                                                     MetaLogicalMonitorLayoutMode  layout_mode,
+                                                     MetaMonitor                  *monitor,
+                                                     MetaMonitorMode              *monitor_mode,
+                                                     int                          *n_supported_scales)
 {
   MetaMonitorScalesConstraint constraints =
     META_MONITOR_SCALES_CONSTRAINT_NONE;
@@ -465,8 +535,6 @@ meta_monitor_manager_kms_get_capabilities (MetaMonitorManager *manager)
 {
   MetaBackend *backend = meta_monitor_manager_get_backend (manager);
   MetaSettings *settings = meta_backend_get_settings (backend);
-  MetaRenderer *renderer = meta_backend_get_renderer (backend);
-  MetaRendererNative *renderer_native = META_RENDERER_NATIVE (renderer);
   MetaMonitorManagerCapability capabilities =
     META_MONITOR_MANAGER_CAPABILITY_NONE;
 
@@ -474,9 +542,6 @@ meta_monitor_manager_kms_get_capabilities (MetaMonitorManager *manager)
         settings,
         META_EXPERIMENTAL_FEATURE_SCALE_MONITOR_FRAMEBUFFER))
     capabilities |= META_MONITOR_MANAGER_CAPABILITY_LAYOUT_MODE;
-
-  if (meta_renderer_native_supports_mirroring (renderer_native))
-    capabilities |= META_MONITOR_MANAGER_CAPABILITY_MIRRORING;
 
   return capabilities;
 }
@@ -486,15 +551,7 @@ meta_monitor_manager_kms_get_max_screen_size (MetaMonitorManager *manager,
                                               int                *max_width,
                                               int                *max_height)
 {
-  MetaMonitorManagerKms *manager_kms = META_MONITOR_MANAGER_KMS (manager);
-
-  if (meta_is_stage_views_enabled ())
-    return FALSE;
-
-  meta_gpu_kms_get_max_buffer_size (manager_kms->primary_gpu,
-                                    max_width, max_height);
-
-  return TRUE;
+  return FALSE;
 }
 
 static MetaLogicalMonitorLayoutMode
@@ -502,9 +559,6 @@ meta_monitor_manager_kms_get_default_layout_mode (MetaMonitorManager *manager)
 {
   MetaBackend *backend = meta_monitor_manager_get_backend (manager);
   MetaSettings *settings = meta_backend_get_settings (backend);
-
-  if (!meta_is_stage_views_enabled ())
-    return META_LOGICAL_MONITOR_LAYOUT_MODE_PHYSICAL;
 
   if (meta_settings_is_experimental_feature_enabled (
         settings,
@@ -514,128 +568,6 @@ meta_monitor_manager_kms_get_default_layout_mode (MetaMonitorManager *manager)
     return META_LOGICAL_MONITOR_LAYOUT_MODE_PHYSICAL;
 }
 
-MetaGpuKms *
-meta_monitor_manager_kms_get_primary_gpu (MetaMonitorManagerKms *manager_kms)
-{
-  return manager_kms->primary_gpu;
-}
-
-typedef enum
-{
-  GPU_TYPE_PRIMARY,
-  GPU_TYPE_SECONDARY
-} GpuType;
-
-static GList *
-get_gpu_paths (MetaMonitorManagerKms *manager_kms,
-               GpuType                gpu_type,
-               const char            *filtered_gpu_path)
-{
-  MetaMonitorManager *manager = META_MONITOR_MANAGER (manager_kms);
-  MetaBackend *backend = meta_monitor_manager_get_backend (manager);
-  MetaBackendNative *backend_native = META_BACKEND_NATIVE (backend);
-  MetaLauncher *launcher = meta_backend_native_get_launcher (backend_native);
-  g_autoptr (GUdevEnumerator) enumerator = NULL;
-  const char *seat_id;
-  GList *devices;
-  GList *l;
-  GList *gpu_paths = NULL;
-
-  enumerator = g_udev_enumerator_new (manager_kms->udev);
-
-  g_udev_enumerator_add_match_name (enumerator, "card*");
-  g_udev_enumerator_add_match_tag (enumerator, "seat");
-
-  /*
-   * We need to explicitly match the subsystem for now.
-   * https://bugzilla.gnome.org/show_bug.cgi?id=773224
-   */
-  g_udev_enumerator_add_match_subsystem (enumerator, "drm");
-
-  devices = g_udev_enumerator_execute (enumerator);
-  if (!devices)
-    return NULL;
-
-  seat_id = meta_launcher_get_seat_id (launcher);
-
-  for (l = devices; l; l = l->next)
-    {
-      GUdevDevice *dev = l->data;
-      g_autoptr (GUdevDevice) platform_device = NULL;
-      g_autoptr (GUdevDevice) pci_device = NULL;
-      const char *device_path;
-      const char *device_type;
-      const char *device_seat;
-
-      /* Filter out devices that are not character device, like card0-VGA-1. */
-      if (g_udev_device_get_device_type (dev) != G_UDEV_DEVICE_TYPE_CHAR)
-        continue;
-
-      device_type = g_udev_device_get_property (dev, "DEVTYPE");
-      if (g_strcmp0 (device_type, DRM_CARD_UDEV_DEVICE_TYPE) != 0)
-        continue;
-
-      device_path = g_udev_device_get_device_file (dev);
-      if (g_strcmp0 (device_path, filtered_gpu_path) == 0)
-        continue;
-
-      device_seat = g_udev_device_get_property (dev, "ID_SEAT");
-      if (!device_seat)
-        {
-          /* When ID_SEAT is not set, it means seat0. */
-          device_seat = "seat0";
-        }
-      else if (g_strcmp0 (device_seat, "seat0") != 0 &&
-               gpu_type == GPU_TYPE_PRIMARY)
-        {
-          /*
-           * If the device has been explicitly assigned other seat
-           * than seat0, it is probably the right device to use.
-           */
-          gpu_paths = g_list_append (gpu_paths, g_strdup (device_path));
-          break;
-        }
-
-      /* Skip devices that do not belong to our seat. */
-      if (g_strcmp0 (seat_id, device_seat))
-        continue;
-
-      platform_device = g_udev_device_get_parent_with_subsystem (dev,
-                                                                 "platform",
-                                                                 NULL);
-      if (platform_device != NULL && gpu_type == GPU_TYPE_PRIMARY)
-        {
-          gpu_paths = g_list_append (gpu_paths, g_strdup (device_path));
-          break;
-        }
-
-      pci_device = g_udev_device_get_parent_with_subsystem (dev, "pci", NULL);
-      if (pci_device != NULL)
-        {
-          if (gpu_type == GPU_TYPE_PRIMARY)
-            {
-              int boot_vga;
-
-              boot_vga = g_udev_device_get_sysfs_attr_as_int (pci_device,
-                                                              "boot_vga");
-              if (boot_vga == 1)
-                {
-                  gpu_paths = g_list_append (gpu_paths, g_strdup (device_path));
-                  break;
-                }
-            }
-          else
-            {
-              gpu_paths = g_list_append (gpu_paths, g_strdup (device_path));
-            }
-        }
-    }
-
-  g_list_free_full (devices, g_object_unref);
-
-  return gpu_paths;
-}
-
 static gboolean
 meta_monitor_manager_kms_initable_init (GInitable    *initable,
                                         GCancellable *cancellable,
@@ -643,58 +575,14 @@ meta_monitor_manager_kms_initable_init (GInitable    *initable,
 {
   MetaMonitorManagerKms *manager_kms = META_MONITOR_MANAGER_KMS (initable);
   MetaMonitorManager *manager = META_MONITOR_MANAGER (manager_kms);
-  const char *subsystems[2] = { "drm", NULL };
-  GList *gpu_paths;
-  g_autofree char *primary_gpu_path = NULL;
-  GList *l;
+  MetaBackend *backend = meta_monitor_manager_get_backend (manager);
   gboolean can_have_outputs;
+  GList *l;
 
-  manager_kms->udev = g_udev_client_new (subsystems);
-
-  gpu_paths = get_gpu_paths (manager_kms, GPU_TYPE_PRIMARY, NULL);
-  if (g_list_length (gpu_paths) != 1)
-    {
-      g_list_free_full (gpu_paths, g_free);
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
-                   "Could not find a primary drm kms device");
-      return FALSE;
-    }
-
-  primary_gpu_path = g_strdup (gpu_paths->data);
-  manager_kms->primary_gpu = meta_gpu_kms_new (manager_kms,
-                                               primary_gpu_path,
-                                               error);
-  g_list_free_full (gpu_paths, g_free);
-  if (!manager_kms->primary_gpu)
-    return FALSE;
-
-  meta_monitor_manager_kms_connect_uevent_handler (manager_kms);
-
-  meta_monitor_manager_add_gpu (META_MONITOR_MANAGER (manager_kms),
-                                META_GPU (manager_kms->primary_gpu));
-
-  gpu_paths = get_gpu_paths (manager_kms, GPU_TYPE_SECONDARY, primary_gpu_path);
-  for (l = gpu_paths; l; l = l->next)
-    {
-      g_autoptr (GError) secondary_error = NULL;
-      char *gpu_path = l->data;
-      MetaGpuKms *gpu_kms;
-
-      gpu_kms = meta_gpu_kms_new (manager_kms, gpu_path, &secondary_error);
-      if (!gpu_kms)
-        {
-          g_warning ("Failed to open secondary gpu '%s': %s",
-                     gpu_path, secondary_error->message);
-          continue;
-        }
-
-      meta_monitor_manager_add_gpu (META_MONITOR_MANAGER (manager_kms),
-                                    META_GPU (gpu_kms));
-    }
-  g_list_free_full (gpu_paths, g_free);
+  meta_monitor_manager_kms_connect_hotplug_handler (manager_kms);
 
   can_have_outputs = FALSE;
-  for (l = meta_monitor_manager_get_gpus (manager); l; l = l->next)
+  for (l = meta_backend_get_gpus (backend); l; l = l->next)
     {
       MetaGpuKms *gpu_kms = l->data;
 
@@ -721,16 +609,6 @@ initable_iface_init (GInitableIface *initable_iface)
 }
 
 static void
-meta_monitor_manager_kms_dispose (GObject *object)
-{
-  MetaMonitorManagerKms *manager_kms = META_MONITOR_MANAGER_KMS (object);
-
-  g_clear_object (&manager_kms->udev);
-
-  G_OBJECT_CLASS (meta_monitor_manager_kms_parent_class)->dispose (object);
-}
-
-static void
 meta_monitor_manager_kms_init (MetaMonitorManagerKms *manager_kms)
 {
 }
@@ -739,11 +617,9 @@ static void
 meta_monitor_manager_kms_class_init (MetaMonitorManagerKmsClass *klass)
 {
   MetaMonitorManagerClass *manager_class = META_MONITOR_MANAGER_CLASS (klass);
-  GObjectClass *object_class = G_OBJECT_CLASS (klass);
-
-  object_class->dispose = meta_monitor_manager_kms_dispose;
 
   manager_class->read_edid = meta_monitor_manager_kms_read_edid;
+  manager_class->read_current_state = meta_monitor_manager_kms_read_current_state;
   manager_class->ensure_initial_config = meta_monitor_manager_kms_ensure_initial_config;
   manager_class->apply_monitors_config = meta_monitor_manager_kms_apply_monitors_config;
   manager_class->set_power_save_mode = meta_monitor_manager_kms_set_power_save_mode;

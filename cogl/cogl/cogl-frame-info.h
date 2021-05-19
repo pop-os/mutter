@@ -45,6 +45,11 @@
 
 G_BEGIN_DECLS
 
+/**
+ * CoglFrameInfo:
+ *
+ * Frame information.
+ */
 typedef struct _CoglFrameInfo CoglFrameInfo;
 #define COGL_FRAME_INFO(X) ((CoglFrameInfo *)(X))
 
@@ -53,6 +58,7 @@ typedef struct _CoglFrameInfo CoglFrameInfo;
  *
  * Returns: a #GType that can be used with the GLib type system.
  */
+COGL_EXPORT
 GType cogl_frame_info_get_gtype (void);
 
 /**
@@ -66,7 +72,7 @@ GType cogl_frame_info_get_gtype (void);
  * Since: 2.0
  * Stability: unstable
  */
-CoglBool
+COGL_EXPORT gboolean
 cogl_is_frame_info (void *object);
 
 /**
@@ -80,6 +86,7 @@ cogl_is_frame_info (void *object);
  * Since: 1.14
  * Stability: unstable
  */
+COGL_EXPORT
 int64_t cogl_frame_info_get_frame_counter (CoglFrameInfo *info);
 
 /**
@@ -101,6 +108,7 @@ int64_t cogl_frame_info_get_frame_counter (CoglFrameInfo *info);
  * Since: 1.14
  * Stability: unstable
  */
+COGL_EXPORT
 int64_t cogl_frame_info_get_presentation_time (CoglFrameInfo *info);
 
 /**
@@ -120,25 +128,13 @@ int64_t cogl_frame_info_get_presentation_time (CoglFrameInfo *info);
  * Since: 1.14
  * Stability: unstable
  */
+COGL_EXPORT
 float cogl_frame_info_get_refresh_rate (CoglFrameInfo *info);
-
-/**
- * cogl_frame_info_get_output:
- * @info: a #CoglFrameInfo object
- *
- * Gets the #CoglOutput that the swapped frame was presented to.
- *
- * Return value: (transfer none): The #CoglOutput that the frame was
- *        presented to, or %NULL if this could not be determined.
- * Since: 1.14
- * Stability: unstable
- */
-CoglOutput *
-cogl_frame_info_get_output (CoglFrameInfo *info);
 
 /**
  * cogl_frame_info_get_global_frame_counter: (skip)
  */
+COGL_EXPORT
 int64_t cogl_frame_info_get_global_frame_counter (CoglFrameInfo *info);
 
 G_END_DECLS

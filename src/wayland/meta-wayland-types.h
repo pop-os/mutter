@@ -37,6 +37,8 @@ typedef struct _MetaWaylandTouch MetaWaylandTouch;
 typedef struct _MetaWaylandDragDestFuncs MetaWaylandDragDestFuncs;
 typedef struct _MetaWaylandDataOffer MetaWaylandDataOffer;
 typedef struct _MetaWaylandDataDevice MetaWaylandDataDevice;
+typedef struct _MetaWaylandDataDevicePrimary MetaWaylandDataDevicePrimary;
+typedef struct _MetaWaylandDataDevicePrimaryLegacy MetaWaylandDataDevicePrimaryLegacy;
 
 typedef struct _MetaWaylandTabletManager MetaWaylandTabletManager;
 typedef struct _MetaWaylandTabletSeat MetaWaylandTabletSeat;
@@ -51,10 +53,11 @@ typedef struct _MetaWaylandBuffer MetaWaylandBuffer;
 typedef struct _MetaWaylandRegion MetaWaylandRegion;
 
 typedef struct _MetaWaylandSurface MetaWaylandSurface;
+typedef struct _MetaWaylandSurfaceState MetaWaylandSurfaceState;
 
 typedef struct _MetaWaylandOutput MetaWaylandOutput;
 
-typedef struct _MetaWaylandSerial MetaWaylandSerial;
+typedef struct _MetaWaylandWindowConfiguration MetaWaylandWindowConfiguration;
 
 typedef struct _MetaWaylandPointerClient MetaWaylandPointerClient;
 

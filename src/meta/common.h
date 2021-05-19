@@ -25,13 +25,13 @@
 #ifndef META_COMMON_H
 #define META_COMMON_H
 
-/* Don't include core headers here */
 #include <X11/Xlib.h>
 #include <X11/extensions/XInput.h>
 #include <X11/extensions/XInput2.h>
-#include <clutter/clutter.h>
 #include <glib.h>
 #include <gtk/gtk.h>
+
+#include "clutter/clutter.h"
 
 /**
  * SECTION:common
@@ -46,11 +46,12 @@
 /* Replacement for X11 CurrentTime */
 #define META_CURRENT_TIME 0L
 
+#define META_EXPORT __attribute__((visibility("default"))) extern
+
 /**
  * MetaFrameFlags:
  * @META_FRAME_ALLOWS_DELETE: frame allows delete
  * @META_FRAME_ALLOWS_MENU: frame allows menu
- * @META_FRAME_ALLOWS_APPMENU: frame allows (fallback) app menu
  * @META_FRAME_ALLOWS_MINIMIZE: frame allows minimize
  * @META_FRAME_ALLOWS_MAXIMIZE: frame allows maximize
  * @META_FRAME_ALLOWS_VERTICAL_RESIZE: frame allows vertical resize
@@ -62,7 +63,6 @@
  * @META_FRAME_ALLOWS_SHADE: frame allows shade
  * @META_FRAME_ALLOWS_MOVE: frame allows move
  * @META_FRAME_FULLSCREEN: frame allows fullscreen
- * @META_FRAME_IS_FLASHING: frame is flashing
  * @META_FRAME_ABOVE: frame is above
  * @META_FRAME_TILED_LEFT: frame is tiled to the left
  * @META_FRAME_TILED_RIGHT: frame is tiled to the right
@@ -71,22 +71,20 @@ typedef enum
 {
   META_FRAME_ALLOWS_DELETE            = 1 << 0,
   META_FRAME_ALLOWS_MENU              = 1 << 1,
-  META_FRAME_ALLOWS_APPMENU           = 1 << 2,
-  META_FRAME_ALLOWS_MINIMIZE          = 1 << 3,
-  META_FRAME_ALLOWS_MAXIMIZE          = 1 << 4,
-  META_FRAME_ALLOWS_VERTICAL_RESIZE   = 1 << 5,
-  META_FRAME_ALLOWS_HORIZONTAL_RESIZE = 1 << 6,
-  META_FRAME_HAS_FOCUS                = 1 << 7,
-  META_FRAME_SHADED                   = 1 << 8,
-  META_FRAME_STUCK                    = 1 << 9,
-  META_FRAME_MAXIMIZED                = 1 << 10,
-  META_FRAME_ALLOWS_SHADE             = 1 << 11,
-  META_FRAME_ALLOWS_MOVE              = 1 << 12,
-  META_FRAME_FULLSCREEN               = 1 << 13,
-  META_FRAME_IS_FLASHING              = 1 << 14,
-  META_FRAME_ABOVE                    = 1 << 15,
-  META_FRAME_TILED_LEFT               = 1 << 16,
-  META_FRAME_TILED_RIGHT              = 1 << 17
+  META_FRAME_ALLOWS_MINIMIZE          = 1 << 2,
+  META_FRAME_ALLOWS_MAXIMIZE          = 1 << 3,
+  META_FRAME_ALLOWS_VERTICAL_RESIZE   = 1 << 4,
+  META_FRAME_ALLOWS_HORIZONTAL_RESIZE = 1 << 5,
+  META_FRAME_HAS_FOCUS                = 1 << 6,
+  META_FRAME_SHADED                   = 1 << 7,
+  META_FRAME_STUCK                    = 1 << 8,
+  META_FRAME_MAXIMIZED                = 1 << 9,
+  META_FRAME_ALLOWS_SHADE             = 1 << 10,
+  META_FRAME_ALLOWS_MOVE              = 1 << 11,
+  META_FRAME_FULLSCREEN               = 1 << 12,
+  META_FRAME_ABOVE                    = 1 << 13,
+  META_FRAME_TILED_LEFT               = 1 << 14,
+  META_FRAME_TILED_RIGHT              = 1 << 15
 } MetaFrameFlags;
 
 /**
@@ -149,8 +147,6 @@ enum
   _WGO_N = META_GRAB_OP_WINDOW_DIR_NORTH,
 };
 
-#define GRAB_OP_GET_BASE_TYPE(op) (op & 0x00FF)
-
 typedef enum
 {
   META_GRAB_OP_NONE,
@@ -208,6 +204,7 @@ typedef enum
  * @META_CURSOR_POINTING_HAND: pointing hand
  * @META_CURSOR_CROSSHAIR: crosshair (action forbidden)
  * @META_CURSOR_IBEAM: I-beam (text input)
+ * @META_CURSOR_BLANK: Invisible cursor
  */
 typedef enum
 {
@@ -230,6 +227,7 @@ typedef enum
   META_CURSOR_POINTING_HAND,
   META_CURSOR_CROSSHAIR,
   META_CURSOR_IBEAM,
+  META_CURSOR_BLANK,
   META_CURSOR_LAST
 } MetaCursor;
 
@@ -387,7 +385,6 @@ typedef enum
   META_BUTTON_FUNCTION_MINIMIZE,
   META_BUTTON_FUNCTION_MAXIMIZE,
   META_BUTTON_FUNCTION_CLOSE,
-  META_BUTTON_FUNCTION_APPMENU,
   META_BUTTON_FUNCTION_LAST
 } MetaButtonFunction;
 
@@ -396,10 +393,10 @@ typedef enum
 /* Keep array size in sync with MAX_BUTTONS_PER_CORNER */
 /**
  * MetaButtonLayout:
- * @left_buttons: (array fixed-size=5):
- * @right_buttons: (array fixed-size=5):
- * @left_buttons_has_spacer: (array fixed-size=5):
- * @right_buttons_has_spacer: (array fixed-size=5):
+ * @left_buttons: (array fixed-size=4):
+ * @right_buttons: (array fixed-size=4):
+ * @left_buttons_has_spacer: (array fixed-size=4):
+ * @right_buttons_has_spacer: (array fixed-size=4):
  */
 typedef struct _MetaButtonLayout MetaButtonLayout;
 struct _MetaButtonLayout
@@ -447,6 +444,7 @@ struct _MetaFrameBorders
 };
 
 /* sets all dimensions to zero */
+META_EXPORT
 void meta_frame_borders_clear (MetaFrameBorders *self);
 
 /* should investigate changing these to whatever most apps use */
@@ -458,14 +456,14 @@ void meta_frame_borders_clear (MetaFrameBorders *self);
 #define META_DEFAULT_ICON_NAME "window"
 
 /* Main loop priorities determine when activity in the GLib
- * will take precendence over the others. Priorities are sometimes
+ * will take precedence over the others. Priorities are sometimes
  * used to enforce ordering: give A a higher priority than B if
  * A must occur before B. But that poses a problem since then
  * if A occurs frequently enough, B will never occur.
  *
  * Anything we want to occur more or less immediately should
  * have a priority of G_PRIORITY_DEFAULT. When we want to
- * coelesce multiple things together, the appropriate place to
+ * coalesce multiple things together, the appropriate place to
  * do it is usually META_PRIORITY_BEFORE_REDRAW.
  *
  * Note that its usually better to use meta_later_add() rather
@@ -478,7 +476,7 @@ void meta_frame_borders_clear (MetaFrameBorders *self);
  * delayed. This happens if the screen is updating rapidly: we
  * are spending all our time either redrawing or waiting for a
  * vblank-synced buffer swap. (When X is improved to allow
- * clutter to do the buffer-swap asychronously, this will get
+ * clutter to do the buffer-swap asynchronously, this will get
  * better.)
  */
 
@@ -509,12 +507,6 @@ void meta_frame_borders_clear (MetaFrameBorders *self);
 
 /************************************************************/
 
-#define POINT_IN_RECT(xcoord, ycoord, rect) \
- ((xcoord) >= (rect).x &&                   \
-  (xcoord) <  ((rect).x + (rect).width) &&  \
-  (ycoord) >= (rect).y &&                   \
-  (ycoord) <  ((rect).y + (rect).height))
-
 /**
  * MetaStackLayer:
  * @META_LAYER_DESKTOP: Desktop layer
@@ -538,5 +530,24 @@ typedef enum
   META_LAYER_OVERRIDE_REDIRECT = 7,
   META_LAYER_LAST	       = 8
 } MetaStackLayer;
+
+/* MetaGravity: (skip)
+ *
+ * Identical to the corresponding gravity value macros from libX11.
+ */
+typedef enum _MetaGravity
+{
+  META_GRAVITY_NONE = 0,
+  META_GRAVITY_NORTH_WEST = 1,
+  META_GRAVITY_NORTH = 2,
+  META_GRAVITY_NORTH_EAST = 3,
+  META_GRAVITY_WEST = 4,
+  META_GRAVITY_CENTER = 5,
+  META_GRAVITY_EAST = 6,
+  META_GRAVITY_SOUTH_WEST = 7,
+  META_GRAVITY_SOUTH = 8,
+  META_GRAVITY_SOUTH_EAST = 9,
+  META_GRAVITY_STATIC = 10,
+} MetaGravity;
 
 #endif

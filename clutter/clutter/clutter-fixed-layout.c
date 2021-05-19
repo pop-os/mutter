@@ -34,9 +34,7 @@
  * #ClutterFixedLayout is available since Clutter 1.2
  */
 
-#ifdef HAVE_CONFIG_H
 #include "clutter-build-config.h"
-#endif
 
 #include "clutter-debug.h"
 #include "clutter-fixed-layout.h"
@@ -133,8 +131,7 @@ clutter_fixed_layout_get_preferred_height (ClutterLayoutManager *manager,
 static void
 clutter_fixed_layout_allocate (ClutterLayoutManager   *manager,
                                ClutterContainer       *container,
-                               const ClutterActorBox  *allocation,
-                               ClutterAllocationFlags  flags)
+                               const ClutterActorBox  *allocation)
 {
   ClutterActor *child;
 
@@ -142,7 +139,11 @@ clutter_fixed_layout_allocate (ClutterLayoutManager   *manager,
        child != NULL;
        child = clutter_actor_get_next_sibling (child))
     {
-      clutter_actor_allocate_preferred_size (child, flags);
+      float x = 0.f;
+      float y = 0.f;
+
+      clutter_actor_get_fixed_position (child, &x, &y);
+      clutter_actor_allocate_preferred_size (child, x, y);
     }
 }
 
