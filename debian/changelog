@@ -1,3 +1,98 @@
+mutter (40.1-1) UNRELEASED; urgency=medium
+
+  * New upstream release:
+    - Replace CoglMatrix with graphene_matrix
+    - Allow to specify debug topics in MUTTER_DEBUG
+    - Fix unwanted position changes on window resize
+    - Do not disable the X Security extension by default
+    - Fix _NET_WM_FRAME_DRAWN timestamps
+    - Fix tiling to the correct monitor
+    - Only snap to window edges when CTRL is pressed (LP: #1727225)
+    - Add support for scroll button locking
+    - Clip Frustra
+    - Improve tablet-mode-switch support
+    - Fix missed redraws of newly-mapped actors
+    - Gracefully handle Xwayland crashes
+    - wayland: Provide previous window dimensions on restore
+    - Remove the ClutterActor::paint signal
+    - Fix background artifacts in magnifier
+    - Use raycasting for picking
+    - Fix monitor tiling support on X11
+    - Fix xwayland grabs for override-redirect windows
+    - Fix device configuration not being picked up on X11
+    - Support tagging devices as primary GPU via udev
+    - Fix size hints with CSD
+    - Fix unresponsive input after screen blank
+    - Cull actors when picking
+    - Handle input in a thread
+    - Improve freezes when switching workspace
+    - Base ClutterEffects on ClutterPaintNodes
+    - xwayland: Set xrandr primary output
+    - Add paint node based blur support
+    - Disable CRTCs if there is no monitor
+    - Fix updates of mipmapped animated backgrounds
+    - Allow remote desktop clients to specify scroll source
+    - Support the color transform matrix RandR property on X11
+    - Adapt to settings moving to gsettings-desktop-schemas
+    - Misc. bug fixes and cleanups
+    - Consider clients without mapped windows for xwayland auto-shutdown
+    - Let compositor to handle super+scroll events
+    - Default to starting Xwayland on demand
+    - xwayland: Restore abstract socket support
+    - Add support for atomic mode setting
+    - Fix clip region glitches when using fractional scaling
+    - Default to horizontal workspace layout
+    - Do not ping unmanaging windows
+    - Handle monitor changes during screencasts
+    - Fix unexpected jumps after restoring misbehaving clients
+    - Fix newly opened X11 windows being invisible in overview
+    - Fix viewport of offscreen effects (LP: #1825126)
+    - Fix drag cancel animation when using geometry scaling
+    - Improve touch-mode heuristics
+    - Integrate clipboard with remote desktop sessions
+    - Fix stuck icon in DND operation between X11 and wayland
+    - Automatically synchronize pointer position after modal grabs 
+    - Reimplement support for CLUTTER_SHOW_FPS
+    - Only pick on events that may move the pointer
+    - Emit discrete scroll events for accumulated smooth events in virtual
+      X11 devices
+    - Add support for rounded clipping when drawing background
+    - Fix keyboard input from remote desktop in Xorg session
+    - Fix restoring focus to windows using globally active input
+    - Expose unaccalerated touchpad gesture deltas
+    - Avoid relayout on text attribute changes when possible
+    - Add remote desktop caps- and num-lock state properties
+    - Improve refresh rate calculation
+    - Implement presentation-time protocol
+    - Disable double-buffered shadow buffering
+    - Fix missing cursor on tablet devices
+    - Fix frame timings causing X11 clients to get stuck
+    - Fix applying input settings on X11
+    - Add headless native backend
+    - Fix high latency and stalls with proprietary nvidia driver
+    - Fix maximized windows not reacting to strut changes
+    - Only start XWayland on demand when running under systemd
+    - Sync LEDs when a new input device is added
+    - Fix order in which subsurface placement operations are handled
+    - xwayland: Check permissions on /tmp/.X11-unix
+    - Prevent clients from pasting old selection data
+    - Fix forward_key IM functionality on wayland
+    - Ensure valid window texture size after viewport changes
+    - Only update cached paint volumes when necessary
+    - Only disable KMS modifiers for drivers with known problems
+    - Fix X11 client resize during moves
+    - Fix performance drop during night light transition with Nvidia
+    - kms: Don't add common modes that exceed the max bandwidth
+    - Create virtual input devices on demand
+    - Fix wrong night light gamma when leaving power saving
+    - Fix picking edge case
+    - Properly tear down things when shutting down
+    - Fix monitor screencasting with fractional scaling
+    - Plugged memory leaks
+    - Fixed crashes
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 19 May 2021 20:23:25 +0200
+
 mutter (3.38.4-1) unstable; urgency=medium
 
   * Team upload
