@@ -41,13 +41,12 @@
 #include "backends/native/meta-crtc-mode-kms.h"
 #include "backends/native/meta-kms-connector.h"
 #include "backends/native/meta-kms-device.h"
+#include "backends/native/meta-kms-mode.h"
 #include "backends/native/meta-kms-update.h"
 #include "backends/native/meta-kms-utils.h"
 #include "backends/native/meta-kms.h"
 #include "backends/native/meta-launcher.h"
 #include "backends/native/meta-output-kms.h"
-
-#include "meta-default-modes.h"
 
 struct _MetaGpuKms
 {
@@ -64,80 +63,6 @@ struct _MetaGpuKms
 };
 
 G_DEFINE_TYPE (MetaGpuKms, meta_gpu_kms, META_TYPE_GPU)
-
-gboolean
-meta_gpu_kms_add_fb (MetaGpuKms              *gpu_kms,
-                     gboolean                 use_modifiers,
-                     const MetaGpuKmsFBArgs  *args,
-                     uint32_t                *fb_id_out,
-                     GError                 **error)
-{
-  MetaDrmFormatBuf tmp;
-  uint32_t fb_id;
-
-  if (use_modifiers && args->modifiers[0] != DRM_FORMAT_MOD_INVALID)
-    {
-      if (drmModeAddFB2WithModifiers (gpu_kms->fd,
-                                      args->width,
-                                      args->height,
-                                      args->format,
-                                      args->handles,
-                                      args->strides,
-                                      args->offsets,
-                                      args->modifiers,
-                                      &fb_id,
-                                      DRM_MODE_FB_MODIFIERS))
-        {
-          g_set_error (error,
-                       G_IO_ERROR,
-                       g_io_error_from_errno (errno),
-                       "drmModeAddFB2WithModifiers failed: %s",
-                       g_strerror (errno));
-          return FALSE;
-        }
-    }
-  else if (drmModeAddFB2 (gpu_kms->fd,
-                          args->width,
-                          args->height,
-                          args->format,
-                          args->handles,
-                          args->strides,
-                          args->offsets,
-                          &fb_id,
-                          0))
-    {
-      if (args->format != DRM_FORMAT_XRGB8888)
-        {
-          g_set_error (error,
-                       G_IO_ERROR,
-                       G_IO_ERROR_FAILED,
-                       "drmModeAddFB does not support format '%s' (0x%x)",
-                       meta_drm_format_to_string (&tmp, args->format),
-                       args->format);
-          return FALSE;
-        }
-
-      if (drmModeAddFB (gpu_kms->fd,
-                        args->width,
-                        args->height,
-                        24,
-                        32,
-                        args->strides[0],
-                        args->handles[0],
-                        &fb_id))
-        {
-          g_set_error (error,
-                       G_IO_ERROR,
-                       g_io_error_from_errno (errno),
-                       "drmModeAddFB failed: %s",
-                       g_strerror (errno));
-          return FALSE;
-        }
-    }
-
-    *fb_id_out = fb_id;
-    return TRUE;
-}
 
 gboolean
 meta_gpu_kms_is_crtc_active (MetaGpuKms *gpu_kms,
@@ -175,14 +100,6 @@ meta_gpu_kms_is_crtc_active (MetaGpuKms *gpu_kms,
   return TRUE;
 }
 
-static int64_t
-timespec_to_nanoseconds (const struct timespec *ts)
-{
-  const int64_t one_billion = 1000000000;
-
-  return ((int64_t) ts->tv_sec) * one_billion + ts->tv_nsec;
-}
-
 MetaKmsDevice *
 meta_gpu_kms_get_kms_device (MetaGpuKms *gpu_kms)
 {
@@ -207,45 +124,10 @@ meta_gpu_kms_get_file_path (MetaGpuKms *gpu_kms)
   return meta_kms_device_get_path (gpu_kms->kms_device);
 }
 
-int64_t
-meta_gpu_kms_get_current_time_ns (MetaGpuKms *gpu_kms)
+gboolean
+meta_gpu_kms_is_clock_monotonic (MetaGpuKms *gpu_kms)
 {
-  struct timespec ts;
-
-  if (clock_gettime (gpu_kms->clock_id, &ts))
-    return 0;
-
-  return timespec_to_nanoseconds (&ts);
-}
-
-void
-meta_gpu_kms_set_power_save_mode (MetaGpuKms    *gpu_kms,
-                                  uint64_t       state,
-                                  MetaKmsUpdate *kms_update)
-{
-  MetaGpu *gpu = META_GPU (gpu_kms);
-  GList *l;
-
-  for (l = meta_gpu_get_outputs (gpu); l; l = l->next)
-    {
-      MetaOutput *output = l->data;
-
-      meta_output_kms_set_power_save_mode (META_OUTPUT_KMS (output),
-                                           state, kms_update);
-    }
-
-  if (state != META_POWER_SAVE_ON)
-    {
-      /* Turn off CRTCs for DPMS */
-      for (l = meta_gpu_get_crtcs (gpu); l; l = l->next)
-        {
-          MetaCrtcKms *crtc_kms = META_CRTC_KMS (l->data);
-
-          meta_kms_update_mode_set (kms_update,
-                                    meta_crtc_kms_get_kms_crtc (crtc_kms),
-                                    NULL, NULL);
-        }
-    }
+  return gpu_kms->clock_id == CLOCK_MONOTONIC;
 }
 
 gboolean
@@ -267,12 +149,12 @@ meta_gpu_kms_is_platform_device (MetaGpuKms *gpu_kms)
 }
 
 gboolean
-meta_gpu_kms_requires_modifiers (MetaGpuKms *gpu_kms)
+meta_gpu_kms_disable_modifiers (MetaGpuKms *gpu_kms)
 {
   MetaKmsDeviceFlag flags;
 
   flags = meta_kms_device_get_flags (gpu_kms->kms_device);
-  return !!(flags & META_KMS_DEVICE_FLAG_REQUIRES_MODIFIERS);
+  return !!(flags & META_KMS_DEVICE_FLAG_DISABLE_MODIFIERS);
 }
 
 static int
@@ -287,50 +169,9 @@ compare_outputs (gconstpointer one,
   return strcmp (output_info_one->name, output_info_two->name);
 }
 
-gboolean
-meta_drm_mode_equal (const drmModeModeInfo *one,
-                     const drmModeModeInfo *two)
-{
-  return (one->clock == two->clock &&
-          one->hdisplay == two->hdisplay &&
-          one->hsync_start == two->hsync_start &&
-          one->hsync_end == two->hsync_end &&
-          one->htotal == two->htotal &&
-          one->hskew == two->hskew &&
-          one->vdisplay == two->vdisplay &&
-          one->vsync_start == two->vsync_start &&
-          one->vsync_end == two->vsync_end &&
-          one->vtotal == two->vtotal &&
-          one->vscan == two->vscan &&
-          one->vrefresh == two->vrefresh &&
-          one->flags == two->flags &&
-          one->type == two->type &&
-          strncmp (one->name, two->name, DRM_DISPLAY_MODE_LEN) == 0);
-}
-
-static guint
-drm_mode_hash (gconstpointer ptr)
-{
-  const drmModeModeInfo *mode = ptr;
-  guint hash = 0;
-
-  /*
-   * We don't include the name in the hash because it's generally
-   * derived from the other fields (hdisplay, vdisplay and flags)
-   */
-
-  hash ^= mode->clock;
-  hash ^= mode->hdisplay ^ mode->hsync_start ^ mode->hsync_end;
-  hash ^= mode->vdisplay ^ mode->vsync_start ^ mode->vsync_end;
-  hash ^= mode->vrefresh;
-  hash ^= mode->flags ^ mode->type;
-
-  return hash;
-}
-
 MetaCrtcMode *
-meta_gpu_kms_get_mode_from_drm_mode (MetaGpuKms            *gpu_kms,
-                                     const drmModeModeInfo *drm_mode)
+meta_gpu_kms_get_mode_from_kms_mode (MetaGpuKms  *gpu_kms,
+                                     MetaKmsMode *kms_mode)
 {
   MetaGpu *gpu = META_GPU (gpu_kms);
   GList *l;
@@ -339,8 +180,8 @@ meta_gpu_kms_get_mode_from_drm_mode (MetaGpuKms            *gpu_kms,
     {
       MetaCrtcModeKms *crtc_mode_kms = l->data;
 
-      if (meta_drm_mode_equal (drm_mode,
-                               meta_crtc_mode_kms_get_drm_mode (crtc_mode_kms)))
+      if (meta_kms_mode_equal (kms_mode,
+                               meta_crtc_mode_kms_get_kms_mode (crtc_mode_kms)))
         return META_CRTC_MODE (crtc_mode_kms);
     }
 
@@ -394,68 +235,60 @@ static void
 init_modes (MetaGpuKms *gpu_kms)
 {
   MetaGpu *gpu = META_GPU (gpu_kms);
+  MetaKmsDevice *kms_device = gpu_kms->kms_device;
   GHashTable *modes_table;
   GList *l;
   GList *modes;
   GHashTableIter iter;
-  drmModeModeInfo *drm_mode;
-  int i;
-  long mode_id;
+  gpointer value;
+  uint64_t mode_id;
 
   /*
    * Gather all modes on all connected connectors.
    */
-  modes_table = g_hash_table_new (drm_mode_hash, (GEqualFunc) meta_drm_mode_equal);
-  for (l = meta_kms_device_get_connectors (gpu_kms->kms_device); l; l = l->next)
+  modes_table = g_hash_table_new ((GHashFunc) meta_kms_mode_hash,
+                                  (GEqualFunc) meta_kms_mode_equal);
+  for (l = meta_kms_device_get_connectors (kms_device); l; l = l->next)
     {
       MetaKmsConnector *kms_connector = l->data;
       const MetaKmsConnectorState *state;
+      GList *l_mode;
 
       state = meta_kms_connector_get_current_state (kms_connector);
       if (!state)
         continue;
 
-      for (i = 0; i < state->n_modes; i++)
-        g_hash_table_add (modes_table, &state->modes[i]);
+      for (l_mode = state->modes; l_mode; l_mode = l_mode->next)
+        {
+          MetaKmsMode *kms_mode = l_mode->data;
+
+          g_hash_table_add (modes_table, kms_mode);
+        }
+    }
+
+  for (l = meta_kms_device_get_fallback_modes (kms_device); l; l = l->next)
+    {
+      MetaKmsMode *fallback_mode = l->data;
+
+      g_hash_table_add (modes_table, fallback_mode);
     }
 
   modes = NULL;
 
   g_hash_table_iter_init (&iter, modes_table);
   mode_id = 0;
-  while (g_hash_table_iter_next (&iter, NULL, (gpointer *) &drm_mode))
+  while (g_hash_table_iter_next (&iter, NULL, &value))
     {
+      MetaKmsMode *kms_mode = value;
       MetaCrtcModeKms *mode;
 
-      mode = meta_crtc_mode_kms_new (drm_mode, (long) mode_id);
+      mode = meta_crtc_mode_kms_new (kms_mode, mode_id);
       modes = g_list_append (modes, mode);
 
       mode_id++;
     }
 
   g_hash_table_destroy (modes_table);
-
-  for (i = 0; i < G_N_ELEMENTS (meta_default_landscape_drm_mode_infos); i++)
-    {
-      MetaCrtcModeKms *mode;
-
-      mode = meta_crtc_mode_kms_new (&meta_default_landscape_drm_mode_infos[i],
-                                     mode_id);
-      modes = g_list_append (modes, mode);
-
-      mode_id++;
-    }
-
-  for (i = 0; i < G_N_ELEMENTS (meta_default_portrait_drm_mode_infos); i++)
-    {
-      MetaCrtcModeKms *mode;
-
-      mode = meta_crtc_mode_kms_new (&meta_default_portrait_drm_mode_infos[i],
-                                     mode_id);
-      modes = g_list_append (modes, mode);
-
-      mode_id++;
-    }
 
   meta_gpu_take_modes (gpu, modes);
 }

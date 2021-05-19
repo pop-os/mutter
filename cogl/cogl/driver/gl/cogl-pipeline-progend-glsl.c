@@ -231,7 +231,7 @@ program_state_new (int n_layers,
 {
   CoglPipelineProgramState *program_state;
 
-  program_state = g_slice_new (CoglPipelineProgramState);
+  program_state = g_new0 (CoglPipelineProgramState, 1);
   program_state->ref_count = 1;
   program_state->program = 0;
   program_state->unit_state = g_new (UnitState, n_layers);
@@ -278,7 +278,7 @@ destroy_program_state (void *user_data,
       if (program_state->uniform_locations)
         g_array_free (program_state->uniform_locations, TRUE);
 
-      g_slice_free (CoglPipelineProgramState, program_state);
+      g_free (program_state);
     }
 }
 
@@ -431,11 +431,11 @@ update_constants_cb (CoglPipeline *pipeline,
   if (unit_state->texture_matrix_uniform != -1 &&
       (state->update_all || unit_state->dirty_texture_matrix))
     {
-      const CoglMatrix *matrix;
-      const float *array;
+      const graphene_matrix_t *matrix;
+      float array[16];
 
       matrix = _cogl_pipeline_get_layer_matrix (pipeline, layer_index);
-      array = cogl_matrix_get_array (matrix);
+      graphene_matrix_to_float (matrix, array);
       GE (ctx, glUniformMatrix4fv (unit_state->texture_matrix_uniform,
                                    1, FALSE, array));
       unit_state->dirty_texture_matrix = FALSE;
@@ -1001,7 +1001,7 @@ _cogl_pipeline_progend_glsl_pre_paint (CoglPipeline *pipeline,
   gboolean projection_changed;
   gboolean need_modelview;
   gboolean need_projection;
-  CoglMatrix modelview, projection;
+  graphene_matrix_t modelview, projection;
 
   _COGL_GET_CONTEXT (ctx, NO_RETVAL);
 
@@ -1016,7 +1016,7 @@ _cogl_pipeline_progend_glsl_pre_paint (CoglPipeline *pipeline,
   if (modelview_entry == NULL || projection_entry == NULL)
     return;
 
-  needs_flip = cogl_is_offscreen (ctx->current_draw_buffer);
+  needs_flip = cogl_framebuffer_is_y_flipped (ctx->current_draw_buffer);
 
   projection_changed =
     _cogl_matrix_entry_cache_maybe_update (&program_state->projection_cache,
@@ -1033,6 +1033,8 @@ _cogl_pipeline_progend_glsl_pre_paint (CoglPipeline *pipeline,
 
   if (modelview_changed || projection_changed)
     {
+      float v[16];
+
       if (program_state->mvp_uniform != -1)
         need_modelview = need_projection = TRUE;
       else
@@ -1049,27 +1051,33 @@ _cogl_pipeline_progend_glsl_pre_paint (CoglPipeline *pipeline,
         {
           if (needs_flip && program_state->flip_uniform == -1)
             {
-              CoglMatrix tmp_matrix;
+              graphene_matrix_t tmp_matrix;
               cogl_matrix_entry_get (projection_entry, &tmp_matrix);
-              cogl_matrix_multiply (&projection,
-                                    &ctx->y_flip_matrix,
-                                    &tmp_matrix);
+              graphene_matrix_multiply (&tmp_matrix,
+                                        &ctx->y_flip_matrix,
+                                        &projection);
             }
           else
             cogl_matrix_entry_get (projection_entry, &projection);
         }
 
       if (projection_changed && program_state->projection_uniform != -1)
-        GE (ctx, glUniformMatrix4fv (program_state->projection_uniform,
-                                     1, /* count */
-                                     FALSE, /* transpose */
-                                     cogl_matrix_get_array (&projection)));
+        {
+          graphene_matrix_to_float (&projection, v);
+          GE (ctx, glUniformMatrix4fv (program_state->projection_uniform,
+                                       1, /* count */
+                                       FALSE, /* transpose */
+                                       v));
+        }
 
       if (modelview_changed && program_state->modelview_uniform != -1)
-        GE (ctx, glUniformMatrix4fv (program_state->modelview_uniform,
-                                     1, /* count */
-                                     FALSE, /* transpose */
-                                     cogl_matrix_get_array (&modelview)));
+        {
+          graphene_matrix_to_float (&modelview,v);
+          GE (ctx, glUniformMatrix4fv (program_state->modelview_uniform,
+                                       1, /* count */
+                                       FALSE, /* transpose */
+                                       v));
+        }
 
       if (program_state->mvp_uniform != -1)
         {
@@ -1078,24 +1086,25 @@ _cogl_pipeline_progend_glsl_pre_paint (CoglPipeline *pipeline,
              avoiding the matrix multiplication */
           if (cogl_matrix_entry_is_identity (modelview_entry))
             {
+              graphene_matrix_to_float (&projection, v);
               GE (ctx,
                   glUniformMatrix4fv (program_state->mvp_uniform,
                                       1, /* count */
                                       FALSE, /* transpose */
-                                      cogl_matrix_get_array (&projection)));
+                                      v));
             }
           else
             {
-              CoglMatrix combined;
+              graphene_matrix_t combined;
 
-              cogl_matrix_multiply (&combined,
-                                    &projection,
-                                    &modelview);
+              graphene_matrix_multiply (&modelview, &projection, &combined);
+              graphene_matrix_to_float (&combined, v);
+
               GE (ctx,
                   glUniformMatrix4fv (program_state->mvp_uniform,
                                       1, /* count */
                                       FALSE, /* transpose */
-                                      cogl_matrix_get_array (&combined)));
+                                      v));
             }
         }
     }

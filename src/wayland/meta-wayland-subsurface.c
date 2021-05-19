@@ -54,6 +54,17 @@ transform_subsurface_position (MetaWaylandSurface *surface,
   while (surface);
 }
 
+static gboolean
+should_show (MetaWaylandSurface *surface)
+{
+  if (!surface->buffer_ref->buffer)
+    return FALSE;
+  else if (surface->sub.parent)
+    return should_show (surface->sub.parent);
+  else
+    return TRUE;
+}
+
 static void
 sync_actor_subsurface_state (MetaWaylandSurface *surface)
 {
@@ -74,7 +85,7 @@ sync_actor_subsurface_state (MetaWaylandSurface *surface)
   clutter_actor_set_position (actor, x, y);
   clutter_actor_set_reactive (actor, TRUE);
 
-  if (surface->buffer_ref->buffer)
+  if (should_show (surface))
     clutter_actor_show (actor);
   else
     clutter_actor_hide (actor);
@@ -147,7 +158,8 @@ meta_wayland_subsurface_union_geometry (MetaWaylandSubsurface *subsurface,
     .height = meta_wayland_surface_get_height (surface),
   };
 
-  meta_rectangle_union (out_geometry, &geometry, out_geometry);
+  if (surface->buffer_ref->buffer)
+    meta_rectangle_union (out_geometry, &geometry, out_geometry);
 
   META_WAYLAND_SURFACE_FOREACH_SUBSURFACE (surface, subsurface_surface)
     {
@@ -343,11 +355,11 @@ is_valid_sibling (MetaWaylandSurface *surface,
 }
 
 static void
-subsurface_handle_pending_surface_destroyed (struct wl_listener *listener,
-                                             void               *data)
+subsurface_handle_pending_subsurface_destroyed (struct wl_listener *listener,
+                                                void               *data)
 {
   MetaWaylandSubsurfacePlacementOp *op =
-    wl_container_of (listener, op, surface_destroy_listener);
+    wl_container_of (listener, op, subsurface_destroy_listener);
 
   op->surface = NULL;
 }
@@ -366,7 +378,7 @@ void
 meta_wayland_subsurface_placement_op_free (MetaWaylandSubsurfacePlacementOp *op)
 {
   if (op->surface)
-    wl_list_remove (&op->surface_destroy_listener.link);
+    wl_list_remove (&op->subsurface_destroy_listener.link);
   if (op->sibling)
     wl_list_remove (&op->sibling_destroy_listener.link);
   g_free (op);
@@ -384,12 +396,12 @@ queue_subsurface_placement (MetaWaylandSurface             *surface,
   op->placement = placement;
   op->surface = surface;
   op->sibling = sibling;
-  op->surface_destroy_listener.notify =
-    subsurface_handle_pending_surface_destroyed;
+  op->subsurface_destroy_listener.notify =
+    subsurface_handle_pending_subsurface_destroyed;
   op->sibling_destroy_listener.notify =
     subsurface_handle_pending_sibling_destroyed;
-  wl_resource_add_destroy_listener (surface->resource,
-                                    &op->surface_destroy_listener);
+  wl_resource_add_destroy_listener (surface->wl_subsurface,
+                                    &op->subsurface_destroy_listener);
   wl_resource_add_destroy_listener (sibling->resource,
                                     &op->sibling_destroy_listener);
 

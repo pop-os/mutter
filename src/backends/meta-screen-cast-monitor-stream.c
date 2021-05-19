@@ -113,8 +113,7 @@ meta_screen_cast_monitor_stream_new (MetaScreenCastSession     *session,
                                      MetaScreenCastFlag         flags,
                                      GError                   **error)
 {
-  MetaGpu *gpu = meta_monitor_get_gpu (monitor);
-  MetaBackend *backend = meta_gpu_get_backend (gpu);
+  MetaBackend *backend = meta_monitor_get_backend (monitor);
   MetaMonitorManager *monitor_manager =
     meta_backend_get_monitor_manager (backend);
   MetaScreenCastMonitorStream *monitor_stream;
@@ -185,7 +184,7 @@ meta_screen_cast_monitor_stream_set_parameters (MetaScreenCastStream *stream,
                                         logical_monitor_layout.height));
 }
 
-static void
+static gboolean
 meta_screen_cast_monitor_stream_transform_position (MetaScreenCastStream *stream,
                                                     double                stream_x,
                                                     double                stream_y,
@@ -201,6 +200,8 @@ meta_screen_cast_monitor_stream_transform_position (MetaScreenCastStream *stream
 
   *x = logical_monitor_layout.x + stream_x;
   *y = logical_monitor_layout.y + stream_y;
+
+  return TRUE;
 }
 
 static void

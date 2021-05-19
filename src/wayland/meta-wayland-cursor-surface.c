@@ -30,6 +30,7 @@
 #include "core/boxes-private.h"
 #include "wayland/meta-cursor-sprite-wayland.h"
 #include "wayland/meta-wayland-buffer.h"
+#include "wayland/meta-wayland-presentation-time-private.h"
 #include "wayland/meta-wayland-private.h"
 #include "wayland/meta-xwayland.h"
 
@@ -81,6 +82,7 @@ update_cursor_sprite_texture (MetaWaylandCursorSurface *cursor_surface)
 
 static void
 cursor_sprite_prepare_at (MetaCursorSprite         *cursor_sprite,
+                          float                     best_scale,
                           int                       x,
                           int                       y,
                           MetaWaylandCursorSurface *cursor_surface)
@@ -186,6 +188,7 @@ meta_wayland_cursor_surface_is_on_logical_monitor (MetaWaylandSurfaceRole *role,
     META_WAYLAND_CURSOR_SURFACE (surface->role);
   MetaWaylandCursorSurfacePrivate *priv =
     meta_wayland_cursor_surface_get_instance_private (cursor_surface);
+  ClutterInputDevice *device;
   graphene_point_t point;
   graphene_rect_t logical_monitor_rect;
 
@@ -195,7 +198,9 @@ meta_wayland_cursor_surface_is_on_logical_monitor (MetaWaylandSurfaceRole *role,
   logical_monitor_rect =
     meta_rectangle_to_graphene_rect (&logical_monitor->rect);
 
-  point = meta_cursor_renderer_get_position (priv->cursor_renderer);
+  device = meta_cursor_renderer_get_input_device (priv->cursor_renderer);
+  clutter_seat_query_state (clutter_input_device_get_seat (device),
+                            device, NULL, &point, NULL);
 
   return graphene_rect_contains_point (&logical_monitor_rect, &point);
 }
@@ -330,11 +335,15 @@ meta_wayland_cursor_surface_get_hotspot (MetaWaylandCursorSurface *cursor_surfac
 static void
 on_cursor_painted (MetaCursorRenderer       *renderer,
                    MetaCursorSprite         *displayed_sprite,
+                   ClutterStageView         *stage_view,
                    MetaWaylandCursorSurface *cursor_surface)
 {
   MetaWaylandCursorSurfacePrivate *priv =
     meta_wayland_cursor_surface_get_instance_private (cursor_surface);
   guint32 time = (guint32) (g_get_monotonic_time () / 1000);
+  MetaBackend *backend = meta_get_backend ();
+  MetaWaylandCompositor *compositor =
+    meta_backend_get_wayland_compositor (backend);
 
   if (displayed_sprite != META_CURSOR_SPRITE (priv->cursor_sprite))
     return;
@@ -347,6 +356,10 @@ on_cursor_painted (MetaCursorRenderer       *renderer,
       wl_callback_send_done (callback->resource, time);
       wl_resource_destroy (callback->resource);
     }
+
+  meta_wayland_presentation_time_cursor_painted (&compositor->presentation_time,
+                                                 stage_view,
+                                                 cursor_surface);
 }
 
 void

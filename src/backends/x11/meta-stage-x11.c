@@ -26,6 +26,7 @@
 #include <unistd.h>
 #endif
 
+#include "backends/meta-stage-private.h"
 #include "backends/x11/cm/meta-backend-x11-cm.h"
 #include "backends/x11/cm/meta-renderer-x11-cm.h"
 #include "backends/x11/meta-backend-x11.h"
@@ -35,6 +36,7 @@
 #include "clutter/clutter-mutter.h"
 #include "clutter/x11/clutter-x11.h"
 #include "clutter/x11/clutter-backend-x11.h"
+#include "cogl/cogl-mutter.h"
 #include "cogl/cogl.h"
 #include "core/display-private.h"
 #include "meta/main.h"
@@ -251,7 +253,39 @@ meta_stage_x11_unrealize (ClutterStageWindow *stage_window)
 
   clutter_stage_window_parent_iface->unrealize (stage_window);
 
-  g_clear_pointer (&stage_x11->onscreen, cogl_object_unref);
+  g_clear_object (&stage_x11->onscreen);
+}
+
+static CoglOnscreen *
+create_onscreen (CoglContext *cogl_context,
+                 int          width,
+                 int          height)
+{
+  CoglDisplay *cogl_display = cogl_context_get_display (cogl_context);
+  CoglRenderer *cogl_renderer = cogl_display_get_renderer (cogl_display);
+
+  switch (cogl_renderer_get_winsys_id (cogl_renderer))
+    {
+    case COGL_WINSYS_ID_GLX:
+#ifdef COGL_HAS_GLX_SUPPORT
+      return COGL_ONSCREEN (cogl_onscreen_glx_new (cogl_context,
+                                                   width, height));
+#else
+      g_assert_not_reached ();
+      break;
+#endif
+    case COGL_WINSYS_ID_EGL_XLIB:
+#ifdef COGL_HAS_EGL_SUPPORT
+      return COGL_ONSCREEN (cogl_onscreen_xlib_new (cogl_context,
+                                                    width, height));
+#else
+      g_assert_not_reached ();
+      break;
+#endif
+    default:
+      g_assert_not_reached ();
+      return NULL;
+    }
 }
 
 static gboolean
@@ -267,7 +301,7 @@ meta_stage_x11_realize (ClutterStageWindow *stage_window)
 
   clutter_actor_get_size (CLUTTER_ACTOR (stage_cogl->wrapper), &width, &height);
 
-  stage_x11->onscreen = cogl_onscreen_new (backend->cogl_context, width, height);
+  stage_x11->onscreen = create_onscreen (backend->cogl_context, width, height);
 
   if (META_IS_BACKEND_X11_CM (stage_x11->backend))
     {
@@ -289,14 +323,15 @@ meta_stage_x11_realize (ClutterStageWindow *stage_window)
     {
       g_warning ("Failed to allocate stage: %s", error->message);
       g_error_free (error);
-      cogl_object_unref (stage_x11->onscreen);
+      g_object_unref (stage_x11->onscreen);
       abort();
     }
 
   if (!(clutter_stage_window_parent_iface->realize (stage_window)))
     return FALSE;
 
-  stage_x11->xwin = cogl_x11_onscreen_get_window_xid (stage_x11->onscreen);
+  stage_x11->xwin =
+    cogl_x11_onscreen_get_x11_window (COGL_X11_ONSCREEN (stage_x11->onscreen));
 
   if (clutter_stages_by_xid == NULL)
     clutter_stages_by_xid = g_hash_table_new (NULL, NULL);
@@ -456,6 +491,15 @@ meta_stage_x11_get_views (ClutterStageWindow *stage_window)
 }
 
 static void
+meta_stage_x11_redraw_view (ClutterStageWindow *stage_window,
+                            ClutterStageView   *view,
+                            ClutterFrame       *frame)
+{
+  clutter_stage_window_parent_iface->redraw_view (stage_window, view, frame);
+  clutter_frame_set_result (frame, CLUTTER_FRAME_RESULT_PENDING_PRESENTED);
+}
+
+static void
 meta_stage_x11_finalize (GObject *object)
 {
   MetaStageX11 *stage_x11 = META_STAGE_X11 (object);
@@ -502,6 +546,7 @@ clutter_stage_window_iface_init (ClutterStageWindowInterface *iface)
   iface->unrealize = meta_stage_x11_unrealize;
   iface->can_clip_redraws = meta_stage_x11_can_clip_redraws;
   iface->get_views = meta_stage_x11_get_views;
+  iface->redraw_view = meta_stage_x11_redraw_view;
 }
 
 static inline void
@@ -692,21 +737,11 @@ meta_stage_x11_translate_event (MetaStageX11 *stage_x11,
       break;
 
     case FocusIn:
-      if (!_clutter_stage_is_activated (stage_cogl->wrapper))
-        {
-          _clutter_stage_update_state (stage_cogl->wrapper,
-                                       0,
-                                       CLUTTER_STAGE_STATE_ACTIVATED);
-        }
+      meta_stage_set_active ((MetaStage *) stage_cogl->wrapper, TRUE);
       break;
 
     case FocusOut:
-      if (_clutter_stage_is_activated (stage_cogl->wrapper))
-        {
-          _clutter_stage_update_state (stage_cogl->wrapper,
-                                       CLUTTER_STAGE_STATE_ACTIVATED,
-                                       0);
-        }
+      meta_stage_set_active ((MetaStage *) stage_cogl->wrapper, FALSE);
       break;
 
     case Expose:
@@ -734,9 +769,10 @@ meta_stage_x11_translate_event (MetaStageX11 *stage_x11,
       g_debug ("Destroy notification received for stage, win:0x%x",
                (unsigned int) xevent->xany.window);
 
-      event->any.type = CLUTTER_DESTROY_NOTIFY;
-      event->any.stage = stage;
-      res = TRUE;
+      g_return_val_if_fail (META_IS_STAGE_X11_NESTED (stage_x11),
+                            FALSE);
+      meta_quit (META_EXIT_SUCCESS);
+      res = FALSE;
       break;
 
     case ClientMessage:

@@ -73,7 +73,6 @@ struct _ClutterBackendClass
   ClutterStageWindow *  (* create_stage)       (ClutterBackend  *backend,
                                                 ClutterStage    *wrapper,
                                                 GError         **error);
-  void                  (* init_events)        (ClutterBackend  *backend);
   void                  (* init_features)      (ClutterBackend  *backend);
   void                  (* add_options)        (ClutterBackend  *backend,
                                                 GOptionGroup    *group);
@@ -116,12 +115,6 @@ gboolean                _clutter_backend_pre_parse                      (Clutter
 gboolean                _clutter_backend_post_parse                     (ClutterBackend         *backend,
                                                                          GError                **error);
 
-void                    _clutter_backend_init_events                    (ClutterBackend         *backend);
-void                    _clutter_backend_copy_event_data                (ClutterBackend         *backend,
-                                                                         const ClutterEvent     *src,
-                                                                         ClutterEvent           *dest);
-void                    _clutter_backend_free_event_data                (ClutterBackend         *backend,
-                                                                         ClutterEvent           *event);
 CLUTTER_EXPORT
 gboolean                _clutter_backend_translate_event                (ClutterBackend         *backend,
                                                                          gpointer                native,
@@ -145,6 +138,9 @@ void clutter_backend_set_fallback_resource_scale (ClutterBackend *backend,
 float clutter_backend_get_fallback_resource_scale (ClutterBackend *backend);
 
 gboolean clutter_backend_is_display_server (ClutterBackend *backend);
+
+CLUTTER_EXPORT
+void clutter_backend_destroy (ClutterBackend *backend);
 
 G_END_DECLS
 

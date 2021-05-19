@@ -24,9 +24,8 @@
 #include <math.h>
 #include <cairo-gobject.h>
 
-#include "backends/native/meta-input-device-tool-native.h"
-#include "backends/native/meta-input-device-native.h"
-#include "backends/native/meta-seat-native.h"
+#include "backends/meta-backend-private.h"
+#include "backends/native/meta-input-thread.h"
 #include "clutter/clutter-mutter.h"
 
 G_DEFINE_TYPE (MetaInputDeviceNative,
@@ -47,9 +46,18 @@ typedef struct _SlowKeysEventPending
 {
   MetaInputDeviceNative *device;
   ClutterEvent *event;
-  ClutterEmitInputDeviceEvent emit_event_func;
-  guint timer;
+  GSource *timer;
 } SlowKeysEventPending;
+
+typedef struct _PadFeature PadFeature;
+
+struct _PadFeature
+{
+  ClutterInputDevicePadFeature feature;
+  int n_feature;
+  int group;
+  gboolean mode_switch;
+};
 
 static void clear_slow_keys      (MetaInputDeviceNative *device);
 static void stop_bounce_keys     (MetaInputDeviceNative *device);
@@ -59,26 +67,17 @@ static void stop_mousekeys_move  (MetaInputDeviceNative *device);
 static void
 meta_input_device_native_finalize (GObject *object)
 {
-  ClutterInputDevice *device = CLUTTER_INPUT_DEVICE (object);
   MetaInputDeviceNative *device_evdev = META_INPUT_DEVICE_NATIVE (object);
-  ClutterBackend *backend;
-  ClutterSeat *seat;
 
-  if (device_evdev->libinput_device)
-    libinput_device_unref (device_evdev->libinput_device);
-
-  meta_input_device_native_release_touch_slots (device_evdev,
-                                                g_get_monotonic_time ());
-  g_clear_pointer (&device_evdev->touches, g_hash_table_unref);
-
-  backend = clutter_get_default_backend ();
-  seat = clutter_backend_get_default_seat (backend);
-  meta_seat_native_release_device_id (META_SEAT_NATIVE (seat), device);
+  g_warn_if_fail (!device_evdev->libinput_device);
 
   clear_slow_keys (device_evdev);
   stop_bounce_keys (device_evdev);
   stop_toggle_slowkeys (device_evdev);
   stop_mousekeys_move (device_evdev);
+
+  g_clear_pointer (&device_evdev->pad_features, g_array_unref);
+  g_clear_pointer (&device_evdev->modes, g_array_unref);
 
   G_OBJECT_CLASS (meta_input_device_native_parent_class)->finalize (object);
 }
@@ -131,101 +130,84 @@ meta_input_device_native_get_property (GObject    *object,
 }
 
 static gboolean
-meta_input_device_native_keycode_to_evdev (ClutterInputDevice *device,
-                                           uint32_t            hardware_keycode,
-                                           uint32_t           *evdev_keycode)
-{
-  /* The hardware keycodes from the evdev backend are almost evdev
-     keycodes: we use the evdev keycode file, but xkb rules have an
-     offset by 8. See the comment in _clutter_key_event_new_from_evdev()
-  */
-  *evdev_keycode = hardware_keycode - 8;
-  return TRUE;
-}
-
-static void
-meta_input_device_native_update_from_tool (ClutterInputDevice     *device,
-                                           ClutterInputDeviceTool *tool)
-{
-  MetaInputDeviceToolNative *evdev_tool;
-
-  evdev_tool = META_INPUT_DEVICE_TOOL_NATIVE (tool);
-
-  g_object_freeze_notify (G_OBJECT (device));
-
-  _clutter_input_device_reset_axes (device);
-
-  _clutter_input_device_add_axis (device, CLUTTER_INPUT_AXIS_X, 0, 0, 0);
-  _clutter_input_device_add_axis (device, CLUTTER_INPUT_AXIS_Y, 0, 0, 0);
-
-  if (libinput_tablet_tool_has_distance (evdev_tool->tool))
-    _clutter_input_device_add_axis (device, CLUTTER_INPUT_AXIS_DISTANCE, 0, 1, 0);
-
-  if (libinput_tablet_tool_has_pressure (evdev_tool->tool))
-    _clutter_input_device_add_axis (device, CLUTTER_INPUT_AXIS_PRESSURE, 0, 1, 0);
-
-  if (libinput_tablet_tool_has_tilt (evdev_tool->tool))
-    {
-      _clutter_input_device_add_axis (device, CLUTTER_INPUT_AXIS_XTILT, -90, 90, 0);
-      _clutter_input_device_add_axis (device, CLUTTER_INPUT_AXIS_YTILT, -90, 90, 0);
-    }
-
-  if (libinput_tablet_tool_has_rotation (evdev_tool->tool))
-    _clutter_input_device_add_axis (device, CLUTTER_INPUT_AXIS_ROTATION, 0, 360, 0);
-
-  if (libinput_tablet_tool_has_slider (evdev_tool->tool))
-    _clutter_input_device_add_axis (device, CLUTTER_INPUT_AXIS_SLIDER, -1, 1, 0);
-
-  if (libinput_tablet_tool_has_wheel (evdev_tool->tool))
-    _clutter_input_device_add_axis (device, CLUTTER_INPUT_AXIS_WHEEL, -180, 180, 0);
-
-  g_object_thaw_notify (G_OBJECT (device));
-}
-
-static gboolean
 meta_input_device_native_is_mode_switch_button (ClutterInputDevice *device,
                                                 uint32_t            group,
                                                 uint32_t            button)
 {
-  struct libinput_device *libinput_device;
-  struct libinput_tablet_pad_mode_group *mode_group;
+  MetaInputDeviceNative *device_native = META_INPUT_DEVICE_NATIVE (device);
+  int i;
 
-  libinput_device = meta_input_device_native_get_libinput_device (device);
-  mode_group = libinput_device_tablet_pad_get_mode_group (libinput_device, group);
+  if (!device_native->pad_features)
+    return FALSE;
 
-  return libinput_tablet_pad_mode_group_button_is_toggle (mode_group, button) != 0;
+  for (i = 0; i < device_native->pad_features->len; i++)
+    {
+      PadFeature *pad_feature;
+
+      pad_feature = &g_array_index (device_native->pad_features, PadFeature, i);
+
+      if (pad_feature->feature == CLUTTER_PAD_FEATURE_BUTTON &&
+          pad_feature->group == group &&
+          pad_feature->n_feature == button)
+        return pad_feature->mode_switch;
+    }
+
+  return FALSE;
 }
 
 static int
 meta_input_device_native_get_group_n_modes (ClutterInputDevice *device,
                                             int                 group)
 {
-  struct libinput_device *libinput_device;
-  struct libinput_tablet_pad_mode_group *mode_group;
+  MetaInputDeviceNative *device_native = META_INPUT_DEVICE_NATIVE (device);
 
-  libinput_device = meta_input_device_native_get_libinput_device (device);
-  mode_group = libinput_device_tablet_pad_get_mode_group (libinput_device, group);
+  if (!device_native->modes || group < device_native->modes->len)
+    return -1;
 
-  return libinput_tablet_pad_mode_group_get_num_modes (mode_group);
+  return g_array_index (device_native->modes, int, group);
 }
 
 static gboolean
 meta_input_device_native_is_grouped (ClutterInputDevice *device,
                                      ClutterInputDevice *other_device)
 {
-  struct libinput_device *libinput_device, *other_libinput_device;
+  MetaInputDeviceNative *device_native, *other_device_native;
 
-  libinput_device = meta_input_device_native_get_libinput_device (device);
-  other_libinput_device = meta_input_device_native_get_libinput_device (other_device);
+  device_native = META_INPUT_DEVICE_NATIVE (device);
+  other_device_native = META_INPUT_DEVICE_NATIVE (other_device);
 
-  return libinput_device_get_device_group (libinput_device) ==
-    libinput_device_get_device_group (other_libinput_device);
+  return device_native->group == other_device_native->group;
+}
+
+static int
+meta_input_device_native_get_pad_feature_group (ClutterInputDevice           *device,
+                                                ClutterInputDevicePadFeature  feature,
+                                                int                           n_feature)
+{
+  MetaInputDeviceNative *device_native = META_INPUT_DEVICE_NATIVE (device);
+  int i;
+
+  if (!device_native->pad_features)
+    return -1;
+
+  for (i = 0; i < device_native->pad_features->len; i++)
+    {
+      PadFeature *pad_feature;
+
+      pad_feature = &g_array_index (device_native->pad_features, PadFeature, i);
+
+      if (pad_feature->feature == feature &&
+          pad_feature->n_feature == n_feature)
+        return pad_feature->group;
+    }
+
+  return -1;
 }
 
 static void
 meta_input_device_native_bell_notify (MetaInputDeviceNative *device)
 {
-  clutter_seat_bell_notify (CLUTTER_SEAT (device->seat));
+  meta_seat_impl_notify_bell_in_impl (device->seat_impl);
 }
 
 static void
@@ -234,7 +216,7 @@ meta_input_device_native_free_pending_slow_key (gpointer data)
   SlowKeysEventPending *slow_keys_event = data;
 
   clutter_event_free (slow_keys_event->event);
-  g_clear_handle_id (&slow_keys_event->timer, g_source_remove);
+  g_clear_pointer (&slow_keys_event->timer, g_source_destroy);
   g_free (slow_keys_event);
 }
 
@@ -250,10 +232,11 @@ static guint
 get_slow_keys_delay (ClutterInputDevice *device)
 {
   MetaInputDeviceNative *device_native = META_INPUT_DEVICE_NATIVE (device);
-  ClutterKbdA11ySettings a11y_settings;
+  MetaKbdA11ySettings a11y_settings;
+  MetaInputSettings *input_settings;
 
-  clutter_seat_get_kbd_a11y_settings (CLUTTER_SEAT (device_native->seat),
-                                      &a11y_settings);
+  input_settings = meta_seat_impl_get_input_settings (device_native->seat_impl);
+  meta_input_settings_get_kbd_a11y_settings (input_settings, &a11y_settings);
   /* Settings use int, we use uint, make sure we dont go negative */
   return MAX (0, a11y_settings.slowkeys_delay);
 }
@@ -267,14 +250,13 @@ trigger_slow_keys (gpointer data)
 
   /* Alter timestamp and emit the event */
   key_event->time = us2ms (g_get_monotonic_time ());
-  slow_keys_event->emit_event_func (slow_keys_event->event,
-                                    CLUTTER_INPUT_DEVICE (device));
+  _clutter_event_push (slow_keys_event->event, TRUE);
 
   /* Then remote the pending event */
   device->slow_keys_list = g_list_remove (device->slow_keys_list, slow_keys_event);
   meta_input_device_native_free_pending_slow_key (slow_keys_event);
 
-  if (device->a11y_flags & CLUTTER_A11Y_SLOW_KEYS_BEEP_ACCEPT)
+  if (device->a11y_flags & META_A11Y_SLOW_KEYS_BEEP_ACCEPT)
     meta_input_device_native_bell_notify (device);
 
   return G_SOURCE_REMOVE;
@@ -291,35 +273,53 @@ find_pending_event_by_keycode (gconstpointer a,
   return kb->hardware_keycode - ka->hardware_keycode;
 }
 
-static void
-start_slow_keys (ClutterEvent                *event,
-                 MetaInputDeviceNative       *device,
-                 ClutterEmitInputDeviceEvent  emit_event_func)
+static GSource *
+timeout_source_new (MetaSeatImpl *seat_impl,
+                    guint         interval,
+                    GSourceFunc   func,
+                    gpointer      user_data)
+{
+  GSource *source;
+
+  source = g_timeout_source_new (interval);
+  g_source_set_callback (source,
+                         func,
+                         user_data, NULL);
+  g_source_attach (source, seat_impl->input_context);
+  g_source_unref (source);
+
+  return source;
+}
+
+static gboolean
+start_slow_keys (ClutterEvent          *event,
+                 MetaInputDeviceNative *device)
 {
   SlowKeysEventPending *slow_keys_event;
   ClutterKeyEvent *key_event = (ClutterKeyEvent *) event;
 
   if (key_event->flags & CLUTTER_EVENT_FLAG_REPEATED)
-    return;
+    return TRUE;
 
   slow_keys_event = g_new0 (SlowKeysEventPending, 1);
   slow_keys_event->device = device;
   slow_keys_event->event = clutter_event_copy (event);
-  slow_keys_event->emit_event_func = emit_event_func;
   slow_keys_event->timer =
-    clutter_threads_add_timeout (get_slow_keys_delay (CLUTTER_INPUT_DEVICE (device)),
-                                 trigger_slow_keys,
-                                 slow_keys_event);
+    timeout_source_new (device->seat_impl,
+                        get_slow_keys_delay (CLUTTER_INPUT_DEVICE (device)),
+                        trigger_slow_keys,
+                        slow_keys_event);
   device->slow_keys_list = g_list_append (device->slow_keys_list, slow_keys_event);
 
-  if (device->a11y_flags & CLUTTER_A11Y_SLOW_KEYS_BEEP_PRESS)
+  if (device->a11y_flags & META_A11Y_SLOW_KEYS_BEEP_PRESS)
     meta_input_device_native_bell_notify (device);
+
+  return TRUE;
 }
 
-static void
-stop_slow_keys (ClutterEvent                *event,
-                MetaInputDeviceNative       *device,
-                ClutterEmitInputDeviceEvent  emit_event_func)
+static gboolean
+stop_slow_keys (ClutterEvent          *event,
+                MetaInputDeviceNative *device)
 {
   GList *item;
 
@@ -332,24 +332,25 @@ stop_slow_keys (ClutterEvent                *event,
       device->slow_keys_list = g_list_delete_link (device->slow_keys_list, item);
       meta_input_device_native_free_pending_slow_key (slow_keys_event);
 
-      if (device->a11y_flags & CLUTTER_A11Y_SLOW_KEYS_BEEP_REJECT)
+      if (device->a11y_flags & META_A11Y_SLOW_KEYS_BEEP_REJECT)
         meta_input_device_native_bell_notify (device);
 
-      return;
+      return TRUE;
     }
 
   /* If no key press event was pending, just emit the key release as-is */
-  emit_event_func (event, CLUTTER_INPUT_DEVICE (device));
+  return FALSE;
 }
 
 static guint
 get_debounce_delay (ClutterInputDevice *device)
 {
   MetaInputDeviceNative *device_native = META_INPUT_DEVICE_NATIVE (device);
-  ClutterKbdA11ySettings a11y_settings;
+  MetaKbdA11ySettings a11y_settings;
+  MetaInputSettings *input_settings;
 
-  clutter_seat_get_kbd_a11y_settings (CLUTTER_SEAT (device_native->seat),
-                                      &a11y_settings);
+  input_settings = meta_seat_impl_get_input_settings (device_native->seat_impl);
+  meta_input_settings_get_kbd_a11y_settings (input_settings, &a11y_settings);
   /* Settings use int, we use uint, make sure we dont go negative */
   return MAX (0, a11y_settings.debounce_delay);
 }
@@ -373,21 +374,22 @@ start_bounce_keys (ClutterEvent          *event,
 
   device->debounce_key = ((ClutterKeyEvent *) event)->hardware_keycode;
   device->debounce_timer =
-    clutter_threads_add_timeout (get_debounce_delay (CLUTTER_INPUT_DEVICE (device)),
-                                 clear_bounce_keys,
-                                 device);
+    timeout_source_new (device->seat_impl,
+                        get_debounce_delay (CLUTTER_INPUT_DEVICE (device)),
+                        clear_bounce_keys,
+                        device);
 }
 
 static void
 stop_bounce_keys (MetaInputDeviceNative *device)
 {
-  g_clear_handle_id (&device->debounce_timer, g_source_remove);
+  g_clear_pointer (&device->debounce_timer, g_source_destroy);
 }
 
 static void
 notify_bounce_keys_reject (MetaInputDeviceNative *device)
 {
-  if (device->a11y_flags & CLUTTER_A11Y_BOUNCE_KEYS_BEEP_REJECT)
+  if (device->a11y_flags & META_A11Y_BOUNCE_KEYS_BEEP_REJECT)
     meta_input_device_native_bell_notify (device);
 }
 
@@ -426,10 +428,9 @@ key_event_is_modifier (ClutterEvent *event)
 static void
 notify_stickykeys_mask (MetaInputDeviceNative *device)
 {
-  g_signal_emit_by_name (device->seat,
-                         "kbd-a11y-mods-state-changed",
-                         device->stickykeys_latched_mask,
-                         device->stickykeys_locked_mask);
+  meta_seat_impl_notify_kbd_a11y_mods_state_changed_in_impl (device->seat_impl,
+                                                             device->stickykeys_latched_mask,
+                                                             device->stickykeys_locked_mask);
 }
 
 static void
@@ -437,15 +438,19 @@ update_internal_xkb_state (MetaInputDeviceNative *device,
                            xkb_mod_mask_t         new_latched_mask,
                            xkb_mod_mask_t         new_locked_mask)
 {
-  MetaSeatNative *seat = device->seat;
+  MetaSeatImpl *seat_impl = device->seat_impl;
   xkb_mod_mask_t depressed_mods;
   xkb_mod_mask_t latched_mods;
   xkb_mod_mask_t locked_mods;
   xkb_mod_mask_t group_mods;
+  struct xkb_state *xkb_state;
 
-  depressed_mods = xkb_state_serialize_mods (seat->xkb, XKB_STATE_MODS_DEPRESSED);
-  latched_mods = xkb_state_serialize_mods (seat->xkb, XKB_STATE_MODS_LATCHED);
-  locked_mods = xkb_state_serialize_mods (seat->xkb, XKB_STATE_MODS_LOCKED);
+  g_rw_lock_writer_lock (&seat_impl->state_lock);
+
+  xkb_state = meta_seat_impl_get_xkb_state_in_impl (seat_impl);
+  depressed_mods = xkb_state_serialize_mods (xkb_state, XKB_STATE_MODS_DEPRESSED);
+  latched_mods = xkb_state_serialize_mods (xkb_state, XKB_STATE_MODS_LATCHED);
+  locked_mods = xkb_state_serialize_mods (xkb_state, XKB_STATE_MODS_LOCKED);
 
   latched_mods &= ~device->stickykeys_latched_mask;
   locked_mods &= ~device->stickykeys_locked_mask;
@@ -456,14 +461,16 @@ update_internal_xkb_state (MetaInputDeviceNative *device,
   latched_mods |= device->stickykeys_latched_mask;
   locked_mods |= device->stickykeys_locked_mask;
 
-  group_mods = xkb_state_serialize_layout (seat->xkb, XKB_STATE_LAYOUT_EFFECTIVE);
+  group_mods = xkb_state_serialize_layout (xkb_state, XKB_STATE_LAYOUT_EFFECTIVE);
 
-  xkb_state_update_mask (seat->xkb,
+  xkb_state_update_mask (xkb_state,
                          depressed_mods,
                          latched_mods,
                          locked_mods,
                          0, 0, group_mods);
   notify_stickykeys_mask (device);
+
+  g_rw_lock_writer_unlock (&seat_impl->state_lock);
 }
 
 static void
@@ -472,23 +479,25 @@ update_stickykeys_event (ClutterEvent          *event,
                          xkb_mod_mask_t         new_latched_mask,
                          xkb_mod_mask_t         new_locked_mask)
 {
-  MetaSeatNative *seat = device->seat;
+  MetaSeatImpl *seat_impl = device->seat_impl;
   xkb_mod_mask_t effective_mods;
   xkb_mod_mask_t latched_mods;
   xkb_mod_mask_t locked_mods;
+  struct xkb_state *xkb_state;
 
   update_internal_xkb_state (device, new_latched_mask, new_locked_mask);
 
-  effective_mods = xkb_state_serialize_mods (seat->xkb, XKB_STATE_MODS_EFFECTIVE);
-  latched_mods = xkb_state_serialize_mods (seat->xkb, XKB_STATE_MODS_LATCHED);
-  locked_mods = xkb_state_serialize_mods (seat->xkb, XKB_STATE_MODS_LOCKED);
+  xkb_state = meta_seat_impl_get_xkb_state_in_impl (seat_impl);
+  effective_mods = xkb_state_serialize_mods (xkb_state, XKB_STATE_MODS_EFFECTIVE);
+  latched_mods = xkb_state_serialize_mods (xkb_state, XKB_STATE_MODS_LATCHED);
+  locked_mods = xkb_state_serialize_mods (xkb_state, XKB_STATE_MODS_LOCKED);
 
   _clutter_event_set_state_full (event,
-                                 seat->button_state,
+                                 seat_impl->button_state,
                                  device->stickykeys_depressed_mask,
                                  latched_mods,
                                  locked_mods,
-                                 effective_mods | seat->button_state);
+                                 effective_mods | seat_impl->button_state);
 }
 
 static void
@@ -498,23 +507,22 @@ notify_stickykeys_change (MetaInputDeviceNative *device)
   device->stickykeys_depressed_mask = 0;
   update_internal_xkb_state (device, 0, 0);
 
-  g_signal_emit_by_name (CLUTTER_INPUT_DEVICE (device)->seat,
-                         "kbd-a11y-flags-changed",
-                         device->a11y_flags,
-                         CLUTTER_A11Y_STICKY_KEYS_ENABLED);
+  meta_seat_impl_notify_kbd_a11y_flags_changed_in_impl (device->seat_impl,
+                                                        device->a11y_flags,
+                                                        META_A11Y_STICKY_KEYS_ENABLED);
 }
 
 static void
 set_stickykeys_off (MetaInputDeviceNative *device)
 {
-  device->a11y_flags &= ~CLUTTER_A11Y_STICKY_KEYS_ENABLED;
+  device->a11y_flags &= ~META_A11Y_STICKY_KEYS_ENABLED;
   notify_stickykeys_change (device);
 }
 
 static void
 set_stickykeys_on (MetaInputDeviceNative *device)
 {
-  device->a11y_flags |= CLUTTER_A11Y_STICKY_KEYS_ENABLED;
+  device->a11y_flags |= META_A11Y_STICKY_KEYS_ENABLED;
   notify_stickykeys_change (device);
 }
 
@@ -529,45 +537,45 @@ clear_stickykeys_event (ClutterEvent          *event,
 static void
 set_slowkeys_off (MetaInputDeviceNative *device)
 {
-  device->a11y_flags &= ~CLUTTER_A11Y_SLOW_KEYS_ENABLED;
+  device->a11y_flags &= ~META_A11Y_SLOW_KEYS_ENABLED;
 
-  g_signal_emit_by_name (CLUTTER_INPUT_DEVICE (device)->seat,
-                         "kbd-a11y-flags-changed",
-                         device->a11y_flags,
-                         CLUTTER_A11Y_SLOW_KEYS_ENABLED);
+  meta_seat_impl_notify_kbd_a11y_flags_changed_in_impl (device->seat_impl,
+                                                        device->a11y_flags,
+                                                        META_A11Y_SLOW_KEYS_ENABLED);
 }
 
 static void
 set_slowkeys_on (MetaInputDeviceNative *device)
 {
-  device->a11y_flags |= CLUTTER_A11Y_SLOW_KEYS_ENABLED;
+  device->a11y_flags |= META_A11Y_SLOW_KEYS_ENABLED;
 
-  g_signal_emit_by_name (CLUTTER_INPUT_DEVICE (device)->seat,
-                         "kbd-a11y-flags-changed",
-                         device->a11y_flags,
-                         CLUTTER_A11Y_SLOW_KEYS_ENABLED);
+  meta_seat_impl_notify_kbd_a11y_flags_changed_in_impl (device->seat_impl,
+                                                        device->a11y_flags,
+                                                        META_A11Y_SLOW_KEYS_ENABLED);
 }
 
 static void
 handle_stickykeys_press (ClutterEvent          *event,
                          MetaInputDeviceNative *device)
 {
-  MetaSeatNative *seat = device->seat;
+  MetaSeatImpl *seat_impl = device->seat_impl;
   xkb_mod_mask_t depressed_mods;
   xkb_mod_mask_t new_latched_mask;
   xkb_mod_mask_t new_locked_mask;
+  struct xkb_state *xkb_state;
 
   if (!key_event_is_modifier (event))
     return;
 
   if (device->stickykeys_depressed_mask &&
-      (device->a11y_flags & CLUTTER_A11Y_STICKY_KEYS_TWO_KEY_OFF))
+      (device->a11y_flags & META_A11Y_STICKY_KEYS_TWO_KEY_OFF))
     {
       clear_stickykeys_event (event, device);
       return;
     }
 
-  depressed_mods = xkb_state_serialize_mods (seat->xkb, XKB_STATE_MODS_DEPRESSED);
+  xkb_state = meta_seat_impl_get_xkb_state_in_impl (seat_impl);
+  depressed_mods = xkb_state_serialize_mods (xkb_state, XKB_STATE_MODS_DEPRESSED);
   /* Ignore the lock modifier mask, that one cannot be sticky, yet the
    * CAPS_LOCK key itself counts as a modifier as it might be remapped
    * to some other modifier which can be sticky.
@@ -600,14 +608,16 @@ static void
 handle_stickykeys_release (ClutterEvent          *event,
                            MetaInputDeviceNative *device)
 {
-  MetaSeatNative *seat = device->seat;
+  MetaSeatImpl *seat_impl = device->seat_impl;
+  struct xkb_state *xkb_state;
 
+  xkb_state = meta_seat_impl_get_xkb_state_in_impl (seat_impl);
   device->stickykeys_depressed_mask =
-    xkb_state_serialize_mods (seat->xkb, XKB_STATE_MODS_DEPRESSED);
+    xkb_state_serialize_mods (xkb_state, XKB_STATE_MODS_DEPRESSED);
 
   if (key_event_is_modifier (event))
     {
-      if (device->a11y_flags & CLUTTER_A11Y_STICKY_KEYS_BEEP)
+      if (device->a11y_flags & META_A11Y_STICKY_KEYS_BEEP)
         meta_input_device_native_bell_notify (device);
 
       return;
@@ -626,10 +636,10 @@ trigger_toggle_slowkeys (gpointer data)
 
   device->toggle_slowkeys_timer = 0;
 
-  if (device->a11y_flags & CLUTTER_A11Y_FEATURE_STATE_CHANGE_BEEP)
+  if (device->a11y_flags & META_A11Y_FEATURE_STATE_CHANGE_BEEP)
     meta_input_device_native_bell_notify (device);
 
-  if (device->a11y_flags & CLUTTER_A11Y_SLOW_KEYS_ENABLED)
+  if (device->a11y_flags & META_A11Y_SLOW_KEYS_ENABLED)
     set_slowkeys_off (device);
   else
     set_slowkeys_on (device);
@@ -644,15 +654,16 @@ start_toggle_slowkeys (MetaInputDeviceNative *device)
     return;
 
   device->toggle_slowkeys_timer =
-    clutter_threads_add_timeout (8 * 1000 /* 8 secs */,
-                                 trigger_toggle_slowkeys,
-                                 device);
+    timeout_source_new (device->seat_impl,
+                        8 * 1000 /* 8 secs */,
+                        trigger_toggle_slowkeys,
+                        device);
 }
 
 static void
 stop_toggle_slowkeys (MetaInputDeviceNative *device)
 {
-  g_clear_handle_id (&device->toggle_slowkeys_timer, g_source_remove);
+  g_clear_pointer (&device->toggle_slowkeys_timer, g_source_destroy);
 }
 
 static void
@@ -688,10 +699,10 @@ handle_enablekeys_release (ClutterEvent          *event,
         {
           device->shift_count = 0;
 
-          if (device->a11y_flags & CLUTTER_A11Y_FEATURE_STATE_CHANGE_BEEP)
+          if (device->a11y_flags & META_A11Y_FEATURE_STATE_CHANGE_BEEP)
             meta_input_device_native_bell_notify (device);
 
-          if (device->a11y_flags & CLUTTER_A11Y_STICKY_KEYS_ENABLED)
+          if (device->a11y_flags & META_A11Y_STICKY_KEYS_ENABLED)
             set_stickykeys_off (device);
           else
             set_stickykeys_on (device);
@@ -758,8 +769,8 @@ emulate_button_click (MetaInputDeviceNative *device)
 #define MOUSEKEYS_CURVE (1.0 + (((double) 50.0) * 0.001))
 
 static void
-update_mousekeys_params (MetaInputDeviceNative  *device,
-                         ClutterKbdA11ySettings *settings)
+update_mousekeys_params (MetaInputDeviceNative *device,
+                         MetaKbdA11ySettings   *settings)
 {
   /* Prevent us from broken settings values */
   device->mousekeys_max_speed = MAX (1, settings->mousekeys_max_speed);
@@ -841,8 +852,12 @@ emulate_pointer_motion (MetaInputDeviceNative *device_evdev,
 static gboolean
 is_numlock_active (MetaInputDeviceNative *device)
 {
-  MetaSeatNative *seat = device->seat;
-  return xkb_state_mod_name_is_active (seat->xkb,
+  MetaSeatImpl *seat_impl = device->seat_impl;
+  struct xkb_state *xkb_state;
+
+  xkb_state = meta_seat_impl_get_xkb_state_in_impl (seat_impl);
+
+  return xkb_state_mod_name_is_active (xkb_state,
                                        "Mod2",
                                        XKB_STATE_MODS_LOCKED);
 }
@@ -862,7 +877,7 @@ enable_mousekeys (MetaInputDeviceNative *device_evdev)
     return;
 
   device->accessibility_virtual_device =
-    clutter_seat_create_virtual_device (CLUTTER_SEAT (device_evdev->seat),
+    clutter_seat_create_virtual_device (clutter_input_device_get_seat (device),
                                         CLUTTER_POINTER_DEVICE);
 }
 
@@ -907,18 +922,20 @@ trigger_mousekeys_move (gpointer data)
     {
       /* This is the first move, Secdule at mk_init_delay */
       device->move_mousekeys_timer =
-        clutter_threads_add_timeout (device->mousekeys_init_delay,
-                                     trigger_mousekeys_move,
-                                     device);
+        timeout_source_new (device->seat_impl,
+                            device->mousekeys_init_delay,
+                            trigger_mousekeys_move,
+                            device);
 
     }
   else
     {
       /* More moves, reschedule at mk_interval */
       device->move_mousekeys_timer =
-        clutter_threads_add_timeout (100, /* msec between mousekey events */
-                                     trigger_mousekeys_move,
-                                     device);
+        timeout_source_new (device->seat_impl,
+                            100, /* msec between mousekey events */
+                            trigger_mousekeys_move,
+                            device);
     }
 
   /* Pointer motion */
@@ -979,7 +996,7 @@ stop_mousekeys_move (MetaInputDeviceNative *device)
   device->mousekeys_first_motion_time = 0;
   device->mousekeys_last_motion_time = 0;
 
-  g_clear_handle_id (&device->move_mousekeys_timer, g_source_remove);
+  g_clear_pointer (&device->move_mousekeys_timer, g_source_destroy);
 }
 
 static void
@@ -1117,18 +1134,13 @@ handle_mousekeys_release (ClutterEvent          *event,
   return FALSE;
 }
 
-static void
-meta_input_device_native_process_kbd_a11y_event (ClutterEvent               *event,
-                                                 ClutterInputDevice         *device,
-                                                 ClutterEmitInputDeviceEvent emit_event_func)
+gboolean
+meta_input_device_native_process_kbd_a11y_event_in_impl (ClutterInputDevice *device,
+                                                         ClutterEvent       *event)
 {
   MetaInputDeviceNative *device_evdev = META_INPUT_DEVICE_NATIVE (device);
 
-  /* Ignore key events injected from IM */
-  if (event->key.flags & CLUTTER_EVENT_FLAG_INPUT_METHOD)
-    goto emit_event;
-
-  if (device_evdev->a11y_flags & CLUTTER_A11Y_KEYBOARD_ENABLED)
+  if (device_evdev->a11y_flags & META_A11Y_KEYBOARD_ENABLED)
     {
       if (event->type == CLUTTER_KEY_PRESS)
         handle_enablekeys_press (event, device_evdev);
@@ -1136,41 +1148,39 @@ meta_input_device_native_process_kbd_a11y_event (ClutterEvent               *eve
         handle_enablekeys_release (event, device_evdev);
     }
 
-  if (device_evdev->a11y_flags & CLUTTER_A11Y_MOUSE_KEYS_ENABLED)
+  if (device_evdev->a11y_flags & META_A11Y_MOUSE_KEYS_ENABLED)
     {
       if (event->type == CLUTTER_KEY_PRESS &&
           handle_mousekeys_press (event, device_evdev))
-        return; /* swallow event */
+        return TRUE; /* swallow event */
       if (event->type == CLUTTER_KEY_RELEASE &&
           handle_mousekeys_release (event, device_evdev))
-        return; /* swallow event */
+        return TRUE; /* swallow event */
     }
 
-  if ((device_evdev->a11y_flags & CLUTTER_A11Y_BOUNCE_KEYS_ENABLED) &&
+  if ((device_evdev->a11y_flags & META_A11Y_BOUNCE_KEYS_ENABLED) &&
       (get_debounce_delay (device) != 0))
     {
       if ((event->type == CLUTTER_KEY_PRESS) && debounce_key (event, device_evdev))
         {
           notify_bounce_keys_reject (device_evdev);
 
-          return;
+          return TRUE;
         }
       else if (event->type == CLUTTER_KEY_RELEASE)
         start_bounce_keys (event, device_evdev);
     }
 
-  if ((device_evdev->a11y_flags & CLUTTER_A11Y_SLOW_KEYS_ENABLED) &&
+  if ((device_evdev->a11y_flags & META_A11Y_SLOW_KEYS_ENABLED) &&
       (get_slow_keys_delay (device) != 0))
     {
       if (event->type == CLUTTER_KEY_PRESS)
-        start_slow_keys (event, device_evdev, emit_event_func);
+        return start_slow_keys (event, device_evdev);
       else if (event->type == CLUTTER_KEY_RELEASE)
-        stop_slow_keys (event, device_evdev, emit_event_func);
-
-      return;
+        return stop_slow_keys (event, device_evdev);
     }
 
-  if (device_evdev->a11y_flags & CLUTTER_A11Y_STICKY_KEYS_ENABLED)
+  if (device_evdev->a11y_flags & META_A11Y_STICKY_KEYS_ENABLED)
     {
       if (event->type == CLUTTER_KEY_PRESS)
         handle_stickykeys_press (event, device_evdev);
@@ -1178,39 +1188,38 @@ meta_input_device_native_process_kbd_a11y_event (ClutterEvent               *eve
         handle_stickykeys_release (event, device_evdev);
     }
 
-emit_event:
-  emit_event_func (event, device);
+  return FALSE;
 }
 
 void
-meta_input_device_native_apply_kbd_a11y_settings (MetaInputDeviceNative  *device,
-                                                  ClutterKbdA11ySettings *settings)
+meta_input_device_native_apply_kbd_a11y_settings_in_impl (MetaInputDeviceNative *device,
+                                                          MetaKbdA11ySettings   *settings)
 {
-  ClutterKeyboardA11yFlags changed_flags = (device->a11y_flags ^ settings->controls);
+  MetaKeyboardA11yFlags changed_flags = (device->a11y_flags ^ settings->controls);
 
-  if (changed_flags & (CLUTTER_A11Y_KEYBOARD_ENABLED | CLUTTER_A11Y_SLOW_KEYS_ENABLED))
+  if (changed_flags & (META_A11Y_KEYBOARD_ENABLED | META_A11Y_SLOW_KEYS_ENABLED))
     clear_slow_keys (device);
 
-  if (changed_flags & (CLUTTER_A11Y_KEYBOARD_ENABLED | CLUTTER_A11Y_BOUNCE_KEYS_ENABLED))
+  if (changed_flags & (META_A11Y_KEYBOARD_ENABLED | META_A11Y_BOUNCE_KEYS_ENABLED))
     device->debounce_key = 0;
 
-  if (changed_flags & (CLUTTER_A11Y_KEYBOARD_ENABLED | CLUTTER_A11Y_STICKY_KEYS_ENABLED))
+  if (changed_flags & (META_A11Y_KEYBOARD_ENABLED | META_A11Y_STICKY_KEYS_ENABLED))
     {
       device->stickykeys_depressed_mask = 0;
       update_internal_xkb_state (device, 0, 0);
     }
 
-  if (changed_flags & CLUTTER_A11Y_KEYBOARD_ENABLED)
+  if (changed_flags & META_A11Y_KEYBOARD_ENABLED)
     {
       device->toggle_slowkeys_timer = 0;
       device->shift_count = 0;
       device->last_shift_time = 0;
     }
 
-  if (changed_flags & (CLUTTER_A11Y_KEYBOARD_ENABLED | CLUTTER_A11Y_MOUSE_KEYS_ENABLED))
+  if (changed_flags & (META_A11Y_KEYBOARD_ENABLED | META_A11Y_MOUSE_KEYS_ENABLED))
     {
       if (settings->controls &
-          (CLUTTER_A11Y_KEYBOARD_ENABLED | CLUTTER_A11Y_MOUSE_KEYS_ENABLED))
+          (META_A11Y_KEYBOARD_ENABLED | META_A11Y_MOUSE_KEYS_ENABLED))
         enable_mousekeys (device);
       else
         disable_mousekeys (device);
@@ -1222,66 +1231,26 @@ meta_input_device_native_apply_kbd_a11y_settings (MetaInputDeviceNative  *device
 }
 
 void
-meta_input_device_native_a11y_maybe_notify_toggle_keys (MetaInputDeviceNative *device)
+meta_input_device_native_a11y_maybe_notify_toggle_keys_in_impl (MetaInputDeviceNative *device)
 {
-  if (device->a11y_flags & CLUTTER_A11Y_TOGGLE_KEYS_ENABLED)
+  if (device->a11y_flags & META_A11Y_TOGGLE_KEYS_ENABLED)
     meta_input_device_native_bell_notify (device);
-}
-
-static void
-release_device_touch_slot (gpointer value)
-{
-  MetaTouchState *touch_state = value;
-
-  meta_seat_native_release_touch_state (touch_state->seat, touch_state);
-}
-
-MetaTouchState *
-meta_input_device_native_acquire_touch_state (MetaInputDeviceNative *device,
-                                              int                    device_slot)
-{
-  MetaTouchState *touch_state;
-
-  touch_state = meta_seat_native_acquire_touch_state (device->seat,
-                                                      device_slot);
-  g_hash_table_insert (device->touches,
-                       GINT_TO_POINTER (device_slot),
-                       touch_state);
-
-  return touch_state;
-}
-
-MetaTouchState *
-meta_input_device_native_lookup_touch_state (MetaInputDeviceNative *device,
-                                             int                    device_slot)
-{
-  return g_hash_table_lookup (device->touches, GINT_TO_POINTER (device_slot));
-}
-
-void
-meta_input_device_native_release_touch_state (MetaInputDeviceNative *device,
-                                              MetaTouchState        *touch_state)
-{
-  g_hash_table_remove (device->touches,
-                       GINT_TO_POINTER (touch_state->device_slot));
 }
 
 static void
 meta_input_device_native_class_init (MetaInputDeviceNativeClass *klass)
 {
-  ClutterInputDeviceClass *device_manager_class = CLUTTER_INPUT_DEVICE_CLASS (klass);
+  ClutterInputDeviceClass *device_class = CLUTTER_INPUT_DEVICE_CLASS (klass);
   GObjectClass *object_class = G_OBJECT_CLASS (klass);
 
   object_class->finalize = meta_input_device_native_finalize;
   object_class->set_property = meta_input_device_native_set_property;
   object_class->get_property = meta_input_device_native_get_property;
 
-  device_manager_class->keycode_to_evdev = meta_input_device_native_keycode_to_evdev;
-  device_manager_class->update_from_tool = meta_input_device_native_update_from_tool;
-  device_manager_class->is_mode_switch_button = meta_input_device_native_is_mode_switch_button;
-  device_manager_class->get_group_n_modes = meta_input_device_native_get_group_n_modes;
-  device_manager_class->is_grouped = meta_input_device_native_is_grouped;
-  device_manager_class->process_kbd_a11y_event = meta_input_device_native_process_kbd_a11y_event;
+  device_class->is_mode_switch_button = meta_input_device_native_is_mode_switch_button;
+  device_class->get_group_n_modes = meta_input_device_native_get_group_n_modes;
+  device_class->is_grouped = meta_input_device_native_is_grouped;
+  device_class->get_pad_feature_group = meta_input_device_native_get_pad_feature_group;
 
   obj_props[PROP_DEVICE_MATRIX] =
     g_param_spec_boxed ("device-matrix",
@@ -1305,9 +1274,59 @@ meta_input_device_native_init (MetaInputDeviceNative *self)
   cairo_matrix_init_identity (&self->device_matrix);
   self->device_aspect_ratio = 0;
   self->output_ratio = 0;
+}
 
-  self->touches = g_hash_table_new_full (NULL, NULL,
-                                         NULL, release_device_touch_slot);
+static void
+update_pad_features (MetaInputDeviceNative *device_native)
+{
+  ClutterInputDevice *device = CLUTTER_INPUT_DEVICE (device_native);
+  struct libinput_device *libinput_device;
+  struct libinput_tablet_pad_mode_group *mode_group;
+  int n_groups, n_buttons, n_rings, n_strips, n_modes, i, j;
+
+  libinput_device = meta_input_device_native_get_libinput_device (device);
+  n_rings = libinput_device_tablet_pad_get_num_rings (libinput_device);
+  n_strips = libinput_device_tablet_pad_get_num_strips (libinput_device);
+  n_groups = libinput_device_tablet_pad_get_num_mode_groups (libinput_device);
+  n_buttons = libinput_device_tablet_pad_get_num_buttons (libinput_device);
+
+  device_native->pad_features = g_array_new (FALSE, FALSE, sizeof (PadFeature));
+  device_native->modes = g_array_sized_new (FALSE, FALSE, sizeof (int), n_groups);
+
+  for (i = 0; i < n_groups; i++)
+    {
+      mode_group =
+        libinput_device_tablet_pad_get_mode_group (libinput_device, i);
+
+      n_modes = libinput_tablet_pad_mode_group_get_num_modes (mode_group);
+      g_array_append_val (device_native->modes, n_modes);
+
+      for (j = 0; j < n_buttons; j++)
+        {
+          gboolean is_mode_switch =
+            libinput_tablet_pad_mode_group_button_is_toggle (mode_group, j) != 0;
+          PadFeature feature = { CLUTTER_PAD_FEATURE_BUTTON, j, i, is_mode_switch };
+
+          if (libinput_tablet_pad_mode_group_has_button (mode_group, j))
+            g_array_append_val (device_native->pad_features, feature);
+        }
+
+      for (j = 0; j < n_rings; j++)
+        {
+          PadFeature feature = { CLUTTER_PAD_FEATURE_RING, j, i };
+
+          if (libinput_tablet_pad_mode_group_has_ring (mode_group, j))
+            g_array_append_val (device_native->pad_features, feature);
+        }
+
+      for (j = 0; j < n_strips; j++)
+        {
+          PadFeature feature = { CLUTTER_PAD_FEATURE_STRIP, j, i };
+
+          if (libinput_tablet_pad_mode_group_has_strip (mode_group, j))
+            g_array_append_val (device_native->pad_features, feature);
+        }
+    }
 }
 
 /*
@@ -1320,20 +1339,19 @@ meta_input_device_native_init (MetaInputDeviceNative *self)
  * it with the provided seat.
  */
 ClutterInputDevice *
-meta_input_device_native_new (MetaSeatNative         *seat,
-                              struct libinput_device *libinput_device)
+meta_input_device_native_new_in_impl (MetaSeatImpl           *seat_impl,
+                                      struct libinput_device *libinput_device)
 {
   MetaInputDeviceNative *device;
   ClutterInputDeviceType type;
   char *vendor, *product;
-  int device_id, n_rings = 0, n_strips = 0, n_groups = 1;
+  int n_rings = 0, n_strips = 0, n_groups = 1, n_buttons = 0;
   char *node_path;
   double width, height;
 
-  type = meta_input_device_native_determine_type (libinput_device);
+  type = meta_input_device_native_determine_type_in_impl (libinput_device);
   vendor = g_strdup_printf ("%.4x", libinput_device_get_id_vendor (libinput_device));
   product = g_strdup_printf ("%.4x", libinput_device_get_id_product (libinput_device));
-  device_id = meta_seat_native_acquire_device_id (seat);
   node_path = g_strdup_printf ("/dev/input/%s", libinput_device_get_sysname (libinput_device));
 
   if (libinput_device_has_capability (libinput_device,
@@ -1342,24 +1360,24 @@ meta_input_device_native_new (MetaSeatNative         *seat,
       n_rings = libinput_device_tablet_pad_get_num_rings (libinput_device);
       n_strips = libinput_device_tablet_pad_get_num_strips (libinput_device);
       n_groups = libinput_device_tablet_pad_get_num_mode_groups (libinput_device);
+      n_buttons = libinput_device_tablet_pad_get_num_buttons (libinput_device);
     }
 
   device = g_object_new (META_TYPE_INPUT_DEVICE_NATIVE,
-                         "id", device_id,
                          "name", libinput_device_get_name (libinput_device),
                          "device-type", type,
                          "device-mode", CLUTTER_INPUT_MODE_PHYSICAL,
-                         "enabled", TRUE,
                          "vendor-id", vendor,
                          "product-id", product,
                          "n-rings", n_rings,
                          "n-strips", n_strips,
                          "n-mode-groups", n_groups,
+                         "n-buttons", n_buttons,
                          "device-node", node_path,
-                         "seat", seat,
+                         "seat", seat_impl->seat_native,
                          NULL);
 
-  device->seat = seat;
+  device->seat_impl = seat_impl;
   device->libinput_device = libinput_device;
 
   libinput_device_set_user_data (libinput_device, device);
@@ -1368,8 +1386,14 @@ meta_input_device_native_new (MetaSeatNative         *seat,
   g_free (product);
   g_free (node_path);
 
+  if (libinput_device_has_capability (libinput_device,
+                                      LIBINPUT_DEVICE_CAP_TABLET_PAD))
+    update_pad_features (device);
+
   if (libinput_device_get_size (libinput_device, &width, &height) == 0)
     device->device_aspect_ratio = width / height;
+
+  device->group = (intptr_t) libinput_device_get_device_group (libinput_device);
 
   return CLUTTER_INPUT_DEVICE (device);
 }
@@ -1382,13 +1406,12 @@ meta_input_device_native_new (MetaSeatNative         *seat,
  * Create a new virtual ClutterInputDevice of the given type.
  */
 ClutterInputDevice *
-meta_input_device_native_new_virtual (MetaSeatNative         *seat,
+meta_input_device_native_new_virtual (MetaSeatImpl           *seat_impl,
                                       ClutterInputDeviceType  type,
                                       ClutterInputMode        mode)
 {
   MetaInputDeviceNative *device;
   const char *name;
-  int device_id;
 
   switch (type)
     {
@@ -1406,30 +1429,27 @@ meta_input_device_native_new_virtual (MetaSeatNative         *seat,
       break;
     };
 
-  device_id = meta_seat_native_acquire_device_id (seat);
   device = g_object_new (META_TYPE_INPUT_DEVICE_NATIVE,
-                         "id", device_id,
                          "name", name,
                          "device-type", type,
                          "device-mode", mode,
-                         "enabled", TRUE,
-                         "seat", seat,
+                         "seat", seat_impl->seat_native,
                          NULL);
 
-  device->seat = seat;
+  device->seat_impl = seat_impl;
 
   return CLUTTER_INPUT_DEVICE (device);
 }
 
-MetaSeatNative *
-meta_input_device_native_get_seat (MetaInputDeviceNative *device)
+MetaSeatImpl *
+meta_input_device_native_get_seat_impl (MetaInputDeviceNative *device)
 {
-  return device->seat;
+  return device->seat_impl;
 }
 
 void
-meta_input_device_native_update_leds (MetaInputDeviceNative *device,
-                                      enum libinput_led      leds)
+meta_input_device_native_update_leds_in_impl (MetaInputDeviceNative *device,
+                                              enum libinput_led      leds)
 {
   if (!device->libinput_device)
     return;
@@ -1438,7 +1458,7 @@ meta_input_device_native_update_leds (MetaInputDeviceNative *device,
 }
 
 ClutterInputDeviceType
-meta_input_device_native_determine_type (struct libinput_device *ldev)
+meta_input_device_native_determine_type_in_impl (struct libinput_device *ldev)
 {
   /* This setting is specific to touchpads and alike, only in these
    * devices there is this additional layer of touch event interpretation.
@@ -1483,18 +1503,17 @@ meta_input_device_native_get_libinput_device (ClutterInputDevice *device)
 }
 
 void
-meta_input_device_native_translate_coordinates (ClutterInputDevice *device,
-                                                ClutterStage       *stage,
-                                                float              *x,
-                                                float              *y)
+meta_input_device_native_translate_coordinates_in_impl (ClutterInputDevice *device,
+                                                        MetaViewportInfo   *viewports,
+                                                        float              *x,
+                                                        float              *y)
 {
   MetaInputDeviceNative *device_evdev = META_INPUT_DEVICE_NATIVE (device);
   double min_x = 0, min_y = 0, max_x = 1, max_y = 1;
-  double stage_width, stage_height;
+  float stage_width, stage_height;
   double x_d, y_d;
 
-  stage_width = clutter_actor_get_width (CLUTTER_ACTOR (stage));
-  stage_height = clutter_actor_get_height (CLUTTER_ACTOR (stage));
+  meta_viewport_info_get_extents (viewports, &stage_width, &stage_height);
   x_d = *x / stage_width;
   y_d = *y / stage_height;
 
@@ -1518,23 +1537,63 @@ meta_input_device_native_translate_coordinates (ClutterInputDevice *device,
   *y = CLAMP (y_d, MIN (min_y, max_y), MAX (min_y, max_y)) * stage_height;
 }
 
-void
-meta_input_device_native_release_touch_slots (MetaInputDeviceNative *device_evdev,
-                                              uint64_t               time_us)
+MetaInputDeviceMapping
+meta_input_device_native_get_mapping_mode_in_impl (ClutterInputDevice *device)
 {
-  GHashTableIter iter;
-  MetaTouchState *touch_state;
+  MetaInputDeviceNative *device_native = META_INPUT_DEVICE_NATIVE (device);
+  ClutterInputDeviceType device_type;
 
-  g_hash_table_iter_init (&iter, device_evdev->touches);
-  while (g_hash_table_iter_next (&iter, NULL, (gpointer *) &touch_state))
-    {
-      meta_seat_native_notify_touch_event (touch_state->seat,
-                                           CLUTTER_INPUT_DEVICE (device_evdev),
-                                           CLUTTER_TOUCH_CANCEL,
-                                           time_us,
-                                           touch_state->seat_slot,
-                                           touch_state->coords.x,
-                                           touch_state->coords.y);
-      g_hash_table_iter_remove (&iter);
-    }
+  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device),
+                        META_INPUT_DEVICE_MAPPING_ABSOLUTE);
+
+  device_type = clutter_input_device_get_device_type (device);
+  g_return_val_if_fail (device_type == CLUTTER_TABLET_DEVICE ||
+                        device_type == CLUTTER_PEN_DEVICE ||
+                        device_type == CLUTTER_ERASER_DEVICE,
+                        META_INPUT_DEVICE_MAPPING_ABSOLUTE);
+
+  return device_native->mapping_mode;
+}
+
+void
+meta_input_device_native_set_mapping_mode_in_impl (ClutterInputDevice     *device,
+                                                   MetaInputDeviceMapping  mapping)
+{
+  MetaInputDeviceNative *device_native = META_INPUT_DEVICE_NATIVE (device);
+  ClutterInputDeviceType device_type;
+
+  g_return_if_fail (CLUTTER_IS_INPUT_DEVICE (device));
+
+  device_type = clutter_input_device_get_device_type (device);
+  g_return_if_fail (device_type == CLUTTER_TABLET_DEVICE ||
+                    device_type == CLUTTER_PEN_DEVICE ||
+                    device_type == CLUTTER_ERASER_DEVICE);
+
+  device_native->mapping_mode = mapping;
+}
+
+void
+meta_input_device_native_set_coords_in_impl (MetaInputDeviceNative *device_native,
+                                             float                  x,
+                                             float                  y)
+{
+  device_native->pointer_x = x;
+  device_native->pointer_y = y;
+}
+
+void
+meta_input_device_native_get_coords_in_impl (MetaInputDeviceNative *device_native,
+                                             float                 *x,
+                                             float                 *y)
+{
+  if (x)
+    *x = device_native->pointer_x;
+  if (y)
+    *y = device_native->pointer_y;
+}
+
+void
+meta_input_device_native_detach_libinput_in_impl (MetaInputDeviceNative *device_native)
+{
+  g_clear_pointer (&device_native->libinput_device, libinput_device_unref);
 }

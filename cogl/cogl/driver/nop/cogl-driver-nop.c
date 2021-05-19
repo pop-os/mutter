@@ -36,10 +36,10 @@
 #include "cogl-context-private.h"
 #include "cogl-feature-private.h"
 #include "cogl-renderer-private.h"
-#include "cogl-framebuffer-nop-private.h"
 #include "cogl-texture-2d-nop-private.h"
 #include "cogl-attribute-nop-private.h"
 #include "cogl-clip-stack-nop-private.h"
+#include "driver/nop/cogl-nop-framebuffer.h"
 
 static gboolean
 _cogl_driver_update_features (CoglContext *ctx,
@@ -67,6 +67,25 @@ _cogl_driver_nop_is_hardware_accelerated (CoglContext *context)
   return FALSE;
 }
 
+static CoglFramebufferDriver *
+_cogl_driver_nop_create_framebuffer_driver (CoglContext                        *context,
+                                            CoglFramebuffer                    *framebuffer,
+                                            const CoglFramebufferDriverConfig  *driver_config,
+                                            GError                            **error)
+{
+  return g_object_new (COGL_TYPE_NOP_FRAMEBUFFER,
+                       "framebuffer", framebuffer,
+                       NULL);
+}
+
+static void
+_cogl_driver_nop_flush_framebuffer_state (CoglContext          *ctx,
+                                          CoglFramebuffer      *draw_buffer,
+                                          CoglFramebuffer      *read_buffer,
+                                          CoglFramebufferState  state)
+{
+}
+
 const CoglDriverVtable
 _cogl_driver_nop =
   {
@@ -77,17 +96,8 @@ _cogl_driver_nop =
     NULL, /* pixel_format_from_gl_internal */
     NULL, /* pixel_format_to_gl */
     _cogl_driver_update_features,
-    _cogl_offscreen_nop_allocate,
-    _cogl_offscreen_nop_free,
-    _cogl_framebuffer_nop_flush_state,
-    _cogl_framebuffer_nop_clear,
-    _cogl_framebuffer_nop_query_bits,
-    _cogl_framebuffer_nop_finish,
-    _cogl_framebuffer_nop_flush,
-    _cogl_framebuffer_nop_discard_buffers,
-    _cogl_framebuffer_nop_draw_attributes,
-    _cogl_framebuffer_nop_draw_indexed_attributes,
-    _cogl_framebuffer_nop_read_pixels_into_bitmap,
+    _cogl_driver_nop_create_framebuffer_driver,
+    _cogl_driver_nop_flush_framebuffer_state,
     _cogl_texture_2d_nop_free,
     _cogl_texture_2d_nop_can_create,
     _cogl_texture_2d_nop_init,

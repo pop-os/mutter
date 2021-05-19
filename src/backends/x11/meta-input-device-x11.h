@@ -69,6 +69,33 @@ void meta_input_device_x11_update_pad_state (ClutterInputDevice *device,
 gboolean meta_input_device_x11_get_pointer_location (ClutterInputDevice *device,
                                                      float              *x,
                                                      float              *y);
+int meta_input_device_x11_get_device_id (ClutterInputDevice *device);
+
+int meta_input_device_x11_get_n_axes (ClutterInputDevice *device);
+void meta_input_device_x11_reset_axes (ClutterInputDevice *device);
+int meta_input_device_x11_add_axis (ClutterInputDevice *device,
+                                    ClutterInputAxis    axis,
+                                    double              minimum,
+                                    double              maximum,
+                                    double              resolution);
+gboolean meta_input_device_x11_get_axis (ClutterInputDevice *device,
+                                         int                 idx,
+                                         ClutterInputAxis   *use);
+gboolean meta_input_device_x11_translate_axis (ClutterInputDevice *device,
+                                               int                 idx,
+                                               double              value,
+                                               double             *axis_value);
+
+void meta_input_device_x11_add_scroll_info (ClutterInputDevice     *device,
+                                            int                     idx,
+                                            ClutterScrollDirection  direction,
+                                            double                  increment);
+gboolean meta_input_device_x11_get_scroll_delta (ClutterInputDevice     *device,
+                                                 int                     idx,
+                                                 gdouble                 value,
+                                                 ClutterScrollDirection *direction_p,
+                                                 double                 *delta_p);
+void meta_input_device_x11_reset_scroll_info (ClutterInputDevice *device);
 
 G_END_DECLS
 

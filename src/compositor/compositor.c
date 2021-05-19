@@ -56,7 +56,6 @@
 
 #include <X11/extensions/Xcomposite.h>
 
-#include "backends/meta-dnd-private.h"
 #include "backends/x11/meta-backend-x11.h"
 #include "backends/x11/meta-event-x11.h"
 #include "backends/x11/meta-stage-x11.h"
@@ -66,7 +65,6 @@
 #include "compositor/meta-window-actor-x11.h"
 #include "compositor/meta-window-actor-private.h"
 #include "compositor/meta-window-group-private.h"
-#include "core/display-private.h"
 #include "core/frame.h"
 #include "core/util-private.h"
 #include "core/window-private.h"
@@ -384,6 +382,18 @@ grab_devices (MetaModalOptions  options,
   return FALSE;
 }
 
+static void
+meta_compositor_grab_begin (MetaCompositor *compositor)
+{
+  META_COMPOSITOR_GET_CLASS (compositor)->grab_begin (compositor);
+}
+
+static void
+meta_compositor_grab_end (MetaCompositor *compositor)
+{
+  META_COMPOSITOR_GET_CLASS (compositor)->grab_end (compositor);
+}
+
 gboolean
 meta_begin_modal_for_plugin (MetaCompositor   *compositor,
                              MetaPlugin       *plugin,
@@ -428,18 +438,9 @@ meta_begin_modal_for_plugin (MetaCompositor   *compositor,
   display->grab_have_keyboard = TRUE;
 
   g_signal_emit_by_name (display, "grab-op-begin",
-                         meta_plugin_get_display (plugin),
                          display->grab_window, display->grab_op);
 
-  if (meta_is_wayland_compositor ())
-    {
-      meta_display_sync_wayland_input_focus (display);
-      meta_display_cancel_touch (display);
-
-#ifdef HAVE_WAYLAND
-      meta_dnd_wayland_handle_begin_modal (compositor);
-#endif
-    }
+  meta_compositor_grab_begin (compositor);
 
   return TRUE;
 }
@@ -467,16 +468,9 @@ meta_end_modal_for_plugin (MetaCompositor *compositor,
   meta_backend_ungrab_device (backend, META_VIRTUAL_CORE_POINTER_ID, timestamp);
   meta_backend_ungrab_device (backend, META_VIRTUAL_CORE_KEYBOARD_ID, timestamp);
 
-#ifdef HAVE_WAYLAND
-  if (meta_is_wayland_compositor ())
-    {
-      meta_dnd_wayland_handle_end_modal (compositor);
-      meta_display_sync_wayland_input_focus (display);
-    }
-#endif
+  meta_compositor_grab_end (compositor);
 
   g_signal_emit_by_name (display, "grab-op-end",
-                         meta_plugin_get_display (plugin),
                          grab_window, grab_op);
 }
 
@@ -547,8 +541,6 @@ meta_compositor_do_manage (MetaCompositor  *compositor,
     g_signal_connect (stage, "presented",
                       G_CALLBACK (on_presented),
                       compositor);
-
-  clutter_stage_set_sync_delay (CLUTTER_STAGE (stage), META_SYNC_DELAY);
 
   priv->window_group = meta_window_group_new (display);
   priv->top_window_group = meta_window_group_new (display);
@@ -960,7 +952,7 @@ meta_compositor_sync_stack (MetaCompositor  *compositor,
           if (!stack_actor)
             {
               meta_verbose ("Failed to find corresponding MetaWindowActor "
-                            "for window %s\n", meta_window_get_description (stack_window));
+                            "for window %s", meta_window_get_description (stack_window));
               stack = g_list_delete_link (stack, stack);
             }
           else
@@ -1041,35 +1033,8 @@ on_presented (ClutterStage     *stage,
 {
   MetaCompositorPrivate *priv =
     meta_compositor_get_instance_private (compositor);
-  int64_t presentation_time_cogl = frame_info->presentation_time;
-  int64_t presentation_time;
+  int64_t presentation_time = frame_info->presentation_time;
   GList *l;
-
-  if (presentation_time_cogl != 0)
-    {
-      int64_t current_cogl_time;
-      int64_t current_monotonic_time;
-
-      /* Cogl reports presentation in terms of its own clock, which is
-       * guaranteed to be in nanoseconds but with no specified base. The
-       * normal case with the open source GPU drivers on Linux 3.8 and
-       * newer is that the base of cogl_get_clock_time() is that of
-       * clock_gettime(CLOCK_MONOTONIC), so the same as g_get_monotonic_time),
-       * but there's no exposure of that through the API. clock_gettime()
-       * is fairly fast, so calling it twice and subtracting to get a
-       * nearly-zero number is acceptable, if a little ugly.
-       */
-      current_cogl_time = cogl_get_clock_time (priv->context);
-      current_monotonic_time = g_get_monotonic_time ();
-
-      presentation_time =
-        current_monotonic_time +
-        (presentation_time_cogl - current_cogl_time) / 1000;
-    }
-  else
-    {
-      presentation_time = 0;
-    }
 
   for (l = priv->windows; l; l = l->next)
     {

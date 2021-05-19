@@ -28,7 +28,6 @@
 /*
  * _clutter_event_new_from_evdev: Create a new Clutter ClutterKeyEvent
  * @device: a ClutterInputDevice
- * @stage: the stage the event should be delivered to
  * @xkb: XKB rules to translate the event
  * @_time: timestamp of the event
  * @key: a key code coming from a Linux input device
@@ -42,7 +41,6 @@
 ClutterEvent *
 meta_key_event_new_from_evdev (ClutterInputDevice *device,
                                ClutterInputDevice *core_device,
-                               ClutterStage       *stage,
                                struct xkb_state   *xkb_state,
                                uint32_t            button_state,
                                uint32_t            _time,
@@ -64,7 +62,7 @@ meta_key_event_new_from_evdev (ClutterInputDevice *device,
    * 0, whereas X11's minimum keycode, for really stupid reasons, is 8.
    * So the evdev XKB rules are based on the keycodes all being shifted
    * upwards by 8. */
-  key += 8;
+  key = meta_xkb_evdev_to_keycode (key);
 
   n = xkb_key_get_syms (xkb_state, key, &syms);
   if (n == 1)
@@ -72,7 +70,6 @@ meta_key_event_new_from_evdev (ClutterInputDevice *device,
   else
     sym = XKB_KEY_NoSymbol;
 
-  event->key.stage = stage;
   event->key.time = _time;
   meta_xkb_translate_state (event, xkb_state, button_state);
   event->key.hardware_keycode = key;
@@ -108,4 +105,33 @@ meta_xkb_translate_state (ClutterEvent     *event,
                                  xkb_state_serialize_mods (state, XKB_STATE_MODS_LATCHED),
                                  xkb_state_serialize_mods (state, XKB_STATE_MODS_LOCKED),
                                  xkb_state_serialize_mods (state, XKB_STATE_MODS_EFFECTIVE) | button_state);
+}
+
+ClutterModifierType
+meta_xkb_translate_modifiers (struct xkb_state    *state,
+                              ClutterModifierType  button_state)
+{
+  ClutterModifierType modifiers;
+
+  modifiers = xkb_state_serialize_mods (state, XKB_STATE_MODS_EFFECTIVE);
+  modifiers |= button_state;
+
+  return modifiers;
+}
+
+uint32_t
+meta_xkb_keycode_to_evdev (uint32_t xkb_keycode)
+{
+  /* The keycodes from the evdev backend are almost evdev
+   * keycodes: we use the evdev keycode file, but xkb rules have an
+   *  offset by 8. See the comment in _clutter_key_event_new_from_evdev()
+   */
+  return xkb_keycode - 8;
+}
+
+uint32_t
+meta_xkb_evdev_to_keycode (uint32_t evcode)
+{
+  /* The inverse of meta_xkb_keycode_to_evdev */
+  return evcode + 8;
 }

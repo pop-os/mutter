@@ -157,6 +157,14 @@ typedef enum
   META_EDGE_CONSTRAINT_MONITOR = 2,
 } MetaEdgeConstraint;
 
+typedef enum
+{
+  META_EDGE_RESISTANCE_DEFAULT     = 0,
+  META_EDGE_RESISTANCE_SNAP        = 1 << 0,
+  META_EDGE_RESISTANCE_KEYBOARD_OP = 1 << 1,
+  META_EDGE_RESISTANCE_WINDOWS     = 1 << 2,
+} MetaEdgeResistanceFlags;
+
 struct _MetaWindow
 {
   GObject parent_instance;
@@ -488,6 +496,9 @@ struct _MetaWindow
 
   /* The geometry to restore when we unmaximize. */
   MetaRectangle saved_rect;
+
+  /* The geometry to restore when we unfullscreen. */
+  MetaRectangle saved_rect_fullscreen;
 
   /* This is the geometry the window will have if no constraints have
    * applied. We use this whenever we are moving implicitly (for example,
@@ -844,7 +855,7 @@ void meta_window_set_urgent (MetaWindow *window,
                              gboolean    urgent);
 
 void meta_window_update_resize (MetaWindow *window,
-                                gboolean    snap,
+                                MetaEdgeResistanceFlags flags,
                                 int x, int y,
                                 gboolean force);
 

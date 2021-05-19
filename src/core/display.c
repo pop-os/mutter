@@ -45,8 +45,7 @@
 #include "backends/meta-cursor-tracker-private.h"
 #include "backends/meta-idle-monitor-dbus.h"
 #include "backends/meta-input-device-private.h"
-#include "backends/meta-input-settings-private.h"
-#include "backends/meta-logical-monitor.h"
+#include "backends/meta-input-mapper-private.h"
 #include "backends/meta-stage-private.h"
 #include "backends/x11/meta-backend-x11.h"
 #include "backends/x11/meta-event-x11.h"
@@ -168,6 +167,7 @@ enum
 {
   PROP_0,
 
+  PROP_COMPOSITOR_MODIFIERS,
   PROP_FOCUS_WINDOW
 };
 
@@ -200,6 +200,9 @@ meta_display_get_property(GObject         *object,
 
   switch (prop_id)
     {
+    case PROP_COMPOSITOR_MODIFIERS:
+      g_value_set_flags (value, meta_display_get_compositor_modifiers (display));
+      break;
     case PROP_FOCUS_WINDOW:
       g_value_set_object (value, display->focus_window);
       break;
@@ -329,8 +332,7 @@ meta_display_class_init (MetaDisplayClass *klass)
                   G_SIGNAL_RUN_LAST,
                   0,
                   NULL, NULL, NULL,
-                  G_TYPE_NONE, 3,
-                  META_TYPE_DISPLAY,
+                  G_TYPE_NONE, 2,
                   META_TYPE_WINDOW,
                   META_TYPE_GRAB_OP);
 
@@ -340,8 +342,7 @@ meta_display_class_init (MetaDisplayClass *klass)
                   G_SIGNAL_RUN_LAST,
                   0,
                   NULL, NULL, NULL,
-                  G_TYPE_NONE, 3,
-                  META_TYPE_DISPLAY,
+                  G_TYPE_NONE, 2,
                   META_TYPE_WINDOW,
                   META_TYPE_GRAB_OP);
 
@@ -512,6 +513,15 @@ meta_display_class_init (MetaDisplayClass *klass)
                   0, g_signal_accumulator_first_wins,
                   NULL, NULL,
                   G_TYPE_BOOLEAN, 1, G_TYPE_TASK);
+
+  g_object_class_install_property (object_class,
+                                   PROP_COMPOSITOR_MODIFIERS,
+                                   g_param_spec_flags ("compositor-modifiers",
+                                                       "Compositor modifiers",
+                                                       "Modifiers reserved for compositor actions",
+                                                       CLUTTER_TYPE_MODIFIER_TYPE,
+                                                       0,
+                                                       G_PARAM_READABLE));
 
   g_object_class_install_property (object_class,
                                    PROP_FOCUS_WINDOW,
@@ -855,6 +865,8 @@ meta_display_open (void)
   g_signal_connect (monitor_manager, "monitors-changed-internal",
                     G_CALLBACK (on_monitors_changed_internal), display);
 
+  display->pad_action_mapper = meta_pad_action_mapper_new (monitor_manager);
+
   settings = meta_backend_get_settings (backend);
   g_signal_connect (settings, "ui-scaling-factor-changed",
                     G_CALLBACK (on_ui_scaling_factor_changed), display);
@@ -1120,6 +1132,7 @@ meta_display_close (MetaDisplay *display,
 
   meta_clipboard_manager_shutdown (display);
   g_clear_object (&display->selection);
+  g_clear_object (&display->pad_action_mapper);
 
   g_object_unref (display);
   the_display = NULL;
@@ -1146,7 +1159,7 @@ meta_display_for_x_display (Display *xdisplay)
   if (the_display->x11_display->xdisplay == xdisplay)
     return the_display;
 
-  meta_warning ("Could not find display for X display %p, probably going to crash\n",
+  meta_warning ("Could not find display for X display %p, probably going to crash",
                 xdisplay);
 
   return NULL;
@@ -1330,7 +1343,7 @@ window_raise_with_delay_callback (void *data)
 	meta_window_raise (window);
       else
 	meta_topic (META_DEBUG_FOCUS,
-		    "Pointer not inside window, not raising %s\n",
+		    "Pointer not inside window, not raising %s",
 		    window->desc);
     }
 
@@ -1342,7 +1355,7 @@ meta_display_queue_autoraise_callback (MetaDisplay *display,
                                        MetaWindow  *window)
 {
   meta_topic (META_DEBUG_FOCUS,
-              "Queuing an autoraise timeout for %s with delay %d\n",
+              "Queuing an autoraise timeout for %s with delay %d",
               window->desc,
               meta_prefs_get_auto_raise_delay ());
 
@@ -1364,6 +1377,8 @@ meta_display_sync_wayland_input_focus (MetaDisplay *display)
   MetaWaylandCompositor *compositor = meta_wayland_compositor_get_default ();
   MetaWindow *focus_window = NULL;
   MetaBackend *backend = meta_get_backend ();
+  ClutterBackend *clutter_backend = meta_backend_get_clutter_backend (backend);
+  ClutterSeat *seat = clutter_backend_get_default_seat (clutter_backend);
   MetaStage *stage = META_STAGE (meta_backend_get_stage (backend));
   gboolean is_no_focus_xwindow = FALSE;
 
@@ -1383,7 +1398,8 @@ meta_display_sync_wayland_input_focus (MetaDisplay *display)
   meta_stage_set_active (stage, focus_window == NULL);
   meta_wayland_compositor_set_input_focus (compositor, focus_window);
 
-  meta_wayland_seat_repick (compositor->seat);
+  clutter_stage_repick_device (CLUTTER_STAGE (stage),
+                               clutter_seat_get_pointer (seat));
 #endif
 }
 
@@ -1399,7 +1415,7 @@ meta_display_update_focus_window (MetaDisplay *display,
       MetaWindow *previous;
 
       meta_topic (META_DEBUG_FOCUS,
-                  "%s is now the previous focus window due to being focused out or unmapped\n",
+                  "%s is now the previous focus window due to being focused out or unmapped",
                   display->focus_window->desc);
 
       /* Make sure that signals handlers invoked by
@@ -1416,12 +1432,12 @@ meta_display_update_focus_window (MetaDisplay *display,
 
   if (display->focus_window)
     {
-      meta_topic (META_DEBUG_FOCUS, "* Focus --> %s\n",
+      meta_topic (META_DEBUG_FOCUS, "* Focus --> %s",
                   display->focus_window->desc);
       meta_window_set_focused_internal (display->focus_window, TRUE);
     }
   else
-    meta_topic (META_DEBUG_FOCUS, "* Focus --> NULL\n");
+    meta_topic (META_DEBUG_FOCUS, "* Focus --> NULL");
 
   if (meta_is_wayland_compositor ())
     meta_display_sync_wayland_input_focus (display);
@@ -1629,43 +1645,9 @@ meta_cursor_for_grab_op (MetaGrabOp op)
   return META_CURSOR_DEFAULT;
 }
 
-static float
-find_highest_logical_monitor_scale (MetaBackend      *backend,
-                                    MetaCursorSprite *cursor_sprite)
-{
-  MetaMonitorManager *monitor_manager =
-    meta_backend_get_monitor_manager (backend);
-  MetaCursorRenderer *cursor_renderer =
-    meta_backend_get_cursor_renderer (backend);
-  graphene_rect_t cursor_rect;
-  GList *logical_monitors;
-  GList *l;
-  float highest_scale = 0.0;
-
-  cursor_rect = meta_cursor_renderer_calculate_rect (cursor_renderer,
-                                                     cursor_sprite);
-
-  logical_monitors =
-    meta_monitor_manager_get_logical_monitors (monitor_manager);
-  for (l = logical_monitors; l; l = l->next)
-    {
-      MetaLogicalMonitor *logical_monitor = l->data;
-      graphene_rect_t logical_monitor_rect =
-        meta_rectangle_to_graphene_rect (&logical_monitor->rect);
-
-      if (!graphene_rect_intersection (&cursor_rect,
-                                       &logical_monitor_rect,
-                                       NULL))
-        continue;
-
-      highest_scale = MAX (highest_scale, logical_monitor->scale);
-    }
-
-  return highest_scale;
-}
-
 static void
 root_cursor_prepare_at (MetaCursorSpriteXcursor *sprite_xcursor,
+                        float                    best_scale,
                         int                      x,
                         int                      y,
                         MetaDisplay             *display)
@@ -1675,14 +1657,11 @@ root_cursor_prepare_at (MetaCursorSpriteXcursor *sprite_xcursor,
 
   if (meta_is_stage_views_scaled ())
     {
-      float scale;
-
-      scale = find_highest_logical_monitor_scale (backend, cursor_sprite);
-      if (scale != 0.0)
+      if (best_scale != 0.0f)
         {
           float ceiled_scale;
 
-          ceiled_scale = ceilf (scale);
+          ceiled_scale = ceilf (best_scale);
           meta_cursor_sprite_xcursor_set_theme_scale (sprite_xcursor,
                                                       (int) ceiled_scale);
           meta_cursor_sprite_set_texture_scale (cursor_sprite,
@@ -1815,13 +1794,13 @@ meta_display_begin_grab_op (MetaDisplay *display,
   g_assert (window != NULL);
 
   meta_topic (META_DEBUG_WINDOW_OPS,
-              "Doing grab op %u on window %s button %d pointer already grabbed: %d pointer pos %d,%d\n",
+              "Doing grab op %u on window %s button %d pointer already grabbed: %d pointer pos %d,%d",
               op, window->desc, button, pointer_already_grabbed,
               root_x, root_y);
 
   if (display->grab_op != META_GRAB_OP_NONE)
     {
-      meta_warning ("Attempt to perform window operation %u on window %s when operation %u on %s already in effect\n",
+      meta_warning ("Attempt to perform window operation %u on window %s when operation %u on %s already in effect",
                     op, window->desc, display->grab_op,
                     display->grab_window ? display->grab_window->desc : "none");
       return FALSE;
@@ -1874,7 +1853,7 @@ meta_display_begin_grab_op (MetaDisplay *display,
 
   if (!display->grab_have_pointer && !meta_grab_op_is_keyboard (op))
     {
-      meta_topic (META_DEBUG_WINDOW_OPS, "XIGrabDevice() failed\n");
+      meta_topic (META_DEBUG_WINDOW_OPS, "XIGrabDevice() failed");
       return FALSE;
     }
 
@@ -1885,7 +1864,7 @@ meta_display_begin_grab_op (MetaDisplay *display,
 
       if (!display->grab_have_keyboard)
         {
-          meta_topic (META_DEBUG_WINDOW_OPS, "grabbing all keys failed, ungrabbing pointer\n");
+          meta_topic (META_DEBUG_WINDOW_OPS, "grabbing all keys failed, ungrabbing pointer");
           meta_backend_ungrab_device (backend, META_VIRTUAL_CORE_POINTER_ID, timestamp);
           display->grab_have_pointer = FALSE;
           return FALSE;
@@ -1903,7 +1882,7 @@ meta_display_begin_grab_op (MetaDisplay *display,
   display->grab_latest_motion_x = root_x;
   display->grab_latest_motion_y = root_y;
   display->grab_last_moveresize_time = 0;
-  display->grab_last_user_action_was_snap = FALSE;
+  display->grab_last_edge_resistance_flags = META_EDGE_RESISTANCE_DEFAULT;
   display->grab_frame_action = frame_action;
 
   meta_display_update_cursor (display);
@@ -1911,7 +1890,7 @@ meta_display_begin_grab_op (MetaDisplay *display,
   g_clear_handle_id (&display->grab_resize_timeout_id, g_source_remove);
 
   meta_topic (META_DEBUG_WINDOW_OPS,
-              "Grab op %u on window %s successful\n",
+              "Grab op %u on window %s successful",
               display->grab_op, window ? window->desc : "(null)");
 
   meta_window_get_frame_rect (display->grab_window,
@@ -1925,7 +1904,7 @@ meta_display_begin_grab_op (MetaDisplay *display,
     }
 
   g_signal_emit (display, display_signals[GRAB_OP_BEGIN], 0,
-                 display, display->grab_window, display->grab_op);
+                 display->grab_window, display->grab_op);
 
   if (display->event_route == META_EVENT_ROUTE_WINDOW_OP)
     meta_window_grab_op_began (display->grab_window, display->grab_op);
@@ -1941,7 +1920,7 @@ meta_display_end_grab_op (MetaDisplay *display,
   MetaGrabOp grab_op = display->grab_op;
 
   meta_topic (META_DEBUG_WINDOW_OPS,
-              "Ending grab op %u at time %u\n", grab_op, timestamp);
+              "Ending grab op %u at time %u", grab_op, timestamp);
 
   if (display->event_route == META_EVENT_ROUTE_NORMAL ||
       display->event_route == META_EVENT_ROUTE_COMPOSITOR_GRAB)
@@ -1981,14 +1960,22 @@ meta_display_end_grab_op (MetaDisplay *display,
   if (display->grab_have_keyboard)
     {
       meta_topic (META_DEBUG_WINDOW_OPS,
-                  "Ungrabbing all keys timestamp %u\n", timestamp);
+                  "Ungrabbing all keys timestamp %u", timestamp);
       meta_window_ungrab_all_keys (grab_window, timestamp);
     }
 
   display->event_route = META_EVENT_ROUTE_NORMAL;
   display->grab_window = NULL;
+  display->grab_button = 0;
   display->grab_tile_mode = META_TILE_NONE;
   display->grab_tile_monitor_number = -1;
+  display->grab_anchor_root_x = 0;
+  display->grab_anchor_root_y = 0;
+  display->grab_latest_motion_x = 0;
+  display->grab_latest_motion_y = 0;
+  display->grab_last_moveresize_time = 0;
+  display->grab_last_edge_resistance_flags = META_EDGE_RESISTANCE_DEFAULT;
+  display->grab_frame_action = FALSE;
 
   meta_display_update_cursor (display);
 
@@ -1998,7 +1985,7 @@ meta_display_end_grab_op (MetaDisplay *display,
     meta_display_sync_wayland_input_focus (display);
 
   g_signal_emit (display, display_signals[GRAB_OP_END], 0,
-                 display, grab_window, grab_op);
+                 grab_window, grab_op);
 }
 
 /**
@@ -2125,7 +2112,7 @@ meta_display_ping_timeout (gpointer data)
   ping_data->ping_timeout_id = 0;
 
   meta_topic (META_DEBUG_PING,
-              "Ping %u on window %s timed out\n",
+              "Ping %u on window %s timed out",
               ping_data->serial, ping_data->window->desc);
 
   display->pending_pings = g_slist_remove (display->pending_pings, ping_data);
@@ -2165,7 +2152,7 @@ meta_display_ping_window (MetaWindow *window,
 
   if (serial == 0)
     {
-      meta_warning ("Tried to ping window %s with a bad serial! Not allowed.\n",
+      meta_warning ("Tried to ping window %s with a bad serial! Not allowed.",
                     window->desc);
       return;
     }
@@ -2180,7 +2167,7 @@ meta_display_ping_window (MetaWindow *window,
       if (window == ping_data->window)
         {
           meta_topic (META_DEBUG_PING,
-                      "Window %s already is being pinged with serial %u\n",
+                      "Window %s already is being pinged with serial %u",
                       window->desc, ping_data->serial);
           return;
         }
@@ -2188,7 +2175,7 @@ meta_display_ping_window (MetaWindow *window,
       if (serial == ping_data->serial)
         {
           meta_warning ("Ping serial %u was reused for window %s, "
-                        "previous use was for window %s.\n",
+                        "previous use was for window %s.",
                         serial, window->desc, ping_data->window->desc);
           return;
         }
@@ -2206,7 +2193,7 @@ meta_display_ping_window (MetaWindow *window,
   display->pending_pings = g_slist_prepend (display->pending_pings, ping_data);
 
   meta_topic (META_DEBUG_PING,
-              "Sending ping with serial %u to window %s\n",
+              "Sending ping with serial %u to window %s",
               serial, window->desc);
 
   META_WINDOW_GET_CLASS (window)->ping (window, serial);
@@ -2227,7 +2214,7 @@ meta_display_pong_for_serial (MetaDisplay    *display,
 {
   GSList *tmp;
 
-  meta_topic (META_DEBUG_PING, "Received a pong with serial %u\n", serial);
+  meta_topic (META_DEBUG_PING, "Received a pong with serial %u", serial);
 
   for (tmp = display->pending_pings; tmp; tmp = tmp->next)
     {
@@ -2236,7 +2223,7 @@ meta_display_pong_for_serial (MetaDisplay    *display,
       if (serial == ping_data->serial)
         {
           meta_topic (META_DEBUG_PING,
-                      "Matching ping found for pong %u\n",
+                      "Matching ping found for pong %u",
                       ping_data->serial);
 
           /* Remove the ping data from the list */
@@ -2581,7 +2568,7 @@ meta_display_manage_all_xwindows (MetaDisplay *display)
   meta_stack_tracker_get_stack (display->stack_tracker, &_children, &n_children);
 
   /* Copy the stack as it will be modified as part of the loop */
-  children = g_memdup (_children, sizeof (guint64) * n_children);
+  children = g_memdup2 (_children, sizeof (uint64_t) * n_children);
 
   for (i = 0; i < n_children; ++i)
     {
@@ -2686,7 +2673,7 @@ meta_display_sanity_check_timestamps (MetaDisplay *display,
       meta_warning ("last_focus_time (%u) is greater than comparison "
                     "timestamp (%u).  This most likely represents a buggy "
                     "client sending inaccurate timestamps in messages such as "
-                    "_NET_ACTIVE_WINDOW.  Trying to work around...\n",
+                    "_NET_ACTIVE_WINDOW.  Trying to work around...",
                     display->last_focus_time, timestamp);
       display->last_focus_time = timestamp;
     }
@@ -2698,7 +2685,7 @@ meta_display_sanity_check_timestamps (MetaDisplay *display,
       meta_warning ("last_user_time (%u) is greater than comparison "
                     "timestamp (%u).  This most likely represents a buggy "
                     "client sending inaccurate timestamps in messages such as "
-                    "_NET_ACTIVE_WINDOW.  Trying to work around...\n",
+                    "_NET_ACTIVE_WINDOW.  Trying to work around...",
                     display->last_user_time, timestamp);
       display->last_user_time = timestamp;
 
@@ -2711,7 +2698,7 @@ meta_display_sanity_check_timestamps (MetaDisplay *display,
           if (XSERVER_TIME_IS_BEFORE (timestamp, window->net_wm_user_time))
             {
               meta_warning ("%s appears to be one of the offending windows "
-                            "with a timestamp of %u.  Working around...\n",
+                            "with a timestamp of %u.  Working around...",
                             window->desc, window->net_wm_user_time);
               meta_window_set_user_time (window, timestamp);
             }
@@ -2944,7 +2931,7 @@ meta_display_request_pad_osd (MetaDisplay        *display,
                               gboolean            edition_mode)
 {
   MetaBackend *backend = meta_get_backend ();
-  MetaInputSettings *input_settings;
+  MetaInputMapper *input_mapper;
   const gchar *layout_path = NULL;
   ClutterActor *osd;
   MetaLogicalMonitor *logical_monitor;
@@ -2960,13 +2947,13 @@ meta_display_request_pad_osd (MetaDisplay        *display,
   if (display->current_pad_osd)
     return;
 
-  input_settings = meta_backend_get_input_settings (meta_get_backend ());
+  input_mapper = meta_backend_get_input_mapper (meta_get_backend ());
 
-  if (input_settings)
+  if (input_mapper)
     {
-      settings = meta_input_settings_get_tablet_settings (input_settings, pad);
+      settings = meta_input_mapper_get_tablet_settings (input_mapper, pad);
       logical_monitor =
-        meta_input_settings_get_tablet_logical_monitor (input_settings, pad);
+        meta_input_mapper_get_device_logical_monitor (input_mapper, pad);
 #ifdef HAVE_LIBWACOM
       wacom_device = meta_input_device_get_wacom_device (META_INPUT_DEVICE (pad));
       layout_path = libwacom_get_layout_filename (wacom_device);
@@ -2989,8 +2976,6 @@ meta_display_request_pad_osd (MetaDisplay        *display,
       g_object_add_weak_pointer (G_OBJECT (display->current_pad_osd),
                                  (gpointer *) &display->current_pad_osd);
     }
-
-  g_object_unref (settings);
 }
 
 gchar *
@@ -2999,12 +2984,12 @@ meta_display_get_pad_action_label (MetaDisplay        *display,
                                    MetaPadActionType   action_type,
                                    guint               action_number)
 {
-  MetaInputSettings *settings;
   gchar *label;
 
   /* First, lookup the action, as imposed by settings */
-  settings = meta_backend_get_input_settings (meta_get_backend ());
-  label = meta_input_settings_get_pad_action_label (settings, pad, action_type, action_number);
+  label = meta_pad_action_mapper_get_action_label (display->pad_action_mapper,
+                                                   pad, action_type,
+                                                   action_number);
   if (label)
     return label;
 
@@ -3050,15 +3035,15 @@ static gint
 lookup_tablet_monitor (MetaDisplay        *display,
                        ClutterInputDevice *device)
 {
-  MetaInputSettings *input_settings;
+  MetaInputMapper *input_mapper;
   MetaLogicalMonitor *monitor;
   gint monitor_idx = -1;
 
-  input_settings = meta_backend_get_input_settings (meta_get_backend ());
-  if (!input_settings)
+  input_mapper = meta_backend_get_input_mapper (meta_get_backend ());
+  if (!input_mapper)
     return -1;
 
-  monitor = meta_input_settings_get_tablet_logical_monitor (input_settings, device);
+  monitor = meta_input_mapper_get_device_logical_monitor (input_mapper, device);
 
   if (monitor)
     {
@@ -3292,7 +3277,7 @@ meta_display_apply_startup_properties (MetaDisplay *display,
   startup_id = meta_window_get_startup_id (window);
 
   meta_topic (META_DEBUG_STARTUP,
-              "Applying startup props to %s id \"%s\"\n",
+              "Applying startup props to %s id \"%s\"",
               window->desc,
               startup_id ? startup_id : "(none)");
 
@@ -3311,7 +3296,7 @@ meta_display_apply_startup_properties (MetaDisplay *display,
           startup_id = window->startup_id;
 
           meta_topic (META_DEBUG_STARTUP,
-                      "Ending legacy sequence %s due to window %s\n",
+                      "Ending legacy sequence %s due to window %s",
                       meta_startup_sequence_get_id (sequence),
                       window->desc);
 
@@ -3339,7 +3324,7 @@ meta_display_apply_startup_properties (MetaDisplay *display,
       gboolean changed_something = FALSE;
 
       meta_topic (META_DEBUG_STARTUP,
-                  "Found startup sequence for window %s ID \"%s\"\n",
+                  "Found startup sequence for window %s ID \"%s\"",
                   window->desc, startup_id);
 
       if (!window->initial_workspace_set)
@@ -3348,7 +3333,7 @@ meta_display_apply_startup_properties (MetaDisplay *display,
           if (space >= 0)
             {
               meta_topic (META_DEBUG_STARTUP,
-                          "Setting initial window workspace to %d based on startup info\n",
+                          "Setting initial window workspace to %d based on startup info",
                           space);
 
               window->initial_workspace_set = TRUE;
@@ -3361,7 +3346,7 @@ meta_display_apply_startup_properties (MetaDisplay *display,
         {
           guint32 timestamp = meta_startup_sequence_get_timestamp (sequence);
           meta_topic (META_DEBUG_STARTUP,
-                      "Setting initial window timestamp to %u based on startup info\n",
+                      "Setting initial window timestamp to %u based on startup info",
                       timestamp);
 
           window->initial_timestamp_set = TRUE;
@@ -3374,7 +3359,7 @@ meta_display_apply_startup_properties (MetaDisplay *display,
   else
     {
       meta_topic (META_DEBUG_STARTUP,
-                  "Did not find startup sequence for window %s ID \"%s\"\n",
+                  "Did not find startup sequence for window %s ID \"%s\"",
                   window->desc, startup_id);
     }
 
@@ -3385,7 +3370,7 @@ static gboolean
 set_work_area_later_func (MetaDisplay *display)
 {
   meta_topic (META_DEBUG_WORKAREA,
-              "Running work area hint computation function\n");
+              "Running work area hint computation function");
 
   display->work_area_later = 0;
 
@@ -3401,7 +3386,7 @@ meta_display_queue_workarea_recalc (MetaDisplay *display)
   if (display->work_area_later == 0)
     {
       meta_topic (META_DEBUG_WORKAREA,
-                  "Adding work area hint computation function\n");
+                  "Adding work area hint computation function");
       display->work_area_later =
         meta_later_add (META_LATER_BEFORE_REDRAW,
                         (GSourceFunc) set_work_area_later_func,
@@ -3743,18 +3728,18 @@ meta_display_get_pointer_window (MetaDisplay *display,
   MetaBackend *backend = meta_get_backend ();
   MetaCursorTracker *cursor_tracker = meta_backend_get_cursor_tracker (backend);
   MetaWindow *window;
-  int x, y;
+  graphene_point_t point;
 
   if (not_this_one)
     meta_topic (META_DEBUG_FOCUS,
-                "Focusing mouse window excluding %s\n", not_this_one->desc);
+                "Focusing mouse window excluding %s", not_this_one->desc);
 
-  meta_cursor_tracker_get_pointer (cursor_tracker, &x, &y, NULL);
+  meta_cursor_tracker_get_pointer (cursor_tracker, &point, NULL);
 
   window = meta_stack_get_default_focus_window_at_point (display->stack,
                                                          workspace_manager->active_workspace,
                                                          not_this_one,
-                                                         x, y);
+                                                         point.x, point.y);
 
   return window;
 }

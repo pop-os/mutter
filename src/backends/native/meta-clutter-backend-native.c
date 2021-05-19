@@ -44,6 +44,7 @@
 
 #include "backends/meta-backend-private.h"
 #include "backends/meta-renderer.h"
+#include "backends/native/meta-backend-native.h"
 #include "backends/native/meta-seat-native.h"
 #include "backends/native/meta-stage-native.h"
 #include "clutter/clutter.h"
@@ -53,24 +54,10 @@
 struct _MetaClutterBackendNative
 {
   ClutterBackend parent;
-
-  MetaSeatNative *main_seat;
-  MetaStageNative *stage_native;
 };
-
-static gchar *evdev_seat_id;
 
 G_DEFINE_TYPE (MetaClutterBackendNative, meta_clutter_backend_native,
                CLUTTER_TYPE_BACKEND)
-
-MetaStageNative *
-meta_clutter_backend_native_get_stage_native (ClutterBackend *backend)
-{
-  MetaClutterBackendNative *clutter_backend_native =
-    META_CLUTTER_BACKEND_NATIVE (backend);
-
-  return clutter_backend_native->stage_native;
-}
 
 static CoglRenderer *
 meta_clutter_backend_native_get_renderer (ClutterBackend  *clutter_backend,
@@ -83,44 +70,26 @@ meta_clutter_backend_native_get_renderer (ClutterBackend  *clutter_backend,
 }
 
 static ClutterStageWindow *
-meta_clutter_backend_native_create_stage (ClutterBackend  *backend,
+meta_clutter_backend_native_create_stage (ClutterBackend  *clutter_backend,
                                           ClutterStage    *wrapper,
                                           GError         **error)
 {
-  MetaClutterBackendNative *clutter_backend_native =
-    META_CLUTTER_BACKEND_NATIVE (backend);
-
-  g_assert (!clutter_backend_native->stage_native);
-
-  clutter_backend_native->stage_native = g_object_new (META_TYPE_STAGE_NATIVE,
-                                                       "backend", backend,
-                                                       "wrapper", wrapper,
-                                                       NULL);
-  return CLUTTER_STAGE_WINDOW (clutter_backend_native->stage_native);
-}
-
-static void
-meta_clutter_backend_native_init_events (ClutterBackend *backend)
-{
-  MetaClutterBackendNative *backend_native = META_CLUTTER_BACKEND_NATIVE (backend);
-  const gchar *seat_id = evdev_seat_id ? evdev_seat_id : "seat0";
-
-  backend_native->main_seat = g_object_new (META_TYPE_SEAT_NATIVE,
-                                            "backend", backend,
-                                            "seat-id", seat_id,
-                                            NULL);
+  return g_object_new (META_TYPE_STAGE_NATIVE,
+                       "backend", clutter_backend,
+                       "wrapper", wrapper,
+                       NULL);
 }
 
 static ClutterSeat *
-meta_clutter_backend_native_get_default_seat (ClutterBackend *backend)
+meta_clutter_backend_native_get_default_seat (ClutterBackend *clutter_backend)
 {
-  MetaClutterBackendNative *backend_native = META_CLUTTER_BACKEND_NATIVE (backend);
+  MetaBackend *backend = meta_get_backend ();
 
-  return CLUTTER_SEAT (backend_native->main_seat);
+  return meta_backend_get_default_seat (backend);
 }
 
 static gboolean
-meta_clutter_backend_native_is_display_server (ClutterBackend *backend)
+meta_clutter_backend_native_is_display_server (ClutterBackend *clutter_backend)
 {
   return TRUE;
 }
@@ -137,22 +106,6 @@ meta_clutter_backend_native_class_init (MetaClutterBackendNativeClass *klass)
 
   clutter_backend_class->get_renderer = meta_clutter_backend_native_get_renderer;
   clutter_backend_class->create_stage = meta_clutter_backend_native_create_stage;
-  clutter_backend_class->init_events = meta_clutter_backend_native_init_events;
   clutter_backend_class->get_default_seat = meta_clutter_backend_native_get_default_seat;
   clutter_backend_class->is_display_server = meta_clutter_backend_native_is_display_server;
-}
-
-/**
- * meta_cluter_backend_native_set_seat_id:
- * @seat_id: The seat ID
- *
- * Sets the seat to assign to the libinput context.
- *
- * For reliable effects, this function must be called before clutter_init().
- */
-void
-meta_clutter_backend_native_set_seat_id (const gchar *seat_id)
-{
-  g_free (evdev_seat_id);
-  evdev_seat_id = g_strdup (seat_id);
 }

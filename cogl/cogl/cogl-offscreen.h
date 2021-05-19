@@ -50,19 +50,13 @@ G_BEGIN_DECLS
  * Cogl allows creating and operating on offscreen framebuffers.
  */
 
-typedef struct _CoglOffscreen CoglOffscreen;
-
-#define COGL_OFFSCREEN(X) ((CoglOffscreen *)X)
-
-/**
- * cogl_offscreen_get_gtype:
- *
- * Returns: a #GType that can be used with the GLib type system.
- */
-COGL_EXPORT
-GType cogl_offscreen_get_gtype (void);
-
 /* Offscreen api */
+
+#define COGL_TYPE_OFFSCREEN (cogl_offscreen_get_type ())
+COGL_EXPORT
+G_DECLARE_FINAL_TYPE (CoglOffscreen, cogl_offscreen,
+                      COGL, OFFSCREEN,
+                      CoglFramebuffer)
 
 /**
  * cogl_offscreen_new_with_texture:
@@ -98,43 +92,6 @@ GType cogl_offscreen_get_gtype (void);
  */
 COGL_EXPORT CoglOffscreen *
 cogl_offscreen_new_with_texture (CoglTexture *texture);
-
-/**
- * cogl_offscreen_new_to_texture:
- * @texture: A #CoglTexture pointer
- *
- * This creates an offscreen buffer object using the given @texture as the
- * primary color buffer. It doesn't just initialize the contents of the
- * offscreen buffer with the @texture; they are tightly bound so that
- * drawing to the offscreen buffer effectivly updates the contents of the
- * given texture. You don't need to destroy the offscreen buffer before
- * you can use the @texture again.
- *
- * <note>This only works with low-level #CoglTexture types such as
- * #CoglTexture2D and not with meta-texture types such as
- * #CoglTexture2DSliced.</note>
- *
- * Return value: (transfer full): a newly instantiated #CoglOffscreen
- *   framebuffer or %NULL if it wasn't possible to create the
- *   buffer.
- * Deprecated: 1.16: Use cogl_offscreen_new_with_texture instead.
- */
-COGL_DEPRECATED_FOR (cogl_offscreen_new_with_texture)
-COGL_EXPORT CoglOffscreen *
-cogl_offscreen_new_to_texture (CoglTexture *texture);
-
-/**
- * cogl_is_offscreen:
- * @object: A pointer to a #CoglObject
- *
- * Determines whether the given #CoglObject references an offscreen
- * framebuffer object.
- *
- * Returns: %TRUE if @object is a #CoglOffscreen framebuffer,
- *          %FALSE otherwise
- */
-COGL_EXPORT gboolean
-cogl_is_offscreen (void *object);
 
 /**
  * cogl_offscreen_get_texture: (skip)

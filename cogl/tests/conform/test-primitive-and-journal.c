@@ -8,7 +8,7 @@ typedef CoglVertexP2C4 Vertex;
 static void
 setup_orthographic_modelview (void)
 {
-  CoglMatrix matrix;
+  graphene_matrix_t matrix;
   int fb_width = cogl_framebuffer_get_width (test_fb);
   int fb_height = cogl_framebuffer_get_height (test_fb);
 
@@ -18,13 +18,10 @@ setup_orthographic_modelview (void)
    * matrix we asked for. The matrix sets up an orthographic transform
    * in the modelview matrix */
 
-  cogl_matrix_init_identity (&matrix);
-  cogl_matrix_orthographic (&matrix,
-                            0.0f, 0.0f, /* x_1 y_1 */
-                            fb_width,
-                            fb_height,
-                            -1.0f, /* nearval */
-                            1.0f /* farval */);
+  graphene_matrix_init_ortho (&matrix,
+                              0.f, fb_width,
+                              fb_height, 0.f,
+                              -1.f, 1.f);
   cogl_framebuffer_set_modelview_matrix (test_fb, &matrix);
 }
 

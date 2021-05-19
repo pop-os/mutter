@@ -140,7 +140,7 @@ meta_actor_painting_untransformed (CoglFramebuffer *fb,
                                    int             *x_origin,
                                    int             *y_origin)
 {
-  CoglMatrix modelview, projection, modelview_projection;
+  graphene_matrix_t modelview, projection, modelview_projection;
   graphene_point3d_t vertices[4];
   float viewport[4];
   int i;
@@ -148,9 +148,9 @@ meta_actor_painting_untransformed (CoglFramebuffer *fb,
   cogl_framebuffer_get_modelview_matrix (fb, &modelview);
   cogl_framebuffer_get_projection_matrix (fb, &projection);
 
-  cogl_matrix_multiply (&modelview_projection,
-                        &projection,
-                        &modelview);
+  graphene_matrix_multiply (&modelview,
+                            &projection,
+                            &modelview_projection);
 
   vertices[0].x = 0;
   vertices[0].y = 0;
@@ -170,11 +170,11 @@ meta_actor_painting_untransformed (CoglFramebuffer *fb,
   for (i = 0; i < 4; i++)
     {
       float w = 1;
-      cogl_matrix_transform_point (&modelview_projection,
-                                   &vertices[i].x,
-                                   &vertices[i].y,
-                                   &vertices[i].z,
-                                   &w);
+      cogl_graphene_matrix_project_point (&modelview_projection,
+                                          &vertices[i].x,
+                                          &vertices[i].y,
+                                          &vertices[i].z,
+                                          &w);
       vertices[i].x = MTX_GL_SCALE_X (vertices[i].x, w,
                                       viewport[2], viewport[0]);
       vertices[i].y = MTX_GL_SCALE_Y (vertices[i].y, w,

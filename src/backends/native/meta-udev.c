@@ -74,25 +74,38 @@ meta_is_udev_device_boot_vga (GUdevDevice *device)
   return g_udev_device_get_sysfs_attr_as_int (pci_device, "boot_vga") == 1;
 }
 
-gboolean
-meta_is_udev_device_requires_modifiers (GUdevDevice *device)
+static gboolean
+meta_has_udev_device_tag (GUdevDevice *device,
+                          const char  *tag)
 {
-  g_autoptr (GUdevDevice) platform_device = NULL;
   const char * const * tags;
+  g_autoptr (GUdevDevice) platform_device = NULL;
+
+  tags = g_udev_device_get_tags (device);
+  if (tags && g_strv_contains (tags, tag))
+    return TRUE;
 
   platform_device = g_udev_device_get_parent_with_subsystem (device,
                                                              "platform",
                                                              NULL);
 
-  if (!platform_device)
+  if (platform_device)
+    return meta_has_udev_device_tag (platform_device, tag);
+  else
     return FALSE;
+}
 
-  tags = g_udev_device_get_tags (platform_device);
+gboolean
+meta_is_udev_device_disable_modifiers (GUdevDevice *device)
+{
+  return meta_has_udev_device_tag (device,
+                                   "mutter-device-disable-kms-modifiers");
+}
 
-  if (!tags)
-    return FALSE;
-
-  return g_strv_contains (tags, "mutter-device-requires-kms-modifiers");
+gboolean
+meta_is_udev_device_ignore (GUdevDevice *device)
+{
+  return meta_has_udev_device_tag (device, "mutter-device-ignore");
 }
 
 gboolean
@@ -111,8 +124,6 @@ gboolean
 meta_udev_is_drm_device (MetaUdev    *udev,
                          GUdevDevice *device)
 {
-  MetaLauncher *launcher =
-    meta_backend_native_get_launcher (udev->backend_native);
   const char *seat_id;
   const char *device_type;
   const char *device_seat;
@@ -133,7 +144,7 @@ meta_udev_is_drm_device (MetaUdev    *udev,
     }
 
   /* Skip devices that do not belong to our seat. */
-  seat_id = meta_launcher_get_seat_id (launcher);
+  seat_id = meta_backend_native_get_seat_id (udev->backend_native);
   if (g_strcmp0 (seat_id, device_seat))
     return FALSE;
 
@@ -161,11 +172,7 @@ meta_udev_list_drm_devices (MetaUdev  *udev,
 
   devices = g_udev_enumerator_execute (enumerator);
   if (!devices)
-    {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
-                   "No drm devices found");
-      return FALSE;
-    }
+    return NULL;
 
   for (l = devices; l;)
     {
@@ -179,13 +186,6 @@ meta_udev_list_drm_devices (MetaUdev  *udev,
         }
 
       l = l_next;
-    }
-
-  if (!devices)
-    {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "No DRM devices found");
-      return NULL;
     }
 
   return devices;

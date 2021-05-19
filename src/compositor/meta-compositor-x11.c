@@ -437,6 +437,22 @@ meta_compositor_x11_monotonic_to_high_res_xserver_time (MetaCompositor *composit
   return monotonic_time_us + compositor_x11->xserver_time_offset_us;
 }
 
+static void
+meta_compositor_x11_grab_begin (MetaCompositor *compositor)
+{
+  MetaBackendX11 *backend_x11 = META_BACKEND_X11 (meta_get_backend ());
+
+  meta_backend_x11_sync_pointer (backend_x11);
+}
+
+static void
+meta_compositor_x11_grab_end (MetaCompositor *compositor)
+{
+  MetaBackendX11 *backend_x11 = META_BACKEND_X11 (meta_get_backend ());
+
+  meta_backend_x11_sync_pointer (backend_x11);
+}
+
 Window
 meta_compositor_x11_get_output_xwindow (MetaCompositorX11 *compositor_x11)
 {
@@ -509,4 +525,6 @@ meta_compositor_x11_class_init (MetaCompositorX11Class *klass)
   compositor_class->remove_window = meta_compositor_x11_remove_window;
   compositor_class->monotonic_to_high_res_xserver_time =
    meta_compositor_x11_monotonic_to_high_res_xserver_time;
+  compositor_class->grab_begin = meta_compositor_x11_grab_begin;
+  compositor_class->grab_end = meta_compositor_x11_grab_end;
 }

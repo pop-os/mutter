@@ -40,7 +40,6 @@
 #include "cogl-framebuffer-private.h"
 #include "cogl-journal-private.h"
 #include "cogl-util.h"
-#include "cogl-matrix-private.h"
 #include "cogl-primitives-private.h"
 #include "cogl-private.h"
 #include "cogl-attribute-private.h"
@@ -54,7 +53,7 @@ _cogl_clip_stack_push_entry (CoglClipStack *clip_stack,
                              size_t size,
                              CoglClipStackType type)
 {
-  CoglClipStack *entry = g_slice_alloc (size);
+  CoglClipStack *entry = g_malloc0 (size);
 
   /* The new entry starts with a ref count of 1 because the stack
      holds a reference to it as it is the top entry */
@@ -69,14 +68,14 @@ _cogl_clip_stack_push_entry (CoglClipStack *clip_stack,
 }
 
 static void
-get_transformed_corners (float x_1,
-                         float y_1,
-                         float x_2,
-                         float y_2,
-                         CoglMatrix *modelview,
-                         CoglMatrix *projection,
-                         const float *viewport,
-                         float *transformed_corners)
+get_transformed_corners (float              x_1,
+                         float              y_1,
+                         float              x_2,
+                         float              y_2,
+                         graphene_matrix_t *modelview,
+                         graphene_matrix_t *projection,
+                         const float       *viewport,
+                         float             *transformed_corners)
 {
   int i;
 
@@ -160,9 +159,9 @@ _cogl_clip_stack_push_rectangle (CoglClipStack *stack,
                                  const float *viewport)
 {
   CoglClipStackRect *entry;
-  CoglMatrix modelview;
-  CoglMatrix projection;
-  CoglMatrix modelview_projection;
+  graphene_matrix_t modelview;
+  graphene_matrix_t projection;
+  graphene_matrix_t modelview_projection;
 
   /* Corners of the given rectangle in an clockwise order:
    *  (0, 1)     (2, 3)
@@ -193,9 +192,7 @@ _cogl_clip_stack_push_rectangle (CoglClipStack *stack,
   cogl_matrix_entry_get (modelview_entry, &modelview);
   cogl_matrix_entry_get (projection_entry, &projection);
 
-  cogl_matrix_multiply (&modelview_projection,
-                        &projection,
-                        &modelview);
+  graphene_matrix_multiply (&modelview, &projection, &modelview_projection);
 
   /* Technically we could avoid the viewport transform at this point
    * if we want to make this a bit faster. */
@@ -260,8 +257,8 @@ _cogl_clip_stack_push_primitive (CoglClipStack *stack,
                                  const float *viewport)
 {
   CoglClipStackPrimitive *entry;
-  CoglMatrix modelview;
-  CoglMatrix projection;
+  graphene_matrix_t modelview;
+  graphene_matrix_t projection;
   float transformed_corners[8];
 
   entry = _cogl_clip_stack_push_entry (stack,
@@ -344,11 +341,11 @@ _cogl_clip_stack_unref (CoglClipStack *entry)
           {
             CoglClipStackRect *rect = (CoglClipStackRect *) entry;
             cogl_matrix_entry_unref (rect->matrix_entry);
-            g_slice_free1 (sizeof (CoglClipStackRect), entry);
+            g_free (entry);
             break;
           }
         case COGL_CLIP_STACK_WINDOW_RECT:
-          g_slice_free1 (sizeof (CoglClipStackWindowRect), entry);
+          g_free (entry);
           break;
         case COGL_CLIP_STACK_PRIMITIVE:
           {
@@ -356,14 +353,14 @@ _cogl_clip_stack_unref (CoglClipStack *entry)
               (CoglClipStackPrimitive *) entry;
             cogl_matrix_entry_unref (primitive_entry->matrix_entry);
             cogl_object_unref (primitive_entry->primitive);
-            g_slice_free1 (sizeof (CoglClipStackPrimitive), entry);
+            g_free (entry);
             break;
           }
         case COGL_CLIP_STACK_REGION:
           {
             CoglClipStackRegion *region = (CoglClipStackRegion *) entry;
             cairo_region_destroy (region->region);
-            g_slice_free1 (sizeof (CoglClipStackRegion), entry);
+            g_free (entry);
             break;
           }
         default:
@@ -431,7 +428,7 @@ void
 _cogl_clip_stack_flush (CoglClipStack *stack,
                         CoglFramebuffer *framebuffer)
 {
-  CoglContext *ctx = framebuffer->context;
+  CoglContext *ctx = cogl_framebuffer_get_context (framebuffer);
 
   ctx->driver_vtable->clip_stack_flush (stack, framebuffer);
 }

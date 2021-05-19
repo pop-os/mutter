@@ -49,34 +49,6 @@ device_type_name (ClutterInputDevice *device)
     }
 }
 
-static const gchar *
-axis_type_name (ClutterInputAxis axis)
-{
-  switch (axis)
-    {
-    case CLUTTER_INPUT_AXIS_X:
-      return "Absolute X";
-
-    case CLUTTER_INPUT_AXIS_Y:
-      return "Absolute Y";
-
-    case CLUTTER_INPUT_AXIS_PRESSURE:
-      return "Pressure";
-
-    case CLUTTER_INPUT_AXIS_XTILT:
-      return "X Tilt";
-
-    case CLUTTER_INPUT_AXIS_YTILT:
-      return "Y Tilt";
-
-    case CLUTTER_INPUT_AXIS_WHEEL:
-      return "Wheel";
-
-    default:
-      return "Unknown";
-    }
-}
-
 static gboolean
 stage_button_event_cb (ClutterActor   *actor,
                        ClutterEvent   *event,
@@ -85,22 +57,18 @@ stage_button_event_cb (ClutterActor   *actor,
   ClutterInputDevice *device;
   ClutterInputDevice *source_device;
   ClutterActor *hand = NULL;
-  gdouble *axes;
-  guint n_axes, i;
 
   device = clutter_event_get_device (event);
   source_device = clutter_event_get_source_device (event);
 
   hand = g_hash_table_lookup (app->devices, device);
 
-  g_print ("Device: '%s' (id:%d, type: %s, source: '%s', axes: %d)\n",
+  g_print ("Device: '%s' (type: %s, source: '%s')\n",
            clutter_input_device_get_device_name (device),
-           clutter_input_device_get_device_id (device),
            device_type_name (device),
            source_device != device
              ? clutter_input_device_get_device_name (source_device)
-             : "<same>",
-           clutter_input_device_get_n_axes (device));
+             : "<same>");
 
   if (hand != NULL)
     {
@@ -108,21 +76,6 @@ stage_button_event_cb (ClutterActor   *actor,
 
       clutter_event_get_coords (event, &event_x, &event_y);
       clutter_actor_set_position (hand, event_x, event_y);
-    }
-
-  axes = clutter_event_get_axes (event, &n_axes);
-  for (i = 0; i < n_axes; i++)
-    {
-      ClutterInputAxis axis;
-
-      axis = clutter_input_device_get_axis (device, i);
-      if (axis == CLUTTER_INPUT_AXIS_IGNORE)
-        continue;
-
-      g_print ("\tAxis[%2d][%s].value: %.2f\n",
-               i,
-               axis_type_name (axis),
-               axes[i]);
     }
 
   return FALSE;
@@ -160,10 +113,9 @@ seat_device_added_cb (ClutterSeat        *seat,
   ClutterInputDeviceType device_type;
   ClutterActor *hand = NULL;
 
-  g_print ("got a %s device '%s' with id %d\n",
+  g_print ("got a %s device '%s'\n",
            device_type_name (device),
-           clutter_input_device_get_device_name (device),
-           clutter_input_device_get_device_id (device));
+           clutter_input_device_get_device_name (device));
 
   device_type = clutter_input_device_get_device_type (device);
   if (device_type == CLUTTER_POINTER_DEVICE ||
@@ -172,8 +124,6 @@ seat_device_added_cb (ClutterSeat        *seat,
     {
       g_print ("*** enabling device '%s' ***\n",
                clutter_input_device_get_device_name (device));
-
-      clutter_input_device_set_enabled (device, TRUE);
 
       hand = clutter_test_utils_create_texture_from_file (TESTS_DATADIR
                                                           G_DIR_SEPARATOR_S
@@ -193,10 +143,9 @@ seat_device_removed_cb (ClutterSeat        *seat,
   ClutterInputDeviceType device_type;
   ClutterActor *hand = NULL;
 
-  g_print ("removed a %s device '%s' with id %d\n",
+  g_print ("removed a %s device '%s'\n",
            device_type_name (device),
-           clutter_input_device_get_device_name (device),
-           clutter_input_device_get_device_id (device));
+           clutter_input_device_get_device_name (device));
 
   device_type = clutter_input_device_get_device_type (device);
   if (device_type == CLUTTER_POINTER_DEVICE ||
@@ -259,10 +208,9 @@ test_devices_main (int argc, char **argv)
       ClutterInputDeviceType device_type;
       ClutterActor *hand = NULL;
 
-      g_print ("got a %s device '%s' with id %d\n",
+      g_print ("got a %s device '%s'\n",
                device_type_name (device),
-               clutter_input_device_get_device_name (device),
-               clutter_input_device_get_device_id (device));
+               clutter_input_device_get_device_name (device));
 
       device_type = clutter_input_device_get_device_type (device);
       if (device_type == CLUTTER_POINTER_DEVICE ||
@@ -271,8 +219,6 @@ test_devices_main (int argc, char **argv)
         {
           g_print ("*** enabling device '%s' ***\n",
                    clutter_input_device_get_device_name (device));
-
-          clutter_input_device_set_enabled (device, TRUE);
 
           hand = clutter_test_utils_create_texture_from_file (TESTS_DATADIR
                                                               G_DIR_SEPARATOR_S

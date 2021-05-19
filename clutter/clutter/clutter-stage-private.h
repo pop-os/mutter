@@ -31,8 +31,6 @@
 
 G_BEGIN_DECLS
 
-typedef struct _ClutterStageQueueRedrawEntry ClutterStageQueueRedrawEntry;
-
 /* stage */
 ClutterStageWindow *_clutter_stage_get_default_window    (void);
 
@@ -55,7 +53,7 @@ void                _clutter_stage_set_window            (ClutterStage          
 CLUTTER_EXPORT
 ClutterStageWindow *_clutter_stage_get_window            (ClutterStage          *stage);
 void                _clutter_stage_get_projection_matrix (ClutterStage          *stage,
-                                                          CoglMatrix            *projection);
+                                                          graphene_matrix_t     *projection);
 void                _clutter_stage_dirty_projection      (ClutterStage          *stage);
 void                _clutter_stage_get_viewport          (ClutterStage          *stage,
                                                           float                 *x,
@@ -70,7 +68,7 @@ void                clutter_stage_maybe_finish_queue_redraws (ClutterStage      
 GSList *            clutter_stage_find_updated_devices   (ClutterStage          *stage);
 void                clutter_stage_update_devices         (ClutterStage          *stage,
                                                           GSList                *devices);
-void                clutter_stage_update_actor_stage_views (ClutterStage        *stage);
+void                clutter_stage_finish_layout          (ClutterStage          *stage);
 
 CLUTTER_EXPORT
 void     _clutter_stage_queue_event                       (ClutterStage *stage,
@@ -81,15 +79,6 @@ void     _clutter_stage_process_queued_events             (ClutterStage *stage);
 void     _clutter_stage_update_input_devices              (ClutterStage *stage);
 gboolean _clutter_stage_has_full_redraw_queued            (ClutterStage *stage);
 
-void clutter_stage_log_pick (ClutterStage           *stage,
-                             const graphene_point_t *vertices,
-                             ClutterActor           *actor);
-
-void clutter_stage_push_pick_clip (ClutterStage           *stage,
-                                   const graphene_point_t *vertices);
-
-void clutter_stage_pop_pick_clip (ClutterStage *stage);
-
 ClutterActor *_clutter_stage_do_pick (ClutterStage    *stage,
                                       float            x,
                                       float            y,
@@ -98,13 +87,12 @@ ClutterActor *_clutter_stage_do_pick (ClutterStage    *stage,
 ClutterPaintVolume *_clutter_stage_paint_volume_stack_allocate (ClutterStage *stage);
 void                _clutter_stage_paint_volume_stack_free_all (ClutterStage *stage);
 
-const ClutterPlane *_clutter_stage_get_clip (ClutterStage *stage);
+void clutter_stage_queue_actor_redraw (ClutterStage             *stage,
+                                       ClutterActor             *actor,
+                                       const ClutterPaintVolume *clip);
 
-ClutterStageQueueRedrawEntry *_clutter_stage_queue_actor_redraw            (ClutterStage                 *stage,
-                                                                            ClutterStageQueueRedrawEntry *entry,
-                                                                            ClutterActor                 *actor,
-                                                                            const ClutterPaintVolume     *clip);
-void                          _clutter_stage_queue_redraw_entry_invalidate (ClutterStageQueueRedrawEntry *entry);
+void clutter_stage_dequeue_actor_redraw (ClutterStage *stage,
+                                         ClutterActor *actor);
 
 void            _clutter_stage_add_pointer_drag_actor    (ClutterStage       *stage,
                                                           ClutterInputDevice *device,
@@ -121,15 +109,6 @@ ClutterActor *  _clutter_stage_get_touch_drag_actor    (ClutterStage         *st
                                                         ClutterEventSequence *sequence);
 void            _clutter_stage_remove_touch_drag_actor (ClutterStage         *stage,
                                                         ClutterEventSequence *sequence);
-
-CLUTTER_EXPORT
-ClutterStageState       _clutter_stage_get_state        (ClutterStage      *stage);
-CLUTTER_EXPORT
-gboolean                _clutter_stage_is_activated     (ClutterStage      *stage);
-CLUTTER_EXPORT
-gboolean                _clutter_stage_update_state     (ClutterStage      *stage,
-                                                         ClutterStageState  unset_state,
-                                                         ClutterStageState  set_state);
 
 void                    _clutter_stage_set_scale_factor (ClutterStage      *stage,
                                                          int                factor);
@@ -148,6 +127,16 @@ GList * clutter_stage_get_views_for_rect (ClutterStage          *stage,
                                           const graphene_rect_t *rect);
 
 void clutter_stage_set_actor_needs_immediate_relayout (ClutterStage *stage);
+
+void clutter_stage_update_device_entry (ClutterStage         *self,
+                                        ClutterInputDevice   *device,
+                                        ClutterEventSequence *sequence,
+                                        graphene_point_t      coords,
+                                        ClutterActor         *actor);
+
+void clutter_stage_remove_device_entry (ClutterStage         *self,
+                                        ClutterInputDevice   *device,
+                                        ClutterEventSequence *sequence);
 
 G_END_DECLS
 

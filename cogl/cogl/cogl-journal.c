@@ -32,8 +32,10 @@
 
 #include "cogl-debug.h"
 #include "cogl-context-private.h"
+#include "cogl-graphene.h"
 #include "cogl-journal-private.h"
 #include "cogl-texture-private.h"
+#include "cogl-texture-2d-private.h"
 #include "cogl-pipeline-private.h"
 #include "cogl-framebuffer-private.h"
 #include "cogl-profile.h"
@@ -138,22 +140,15 @@ _cogl_journal_free (CoglJournal *journal)
     if (journal->vbo_pool[i])
       cogl_object_unref (journal->vbo_pool[i]);
 
-  g_slice_free (CoglJournal, journal);
+  g_free (journal);
 }
 
 CoglJournal *
 _cogl_journal_new (CoglFramebuffer *framebuffer)
 {
-  CoglJournal *journal = g_slice_new0 (CoglJournal);
+  CoglJournal *journal = g_new0 (CoglJournal, 1);
 
-  /* The journal keeps a pointer back to the framebuffer because there
-     is effectively a 1:1 mapping between journals and framebuffers.
-     However, to avoid a circular reference the journal doesn't take a
-     reference unless it is non-empty. The framebuffer has a special
-     unref implementation to ensure that the journal is flushed when
-     the journal is the only thing keeping it alive */
   journal->framebuffer = framebuffer;
-
   journal->entries = g_array_new (FALSE, FALSE, sizeof (CoglJournalEntry));
   journal->vertices = g_array_new (FALSE, FALSE, sizeof (float));
 
@@ -566,7 +561,8 @@ _cogl_journal_flush_vbo_offsets_and_entries (CoglJournalEntry *batch_start,
                                              void             *data)
 {
   CoglJournalFlushState *state = data;
-  CoglContext *ctx = state->journal->framebuffer->context;
+  CoglFramebuffer *framebuffer = state->journal->framebuffer;
+  CoglContext *ctx = cogl_framebuffer_get_context (framebuffer);
   size_t stride;
   int i;
   CoglAttribute **attribute_entry;
@@ -687,7 +683,7 @@ _cogl_journal_flush_clip_stacks_and_entries (CoglJournalEntry *batch_start,
 {
   CoglJournalFlushState *state = data;
   CoglFramebuffer *framebuffer = state->journal->framebuffer;
-  CoglContext *ctx = framebuffer->context;
+  CoglContext *ctx = cogl_framebuffer_get_context (framebuffer);
   CoglMatrixStack *projection_stack;
 
   COGL_STATIC_TIMER (time_flush_clip_stack_pipeline_entries,
@@ -1031,7 +1027,7 @@ _cogl_journal_flush_dither_and_entries (CoglJournalEntry *batch_start,
 {
   CoglJournalFlushState *state = data;
   CoglFramebuffer *framebuffer = state->journal->framebuffer;
-  CoglContext *ctx = framebuffer->context;
+  CoglContext *ctx = cogl_framebuffer_get_context (framebuffer);
 
   COGL_STATIC_TIMER (time_flush_dither_and_entries,
                      "Journal Flush", /* parent */
@@ -1048,9 +1044,10 @@ _cogl_journal_flush_dither_and_entries (CoglJournalEntry *batch_start,
   cogl_framebuffer_set_dither_enabled (framebuffer, batch_start->dither_enabled);
   ctx->current_draw_buffer_changes |= COGL_FRAMEBUFFER_STATE_DITHER;
 
-  _cogl_framebuffer_flush_state (framebuffer,
-                                 framebuffer,
-                                 COGL_FRAMEBUFFER_STATE_DITHER);
+  cogl_context_flush_framebuffer_state (ctx,
+                                        framebuffer,
+                                        framebuffer,
+                                        COGL_FRAMEBUFFER_STATE_DITHER);
 
   batch_and_call (batch_start,
                   batch_len,
@@ -1074,7 +1071,7 @@ _cogl_journal_flush_viewport_and_entries (CoglJournalEntry *batch_start,
 {
   CoglJournalFlushState *state = data;
   CoglFramebuffer *framebuffer = state->journal->framebuffer;
-  CoglContext *ctx = framebuffer->context;
+  CoglContext *ctx = cogl_framebuffer_get_context (framebuffer);
   float current_viewport[4];
 
   COGL_STATIC_TIMER (time_flush_viewport_and_entries,
@@ -1094,9 +1091,10 @@ _cogl_journal_flush_viewport_and_entries (CoglJournalEntry *batch_start,
   cogl_framebuffer_get_viewport4fv (framebuffer, current_viewport);
   cogl_framebuffer_set_viewport4fv (framebuffer, batch_start->viewport);
 
-  _cogl_framebuffer_flush_state (framebuffer,
-                                 framebuffer,
-                                 COGL_FRAMEBUFFER_STATE_VIEWPORT);
+  cogl_context_flush_framebuffer_state (ctx,
+                                        framebuffer,
+                                        framebuffer,
+                                        COGL_FRAMEBUFFER_STATE_VIEWPORT);
 
   batch_and_call (batch_start,
                   batch_len,
@@ -1122,8 +1120,8 @@ static CoglAttributeBuffer *
 create_attribute_buffer (CoglJournal *journal,
                          size_t n_bytes)
 {
+  CoglContext *ctx = cogl_framebuffer_get_context (journal->framebuffer);
   CoglAttributeBuffer *vbo;
-  CoglContext *ctx = journal->framebuffer->context;
 
   vbo = journal->vbo_pool[journal->next_vbo_in_pool];
 
@@ -1160,7 +1158,7 @@ upload_vertices (CoglJournal *journal,
   int entry_num;
   int i;
   CoglMatrixEntry *last_modelview_entry = NULL;
-  CoglMatrix modelview;
+  graphene_matrix_t modelview;
 
   g_assert (needed_vbo_len);
 
@@ -1212,14 +1210,14 @@ upload_vertices (CoglJournal *journal,
 
           if (entry->modelview_entry != last_modelview_entry)
             cogl_matrix_entry_get (entry->modelview_entry, &modelview);
-          cogl_matrix_transform_points (&modelview,
-                                        2, /* n_components */
-                                        sizeof (float) * 2, /* stride_in */
-                                        v, /* points_in */
-                                        /* strideout */
-                                        vb_stride * sizeof (float),
-                                        vout, /* points_out */
-                                        4 /* n_points */);
+          cogl_graphene_matrix_transform_points (&modelview,
+                                                 2, /* n_components */
+                                                 sizeof (float) * 2, /* stride_in */
+                                                 v, /* points_in */
+                                                 /* strideout */
+                                                 vb_stride * sizeof (float),
+                                                 vout, /* points_out */
+                                                 4 /* n_points */);
         }
 
       for (i = 0; i < entry->n_layers; i++)
@@ -1267,10 +1265,6 @@ _cogl_journal_discard (CoglJournal *journal)
   g_array_set_size (journal->vertices, 0);
   journal->needed_vbo_len = 0;
   journal->fast_read_pixel_count = 0;
-
-  /* The journal only holds a reference to the framebuffer while the
-     journal is not empty */
-  cogl_object_unref (journal->framebuffer);
 }
 
 /* Note: A return value of FALSE doesn't mean 'no' it means
@@ -1382,7 +1376,7 @@ _cogl_journal_flush (CoglJournal *journal)
     }
 
   framebuffer = journal->framebuffer;
-  ctx = framebuffer->context;
+  ctx = cogl_framebuffer_get_context (framebuffer);
 
   /* The entries in this journal may depend on images in other
    * framebuffers which may require that we flush the journals
@@ -1399,13 +1393,14 @@ _cogl_journal_flush (CoglJournal *journal)
 
   /* NB: the journal deals with flushing the viewport, the modelview
    * stack and clip state manually */
-  _cogl_framebuffer_flush_state (framebuffer,
-                                 framebuffer,
-                                 COGL_FRAMEBUFFER_STATE_ALL &
-                                 ~(COGL_FRAMEBUFFER_STATE_DITHER |
-                                   COGL_FRAMEBUFFER_STATE_VIEWPORT |
-                                   COGL_FRAMEBUFFER_STATE_MODELVIEW |
-                                   COGL_FRAMEBUFFER_STATE_CLIP));
+  cogl_context_flush_framebuffer_state (ctx,
+                                        framebuffer,
+                                        framebuffer,
+                                        COGL_FRAMEBUFFER_STATE_ALL &
+                                        ~(COGL_FRAMEBUFFER_STATE_DITHER |
+                                          COGL_FRAMEBUFFER_STATE_VIEWPORT |
+                                          COGL_FRAMEBUFFER_STATE_MODELVIEW |
+                                          COGL_FRAMEBUFFER_STATE_CLIP));
 
   /* We need to mark the current modelview state of the framebuffer as
    * dirty because we are going to manually replace it */
@@ -1527,12 +1522,6 @@ _cogl_journal_log_quad (CoglJournal  *journal,
 
   COGL_TIMER_START (_cogl_uprof_context, log_timer);
 
-  /* If the framebuffer was previously empty then we'll take a
-     reference to the current framebuffer. This reference will be
-     removed when the journal is flushed */
-  if (journal->vertices->len == 0)
-    cogl_object_ref (framebuffer);
-
   /* The vertex data is logged into a separate array. The data needs
      to be copied into a vertex array before it's given to GL so we
      only store two vertices per quad and expand it to four while
@@ -1627,8 +1616,23 @@ _cogl_journal_log_quad (CoglJournal  *journal,
                                          add_framebuffer_deps_cb,
                                          framebuffer);
 
-  if (G_UNLIKELY (COGL_DEBUG_ENABLED (COGL_DEBUG_DISABLE_BATCHING)))
-    _cogl_journal_flush (journal);
+  if (COGL_IS_OFFSCREEN (framebuffer))
+    {
+      CoglOffscreen *offscreen = COGL_OFFSCREEN (framebuffer);
+      CoglTexture *texture = cogl_offscreen_get_texture (offscreen);
+
+      _cogl_texture_2d_externally_modified (texture);
+    }
+
+  if (G_UNLIKELY (COGL_DEBUG_ENABLED (COGL_DEBUG_SYNC_PRIMITIVE)))
+    {
+      _cogl_journal_flush (journal);
+      cogl_framebuffer_finish (framebuffer);
+    }
+  else if (G_UNLIKELY (COGL_DEBUG_ENABLED (COGL_DEBUG_DISABLE_BATCHING)))
+    {
+      _cogl_journal_flush (journal);
+    }
 
   COGL_TIMER_STOP (_cogl_uprof_context, log_timer);
 }
@@ -1642,8 +1646,8 @@ entry_to_screen_polygon (CoglFramebuffer *framebuffer,
   size_t array_stride =
     GET_JOURNAL_ARRAY_STRIDE_FOR_N_LAYERS (entry->n_layers);
   CoglMatrixStack *projection_stack;
-  CoglMatrix projection;
-  CoglMatrix modelview;
+  graphene_matrix_t projection;
+  graphene_matrix_t modelview;
   int i;
   const float *viewport = entry->viewport;
 
@@ -1672,27 +1676,27 @@ entry_to_screen_polygon (CoglFramebuffer *framebuffer,
    */
 
   cogl_matrix_entry_get (entry->modelview_entry, &modelview);
-  cogl_matrix_transform_points (&modelview,
-                                2, /* n_components */
-                                sizeof (float) * 4, /* stride_in */
-                                poly, /* points_in */
-                                /* strideout */
-                                sizeof (float) * 4,
-                                poly, /* points_out */
-                                4 /* n_points */);
+  cogl_graphene_matrix_transform_points (&modelview,
+                                         2, /* n_components */
+                                         sizeof (float) * 4, /* stride_in */
+                                         poly, /* points_in */
+                                         /* strideout */
+                                         sizeof (float) * 4,
+                                         poly, /* points_out */
+                                         4 /* n_points */);
 
   projection_stack =
     _cogl_framebuffer_get_projection_stack (framebuffer);
   cogl_matrix_stack_get (projection_stack, &projection);
 
-  cogl_matrix_project_points (&projection,
-                              3, /* n_components */
-                              sizeof (float) * 4, /* stride_in */
-                              poly, /* points_in */
-                              /* strideout */
-                              sizeof (float) * 4,
-                              poly, /* points_out */
-                              4 /* n_points */);
+  cogl_graphene_matrix_transform_points (&projection,
+                                         3, /* n_components */
+                                         sizeof (float) * 4, /* stride_in */
+                                         poly, /* points_in */
+                                         /* strideout */
+                                         sizeof (float) * 4,
+                                         poly, /* points_out */
+                                         4 /* n_points */);
 
 /* Scale from OpenGL normalized device coordinates (ranging from -1 to 1)
  * to Cogl window/framebuffer coordinates (ranging from 0 to buffer-size) with

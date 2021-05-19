@@ -39,7 +39,17 @@
 #include <cogl/cogl-frame-info-private.h>
 #include <cogl/cogl-renderer-private.h>
 #if defined (COGL_HAS_EGL_SUPPORT)
+#include <cogl/winsys/cogl-onscreen-egl.h>
 #include <cogl/winsys/cogl-winsys-egl-private.h>
+#endif
+#if defined (COGL_HAS_GLX_SUPPORT)
+#include <cogl/winsys/cogl-onscreen-glx.h>
+#endif
+#if defined (COGL_HAS_XLIB_SUPPORT)
+#include <cogl/winsys/cogl-onscreen-xlib.h>
+#endif
+#ifdef COGL_HAS_X11
+#include <cogl/cogl-x11-onscreen.h>
 #endif
 #include <cogl/winsys/cogl-winsys-private.h>
 

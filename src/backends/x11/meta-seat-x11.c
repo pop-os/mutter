@@ -18,8 +18,12 @@
  */
 #include "config.h"
 
+#include <linux/input-event-codes.h>
 #include <X11/extensions/XInput2.h>
+#include <X11/extensions/XKB.h>
 
+#include "backends/meta-input-settings-private.h"
+#include "backends/x11/meta-backend-x11.h"
 #include "backends/x11/meta-event-x11.h"
 #include "backends/x11/meta-input-device-tool-x11.h"
 #include "backends/x11/meta-input-device-x11.h"
@@ -44,6 +48,15 @@ enum
   PROP_TOUCH_MODE,
 };
 
+typedef struct _MetaTouchInfo MetaTouchInfo;
+
+struct _MetaTouchInfo
+{
+  ClutterEventSequence *sequence;
+  double x;
+  double y;
+};
+
 struct _MetaSeatX11
 {
   ClutterSeat parent_instance;
@@ -52,6 +65,7 @@ struct _MetaSeatX11
   GList *devices;
   GHashTable *devices_by_id;
   GHashTable *tools_by_serial;
+  GHashTable *touch_coords;
   MetaKeymapX11 *keymap;
 
   int pointer_id;
@@ -59,6 +73,7 @@ struct _MetaSeatX11
   int opcode;
   guint has_touchscreens : 1;
   guint touch_mode : 1;
+  guint has_pointer_focus : 1;
 };
 
 static GParamSpec *props[N_PROPS] = { 0 };
@@ -135,7 +150,7 @@ translate_valuator_class (Display             *xdisplay,
         }
     }
 
-  _clutter_input_device_add_axis (device, axis,
+  meta_input_device_x11_add_axis (device, axis,
                                   class->min,
                                   class->max,
                                   class->resolution);
@@ -145,7 +160,7 @@ translate_valuator_class (Display             *xdisplay,
            class->min,
            class->max,
            class->resolution,
-           device->id);
+           meta_input_device_x11_get_device_id (device));
 }
 
 static void
@@ -162,23 +177,6 @@ translate_device_classes (Display             *xdisplay,
 
       switch (class_info->type)
         {
-        case XIKeyClass:
-          {
-            XIKeyClassInfo *key_info = (XIKeyClassInfo *) class_info;
-            int j;
-
-            _clutter_input_device_set_n_keys (device,
-                                              key_info->num_keycodes);
-
-            for (j = 0; j < key_info->num_keycodes; j++)
-              {
-                clutter_input_device_set_key (device, j,
-                                              key_info->keycodes[i],
-                                              0);
-              }
-          }
-          break;
-
         case XIValuatorClass:
           translate_valuator_class (xdisplay, device,
                                     (XIValuatorClassInfo *) class_info);
@@ -201,7 +199,7 @@ translate_device_classes (Display             *xdisplay,
                      : "horizontal",
                      scroll_info->increment);
 
-            _clutter_input_device_add_scroll_info (device,
+            meta_input_device_x11_add_scroll_info (device,
                                                    scroll_info->number,
                                                    direction,
                                                    scroll_info->increment);
@@ -462,7 +460,6 @@ create_device (MetaSeatX11    *seat_x11,
   ClutterInputDeviceType source, touch_source;
   ClutterInputDevice *retval;
   ClutterInputMode mode;
-  gboolean is_enabled;
   uint32_t num_touches = 0, num_rings = 0, num_strips = 0;
   char *vendor_id = NULL, *product_id = NULL, *node_path = NULL;
 
@@ -508,19 +505,16 @@ create_device (MetaSeatX11    *seat_x11,
     case XIMasterKeyboard:
     case XIMasterPointer:
       mode = CLUTTER_INPUT_MODE_LOGICAL;
-      is_enabled = TRUE;
       break;
 
     case XISlaveKeyboard:
     case XISlavePointer:
       mode = CLUTTER_INPUT_MODE_PHYSICAL;
-      is_enabled = FALSE;
       break;
 
     case XIFloatingSlave:
     default:
       mode = CLUTTER_INPUT_MODE_FLOATING;
-      is_enabled = FALSE;
       break;
     }
 
@@ -532,10 +526,7 @@ create_device (MetaSeatX11    *seat_x11,
     }
 
   if (source == CLUTTER_PAD_DEVICE)
-    {
-      is_enabled = TRUE;
-      get_pad_features (info, &num_rings, &num_strips);
-    }
+    get_pad_features (info, &num_rings, &num_strips);
 
   retval = g_object_new (META_TYPE_INPUT_DEVICE_X11,
                          "name", info->name,
@@ -544,7 +535,6 @@ create_device (MetaSeatX11    *seat_x11,
                          "device-type", source,
                          "device-mode", mode,
                          "backend", backend,
-                         "enabled", is_enabled,
                          "vendor-id", vendor_id,
                          "product-id", product_id,
                          "device-node", node_path,
@@ -577,7 +567,7 @@ pad_passive_button_grab (ClutterInputDevice *device)
   XIEventMask xi_event_mask;
   int device_id, rc;
 
-  device_id = clutter_input_device_get_device_id (device);
+  device_id = meta_input_device_x11_get_device_id (device);
 
   xi_event_mask.deviceid = device_id;
   xi_event_mask.mask_len = XIMaskLen (XI_LASTEVENT);
@@ -627,8 +617,7 @@ update_touch_mode (MetaSeatX11 *seat_x11)
 static ClutterInputDevice *
 add_device (MetaSeatX11    *seat_x11,
             ClutterBackend *backend,
-            XIDeviceInfo   *info,
-            gboolean        in_construction)
+            XIDeviceInfo   *info)
 {
   ClutterInputDevice *device;
 
@@ -663,22 +652,6 @@ add_device (MetaSeatX11    *seat_x11,
 
   if (clutter_input_device_get_device_type (device) == CLUTTER_PAD_DEVICE)
     pad_passive_button_grab (device);
-
-  /* relationships between devices and signal emissions are not
-   * necessary while we're constructing the device manager instance
-   */
-  if (!in_construction)
-    {
-      if (info->use == XISlavePointer || info->use == XISlaveKeyboard)
-        {
-          ClutterInputDevice *logical;
-
-          logical = g_hash_table_lookup (seat_x11->devices_by_id,
-                                         GINT_TO_POINTER (info->attachment));
-          _clutter_input_device_set_associated_device (device, logical);
-          _clutter_input_device_add_physical_device (logical, device);
-        }
-    }
 
   return device;
 }
@@ -716,24 +689,33 @@ remove_device (MetaSeatX11        *seat_x11,
 }
 
 static gboolean
-meta_seat_x11_handle_device_event (ClutterSeat  *seat,
-                                   ClutterEvent *event)
+meta_seat_x11_handle_event_post (ClutterSeat        *seat,
+                                 const ClutterEvent *event)
 {
   MetaSeatX11 *seat_x11 = META_SEAT_X11 (seat);
-  ClutterInputDevice *device = event->device.device;
+  ClutterInputDevice *device;
+  MetaInputSettings *input_settings;
   gboolean is_touch;
 
+  if (event->type != CLUTTER_DEVICE_ADDED &&
+      event->type != CLUTTER_DEVICE_REMOVED)
+    return TRUE;
+
+  device = clutter_event_get_device (event);
   is_touch =
     clutter_input_device_get_device_type (device) == CLUTTER_TOUCHSCREEN_DEVICE;
+  input_settings = meta_backend_get_input_settings (meta_get_backend ());
 
   switch (event->type)
     {
       case CLUTTER_DEVICE_ADDED:
+        meta_input_settings_add_device (input_settings, device);
         seat_x11->has_touchscreens |= is_touch;
         break;
       case CLUTTER_DEVICE_REMOVED:
         if (is_touch)
           seat_x11->has_touchscreens = has_touchscreens (seat_x11);
+        meta_input_settings_remove_device (input_settings, device);
         break;
       default:
         break;
@@ -743,36 +725,6 @@ meta_seat_x11_handle_device_event (ClutterSeat  *seat,
     update_touch_mode (seat_x11);
 
   return TRUE;
-}
-
-static void
-relate_logical_devices (gpointer key,
-                        gpointer value,
-                        gpointer data)
-{
-  MetaSeatX11 *seat_x11 = data;
-  ClutterInputDevice *device, *relative;
-
-  device = g_hash_table_lookup (seat_x11->devices_by_id, key);
-  relative = g_hash_table_lookup (seat_x11->devices_by_id, value);
-
-  _clutter_input_device_set_associated_device (device, relative);
-  _clutter_input_device_set_associated_device (relative, device);
-}
-
-static void
-relate_physical_devices (gpointer key,
-                         gpointer value,
-                         gpointer data)
-{
-  MetaSeatX11 *seat_x11 = data;
-  ClutterInputDevice *logical, *physical;
-
-  physical = g_hash_table_lookup (seat_x11->devices_by_id, key);
-  logical = g_hash_table_lookup (seat_x11->devices_by_id, value);
-
-  _clutter_input_device_set_associated_device (physical, logical);
-  _clutter_input_device_add_physical_device (logical, physical);
 }
 
 static uint
@@ -791,7 +743,7 @@ device_get_tool_serial (ClutterInputDevice *device)
 
   clutter_x11_trap_x_errors ();
   rc = XIGetProperty (clutter_x11_get_default_display (),
-                      clutter_input_device_get_device_id (device),
+                      meta_input_device_x11_get_device_id (device),
                       prop, 0, 4, FALSE, XA_INTEGER, &type, &format, &nitems, &bytes_after,
                       (guchar **) &data);
   clutter_x11_untrap_x_errors ();
@@ -833,7 +785,7 @@ translate_hierarchy_event (ClutterBackend   *backend,
             {
               ClutterInputDevice *device;
 
-              device = add_device (seat_x11, backend, &info[0], FALSE);
+              device = add_device (seat_x11, backend, &info[0]);
 
               event->any.type = CLUTTER_DEVICE_ADDED;
               event->any.time = ev->time;
@@ -867,46 +819,10 @@ translate_hierarchy_event (ClutterBackend   *backend,
       else if ((ev->info[i].flags & XISlaveAttached) ||
                (ev->info[i].flags & XISlaveDetached))
         {
-          ClutterInputDevice *logical, *physical;
-          XIDeviceInfo *info;
-          int n_devices;
-
           g_debug ("Hierarchy event: physical device %s",
                    (ev->info[i].flags & XISlaveAttached)
                    ? "attached"
                    : "detached");
-
-          physical = g_hash_table_lookup (seat_x11->devices_by_id,
-                                          GINT_TO_POINTER (ev->info[i].deviceid));
-          logical = clutter_input_device_get_associated_device (physical);
-
-          /* detach the physical device in both cases */
-          if (logical != NULL)
-            {
-              _clutter_input_device_remove_physical_device (logical, physical);
-              _clutter_input_device_set_associated_device (physical, NULL);
-            }
-
-          /* and attach the physical device to the new logical device if needed */
-          if (ev->info[i].flags & XISlaveAttached)
-            {
-              clutter_x11_trap_x_errors ();
-              info = XIQueryDevice (clutter_x11_get_default_display (),
-                                    ev->info[i].deviceid,
-                                    &n_devices);
-              clutter_x11_untrap_x_errors ();
-              if (info != NULL)
-                {
-                  logical = g_hash_table_lookup (seat_x11->devices_by_id,
-                                                 GINT_TO_POINTER (info->attachment));
-                  if (logical != NULL)
-                    {
-                      _clutter_input_device_set_associated_device (physical, logical);
-                      _clutter_input_device_add_physical_device (logical, physical);
-                    }
-                  XIFreeDeviceInfo (info);
-                }
-            }
         }
     }
 
@@ -930,6 +846,7 @@ translate_property_event (MetaSeatX11 *seat_x11,
     {
       ClutterInputDeviceTool *tool = NULL;
       ClutterInputDeviceToolType type;
+      MetaInputSettings *input_settings;
       int serial_id;
 
       serial_id = device_get_tool_serial (device);
@@ -950,8 +867,32 @@ translate_property_event (MetaSeatX11 *seat_x11,
         }
 
       meta_input_device_x11_update_tool (device, tool);
-      g_signal_emit_by_name (seat_x11, "tool-changed", device, tool);
+      input_settings = meta_backend_get_input_settings (meta_get_backend ());
+      meta_input_settings_notify_tool_change (input_settings, device, tool);
     }
+}
+
+static void
+emulate_motion (MetaSeatX11 *seat_x11,
+                double       x,
+                double       y)
+{
+  ClutterInputDevice *pointer;
+  ClutterEvent *event;
+  ClutterStage *stage;
+
+  pointer = clutter_seat_get_pointer (CLUTTER_SEAT (seat_x11));
+  stage = CLUTTER_STAGE (meta_backend_get_stage (meta_get_backend ()));
+
+  event = clutter_event_new (CLUTTER_MOTION);
+  clutter_event_set_flags (event, CLUTTER_EVENT_FLAG_SYNTHETIC);
+  clutter_event_set_coords (event, x, y);
+  clutter_event_set_device (event, pointer);
+  clutter_event_set_source_device (event, NULL);
+  clutter_event_set_stage (event, stage);
+
+  clutter_event_put (event);
+  clutter_event_free (event);
 }
 
 static void
@@ -973,15 +914,12 @@ translate_raw_event (MetaSeatX11 *seat_x11,
   if (device == NULL)
     return;
 
-  if (!_clutter_is_input_pointer_a11y_enabled (device))
-    return;
-
   switch (cookie->evtype)
     {
     case XI_RawMotion:
       g_debug ("raw motion: device:%d '%s'",
-               device->id,
-               device->device_name);
+               meta_input_device_x11_get_device_id (device),
+               clutter_input_device_get_device_name (device));
 
       /* We don't get actual pointer location with raw events, and we cannot
        * rely on `clutter_input_device_get_coords()` either because of
@@ -989,7 +927,12 @@ translate_raw_event (MetaSeatX11 *seat_x11,
        * so we need to explicitly query the pointer here...
        */
       if (meta_input_device_x11_get_pointer_location (device, &x, &y))
-        _clutter_input_pointer_a11y_on_motion_event (device, x, y);
+        {
+          if (_clutter_is_input_pointer_a11y_enabled (device))
+            _clutter_input_pointer_a11y_on_motion_event (device, x, y);
+          if (!seat_x11->has_pointer_focus)
+            emulate_motion (seat_x11, x, y);
+        }
       break;
     case XI_RawButtonPress:
     case XI_RawButtonRelease:
@@ -997,12 +940,15 @@ translate_raw_event (MetaSeatX11 *seat_x11,
                cookie->evtype == XI_RawButtonPress
                ? "press  "
                : "release",
-               device->id,
-               device->device_name,
+               meta_input_device_x11_get_device_id (device),
+               clutter_input_device_get_device_name (device),
                xev->detail);
-      _clutter_input_pointer_a11y_on_button_event (device,
-                                                  xev->detail,
-                                                  (cookie->evtype == XI_RawButtonPress));
+      if (_clutter_is_input_pointer_a11y_enabled (device))
+        {
+          _clutter_input_pointer_a11y_on_button_event (device,
+                                                       xev->detail,
+                                                       (cookie->evtype == XI_RawButtonPress));
+        }
       break;
     }
 }
@@ -1031,7 +977,7 @@ translate_pad_axis (ClutterInputDevice *device,
       if (val <= 0)
         continue;
 
-      _clutter_input_device_translate_axis (device, i, val, value);
+      meta_input_device_x11_translate_axis (device, i, val, value);
 
       if (i == PAD_AXIS_RING1 || i == PAD_AXIS_RING2)
         {
@@ -1102,8 +1048,8 @@ translate_pad_event (ClutterEvent       *event,
            ? "pad ring  "
            : "pad strip",
            (unsigned int) xev->event,
-           device->id,
-           device->device_name,
+           meta_input_device_x11_get_device_id (device),
+           clutter_input_device_get_device_name (device),
            event->any.time, value);
 
   return TRUE;
@@ -1216,12 +1162,11 @@ translate_axes (ClutterInputDevice *device,
                 double              y,
                 XIValuatorState    *valuators)
 {
-  uint32_t n_axes = clutter_input_device_get_n_axes (device);
   uint32_t i;
   double *retval;
   double *values;
 
-  retval = g_new0 (double, n_axes);
+  retval = g_new0 (double, CLUTTER_INPUT_AXIS_LAST);
   values = valuators->values;
 
   for (i = 0; i < valuators->mask_len * 8; i++)
@@ -1231,22 +1176,23 @@ translate_axes (ClutterInputDevice *device,
 
       if (!XIMaskIsSet (valuators->mask, i))
         continue;
+      if (!meta_input_device_x11_get_axis (device, i, &axis))
+        continue;
 
-      axis = clutter_input_device_get_axis (device, i);
       val = *values++;
 
       switch (axis)
         {
         case CLUTTER_INPUT_AXIS_X:
-          retval[i] = x;
+          retval[axis] = x;
           break;
 
         case CLUTTER_INPUT_AXIS_Y:
-          retval[i] = y;
+          retval[axis] = y;
           break;
 
         default:
-          _clutter_input_device_translate_axis (device, i, val, &retval[i]);
+          meta_input_device_x11_translate_axis (device, i, val, &retval[axis]);
           break;
         }
     }
@@ -1264,7 +1210,7 @@ scroll_valuators_changed (ClutterInputDevice *device,
   uint32_t n_axes, n_val, i;
   double *values;
 
-  n_axes = clutter_input_device_get_n_axes (device);
+  n_axes = meta_input_device_x11_get_n_axes (device);
   values = valuators->values;
 
   *dx_p = *dy_p = 0.0;
@@ -1279,7 +1225,7 @@ scroll_valuators_changed (ClutterInputDevice *device,
       if (!XIMaskIsSet (valuators->mask, i))
         continue;
 
-      if (_clutter_input_device_get_scroll_delta (device, i,
+      if (meta_input_device_x11_get_scroll_delta (device, i,
                                                   values[n_val],
                                                   &direction,
                                                   &delta))
@@ -1321,13 +1267,15 @@ static void
 on_keymap_state_change (MetaKeymapX11 *keymap_x11,
                         gpointer       data)
 {
-  ClutterSeat *seat = CLUTTER_SEAT (data);
-  ClutterKbdA11ySettings kbd_a11y_settings;
+  ClutterSeat *seat = data;
+  MetaInputSettings *input_settings;
+  MetaKbdA11ySettings kbd_a11y_settings;
 
   /* On keymaps state change, just reapply the current settings, it'll
    * take care of enabling/disabling mousekeys based on NumLock state.
    */
-  clutter_seat_get_kbd_a11y_settings (seat, &kbd_a11y_settings);
+  input_settings = meta_backend_get_input_settings (meta_get_backend ());
+  meta_input_settings_get_kbd_a11y_settings (input_settings, &kbd_a11y_settings);
   meta_seat_x11_apply_kbd_a11y_settings (seat, &kbd_a11y_settings);
 }
 
@@ -1398,7 +1346,8 @@ meta_seat_x11_notify_devices (MetaSeatX11  *seat_x11,
       event = clutter_event_new (CLUTTER_DEVICE_ADDED);
       clutter_event_set_device (event, device);
       clutter_event_set_stage (event, stage);
-      clutter_do_event (event);
+      clutter_event_put (event);
+      clutter_event_free (event);
     }
 }
 
@@ -1407,7 +1356,6 @@ meta_seat_x11_constructed (GObject *object)
 {
   MetaSeatX11 *seat_x11 = META_SEAT_X11 (object);
   ClutterBackend *backend = clutter_get_default_backend ();
-  GHashTable *logical_devices, *physical_devices;
   XIDeviceInfo *info;
   XIEventMask event_mask;
   unsigned char mask[XIMaskLen(XI_LASTEVENT)] = { 0, };
@@ -1415,8 +1363,6 @@ meta_seat_x11_constructed (GObject *object)
   Display *xdisplay;
 
   xdisplay = clutter_x11_get_default_display ();
-  logical_devices = g_hash_table_new (NULL, NULL);
-  physical_devices = g_hash_table_new (NULL, NULL);
 
   info = XIQueryDevice (clutter_x11_get_default_display (),
                         XIAllDevices, &n_devices);
@@ -1428,31 +1374,10 @@ meta_seat_x11_constructed (GObject *object)
       if (!xi_device->enabled)
         continue;
 
-      add_device (seat_x11, backend, xi_device, TRUE);
-
-      if (xi_device->use == XIMasterPointer ||
-          xi_device->use == XIMasterKeyboard)
-        {
-          g_hash_table_insert (logical_devices,
-                               GINT_TO_POINTER (xi_device->deviceid),
-                               GINT_TO_POINTER (xi_device->attachment));
-        }
-      else if (xi_device->use == XISlavePointer ||
-               xi_device->use == XISlaveKeyboard)
-        {
-          g_hash_table_insert (physical_devices,
-                               GINT_TO_POINTER (xi_device->deviceid),
-                               GINT_TO_POINTER (xi_device->attachment));
-        }
+      add_device (seat_x11, backend, xi_device);
     }
 
   XIFreeDeviceInfo (info);
-
-  g_hash_table_foreach (logical_devices, relate_logical_devices, seat_x11);
-  g_hash_table_destroy (logical_devices);
-
-  g_hash_table_foreach (physical_devices, relate_physical_devices, seat_x11);
-  g_hash_table_destroy (physical_devices);
 
   XISetMask (mask, XI_HierarchyChanged);
   XISetMask (mask, XI_DeviceChanged);
@@ -1500,6 +1425,7 @@ meta_seat_x11_finalize (GObject *object)
 
   g_hash_table_unref (seat_x11->devices_by_id);
   g_hash_table_unref (seat_x11->tools_by_serial);
+  g_hash_table_unref (seat_x11->touch_coords);
   g_list_free (seat_x11->devices);
 
   G_OBJECT_CLASS (meta_seat_x11_parent_class)->finalize (object);
@@ -1543,29 +1469,6 @@ meta_seat_x11_get_keymap (ClutterSeat *seat)
   return CLUTTER_KEYMAP (META_SEAT_X11 (seat)->keymap);
 }
 
-static void
-meta_seat_x11_copy_event_data (ClutterSeat        *seat,
-                               const ClutterEvent *src,
-                               ClutterEvent       *dest)
-{
-  gpointer event_x11;
-
-  event_x11 = _clutter_event_get_platform_data (src);
-  if (event_x11 != NULL)
-    _clutter_event_set_platform_data (dest, meta_event_x11_copy (event_x11));
-}
-
-static void
-meta_seat_x11_free_event_data (ClutterSeat  *seat,
-                               ClutterEvent *event)
-{
-  gpointer event_x11;
-
-  event_x11 = _clutter_event_get_platform_data (event);
-  if (event_x11 != NULL)
-    meta_event_x11_free (event_x11);
-}
-
 static ClutterVirtualInputDevice *
 meta_seat_x11_create_virtual_device (ClutterSeat            *seat,
                                      ClutterInputDeviceType  device_type)
@@ -1590,12 +1493,155 @@ meta_seat_x11_warp_pointer (ClutterSeat *seat,
 {
   MetaSeatX11 *seat_x11 = META_SEAT_X11 (seat);
 
+  clutter_x11_trap_x_errors ();
   XIWarpPointer (clutter_x11_get_default_display (),
                  seat_x11->pointer_id,
                  None,
                  clutter_x11_get_root_window (),
                  0, 0, 0, 0,
                  x, y);
+  clutter_x11_untrap_x_errors ();
+}
+
+static uint32_t
+translate_state (XIButtonState   *button_state,
+                 XIModifierState *modifier_state,
+                 XIGroupState    *group_state)
+{
+  uint32_t state = 0;
+  int i;
+
+  if (modifier_state)
+    state |= modifier_state->effective;
+
+  if (button_state)
+    {
+      for (i = 1; i < button_state->mask_len * 8; i++)
+        {
+          if (!XIMaskIsSet (button_state->mask, i))
+            continue;
+
+          switch (i)
+            {
+            case 1:
+              state |= CLUTTER_BUTTON1_MASK;
+              break;
+            case 2:
+              state |= CLUTTER_BUTTON2_MASK;
+              break;
+            case 3:
+              state |= CLUTTER_BUTTON3_MASK;
+              break;
+            case 8:
+              state |= CLUTTER_BUTTON4_MASK;
+              break;
+            case 9:
+              state |= CLUTTER_BUTTON5_MASK;
+              break;
+            default:
+              break;
+            }
+        }
+    }
+
+  if (group_state)
+    state |= XkbBuildCoreState (0, group_state->effective);
+
+  return state;
+}
+
+static gboolean
+meta_seat_x11_query_state (ClutterSeat          *seat,
+                           ClutterInputDevice   *device,
+                           ClutterEventSequence *sequence,
+                           graphene_point_t     *coords,
+                           ClutterModifierType  *modifiers)
+{
+  MetaBackendX11 *backend_x11 = META_BACKEND_X11 (meta_get_backend ());
+  MetaSeatX11 *seat_x11 = META_SEAT_X11 (seat);
+  Window root_ret, child_ret;
+  double root_x, root_y, win_x, win_y;
+  XIButtonState button_state = { 0 };
+  XIModifierState modifier_state;
+  XIGroupState group_state;
+
+  clutter_x11_trap_x_errors ();
+  XIQueryPointer (clutter_x11_get_default_display (),
+                  seat_x11->pointer_id,
+                  meta_backend_x11_get_xwindow (backend_x11),
+                  &root_ret, &child_ret,
+                  &root_x, &root_y, &win_x, &win_y,
+                  &button_state, &modifier_state, &group_state);
+  if (clutter_x11_untrap_x_errors ())
+    {
+      g_free (button_state.mask);
+      return FALSE;
+    }
+
+  if (sequence)
+    {
+      MetaTouchInfo *touch_info;
+
+      touch_info = g_hash_table_lookup (seat_x11->touch_coords, sequence);
+      if (!touch_info)
+        {
+          g_free (button_state.mask);
+          return FALSE;
+        }
+
+      if (coords)
+        {
+          coords->x = touch_info->x;
+          coords->y = touch_info->y;
+        }
+    }
+  else
+    {
+      if (coords)
+        {
+          coords->x = win_x;
+          coords->y = win_y;
+        }
+    }
+
+  if (modifiers)
+    *modifiers = translate_state (&button_state, &modifier_state, &group_state);
+
+  g_free (button_state.mask);
+  return TRUE;
+}
+
+static void
+meta_seat_x11_update_touchpoint (MetaSeatX11          *seat,
+                                 ClutterEventSequence *sequence,
+                                 double                x,
+                                 double                y)
+{
+  MetaTouchInfo *touch_info;
+
+  touch_info = g_hash_table_lookup (seat->touch_coords, sequence);
+  if (!touch_info)
+    {
+      touch_info = g_new0 (MetaTouchInfo, 1);
+      touch_info->sequence = sequence;
+      g_hash_table_insert (seat->touch_coords, sequence, touch_info);
+    }
+
+  touch_info->x = x;
+  touch_info->y = y;
+}
+
+static void
+meta_seat_x11_remove_touchpoint (MetaSeatX11          *seat,
+                                 ClutterEventSequence *sequence)
+{
+  g_hash_table_remove (seat->touch_coords, sequence);
+}
+
+static void
+meta_touch_info_free (MetaTouchInfo *touch_info)
+{
+  g_free (touch_info);
 }
 
 static void
@@ -1614,13 +1660,11 @@ meta_seat_x11_class_init (MetaSeatX11Class *klass)
   seat_class->peek_devices = meta_seat_x11_peek_devices;
   seat_class->bell_notify = meta_seat_x11_bell_notify;
   seat_class->get_keymap = meta_seat_x11_get_keymap;
-  seat_class->copy_event_data = meta_seat_x11_copy_event_data;
-  seat_class->free_event_data = meta_seat_x11_free_event_data;
-  seat_class->apply_kbd_a11y_settings = meta_seat_x11_apply_kbd_a11y_settings;
   seat_class->create_virtual_device = meta_seat_x11_create_virtual_device;
   seat_class->get_supported_virtual_device_types = meta_seat_x11_get_supported_virtual_device_types;
   seat_class->warp_pointer = meta_seat_x11_warp_pointer;
-  seat_class->handle_device_event = meta_seat_x11_handle_device_event;
+  seat_class->handle_event_post = meta_seat_x11_handle_event_post;
+  seat_class->query_state = meta_seat_x11_query_state;
 
   props[PROP_OPCODE] =
     g_param_spec_int ("opcode",
@@ -1658,6 +1702,8 @@ meta_seat_x11_init (MetaSeatX11 *seat)
                                                (GDestroyNotify) g_object_unref);
   seat->tools_by_serial = g_hash_table_new_full (NULL, NULL, NULL,
                                                  (GDestroyNotify) g_object_unref);
+  seat->touch_coords = g_hash_table_new_full (NULL, NULL, NULL,
+                                              (GDestroyNotify) meta_touch_info_free);
 }
 
 MetaSeatX11 *
@@ -1686,6 +1732,35 @@ get_source_device_checked (MetaSeatX11   *seat,
                "type %d", xev->sourceid, xev->evtype);
 
   return source_device;
+}
+
+static uint32_t
+evdev_button_code (uint32_t x_button)
+{
+  uint32_t button;
+
+  switch (x_button)
+    {
+    case 1:
+      button = BTN_LEFT;
+      break;
+
+      /* The evdev input right and middle button numbers are swapped
+         relative to how Clutter numbers them */
+    case 2:
+      button = BTN_MIDDLE;
+      break;
+
+    case 3:
+      button = BTN_RIGHT;
+      break;
+
+    default:
+      button = x_button + (BTN_LEFT - 1) + 4;
+      break;
+    }
+
+  return button;
 }
 
 gboolean
@@ -1755,7 +1830,7 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
                                              GINT_TO_POINTER (xev->sourceid));
         if (device)
           {
-            _clutter_input_device_reset_axes (device);
+            meta_input_device_x11_reset_axes (device);
             translate_device_classes (clutter_x11_get_default_display (),
                                       device,
                                       xev->classes,
@@ -1763,7 +1838,7 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
           }
 
         if (source_device)
-          _clutter_input_device_reset_scroll_info (source_device);
+          meta_input_device_x11_reset_scroll_info (source_device);
       }
       retval = FALSE;
       break;
@@ -1772,7 +1847,6 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
       {
         XIDeviceEvent *xev = (XIDeviceEvent *) xi_event;
         MetaKeymapX11 *keymap_x11 = seat->keymap;
-        MetaEventX11 *event_x11;
         char buffer[7] = { 0, };
         gunichar n;
 
@@ -1792,6 +1866,10 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
         meta_input_device_x11_translate_state (event, &xev->mods, &xev->buttons, &xev->group);
         event->key.hardware_keycode = xev->detail;
 
+        /* clutter-xkb-utils.c adds a fixed offset of 8 to go into XKB's
+         * range, so we do the reverse here. */
+        event->key.evdev_code = event->key.hardware_keycode - 8;
+
           /* keyval is the key ignoring all modifiers ('1' vs. '!') */
         event->key.keyval =
           meta_keymap_x11_translate_key_state (keymap_x11,
@@ -1799,30 +1877,11 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
                                                &event->key.modifier_state,
                                                NULL);
 
-        /* KeyEvents have platform specific data associated to them */
-        event_x11 = meta_event_x11_new ();
-        _clutter_event_set_platform_data (event, event_x11);
-
-        event_x11->key_group =
-          meta_keymap_x11_get_key_group (keymap_x11,
-                                         event->key.modifier_state);
-        event_x11->key_is_modifier =
-          meta_keymap_x11_get_is_modifier (keymap_x11,
-                                           event->key.hardware_keycode);
-        event_x11->num_lock_set =
-          clutter_keymap_get_num_lock_state (CLUTTER_KEYMAP (keymap_x11));
-        event_x11->caps_lock_set =
-          clutter_keymap_get_caps_lock_state (CLUTTER_KEYMAP (keymap_x11));
-
         clutter_event_set_source_device (event, source_device);
 
         device = g_hash_table_lookup (seat->devices_by_id,
                                       GINT_TO_POINTER (xev->deviceid));
         clutter_event_set_device (event, device);
-
-        if (clutter_input_device_get_device_mode (device) == CLUTTER_INPUT_MODE_LOGICAL &&
-            stage != NULL)
-          _clutter_input_device_set_stage (device, stage);
 
         /* XXX keep this in sync with the evdev device manager */
         n = print_keysym (event->key.keyval, buffer, sizeof (buffer));
@@ -1867,12 +1926,6 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
 
         device = g_hash_table_lookup (seat->devices_by_id,
                                       GINT_TO_POINTER (xev->deviceid));
-
-        /* Set the stage for core events coming out of nowhere (see bug #684509) */
-        if (clutter_input_device_get_device_mode (device) == CLUTTER_INPUT_MODE_LOGICAL &&
-            clutter_input_device_get_pointer_stage (device) == NULL &&
-            stage != NULL)
-          _clutter_input_device_set_stage (device, stage);
 
 	if (clutter_input_device_get_device_type (source_device) == CLUTTER_PAD_DEVICE)
           {
@@ -1924,8 +1977,8 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
                      ? "pad button press  "
                      : "pad button release",
                      (unsigned int) stage_x11->xwin,
-                     device->id,
-                     device->device_name,
+                     meta_input_device_x11_get_device_id (device),
+                     clutter_input_device_get_device_name (device),
                      event->any.time,
                      event->pad_button.button);
             retval = TRUE;
@@ -1974,8 +2027,8 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
                      "x:%.2f, y:%.2f, "
                      "emulated:%s)",
                      (unsigned int) stage_x11->xwin,
-                     device->id,
-                     device->device_name,
+                     meta_input_device_x11_get_device_id (device),
+                     clutter_input_device_get_device_name (device),
                      event->any.time,
                      event->scroll.direction == CLUTTER_SCROLL_UP ? "up" :
                      event->scroll.direction == CLUTTER_SCROLL_DOWN ? "down" :
@@ -1997,6 +2050,7 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
             event->button.time = xev->time;
             translate_coords (stage_x11, xev->event_x, xev->event_y, &event->button.x, &event->button.y);
             event->button.button = xev->detail;
+            event->button.evdev_code = evdev_button_code (xev->detail);
             meta_input_device_x11_translate_state (event,
                                                    &xev->mods,
                                                    &xev->buttons,
@@ -2020,8 +2074,8 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
                      ? "button press  "
                      : "button release",
                      (unsigned int) stage_x11->xwin,
-                     device->id,
-                     device->device_name,
+                     meta_input_device_x11_get_device_id (device),
+                     clutter_input_device_get_device_name (device),
                      event->any.time,
                      event->button.button,
                      event->button.x,
@@ -2030,9 +2084,6 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
                      (xev->flags & XIPointerEmulated) ? "yes" : "no");
             break;
           }
-
-        if (device->stage != NULL)
-          _clutter_input_device_set_stage (source_device, device->stage);
 
         if (xev->flags & XIPointerEmulated)
           _clutter_event_set_pointer_emulated (event, TRUE);
@@ -2065,12 +2116,6 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
             break;
           }
 
-        /* Set the stage for core events coming out of nowhere (see bug #684509) */
-        if (clutter_input_device_get_device_mode (device) == CLUTTER_INPUT_MODE_LOGICAL &&
-            clutter_input_device_get_pointer_stage (device) == NULL &&
-            stage != NULL)
-          _clutter_input_device_set_stage (device, stage);
-
         if (scroll_valuators_changed (source_device,
                                       &xev->valuators,
                                       &delta_x, &delta_y))
@@ -2092,8 +2137,8 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
 
             g_debug ("smooth scroll: win:0x%x device:%d '%s' (x:%.2f, y:%.2f, delta:%f, %f)",
                      (unsigned int) stage_x11->xwin,
-                     event->scroll.device->id,
-                     event->scroll.device->device_name,
+                     meta_input_device_x11_get_device_id (event->scroll.device),
+                     clutter_input_device_get_device_name (event->scroll.device),
                      event->scroll.x,
                      event->scroll.y,
                      delta_x, delta_y);
@@ -2123,16 +2168,13 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
                                              event->motion.y,
                                              &xev->valuators);
 
-        if (device->stage != NULL)
-          _clutter_input_device_set_stage (source_device, device->stage);
-
         if (xev->flags & XIPointerEmulated)
           _clutter_event_set_pointer_emulated (event, TRUE);
 
         g_debug ("motion: win:0x%x device:%d '%s' (x:%.2f, y:%.2f, axes:%s)",
                  (unsigned int) stage_x11->xwin,
-                 event->motion.device->id,
-                 event->motion.device->device_name,
+                 meta_input_device_x11_get_device_id (event->motion.device),
+                 clutter_input_device_get_device_name (event->motion.device),
                  event->motion.x,
                  event->motion.y,
                  event->motion.axes != NULL ? "yes" : "no");
@@ -2146,8 +2188,6 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
         XIDeviceEvent *xev = (XIDeviceEvent *) xi_event;
         device = g_hash_table_lookup (seat->devices_by_id,
                                       GINT_TO_POINTER (xev->deviceid));
-        if (!_clutter_input_device_get_stage (device))
-          _clutter_input_device_set_stage (device, stage);
       }
       /* Fall through */
     case XI_TouchEnd:
@@ -2186,9 +2226,19 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
             event->touch.modifier_state |= CLUTTER_BUTTON1_MASK;
 
             meta_stage_x11_set_user_time (stage_x11, event->touch.time);
+            meta_seat_x11_update_touchpoint (seat,
+                                             GUINT_TO_POINTER (xev->detail),
+                                             xev->root_x,
+                                             xev->root_y);
+          }
+        else if (xi_event->evtype == XI_TouchEnd)
+          {
+            meta_seat_x11_remove_touchpoint (seat,
+                                             GUINT_TO_POINTER (xev->detail));
           }
 
-        event->touch.sequence = GUINT_TO_POINTER (xev->detail);
+        /* "NULL" sequences are special cased in clutter */
+        event->touch.sequence = GINT_TO_POINTER (MAX (1, xev->detail + 1));
 
         if (xev->flags & XITouchEmulatingPointer)
           _clutter_event_set_pointer_emulated (event, TRUE);
@@ -2196,8 +2246,8 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
         g_debug ("touch %s: win:0x%x device:%d '%s' (seq:%d, x:%.2f, y:%.2f, axes:%s)",
                  event->type == CLUTTER_TOUCH_BEGIN ? "begin" : "end",
                  (unsigned int) stage_x11->xwin,
-                 event->touch.device->id,
-                 event->touch.device->device_name,
+                 meta_input_device_x11_get_device_id (event->touch.device),
+                 clutter_input_device_get_device_name (event->touch.device),
                  GPOINTER_TO_UINT (event->touch.sequence),
                  event->touch.x,
                  event->touch.y,
@@ -2217,7 +2267,8 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
         event->touch.type = event->type = CLUTTER_TOUCH_UPDATE;
         event->touch.stage = stage;
         event->touch.time = xev->time;
-        event->touch.sequence = GUINT_TO_POINTER (xev->detail);
+        /* "NULL" sequences are special cased in clutter */
+        event->touch.sequence = GINT_TO_POINTER (MAX (1, xev->detail + 1));
         translate_coords (stage_x11, xev->event_x, xev->event_y, &event->touch.x, &event->touch.y);
 
         clutter_event_set_source_device (event, source_device);
@@ -2240,10 +2291,15 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
         if (xev->flags & XITouchEmulatingPointer)
           _clutter_event_set_pointer_emulated (event, TRUE);
 
+        meta_seat_x11_update_touchpoint (seat,
+                                         event->touch.sequence,
+                                         xev->root_x,
+                                         xev->root_y);
+
         g_debug ("touch update: win:0x%x device:%d '%s' (seq:%d, x:%.2f, y:%.2f, axes:%s)",
                  (unsigned int) stage_x11->xwin,
-                 event->touch.device->id,
-                 event->touch.device->device_name,
+                 meta_input_device_x11_get_device_id (event->touch.device),
+                 clutter_input_device_get_device_name (event->touch.device),
                  GPOINTER_TO_UINT (event->touch.sequence),
                  event->touch.x,
                  event->touch.y,
@@ -2274,17 +2330,12 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
 
             event->crossing.time = xev->time;
             translate_coords (stage_x11, xev->event_x, xev->event_y, &event->crossing.x, &event->crossing.y);
+
+            if (xev->deviceid == seat->pointer_id)
+              seat->has_pointer_focus = TRUE;
           }
         else
           {
-            if (device->stage == NULL)
-              {
-                g_debug ("Discarding Leave for ButtonRelease "
-                         "event off-stage");
-                retval = FALSE;
-                break;
-              }
-
             event->crossing.type = event->type = CLUTTER_LEAVE;
 
             event->crossing.stage = stage;
@@ -2293,9 +2344,12 @@ meta_seat_x11_translate_event (MetaSeatX11  *seat,
 
             event->crossing.time = xev->time;
             translate_coords (stage_x11, xev->event_x, xev->event_y, &event->crossing.x, &event->crossing.y);
+
+            if (xev->deviceid == seat->pointer_id)
+              seat->has_pointer_focus = FALSE;
           }
 
-        _clutter_input_device_reset_scroll_info (source_device);
+        meta_input_device_x11_reset_scroll_info (source_device);
 
         clutter_event_set_device (event, device);
         clutter_event_set_source_device (event, source_device);

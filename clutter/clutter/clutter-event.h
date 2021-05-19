@@ -112,7 +112,6 @@ typedef struct _ClutterButtonEvent      ClutterButtonEvent;
 typedef struct _ClutterKeyEvent         ClutterKeyEvent;
 typedef struct _ClutterMotionEvent      ClutterMotionEvent;
 typedef struct _ClutterScrollEvent      ClutterScrollEvent;
-typedef struct _ClutterStageStateEvent  ClutterStageStateEvent;
 typedef struct _ClutterCrossingEvent    ClutterCrossingEvent;
 typedef struct _ClutterTouchEvent       ClutterTouchEvent;
 typedef struct _ClutterTouchpadPinchEvent ClutterTouchpadPinchEvent;
@@ -174,6 +173,7 @@ struct _ClutterKeyEvent
   guint keyval;
   guint16 hardware_keycode;
   gunichar unicode_value;
+  uint32_t evdev_code;
   ClutterInputDevice *device;
 };
 
@@ -217,6 +217,7 @@ struct _ClutterButtonEvent
   guint click_count;
   gdouble *axes; /* Future use */
   ClutterInputDevice *device;
+  uint32_t evdev_code;
 };
 
 /**
@@ -306,6 +307,12 @@ struct _ClutterMotionEvent
   ClutterModifierType modifier_state;
   gdouble *axes; /* Future use */
   ClutterInputDevice *device;
+
+  int64_t time_us;
+  double dx;
+  double dy;
+  double dx_unaccel;
+  double dy_unaccel;
 };
 
 /**
@@ -345,32 +352,6 @@ struct _ClutterScrollEvent
   ClutterInputDevice *device;
   ClutterScrollSource scroll_source;
   ClutterScrollFinishFlags finish_flags;
-};
-
-/**
- * ClutterStageStateEvent:
- * @type: event type
- * @time: event time
- * @flags: event flags
- * @stage: event source stage
- * @source: event source actor (unused)
- * @changed_mask: bitwise OR of the changed flags
- * @new_state: bitwise OR of the current state flags
- *
- * Event signalling a change in the #ClutterStage state.
- *
- * Since: 0.2
- */
-struct _ClutterStageStateEvent
-{
-  ClutterEventType type;
-  guint32 time;
-  ClutterEventFlags flags;
-  ClutterStage *stage;
-  ClutterActor *source; /* XXX: should probably be the stage itself */
-
-  ClutterStageState changed_mask;
-  ClutterStageState new_state;
 };
 
 /**
@@ -433,6 +414,10 @@ struct _ClutterTouchEvent
  * @y: the Y coordinate of the pointer, relative to the stage
  * @dx: movement delta of the pinch focal point in the X axis
  * @dy: movement delta of the pinch focal point in the Y axis
+ * @dx_unaccel: unaccelerated movement delta of the pinch focal
+ *   point in the X axis
+ * @dy_unaccel: unaccelerated movement delta of the pinch focal
+ *   point in the Y axis
  * @angle_delta: angle delta in degrees, clockwise rotations are
  *   represented by positive deltas
  * @scale: the current scale
@@ -460,6 +445,8 @@ struct _ClutterTouchpadPinchEvent
   gfloat y;
   gfloat dx;
   gfloat dy;
+  gfloat dx_unaccel;
+  gfloat dy_unaccel;
   gfloat angle_delta;
   gfloat scale;
   guint n_fingers;
@@ -476,8 +463,12 @@ struct _ClutterTouchpadPinchEvent
  * @n_fingers: the number of fingers triggering the swipe
  * @x: the X coordinate of the pointer, relative to the stage
  * @y: the Y coordinate of the pointer, relative to the stage
- * @dx: movement delta of the pinch focal point in the X axis
- * @dy: movement delta of the pinch focal point in the Y axis
+ * @dx: movement delta of the swipe center point in the X axis
+ * @dy: movement delta of the swipe center point in the Y axis
+ * @dx_unaccel: unaccelerated movement delta of the swipe center
+ *   point in the X axis
+ * @dy_unaccel: unaccelerated movement delta of the swipe center
+ *   point in the Y axis
  *
  * Used for touchpad swipe gesture events. The current state of the
  * gesture will be determined by the @phase field.
@@ -498,6 +489,8 @@ struct _ClutterTouchpadSwipeEvent
   gfloat y;
   gfloat dx;
   gfloat dy;
+  gfloat dx_unaccel;
+  gfloat dy_unaccel;
 };
 
 struct _ClutterPadButtonEvent
@@ -587,7 +580,6 @@ union _ClutterEvent
   ClutterKeyEvent key;
   ClutterMotionEvent motion;
   ClutterScrollEvent scroll;
-  ClutterStageStateEvent stage_state;
   ClutterCrossingEvent crossing;
   ClutterTouchEvent touch;
   ClutterTouchpadPinchEvent touchpad_pinch;
@@ -628,8 +620,6 @@ CLUTTER_EXPORT
 gboolean                clutter_events_pending                  (void);
 CLUTTER_EXPORT
 ClutterEvent *          clutter_event_get                       (void);
-CLUTTER_EXPORT
-ClutterEvent *          clutter_event_peek                      (void);
 CLUTTER_EXPORT
 void                    clutter_event_put                       (const ClutterEvent     *event);
 
@@ -700,8 +690,6 @@ void                    clutter_event_set_stage                 (ClutterEvent   
                                                                  ClutterStage           *stage);
 CLUTTER_EXPORT
 ClutterStage *          clutter_event_get_stage                 (const ClutterEvent     *event);
-CLUTTER_EXPORT
-gint                    clutter_event_get_device_id             (const ClutterEvent     *event);
 CLUTTER_EXPORT
 ClutterInputDeviceType  clutter_event_get_device_type           (const ClutterEvent     *event);
 CLUTTER_EXPORT
@@ -802,6 +790,11 @@ void                    clutter_event_get_gesture_motion_delta       (const Clut
                                                                       gdouble                *dy);
 
 CLUTTER_EXPORT
+void                    clutter_event_get_gesture_motion_delta_unaccelerated (const ClutterEvent     *event,
+                                                                              gdouble                *dx,
+                                                                              gdouble                *dy);
+
+CLUTTER_EXPORT
 ClutterScrollSource      clutter_event_get_scroll_source             (const ClutterEvent     *event);
 
 CLUTTER_EXPORT
@@ -815,6 +808,20 @@ gboolean                 clutter_event_get_pad_event_details         (const Clut
                                                                       guint                  *number,
                                                                       guint                  *mode,
                                                                       gdouble                *value);
+CLUTTER_EXPORT
+uint32_t                 clutter_event_get_event_code                (const ClutterEvent     *event);
+
+CLUTTER_EXPORT
+int32_t                  clutter_event_sequence_get_slot (const ClutterEventSequence *sequence);
+
+CLUTTER_EXPORT
+int64_t                  clutter_event_get_time_us (const ClutterEvent *event);
+CLUTTER_EXPORT
+gboolean                 clutter_event_get_relative_motion (const ClutterEvent *event,
+                                                            double             *dx,
+                                                            double             *dy,
+                                                            double             *dx_unaccel,
+                                                            double             *dy_unaccel);
 
 
 G_END_DECLS

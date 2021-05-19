@@ -51,9 +51,17 @@ int64_t clutter_stage_get_frame_counter (ClutterStage *stage);
 
 CLUTTER_EXPORT
 void clutter_stage_capture_into (ClutterStage          *stage,
-                                 gboolean               paint,
                                  cairo_rectangle_int_t *rect,
-                                 uint8_t               *data);
+                                 float                  scale,
+                                 uint8_t               *data,
+                                 int                    stride);
+
+CLUTTER_EXPORT
+void clutter_stage_capture_view_into (ClutterStage          *stage,
+                                      ClutterStageView      *view,
+                                      cairo_rectangle_int_t *rect,
+                                      uint8_t               *data,
+                                      int                    stride);
 
 CLUTTER_EXPORT
 void clutter_stage_clear_stage_views (ClutterStage *stage);
@@ -71,6 +79,27 @@ gboolean clutter_actor_has_transitions (ClutterActor *actor);
 CLUTTER_EXPORT
 ClutterFrameClock * clutter_actor_pick_frame_clock (ClutterActor  *self,
                                                     ClutterActor **out_actor);
+CLUTTER_EXPORT
+gboolean clutter_seat_handle_event_post (ClutterSeat        *seat,
+                                         const ClutterEvent *event);
+
+CLUTTER_EXPORT
+void clutter_stage_update_device (ClutterStage         *stage,
+                                  ClutterInputDevice   *device,
+                                  ClutterEventSequence *sequence,
+                                  graphene_point_t      point,
+                                  uint32_t              time,
+                                  ClutterActor         *new_actor,
+                                  gboolean              emit_crossing);
+
+CLUTTER_EXPORT
+void clutter_stage_get_device_coords (ClutterStage         *stage,
+                                      ClutterInputDevice   *device,
+                                      ClutterEventSequence *sequence,
+                                      graphene_point_t     *coords);
+CLUTTER_EXPORT
+void clutter_stage_repick_device (ClutterStage       *stage,
+                                  ClutterInputDevice *device);
 
 #undef __CLUTTER_H_INSIDE__
 

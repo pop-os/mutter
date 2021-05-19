@@ -35,6 +35,7 @@
 #include "cogl-config.h"
 
 #include "cogl-context-private.h"
+#include "cogl-graphene.h"
 #include "cogl-primitives-private.h"
 #include "cogl-primitive-private.h"
 #include "driver/gl/cogl-util-gl-private.h"
@@ -132,10 +133,11 @@ add_stencil_clip_region (CoglFramebuffer *framebuffer,
 {
   CoglContext *ctx = cogl_framebuffer_get_context (framebuffer);
   CoglMatrixEntry *old_projection_entry, *old_modelview_entry;
-  CoglMatrix matrix;
+  graphene_matrix_t matrix;
   int num_rectangles = cairo_region_num_rectangles (region);
   int i;
   CoglVertexP2 *vertices;
+  graphene_point3d_t p;
 
   /* NB: This can be called while flushing the journal so we need
    * to be very conservative with what state we change.
@@ -150,16 +152,17 @@ add_stencil_clip_region (CoglFramebuffer *framebuffer,
    * make a matrix that translates those across the viewport, and into
    * the default [-1, -1, 1, 1] range.
    */
-  cogl_matrix_init_identity (&matrix);
-  cogl_matrix_translate (&matrix, -1, 1, 0);
-  cogl_matrix_scale (&matrix,
-                     2.0 / framebuffer->viewport_width,
-                     - 2.0 / framebuffer->viewport_height,
-                     1);
-  cogl_matrix_translate (&matrix,
-                         - framebuffer->viewport_x,
-                         - framebuffer->viewport_y,
+  graphene_point3d_init (&p,
+                         - cogl_framebuffer_get_viewport_x (framebuffer),
+                         - cogl_framebuffer_get_viewport_y (framebuffer),
                          0);
+
+  graphene_matrix_init_translate (&matrix, &p);
+  graphene_matrix_scale (&matrix,
+                         2.0 / cogl_framebuffer_get_viewport_width (framebuffer),
+                         - 2.0 / cogl_framebuffer_get_viewport_height (framebuffer),
+                         1);
+  graphene_matrix_translate (&matrix, &GRAPHENE_POINT3D_INIT (-1.f, 1.f, 0.f));
 
   GE( ctx, glColorMask (FALSE, FALSE, FALSE, FALSE) );
   GE( ctx, glDepthMask (FALSE) );
@@ -204,8 +207,8 @@ add_stencil_clip_region (CoglFramebuffer *framebuffer,
       z2 = 0.f;
       w2 = 1.f;
 
-      cogl_matrix_transform_point (&matrix, &x1, &y1, &z1, &w1);
-      cogl_matrix_transform_point (&matrix, &x2, &y2, &z2, &w2);
+      cogl_graphene_matrix_project_point (&matrix, &x1, &y1, &z1, &w1);
+      cogl_graphene_matrix_project_point (&matrix, &x2, &y2, &z2, &w2);
 
       v[0].x = x1;
       v[0].y = y1;
@@ -395,7 +398,7 @@ void
 _cogl_clip_stack_gl_flush (CoglClipStack *stack,
                            CoglFramebuffer *framebuffer)
 {
-  CoglContext *ctx = framebuffer->context;
+  CoglContext *ctx = cogl_framebuffer_get_context (framebuffer);
   gboolean using_stencil_buffer = FALSE;
   int scissor_x0;
   int scissor_y0;
@@ -450,8 +453,10 @@ _cogl_clip_stack_gl_flush (CoglClipStack *stack,
        * down so in this case no conversion is needed.
        */
 
-      if (cogl_is_offscreen (framebuffer))
-        scissor_y_start = scissor_y0;
+      if (cogl_framebuffer_is_y_flipped (framebuffer))
+        {
+          scissor_y_start = scissor_y0;
+        }
       else
         {
           int framebuffer_height =

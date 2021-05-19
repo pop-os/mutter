@@ -30,6 +30,7 @@ struct _ClutterPaintContext
   ClutterStageView *view;
 
   cairo_region_t *redraw_clip;
+  GArray *clip_frusta;
 };
 
 G_DEFINE_BOXED_TYPE (ClutterPaintContext, clutter_paint_context,
@@ -39,6 +40,7 @@ G_DEFINE_BOXED_TYPE (ClutterPaintContext, clutter_paint_context,
 ClutterPaintContext *
 clutter_paint_context_new_for_view (ClutterStageView     *view,
                                     const cairo_region_t *redraw_clip,
+                                    GArray               *clip_frusta,
                                     ClutterPaintFlag      paint_flags)
 {
   ClutterPaintContext *paint_context;
@@ -48,6 +50,7 @@ clutter_paint_context_new_for_view (ClutterStageView     *view,
   g_ref_count_init (&paint_context->ref_count);
   paint_context->view = view;
   paint_context->redraw_clip = cairo_region_copy (redraw_clip);
+  paint_context->clip_frusta = g_array_ref (clip_frusta);
   paint_context->paint_flags = paint_flags;
 
   framebuffer = clutter_stage_view_get_framebuffer (view);
@@ -86,10 +89,10 @@ clutter_paint_context_ref (ClutterPaintContext *paint_context)
 static void
 clutter_paint_context_dispose (ClutterPaintContext *paint_context)
 {
-  g_list_free_full (paint_context->framebuffers,
-                    cogl_object_unref);
+  g_list_free_full (paint_context->framebuffers, g_object_unref);
   paint_context->framebuffers = NULL;
   g_clear_pointer (&paint_context->redraw_clip, cairo_region_destroy);
+  g_clear_pointer (&paint_context->clip_frusta, g_array_unref);
 }
 
 void
@@ -114,7 +117,7 @@ clutter_paint_context_push_framebuffer (ClutterPaintContext *paint_context,
                                         CoglFramebuffer     *framebuffer)
 {
   paint_context->framebuffers = g_list_prepend (paint_context->framebuffers,
-                                                cogl_object_ref (framebuffer));
+                                                g_object_ref (framebuffer));
 }
 
 void
@@ -122,7 +125,7 @@ clutter_paint_context_pop_framebuffer (ClutterPaintContext *paint_context)
 {
   g_return_if_fail (paint_context->framebuffers);
 
-  cogl_object_unref (paint_context->framebuffers->data);
+  g_object_unref (paint_context->framebuffers->data);
   paint_context->framebuffers =
     g_list_delete_link (paint_context->framebuffers,
                         paint_context->framebuffers);
@@ -132,6 +135,12 @@ const cairo_region_t *
 clutter_paint_context_get_redraw_clip (ClutterPaintContext *paint_context)
 {
   return paint_context->redraw_clip;
+}
+
+const GArray *
+clutter_paint_context_get_clip_frusta (ClutterPaintContext *paint_context)
+{
+  return paint_context->clip_frusta;
 }
 
 /**

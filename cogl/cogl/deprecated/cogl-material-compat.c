@@ -34,7 +34,6 @@
 #include <cogl-pipeline.h>
 #include <cogl-pipeline-private.h>
 #include <cogl-types.h>
-#include <cogl-matrix.h>
 #include <cogl-context-private.h>
 #include <deprecated/cogl-material-compat.h>
 
@@ -129,9 +128,9 @@ cogl_material_set_layer_combine_constant (CoglMaterial    *material,
 }
 
 void
-cogl_material_set_layer_matrix (CoglMaterial     *material,
-				int               layer_index,
-				const CoglMatrix *matrix)
+cogl_material_set_layer_matrix (CoglMaterial            *material,
+                                int                      layer_index,
+                                const graphene_matrix_t *matrix)
 {
   cogl_pipeline_set_layer_matrix (COGL_PIPELINE (material),
                                   layer_index, matrix);

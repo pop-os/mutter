@@ -74,46 +74,46 @@ meta_renderer_view_get_crtc (MetaRendererView *view)
 }
 
 static void
-meta_renderer_view_get_offscreen_transformation_matrix (ClutterStageView *view,
-                                                        CoglMatrix       *matrix)
+meta_renderer_view_get_offscreen_transformation_matrix (ClutterStageView  *view,
+                                                        graphene_matrix_t *matrix)
 {
   MetaRendererView *renderer_view = META_RENDERER_VIEW (view);
 
-  cogl_matrix_init_identity (matrix);
+  graphene_matrix_init_identity (matrix);
 
   switch (renderer_view->transform)
     {
     case META_MONITOR_TRANSFORM_NORMAL:
       break;
     case META_MONITOR_TRANSFORM_90:
-      cogl_matrix_rotate (matrix, 90, 0, 0, 1);
-      cogl_matrix_translate (matrix, 0, -1, 0);
+      graphene_matrix_translate (matrix, &GRAPHENE_POINT3D_INIT (0, -1, 0));
+      graphene_matrix_rotate (matrix, 90, graphene_vec3_z_axis ());
       break;
     case META_MONITOR_TRANSFORM_180:
-      cogl_matrix_rotate (matrix, 180, 0, 0, 1);
-      cogl_matrix_translate (matrix, -1, -1, 0);
+      graphene_matrix_translate (matrix, &GRAPHENE_POINT3D_INIT (-1, -1, 0));
+      graphene_matrix_rotate (matrix, 180, graphene_vec3_z_axis ());
       break;
     case META_MONITOR_TRANSFORM_270:
-      cogl_matrix_rotate (matrix, 270, 0, 0, 1);
-      cogl_matrix_translate (matrix, -1, 0, 0);
+      graphene_matrix_translate (matrix, &GRAPHENE_POINT3D_INIT (-1, 0, 0));
+      graphene_matrix_rotate (matrix, 270, graphene_vec3_z_axis ());
       break;
     case META_MONITOR_TRANSFORM_FLIPPED:
-      cogl_matrix_scale (matrix, -1, 1, 1);
-      cogl_matrix_translate (matrix, -1, 0, 0);
+      graphene_matrix_translate (matrix, &GRAPHENE_POINT3D_INIT (-1, 0, 0));
+      graphene_matrix_scale (matrix, -1, 1, 1);
       break;
     case META_MONITOR_TRANSFORM_FLIPPED_90:
-      cogl_matrix_scale (matrix, -1, 1, 1);
-      cogl_matrix_rotate (matrix, 90, 0, 0, 1);
+      graphene_matrix_rotate (matrix, 90, graphene_vec3_z_axis ());
+      graphene_matrix_scale (matrix, -1, 1, 1);
       break;
     case META_MONITOR_TRANSFORM_FLIPPED_180:
-      cogl_matrix_scale (matrix, -1, 1, 1);
-      cogl_matrix_rotate (matrix, 180, 0, 0, 1);
-      cogl_matrix_translate (matrix, 0, -1, 0);
+      graphene_matrix_translate (matrix, &GRAPHENE_POINT3D_INIT (0, -1, 0));
+      graphene_matrix_rotate (matrix, 180, graphene_vec3_z_axis ());
+      graphene_matrix_scale (matrix, -1, 1, 1);
       break;
     case META_MONITOR_TRANSFORM_FLIPPED_270:
-      cogl_matrix_scale (matrix, -1, 1, 1);
-      cogl_matrix_rotate (matrix, 270, 0, 0, 1);
-      cogl_matrix_translate (matrix, -1, -1, 0);
+      graphene_matrix_translate (matrix, &GRAPHENE_POINT3D_INIT (-1, -1, 0));
+      graphene_matrix_rotate (matrix, 270, graphene_vec3_z_axis ());
+      graphene_matrix_scale (matrix, -1, 1, 1);
       break;
     }
 }
@@ -122,7 +122,7 @@ static void
 meta_renderer_view_setup_offscreen_blit_pipeline (ClutterStageView *view,
                                                   CoglPipeline     *pipeline)
 {
-  CoglMatrix matrix;
+  graphene_matrix_t matrix;
 
   meta_renderer_view_get_offscreen_transformation_matrix (view, &matrix);
   cogl_pipeline_set_layer_matrix (pipeline, 0, &matrix);

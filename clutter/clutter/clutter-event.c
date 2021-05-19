@@ -73,8 +73,6 @@ typedef struct _ClutterEventFilter {
   gpointer user_data;
 } ClutterEventFilter;
 
-static GHashTable *all_events = NULL;
-
 G_DEFINE_BOXED_TYPE (ClutterEvent, clutter_event,
                      clutter_event_copy,
                      clutter_event_free);
@@ -96,15 +94,6 @@ G_DEFINE_BOXED_TYPE (ClutterEventSequence, clutter_event_sequence,
                      clutter_event_sequence_copy,
                      clutter_event_sequence_free);
 
-static gboolean
-is_event_allocated (const ClutterEvent *event)
-{
-  if (all_events == NULL)
-    return FALSE;
-
-  return g_hash_table_lookup (all_events, event) != NULL;
-}
-
 /*
  * _clutter_event_get_platform_data:
  * @event: a #ClutterEvent
@@ -118,9 +107,6 @@ is_event_allocated (const ClutterEvent *event)
 gpointer
 _clutter_event_get_platform_data (const ClutterEvent *event)
 {
-  if (!is_event_allocated (event))
-    return NULL;
-
   return ((ClutterEventPrivate *) event)->platform_data;
 }
 
@@ -137,9 +123,6 @@ void
 _clutter_event_set_platform_data (ClutterEvent *event,
                                   gpointer      data)
 {
-  if (!is_event_allocated (event))
-    return;
-
   ((ClutterEventPrivate *) event)->platform_data = data;
 }
 
@@ -147,9 +130,6 @@ void
 _clutter_event_set_pointer_emulated (ClutterEvent *event,
                                      gboolean      is_emulated)
 {
-  if (!is_event_allocated (event))
-    return;
-
   ((ClutterEventPrivate *) event)->is_pointer_emulated = !!is_emulated;
 }
 
@@ -404,9 +384,6 @@ clutter_event_get_position (const ClutterEvent *event,
     case CLUTTER_NOTHING:
     case CLUTTER_KEY_PRESS:
     case CLUTTER_KEY_RELEASE:
-    case CLUTTER_STAGE_STATE:
-    case CLUTTER_DESTROY_NOTIFY:
-    case CLUTTER_CLIENT_MESSAGE:
     case CLUTTER_EVENT_LAST:
     case CLUTTER_PROXIMITY_IN:
     case CLUTTER_PROXIMITY_OUT:
@@ -482,9 +459,6 @@ clutter_event_set_coords (ClutterEvent *event,
     case CLUTTER_NOTHING:
     case CLUTTER_KEY_PRESS:
     case CLUTTER_KEY_RELEASE:
-    case CLUTTER_STAGE_STATE:
-    case CLUTTER_DESTROY_NOTIFY:
-    case CLUTTER_CLIENT_MESSAGE:
     case CLUTTER_EVENT_LAST:
     case CLUTTER_PROXIMITY_IN:
     case CLUTTER_PROXIMITY_OUT:
@@ -723,9 +697,6 @@ clutter_event_set_scroll_delta (ClutterEvent *event,
   g_return_if_fail (event != NULL);
   g_return_if_fail (event->type == CLUTTER_SCROLL);
 
-  if (!is_event_allocated (event))
-    return;
-
   event->scroll.direction = CLUTTER_SCROLL_SMOOTH;
 
   ((ClutterEventPrivate *) event)->delta_x = dx;
@@ -756,13 +727,8 @@ clutter_event_get_scroll_delta (const ClutterEvent *event,
   g_return_if_fail (event->type == CLUTTER_SCROLL);
   g_return_if_fail (event->scroll.direction == CLUTTER_SCROLL_SMOOTH);
 
-  delta_x = delta_y = 0;
-
-  if (is_event_allocated (event))
-    {
-      delta_x = ((ClutterEventPrivate *) event)->delta_x;
-      delta_y = ((ClutterEventPrivate *) event)->delta_y;
-    }
+  delta_x = ((ClutterEventPrivate *) event)->delta_x;
+  delta_y = ((ClutterEventPrivate *) event)->delta_y;
 
   if (dx != NULL)
     *dx = delta_x;
@@ -1037,29 +1003,6 @@ clutter_event_get_event_sequence (const ClutterEvent *event)
 }
 
 /**
- * clutter_event_get_device_id:
- * @event: a clutter event 
- *
- * Retrieves the events device id if set.
- *
- * Return value: A unique identifier for the device or -1 if the event has
- *   no specific device set.
- */
-gint
-clutter_event_get_device_id (const ClutterEvent *event)
-{
-  ClutterInputDevice *device = NULL;
-
-  g_return_val_if_fail (event != NULL, CLUTTER_POINTER_DEVICE);
-
-  device = clutter_event_get_device (event);
-  if (device != NULL)
-    return clutter_input_device_get_device_id (device);
-
-  return -1;
-}
-
-/**
  * clutter_event_get_device_type:
  * @event: a #ClutterEvent
  *
@@ -1097,22 +1040,16 @@ void
 clutter_event_set_device (ClutterEvent       *event,
                           ClutterInputDevice *device)
 {
+  ClutterEventPrivate *real_event = (ClutterEventPrivate *) event;
+
   g_return_if_fail (event != NULL);
   g_return_if_fail (device == NULL || CLUTTER_IS_INPUT_DEVICE (device));
 
-  if (is_event_allocated (event))
-    {
-      ClutterEventPrivate *real_event = (ClutterEventPrivate *) event;
-
-      g_set_object (&real_event->device, device);
-    }
+  g_set_object (&real_event->device, device);
 
   switch (event->type)
     {
     case CLUTTER_NOTHING:
-    case CLUTTER_STAGE_STATE:
-    case CLUTTER_DESTROY_NOTIFY:
-    case CLUTTER_CLIENT_MESSAGE:
     case CLUTTER_EVENT_LAST:
     case CLUTTER_IM_COMMIT:
     case CLUTTER_IM_DELETE:
@@ -1200,23 +1137,16 @@ ClutterInputDevice *
 clutter_event_get_device (const ClutterEvent *event)
 {
   ClutterInputDevice *device = NULL;
+  ClutterEventPrivate *real_event = (ClutterEventPrivate *) event;
 
   g_return_val_if_fail (event != NULL, NULL);
 
-  if (is_event_allocated (event))
-    {
-      ClutterEventPrivate *real_event = (ClutterEventPrivate *) event;
-
-      if (real_event->device != NULL)
-        return real_event->device;
-    }
+  if (real_event->device != NULL)
+    return real_event->device;
 
   switch (event->type)
     {
     case CLUTTER_NOTHING:
-    case CLUTTER_STAGE_STATE:
-    case CLUTTER_DESTROY_NOTIFY:
-    case CLUTTER_CLIENT_MESSAGE:
     case CLUTTER_IM_COMMIT:
     case CLUTTER_IM_DELETE:
     case CLUTTER_IM_PREEDIT:
@@ -1298,14 +1228,11 @@ void
 clutter_event_set_device_tool (ClutterEvent           *event,
                                ClutterInputDeviceTool *tool)
 {
+  ClutterEventPrivate *real_event = (ClutterEventPrivate *) event;
+
   g_return_if_fail (event != NULL);
 
-  if (is_event_allocated (event))
-    {
-      ClutterEventPrivate *real_event = (ClutterEventPrivate *) event;
-
-      real_event->tool = tool;
-    }
+  real_event->tool = tool;
 }
 
 /**
@@ -1321,16 +1248,11 @@ clutter_event_set_device_tool (ClutterEvent           *event,
 ClutterInputDeviceTool *
 clutter_event_get_device_tool (const ClutterEvent *event)
 {
+  ClutterEventPrivate *real_event = (ClutterEventPrivate *) event;
+
   g_return_val_if_fail (event != NULL, NULL);
 
-  if (is_event_allocated (event))
-    {
-      ClutterEventPrivate *real_event = (ClutterEventPrivate *) event;
-
-      return real_event->tool;
-    }
-
-  return NULL;
+  return real_event->tool;
 }
 
 /**
@@ -1347,15 +1269,10 @@ clutter_event_new (ClutterEventType type)
   ClutterEvent *new_event;
   ClutterEventPrivate *priv;
 
-  priv = g_slice_new0 (ClutterEventPrivate);
+  priv = g_new0 (ClutterEventPrivate, 1);
 
   new_event = (ClutterEvent *) priv;
   new_event->type = new_event->any.type = type;
-
-  if (G_UNLIKELY (all_events == NULL))
-    all_events = g_hash_table_new (NULL, NULL);
-
-  g_hash_table_replace (all_events, priv, GUINT_TO_POINTER (1));
 
   return new_event;
 }
@@ -1373,8 +1290,7 @@ clutter_event_copy (const ClutterEvent *event)
 {
   ClutterEvent *new_event;
   ClutterEventPrivate *new_real_event;
-  ClutterInputDevice *device;
-  gint n_axes = 0;
+  ClutterEventPrivate *real_event = (ClutterEventPrivate *) event;
 
   g_return_val_if_fail (event != NULL, NULL);
 
@@ -1383,45 +1299,45 @@ clutter_event_copy (const ClutterEvent *event)
 
   *new_event = *event;
 
-  if (is_event_allocated (event))
-    {
-      ClutterEventPrivate *real_event = (ClutterEventPrivate *) event;
-
-      g_set_object (&new_real_event->device, real_event->device);
-      g_set_object (&new_real_event->source_device, real_event->source_device);
-      new_real_event->delta_x = real_event->delta_x;
-      new_real_event->delta_y = real_event->delta_y;
-      new_real_event->is_pointer_emulated = real_event->is_pointer_emulated;
-      new_real_event->base_state = real_event->base_state;
-      new_real_event->button_state = real_event->button_state;
-      new_real_event->latched_state = real_event->latched_state;
-      new_real_event->locked_state = real_event->locked_state;
-      new_real_event->tool = real_event->tool;
-    }
-
-  device = clutter_event_get_device (event);
-  if (device != NULL)
-    n_axes = clutter_input_device_get_n_axes (device);
+  g_set_object (&new_real_event->device, real_event->device);
+  g_set_object (&new_real_event->source_device, real_event->source_device);
+  new_real_event->delta_x = real_event->delta_x;
+  new_real_event->delta_y = real_event->delta_y;
+  new_real_event->is_pointer_emulated = real_event->is_pointer_emulated;
+  new_real_event->base_state = real_event->base_state;
+  new_real_event->button_state = real_event->button_state;
+  new_real_event->latched_state = real_event->latched_state;
+  new_real_event->locked_state = real_event->locked_state;
+  new_real_event->tool = real_event->tool;
 
   switch (event->type)
     {
     case CLUTTER_BUTTON_PRESS:
     case CLUTTER_BUTTON_RELEASE:
       if (event->button.axes != NULL)
-        new_event->button.axes = g_memdup (event->button.axes,
-                                           sizeof (gdouble) * n_axes);
+        {
+          new_event->button.axes =
+            g_memdup2 (event->button.axes,
+                       sizeof (double) * CLUTTER_INPUT_AXIS_LAST);
+        }
       break;
 
     case CLUTTER_SCROLL:
       if (event->scroll.axes != NULL)
-        new_event->scroll.axes = g_memdup (event->scroll.axes,
-                                           sizeof (gdouble) * n_axes);
+        {
+          new_event->scroll.axes =
+            g_memdup2 (event->scroll.axes,
+                       sizeof (double) * CLUTTER_INPUT_AXIS_LAST);
+        }
       break;
 
     case CLUTTER_MOTION:
       if (event->motion.axes != NULL)
-        new_event->motion.axes = g_memdup (event->motion.axes,
-                                           sizeof (gdouble) * n_axes);
+        {
+          new_event->motion.axes =
+            g_memdup2 (event->motion.axes,
+                       sizeof (double) * CLUTTER_INPUT_AXIS_LAST);
+        }
       break;
 
     case CLUTTER_TOUCH_BEGIN:
@@ -1429,8 +1345,11 @@ clutter_event_copy (const ClutterEvent *event)
     case CLUTTER_TOUCH_END:
     case CLUTTER_TOUCH_CANCEL:
       if (event->touch.axes != NULL)
-        new_event->touch.axes = g_memdup (event->touch.axes,
-                                          sizeof (gdouble) * n_axes);
+        {
+          new_event->touch.axes =
+            g_memdup2 (event->touch.axes,
+                      sizeof (double) * CLUTTER_INPUT_AXIS_LAST);
+        }
       break;
 
     case CLUTTER_DEVICE_ADDED:
@@ -1446,11 +1365,6 @@ clutter_event_copy (const ClutterEvent *event)
       break;
     }
 
-  if (is_event_allocated (event))
-    _clutter_backend_copy_event_data (clutter_get_default_backend (),
-                                      event,
-                                      new_event);
-
   return new_event;
 }
 
@@ -1465,15 +1379,10 @@ clutter_event_free (ClutterEvent *event)
 {
   if (G_LIKELY (event != NULL))
     {
-      _clutter_backend_free_event_data (clutter_get_default_backend (), event);
+      ClutterEventPrivate *real_event = (ClutterEventPrivate *) event;
 
-      if (is_event_allocated (event))
-        {
-          ClutterEventPrivate *real_event = (ClutterEventPrivate *) event;
-
-          g_clear_object (&real_event->device);
-          g_clear_object (&real_event->source_device);
-        }
+      g_clear_object (&real_event->device);
+      g_clear_object (&real_event->source_device);
 
       switch (event->type)
         {
@@ -1506,8 +1415,7 @@ clutter_event_free (ClutterEvent *event)
           break;
         }
 
-      g_hash_table_remove (all_events, event);
-      g_slice_free (ClutterEventPrivate, (ClutterEventPrivate *) event);
+      g_free ((ClutterEventPrivate *) event);
     }
 }
 
@@ -1525,40 +1433,11 @@ ClutterEvent *
 clutter_event_get (void)
 {
   ClutterMainContext *context = _clutter_context_get_default ();
+  ClutterEvent *event;
 
-  if (context->events_queue == NULL)
-    return NULL;
+  event = g_async_queue_try_pop (context->events_queue);
 
-  if (g_queue_is_empty (context->events_queue))
-    return NULL;
-
-  return g_queue_pop_tail (context->events_queue);
-}
-
-/**
- * clutter_event_peek:
- * 
- * Returns a pointer to the first event from the event queue but 
- * does not remove it. 
- *
- * Return value: (transfer none): A #ClutterEvent or NULL if queue empty.
- *
- * Since: 0.4
- */
-ClutterEvent *
-clutter_event_peek (void)
-{
-  ClutterMainContext *context = _clutter_context_get_default ();
-
-  g_return_val_if_fail (context != NULL, NULL);
-  
-  if (context->events_queue == NULL)
-    return NULL;
-
-  if (g_queue_is_empty (context->events_queue))
-    return NULL;
-
-  return g_queue_peek_tail (context->events_queue);
+  return event;
 }
 
 void
@@ -1566,22 +1445,8 @@ _clutter_event_push (const ClutterEvent *event,
                      gboolean            do_copy)
 {
   ClutterMainContext *context = _clutter_context_get_default ();
-  ClutterInputDevice *device;
 
   g_assert (context != NULL);
-
-  if (context->events_queue == NULL)
-    context->events_queue = g_queue_new ();
-
-  /* disabled devices don't propagate events */
-  device = clutter_event_get_device (event);
-  if (device != NULL)
-    {
-      if (event->type != CLUTTER_DEVICE_ADDED &&
-          event->type != CLUTTER_DEVICE_REMOVED &&
-          !clutter_input_device_get_enabled (device))
-        return;
-    }
 
   if (do_copy)
     {
@@ -1591,7 +1456,8 @@ _clutter_event_push (const ClutterEvent *event,
       event = copy;
     }
 
-  g_queue_push_head (context->events_queue, (gpointer) event);
+  g_async_queue_push (context->events_queue, (gpointer) event);
+  g_main_context_wakeup (NULL);
 }
 
 /**
@@ -1628,10 +1494,7 @@ clutter_events_pending (void)
 
   g_return_val_if_fail (context != NULL, FALSE);
 
-  if (context->events_queue == NULL)
-    return FALSE;
-
-  return g_queue_is_empty (context->events_queue) == FALSE;
+  return g_async_queue_length (context->events_queue) > 0;
 }
 
 /**
@@ -1701,9 +1564,6 @@ clutter_event_get_source_device (const ClutterEvent *event)
 {
   ClutterEventPrivate *real_event;
 
-  if (!is_event_allocated (event))
-    return NULL;
-
   real_event = (ClutterEventPrivate *) event;
 
   if (real_event->source_device != NULL)
@@ -1732,9 +1592,6 @@ clutter_event_set_source_device (ClutterEvent       *event,
   g_return_if_fail (event != NULL);
   g_return_if_fail (device == NULL || CLUTTER_IS_INPUT_DEVICE (device));
 
-  if (!is_event_allocated (event))
-    return;
-
   real_event = (ClutterEventPrivate *) event;
   g_set_object (&real_event->source_device, device);
 }
@@ -1755,14 +1612,10 @@ clutter_event_get_axes (const ClutterEvent *event,
                         guint              *n_axes)
 {
   gdouble *retval = NULL;
-  guint len = 0;
 
   switch (event->type)
     {
     case CLUTTER_NOTHING:
-    case CLUTTER_STAGE_STATE:
-    case CLUTTER_DESTROY_NOTIFY:
-    case CLUTTER_CLIENT_MESSAGE:
     case CLUTTER_ENTER:
     case CLUTTER_LEAVE:
     case CLUTTER_KEY_PRESS:
@@ -1806,19 +1659,8 @@ clutter_event_get_axes (const ClutterEvent *event,
       break;
     }
 
-  if (retval != NULL)
-    {
-      ClutterInputDevice *device;
-
-      device = clutter_event_get_device (event);
-      if (device != NULL)
-        len = clutter_input_device_get_n_axes (device);
-      else
-        retval = NULL;
-    }
-
   if (n_axes)
-    *n_axes = len;
+    *n_axes = CLUTTER_INPUT_AXIS_LAST;
 
   return retval;
 }
@@ -1937,9 +1779,6 @@ clutter_event_is_pointer_emulated (const ClutterEvent *event)
 {
   g_return_val_if_fail (event != NULL, FALSE);
 
-  if (!is_event_allocated (event))
-    return FALSE;
-
   return ((ClutterEventPrivate *) event)->is_pointer_emulated;
 }
 
@@ -1991,7 +1830,7 @@ clutter_event_add_filter (ClutterStage          *stage,
                           gpointer               user_data)
 {
   ClutterMainContext *context = _clutter_context_get_default ();
-  ClutterEventFilter *event_filter = g_slice_new (ClutterEventFilter);
+  ClutterEventFilter *event_filter = g_new0 (ClutterEventFilter, 1);
   static guint event_filter_id = 0;
 
   event_filter->stage = stage;
@@ -2032,7 +1871,7 @@ clutter_event_remove_filter (guint id)
             event_filter->notify (event_filter->user_data);
 
           context->event_filters = g_list_delete_link (context->event_filters, l);
-          g_slice_free (ClutterEventFilter, event_filter);
+          g_free (event_filter);
           return;
         }
     }
@@ -2169,6 +2008,42 @@ clutter_event_get_gesture_motion_delta (const ClutterEvent *event,
 }
 
 /**
+ * clutter_event_get_gesture_motion_delta_unaccelerated:
+ * @event: A clutter touchpad gesture event
+ * @dx: (out) (allow-none): the displacement relative to the pointer
+ *      position in the X axis, or %NULL
+ * @dy: (out) (allow-none): the displacement relative to the pointer
+ *      position in the Y axis, or %NULL
+ *
+ * Returns the unaccelerated gesture motion deltas relative to the current
+ * pointer position. Unlike clutter_event_get_gesture_motion_delta(),
+ * pointer acceleration is ignored.
+ **/
+void
+clutter_event_get_gesture_motion_delta_unaccelerated (const ClutterEvent *event,
+                                                      gdouble            *dx,
+                                                      gdouble            *dy)
+{
+  g_return_if_fail (event != NULL);
+  g_return_if_fail (event->type == CLUTTER_TOUCHPAD_PINCH ||
+                    event->type == CLUTTER_TOUCHPAD_SWIPE);
+
+  if (event->type == CLUTTER_TOUCHPAD_PINCH)
+    {
+      if (dx)
+        *dx = event->touchpad_pinch.dx_unaccel;
+      if (dy)
+        *dy = event->touchpad_pinch.dy_unaccel;
+    }
+  else if (event->type == CLUTTER_TOUCHPAD_SWIPE)
+    {
+      if (dx)
+        *dx = event->touchpad_swipe.dx_unaccel;
+      if (dy)
+        *dy = event->touchpad_swipe.dy_unaccel;
+    }
+}
+/**
  * clutter_event_get_scroll_source:
  * @event: an scroll event
  *
@@ -2287,4 +2162,59 @@ clutter_event_get_pad_event_details (const ClutterEvent *event,
     *value = v;
 
   return TRUE;
+}
+
+uint32_t
+clutter_event_get_event_code (const ClutterEvent *event)
+{
+  if (event->type == CLUTTER_KEY_PRESS ||
+      event->type == CLUTTER_KEY_RELEASE)
+    return event->key.evdev_code;
+  else if (event->type == CLUTTER_BUTTON_PRESS ||
+           event->type == CLUTTER_BUTTON_RELEASE)
+    return event->button.evdev_code;
+
+  return 0;
+}
+
+int32_t
+clutter_event_sequence_get_slot (const ClutterEventSequence *sequence)
+{
+  g_return_val_if_fail (sequence != NULL, -1);
+
+  return GPOINTER_TO_INT (sequence) - 1;
+}
+
+int64_t
+clutter_event_get_time_us (const ClutterEvent *event)
+{
+  if (event->type == CLUTTER_MOTION)
+    return event->motion.time_us;
+
+  return 0;
+}
+
+gboolean
+clutter_event_get_relative_motion (const ClutterEvent *event,
+                                   double             *dx,
+                                   double             *dy,
+                                   double             *dx_unaccel,
+                                   double             *dy_unaccel)
+{
+  if (event->type == CLUTTER_MOTION &&
+      event->motion.flags & CLUTTER_EVENT_FLAG_RELATIVE_MOTION)
+    {
+      if (dx)
+        *dx = event->motion.dx;
+      if (dy)
+        *dy = event->motion.dy;
+      if (dx_unaccel)
+        *dx_unaccel = event->motion.dx_unaccel;
+      if (dy_unaccel)
+        *dy_unaccel = event->motion.dy_unaccel;
+
+      return TRUE;
+    }
+  else
+    return FALSE;
 }

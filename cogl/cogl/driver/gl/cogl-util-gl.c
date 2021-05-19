@@ -34,6 +34,9 @@
 
 #include "cogl-types.h"
 #include "cogl-context-private.h"
+#include "driver/gl/cogl-framebuffer-gl-private.h"
+#include "driver/gl/cogl-gl-framebuffer-fbo.h"
+#include "driver/gl/cogl-gl-framebuffer-back.h"
 #include "driver/gl/cogl-pipeline-opengl-private.h"
 #include "driver/gl/cogl-util-gl-private.h"
 
@@ -128,6 +131,144 @@ _cogl_driver_gl_context_deinit (CoglContext *context)
 {
   _cogl_destroy_texture_units (context);
   g_free (context->driver_context);
+}
+
+CoglFramebufferDriver *
+_cogl_driver_gl_create_framebuffer_driver (CoglContext                        *context,
+                                           CoglFramebuffer                    *framebuffer,
+                                           const CoglFramebufferDriverConfig  *driver_config,
+                                           GError                            **error)
+{
+  g_return_val_if_fail (driver_config, NULL);
+
+  switch (driver_config->type)
+    {
+    case COGL_FRAMEBUFFER_DRIVER_TYPE_FBO:
+      {
+        CoglGlFramebufferFbo *gl_framebuffer_fbo;
+
+        gl_framebuffer_fbo = cogl_gl_framebuffer_fbo_new (framebuffer,
+                                                          driver_config,
+                                                          error);
+        if (!gl_framebuffer_fbo)
+          return NULL;
+
+        return COGL_FRAMEBUFFER_DRIVER (gl_framebuffer_fbo);
+      }
+    case COGL_FRAMEBUFFER_DRIVER_TYPE_BACK:
+      {
+        CoglGlFramebufferBack *gl_framebuffer_back;
+
+        gl_framebuffer_back = cogl_gl_framebuffer_back_new (framebuffer,
+                                                            driver_config,
+                                                            error);
+        if (!gl_framebuffer_back)
+          return NULL;
+
+        return COGL_FRAMEBUFFER_DRIVER (gl_framebuffer_back);
+      }
+    }
+
+  g_assert_not_reached ();
+  return NULL;
+}
+
+void
+_cogl_driver_gl_flush_framebuffer_state (CoglContext          *ctx,
+                                         CoglFramebuffer      *draw_buffer,
+                                         CoglFramebuffer      *read_buffer,
+                                         CoglFramebufferState  state)
+{
+  CoglGlFramebuffer *draw_gl_framebuffer;
+  CoglGlFramebuffer *read_gl_framebuffer;
+  unsigned long differences;
+
+  /* We can assume that any state that has changed for the current
+   * framebuffer is different to the currently flushed value. */
+  differences = ctx->current_draw_buffer_changes;
+
+  /* Any state of the current framebuffer that hasn't already been
+   * flushed is assumed to be unknown so we will always flush that
+   * state if asked. */
+  differences |= ~ctx->current_draw_buffer_state_flushed;
+
+  /* We only need to consider the state we've been asked to flush */
+  differences &= state;
+
+  if (ctx->current_draw_buffer != draw_buffer)
+    {
+      /* If the previous draw buffer is NULL then we'll assume
+         everything has changed. This can happen if a framebuffer is
+         destroyed while it is the last flushed draw buffer. In that
+         case the framebuffer destructor will set
+         ctx->current_draw_buffer to NULL */
+      if (ctx->current_draw_buffer == NULL)
+        differences |= state;
+      else
+        /* NB: we only need to compare the state we're being asked to flush
+         * and we don't need to compare the state we've already decided
+         * we will definitely flush... */
+        differences |= _cogl_framebuffer_compare (ctx->current_draw_buffer,
+                                                  draw_buffer,
+                                                  state & ~differences);
+
+      /* NB: we don't take a reference here, to avoid a circular
+       * reference. */
+      ctx->current_draw_buffer = draw_buffer;
+      ctx->current_draw_buffer_state_flushed = 0;
+    }
+
+  if (ctx->current_read_buffer != read_buffer &&
+      state & COGL_FRAMEBUFFER_STATE_BIND)
+    {
+      differences |= COGL_FRAMEBUFFER_STATE_BIND;
+      /* NB: we don't take a reference here, to avoid a circular
+       * reference. */
+      ctx->current_read_buffer = read_buffer;
+    }
+
+  if (!differences)
+    return;
+
+  /* Lazily ensure the framebuffers have been allocated */
+  if (G_UNLIKELY (!cogl_framebuffer_is_allocated (draw_buffer)))
+    cogl_framebuffer_allocate (draw_buffer, NULL);
+  if (G_UNLIKELY (!cogl_framebuffer_is_allocated (read_buffer)))
+    cogl_framebuffer_allocate (read_buffer, NULL);
+
+  draw_gl_framebuffer =
+    COGL_GL_FRAMEBUFFER (cogl_framebuffer_get_driver (draw_buffer));
+  read_gl_framebuffer =
+    COGL_GL_FRAMEBUFFER (cogl_framebuffer_get_driver (read_buffer));
+
+  /* We handle buffer binding separately since the method depends on whether
+   * we are binding the same buffer for read and write or not unlike all
+   * other state that only relates to the draw_buffer. */
+  if (differences & COGL_FRAMEBUFFER_STATE_BIND)
+    {
+      if (draw_buffer == read_buffer)
+        {
+          cogl_gl_framebuffer_bind (draw_gl_framebuffer, GL_FRAMEBUFFER);
+        }
+      else
+        {
+          /* NB: Currently we only take advantage of binding separate
+           * read/write buffers for framebuffer blit purposes. */
+          g_return_if_fail (cogl_has_feature
+                            (ctx, COGL_FEATURE_ID_BLIT_FRAMEBUFFER));
+
+          cogl_gl_framebuffer_bind (draw_gl_framebuffer, GL_DRAW_FRAMEBUFFER);
+          cogl_gl_framebuffer_bind (read_gl_framebuffer, GL_READ_FRAMEBUFFER);
+        }
+
+      differences &= ~COGL_FRAMEBUFFER_STATE_BIND;
+    }
+
+  cogl_gl_framebuffer_flush_state_differences (draw_gl_framebuffer,
+                                               differences);
+
+  ctx->current_draw_buffer_state_flushed |= state;
+  ctx->current_draw_buffer_changes &= ~state;
 }
 
 GLenum

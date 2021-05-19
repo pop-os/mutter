@@ -90,18 +90,16 @@ COGL_EXPORT
 int64_t cogl_frame_info_get_frame_counter (CoglFrameInfo *info);
 
 /**
- * cogl_frame_info_get_presentation_time:
+ * cogl_frame_info_get_presentation_time_us:
  * @info: a #CoglFrameInfo object
  *
  * Gets the presentation time for the frame. This is the time at which
  * the frame became visible to the user.
  *
- * The presentation time measured in nanoseconds, is based on
- * cogl_get_clock_time().
+ * The presentation time measured in microseconds, is based on
+ * CLOCK_MONOTONIC.
  *
- * <note>Linux kernel version less that 3.8 can result in
- * non-monotonic timestamps being reported when using a drm based
- * OpenGL driver. Also some buggy Mesa drivers up to 9.0.1 may also
+ * <note>Some buggy Mesa drivers up to 9.0.1 may
  * incorrectly report non-monotonic timestamps.</note>
  *
  * Return value: the presentation time for the frame
@@ -109,7 +107,7 @@ int64_t cogl_frame_info_get_frame_counter (CoglFrameInfo *info);
  * Stability: unstable
  */
 COGL_EXPORT
-int64_t cogl_frame_info_get_presentation_time (CoglFrameInfo *info);
+int64_t cogl_frame_info_get_presentation_time_us (CoglFrameInfo *info);
 
 /**
  * cogl_frame_info_get_refresh_rate:
@@ -136,6 +134,21 @@ float cogl_frame_info_get_refresh_rate (CoglFrameInfo *info);
  */
 COGL_EXPORT
 int64_t cogl_frame_info_get_global_frame_counter (CoglFrameInfo *info);
+
+COGL_EXPORT
+gboolean cogl_frame_info_get_is_symbolic (CoglFrameInfo *info);
+
+COGL_EXPORT
+gboolean cogl_frame_info_is_hw_clock (CoglFrameInfo *info);
+
+COGL_EXPORT
+gboolean cogl_frame_info_is_zero_copy (CoglFrameInfo *info);
+
+COGL_EXPORT
+gboolean cogl_frame_info_is_vsync (CoglFrameInfo *info);
+
+COGL_EXPORT
+unsigned int cogl_frame_info_get_sequence (CoglFrameInfo *info);
 
 G_END_DECLS
 

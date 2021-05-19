@@ -370,7 +370,7 @@ transfer_cb (MetaSelection *selection,
 
   if (!meta_selection_transfer_finish (selection, res, &error))
     {
-      g_warning ("Could not transfer DnD selection: %s\n", error->message);
+      g_warning ("Could not transfer DnD selection: %s", error->message);
       g_error_free (error);
     }
 
@@ -554,7 +554,8 @@ meta_x11_drag_dest_update (MetaWaylandDataDevice *data_device,
   MetaWaylandSeat *seat = compositor->seat;
   graphene_point_t pos;
 
-  clutter_input_device_get_coords (seat->pointer->device, NULL, &pos);
+  clutter_seat_query_state (clutter_input_device_get_seat (seat->pointer->device),
+                            seat->pointer->device, NULL, &pos, NULL);
   xdnd_send_position (dnd, dnd->dnd_dest,
                       clutter_get_current_event_time (),
                       pos.x, pos.y);
@@ -842,7 +843,8 @@ meta_xwayland_dnd_handle_client_message (MetaWaylandCompositor *compositor,
           dnd->client_message_timestamp = event->data.l[3];
 
           motion = clutter_event_new (CLUTTER_MOTION);
-          clutter_input_device_get_coords (seat->pointer->device, NULL, &pos);
+          clutter_seat_query_state (clutter_input_device_get_seat (seat->pointer->device),
+                                    seat->pointer->device, NULL, &pos, NULL);
           clutter_event_set_coords (motion, pos.x, pos.y);
           clutter_event_set_device (motion, seat->pointer->device);
           clutter_event_set_source_device (motion, seat->pointer->device);
@@ -950,7 +952,7 @@ meta_xwayland_init_dnd (Display *xdisplay)
 
   g_assert (manager->dnd == NULL);
 
-  manager->dnd = dnd = g_slice_new0 (MetaXWaylandDnd);
+  manager->dnd = dnd = g_new0 (MetaXWaylandDnd, 1);
 
   for (i = 0; i < N_DND_ATOMS; i++)
     xdnd_atoms[i] = gdk_x11_get_xatom_by_name (atom_names[i]);
@@ -985,6 +987,6 @@ meta_xwayland_shutdown_dnd (Display *xdisplay)
   XDestroyWindow (xdisplay, dnd->dnd_window);
   dnd->dnd_window = None;
 
-  g_slice_free (MetaXWaylandDnd, dnd);
+  g_free (dnd);
   manager->dnd = NULL;
 }

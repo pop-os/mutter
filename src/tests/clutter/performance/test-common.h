@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <glib.h>
 #include <clutter/clutter.h>
+#include <clutter/clutter-mutter.h>
 
 #include "tests/clutter-test-utils.h"
 
@@ -27,15 +28,15 @@ clutter_perf_fps_init (void)
   g_random_set_seed (12345678);
 }
 
-static void perf_stage_paint_cb (ClutterStage        *stage,
-                                 ClutterPaintContext *paint_context,
-                                 gpointer            *data);
+static void perf_stage_after_paint_cb (ClutterStage        *stage,
+                                       ClutterPaintContext *paint_context,
+                                       gpointer            *data);
 static gboolean perf_fake_mouse_cb (gpointer stage);
 
 static inline void
 clutter_perf_fps_start (ClutterStage *stage)
 {
-  g_signal_connect (stage, "paint", G_CALLBACK (perf_stage_paint_cb), NULL);
+  g_signal_connect (stage, "after-paint", G_CALLBACK (perf_stage_after_paint_cb), NULL);
 }
 
 static inline void
@@ -52,9 +53,9 @@ clutter_perf_fps_report (const gchar *id)
 }
 
 static void
-perf_stage_paint_cb (ClutterStage        *stage,
-                     ClutterPaintContext *paint_context,
-                     gpointer            *data)
+perf_stage_after_paint_cb (ClutterStage        *stage,
+                           ClutterPaintContext *paint_context,
+                           gpointer            *data)
 {
   if (!testtimer)
     testtimer = g_timer_new ();
@@ -109,7 +110,6 @@ static gboolean perf_fake_mouse_cb (gpointer stage)
       event2->crossing.related = NULL;
 
       clutter_event_set_device (event2, device);
-      clutter_input_device_update_from_event (device, event2, TRUE);
 
       clutter_event_put (event2);
       clutter_event_free (event2);

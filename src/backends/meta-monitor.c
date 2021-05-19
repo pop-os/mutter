@@ -55,7 +55,7 @@ typedef struct _MetaMonitorModeTiled
 
 typedef struct _MetaMonitorPrivate
 {
-  MetaGpu *gpu;
+  MetaBackend *backend;
 
   GList *outputs;
   GList *modes;
@@ -288,12 +288,12 @@ meta_monitor_make_display_name (MetaMonitor        *monitor,
     }
 }
 
-MetaGpu *
-meta_monitor_get_gpu (MetaMonitor *monitor)
+MetaBackend *
+meta_monitor_get_backend (MetaMonitor *monitor)
 {
   MetaMonitorPrivate *priv = meta_monitor_get_instance_private (monitor);
 
-  return priv->gpu;
+  return priv->backend;
 }
 
 GList *
@@ -486,6 +486,7 @@ meta_monitor_dispose (GObject *object)
 
   if (priv->outputs)
     {
+      g_list_foreach (priv->outputs, (GFunc) meta_output_unset_monitor, NULL);
       g_list_free_full (priv->outputs, g_object_unref);
       priv->outputs = NULL;
     }
@@ -660,8 +661,7 @@ meta_monitor_normal_generate_modes (MetaMonitorNormal *monitor_normal)
 }
 
 MetaMonitorNormal *
-meta_monitor_normal_new (MetaGpu            *gpu,
-                         MetaMonitorManager *monitor_manager,
+meta_monitor_normal_new (MetaMonitorManager *monitor_manager,
                          MetaOutput         *output)
 {
   MetaMonitorNormal *monitor_normal;
@@ -672,9 +672,11 @@ meta_monitor_normal_new (MetaGpu            *gpu,
   monitor = META_MONITOR (monitor_normal);
   monitor_priv = meta_monitor_get_instance_private (monitor);
 
-  monitor_priv->gpu = gpu;
+  monitor_priv->backend = meta_monitor_manager_get_backend (monitor_manager);
 
   monitor_priv->outputs = g_list_append (NULL, g_object_ref (output));
+  meta_output_set_monitor (output, monitor);
+
   monitor_priv->winsys_id = meta_output_get_id (output);
   meta_monitor_generate_spec (monitor);
 
@@ -802,6 +804,8 @@ add_tiled_monitor_outputs (MetaGpu          *gpu,
 
       monitor_priv->outputs = g_list_append (monitor_priv->outputs,
                                              g_object_ref (output));
+
+      meta_output_set_monitor (output, META_MONITOR (monitor_tiled));
     }
 }
 
@@ -1344,8 +1348,7 @@ meta_monitor_tiled_generate_modes (MetaMonitorTiled *monitor_tiled)
 }
 
 MetaMonitorTiled *
-meta_monitor_tiled_new (MetaGpu            *gpu,
-                        MetaMonitorManager *monitor_manager,
+meta_monitor_tiled_new (MetaMonitorManager *monitor_manager,
                         MetaOutput         *output)
 {
   const MetaOutputInfo *output_info = meta_output_get_info (output);
@@ -1357,13 +1360,13 @@ meta_monitor_tiled_new (MetaGpu            *gpu,
   monitor = META_MONITOR (monitor_tiled);
   monitor_priv = meta_monitor_get_instance_private (monitor);
 
-  monitor_priv->gpu = gpu;
+  monitor_priv->backend = meta_monitor_manager_get_backend (monitor_manager);
 
   monitor_tiled->tile_group_id = output_info->tile_info.group_id;
   monitor_priv->winsys_id = meta_output_get_id (output);
 
   monitor_tiled->origin_output = output;
-  add_tiled_monitor_outputs (gpu, monitor_tiled);
+  add_tiled_monitor_outputs (meta_output_get_gpu (output), monitor_tiled);
 
   monitor_tiled->main_output = find_untiled_output (monitor_tiled);
 
@@ -1942,6 +1945,28 @@ meta_monitor_mode_foreach_output (MetaMonitor          *monitor,
     }
 
   return TRUE;
+}
+
+MetaMonitorCrtcMode *
+meta_monitor_get_crtc_mode_for_output (MetaMonitor     *monitor,
+                                       MetaMonitorMode *mode,
+                                       MetaOutput      *output)
+{
+  MetaMonitorPrivate *monitor_priv =
+    meta_monitor_get_instance_private (monitor);
+  GList *l;
+  int i;
+
+  for (l = monitor_priv->outputs, i = 0; l; l = l->next, i++)
+    {
+      MetaMonitorCrtcMode *monitor_crtc_mode = &mode->crtc_modes[i];
+
+      if (monitor_crtc_mode->output == output)
+        return monitor_crtc_mode;
+    }
+
+  g_warn_if_reached ();
+  return NULL;
 }
 
 const char *

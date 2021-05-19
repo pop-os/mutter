@@ -1,4 +1,3 @@
-#define CLUTTER_ENABLE_EXPERIMENTAL_API
 #define CLUTTER_DISABLE_DEPRECATION_WARNINGS
 #include <clutter/clutter.h>
 
@@ -37,6 +36,7 @@ G_DEFINE_TYPE (FooOldShaderEffect,
 
 static void
 foo_old_shader_effect_paint_target (ClutterOffscreenEffect *effect,
+                                    ClutterPaintNode       *node,
                                     ClutterPaintContext    *paint_context)
 {
   clutter_shader_effect_set_shader_source (CLUTTER_SHADER_EFFECT (effect),
@@ -47,7 +47,7 @@ foo_old_shader_effect_paint_target (ClutterOffscreenEffect *effect,
                                      1.0f, 0.0f, 0.0f);
 
   CLUTTER_OFFSCREEN_EFFECT_CLASS (foo_old_shader_effect_parent_class)->
-    paint_target (effect, paint_context);
+    paint_target (effect, node, paint_context);
 }
 
 static void
@@ -112,6 +112,7 @@ foo_new_shader_effect_get_static_source (ClutterShaderEffect *effect)
 
 static void
 foo_new_shader_effect_paint_target (ClutterOffscreenEffect *effect,
+                                    ClutterPaintNode       *node,
                                     ClutterPaintContext    *paint_context)
 {
   clutter_shader_effect_set_uniform (CLUTTER_SHADER_EFFECT (effect),
@@ -120,7 +121,7 @@ foo_new_shader_effect_paint_target (ClutterOffscreenEffect *effect,
                                      0.0f, 1.0f, 0.0f);
 
   CLUTTER_OFFSCREEN_EFFECT_CLASS (foo_new_shader_effect_parent_class)->
-    paint_target (effect, paint_context);
+    paint_target (effect, node, paint_context);
 }
 
 static void

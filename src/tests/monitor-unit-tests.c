@@ -178,11 +178,6 @@ create_monitor_test_clients (void)
 {
   GError *error = NULL;
 
-  test_wait_for_x11_display ();
-
-  meta_x11_display_set_alarm_filter (meta_get_display ()->x11_display,
-                                     monitor_tests_alarm_filter, NULL);
-
   wayland_monitor_test_client = test_client_new (WAYLAND_TEST_CLIENT_NAME,
                                                  META_WINDOW_CLIENT_TYPE_WAYLAND,
                                                  &error);
@@ -194,6 +189,9 @@ create_monitor_test_clients (void)
                                              &error);
   if (!x11_monitor_test_client)
     g_error ("Failed to launch X11 test client: %s", error->message);
+
+  meta_x11_display_set_alarm_filter (meta_get_display ()->x11_display,
+                                     monitor_tests_alarm_filter, NULL);
 
   if (!test_client_do (wayland_monitor_test_client, &error,
                        "create", WAYLAND_TEST_CLIENT_WINDOW,
@@ -5541,8 +5539,6 @@ meta_test_monitor_wm_tiling (void)
   meta_window_tile (test_window, META_TILE_MAXIMIZED);
   meta_window_move_to_monitor (test_window, 1);
   check_test_client_state (test_client);
-
-  fprintf(stderr, ":::: %s:%d %s() - UNPLUGGING\n", __FILE__, __LINE__, __func__);
 
   test_case.setup.n_outputs = 0;
   test_setup = create_monitor_test_setup (&test_case.setup,

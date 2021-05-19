@@ -262,7 +262,7 @@ do_all_constraints (MetaWindow         *window,
         {
           /* Log how the constraint modified the position */
           meta_topic (META_DEBUG_GEOMETRY,
-                      "info->current is %d,%d +%d,%d after %s\n",
+                      "info->current is %d,%d +%d,%d after %s",
                       info->current.x, info->current.y,
                       info->current.width, info->current.height,
                       constraint->name);
@@ -271,7 +271,7 @@ do_all_constraints (MetaWindow         *window,
         {
           /* Log which constraint was not satisfied */
           meta_topic (META_DEBUG_GEOMETRY,
-                      "constraint %s not satisfied.\n",
+                      "constraint %s not satisfied.",
                       constraint->name);
           return FALSE;
         }
@@ -296,7 +296,7 @@ meta_window_constrain (MetaWindow          *window,
   gboolean satisfied = FALSE;
 
   meta_topic (META_DEBUG_GEOMETRY,
-              "Constraining %s in move from %d,%d %dx%d to %d,%d %dx%d\n",
+              "Constraining %s in move from %d,%d %dx%d to %d,%d %dx%d",
               window->desc,
               orig->x, orig->y, orig->width, orig->height,
               new->x,  new->y,  new->width,  new->height);
@@ -371,7 +371,7 @@ setup_constraint_info (ConstraintInfo      *info,
     info->action_type = ACTION_MOVE;
   else
     g_error ("BAD, BAD developer!  No treat for you!  (Fix your calls to "
-             "meta_window_move_resize_internal()).\n");
+             "meta_window_move_resize_internal()).");
 
   info->is_user_action = (flags & META_MOVE_RESIZE_USER_ACTION);
 
@@ -448,7 +448,7 @@ setup_constraint_info (ConstraintInfo      *info,
               "  resize_gravity  : %s\n"
               "  fixed_directions: %s\n"
               "  work_area_monitor: %d,%d +%d,%d\n"
-              "  entire_monitor   : %d,%d +%d,%d\n",
+              "  entire_monitor   : %d,%d +%d,%d",
               info->orig.x, info->orig.y, info->orig.width, info->orig.height,
               info->current.x, info->current.y,
                 info->current.width, info->current.height,
@@ -643,7 +643,7 @@ update_onscreen_requirements (MetaWindow     *window,
                                         &info->current);
   if (old != window->require_fully_onscreen)
     meta_topic (META_DEBUG_GEOMETRY,
-                "require_fully_onscreen for %s toggled to %s\n",
+                "require_fully_onscreen for %s toggled to %s",
                 window->desc,
                 window->require_fully_onscreen ? "TRUE" : "FALSE");
 
@@ -656,7 +656,7 @@ update_onscreen_requirements (MetaWindow     *window,
                                         &info->current);
   if (old != window->require_on_single_monitor)
     meta_topic (META_DEBUG_GEOMETRY,
-                "require_on_single_monitor for %s toggled to %s\n",
+                "require_on_single_monitor for %s toggled to %s",
                 window->desc,
                 window->require_on_single_monitor ? "TRUE" : "FALSE");
 
@@ -680,7 +680,7 @@ update_onscreen_requirements (MetaWindow     *window,
                                              &titlebar_rect);
       if (old != window->require_titlebar_visible)
         meta_topic (META_DEBUG_GEOMETRY,
-                    "require_titlebar_visible for %s toggled to %s\n",
+                    "require_titlebar_visible for %s toggled to %s",
                     window->desc,
                     window->require_titlebar_visible ? "TRUE" : "FALSE");
     }
@@ -1596,9 +1596,9 @@ do_screen_and_monitor_relative_constraints (
       char spanning_region[1 + 28 * g_list_length (region_spanning_rectangles)];
 
       meta_topic (META_DEBUG_GEOMETRY,
-             "screen/monitor constraint; region_spanning_rectangles: %s\n",
-             meta_rectangle_region_to_string (region_spanning_rectangles, ", ",
-                                              spanning_region));
+                  "screen/monitor constraint; region_spanning_rectangles: %s",
+                  meta_rectangle_region_to_string (region_spanning_rectangles, ", ",
+                                                   spanning_region));
     }
 #endif
 

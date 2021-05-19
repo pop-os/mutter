@@ -46,6 +46,7 @@
 #include "wayland/meta-wayland-legacy-xdg-shell.h"
 #include "wayland/meta-wayland-outputs.h"
 #include "wayland/meta-wayland-pointer.h"
+#include "wayland/meta-wayland-presentation-time-private.h"
 #include "wayland/meta-wayland-private.h"
 #include "wayland/meta-wayland-region.h"
 #include "wayland/meta-wayland-seat.h"
@@ -468,6 +469,20 @@ meta_wayland_surface_state_set_default (MetaWaylandSurfaceState *state)
   state->has_new_viewport_dst_size = FALSE;
 
   state->subsurface_placement_ops = NULL;
+
+  wl_list_init (&state->presentation_feedback_list);
+}
+
+static void
+meta_wayland_surface_state_discard_presentation_feedback (MetaWaylandSurfaceState *state)
+{
+  while (!wl_list_empty (&state->presentation_feedback_list))
+    {
+      MetaWaylandPresentationFeedback *feedback =
+        wl_container_of (state->presentation_feedback_list.next, feedback, link);
+
+      meta_wayland_presentation_feedback_discard (feedback);
+    }
 }
 
 static void
@@ -492,6 +507,8 @@ meta_wayland_surface_state_clear (MetaWaylandSurfaceState *state)
         state->subsurface_placement_ops,
         (GDestroyNotify) meta_wayland_subsurface_placement_op_free);
     }
+
+  meta_wayland_surface_state_discard_presentation_feedback (state);
 }
 
 static void
@@ -617,6 +634,10 @@ meta_wayland_surface_state_merge_into (MetaWaylandSurfaceState *from,
       from->subsurface_placement_ops = NULL;
     }
 
+  wl_list_insert_list (&to->presentation_feedback_list,
+                       &from->presentation_feedback_list);
+  wl_list_init (&from->presentation_feedback_list);
+
   meta_wayland_surface_state_reset (from);
 }
 
@@ -650,6 +671,19 @@ meta_wayland_surface_state_class_init (MetaWaylandSurfaceStateClass *klass)
                   0,
                   NULL, NULL, NULL,
                   G_TYPE_NONE, 0);
+}
+
+static void
+meta_wayland_surface_discard_presentation_feedback (MetaWaylandSurface *surface)
+{
+  while (!wl_list_empty (&surface->presentation_time.feedback_list))
+    {
+      MetaWaylandPresentationFeedback *feedback =
+        wl_container_of (surface->presentation_time.feedback_list.next,
+                         feedback, link);
+
+      meta_wayland_presentation_feedback_discard (feedback);
+    }
 }
 
 static void
@@ -779,6 +813,20 @@ meta_wayland_surface_apply_state (MetaWaylandSurface      *surface,
       else
         surface->input_region = NULL;
     }
+
+  /*
+   * A new commit indicates a new content update, so any previous
+   * content update did not go on screen and needs to be discarded.
+   */
+  meta_wayland_surface_discard_presentation_feedback (surface);
+
+  wl_list_insert_list (&surface->presentation_time.feedback_list,
+                       &state->presentation_feedback_list);
+  wl_list_init (&state->presentation_feedback_list);
+
+  if (!wl_list_empty (&surface->presentation_time.feedback_list))
+    meta_wayland_compositor_add_presentation_feedback_surface (surface->compositor,
+                                                               surface);
 
   if (surface->role)
     {
@@ -932,6 +980,13 @@ meta_wayland_surface_commit (MetaWaylandSurface *surface)
       MetaWaylandSurfaceState *cached_state;
 
       cached_state = meta_wayland_surface_ensure_cached_state (surface);
+
+      /*
+       * A new commit indicates a new content update, so any previous
+       * cached content update did not go on screen and needs to be discarded.
+       */
+      meta_wayland_surface_state_discard_presentation_feedback (cached_state);
+
       meta_wayland_surface_state_merge_into (pending, cached_state);
     }
   else
@@ -1019,7 +1074,7 @@ destroy_frame_callback (struct wl_resource *callback_resource)
     wl_resource_get_user_data (callback_resource);
 
   wl_list_remove (&callback->link);
-  g_slice_free (MetaWaylandFrameCallback, callback);
+  g_free (callback);
 }
 
 static void
@@ -1035,7 +1090,7 @@ wl_surface_frame (struct wl_client *client,
   if (!surface)
     return;
 
-  callback = g_slice_new0 (MetaWaylandFrameCallback);
+  callback = g_new0 (MetaWaylandFrameCallback, 1);
   callback->surface = surface;
   callback->resource = wl_resource_create (client,
                                            &wl_callback_interface,
@@ -1147,7 +1202,7 @@ wl_surface_set_buffer_transform (struct wl_client   *client,
     {
       wl_resource_post_error (resource,
                               WL_SURFACE_ERROR_INVALID_TRANSFORM,
-                              "Trying to set invalid buffer_transform of %d\n",
+                              "Trying to set invalid buffer_transform of %d",
                               transform);
       return;
     }
@@ -1168,7 +1223,7 @@ wl_surface_set_buffer_scale (struct wl_client *client,
     {
       wl_resource_post_error (resource,
                               WL_SURFACE_ERROR_INVALID_SCALE,
-                              "Trying to set invalid buffer_scale of %d\n",
+                              "Trying to set invalid buffer_scale of %d",
                               scale);
       return;
     }
@@ -1401,6 +1456,8 @@ wl_surface_destructor (struct wl_resource *resource)
     cairo_region_destroy (surface->input_region);
 
   meta_wayland_compositor_remove_frame_callback_surface (compositor, surface);
+  meta_wayland_compositor_remove_presentation_feedback_surface (compositor,
+                                                                surface);
 
   g_hash_table_foreach (surface->outputs,
                         surface_output_disconnect_signals,
@@ -1411,6 +1468,8 @@ wl_surface_destructor (struct wl_resource *resource)
                          &surface->unassigned.pending_frame_callback_list,
                          link)
     wl_resource_destroy (cb->resource);
+
+  meta_wayland_surface_discard_presentation_feedback (surface);
 
   if (surface->resource)
     wl_resource_set_user_data (surface->resource, NULL);
@@ -1430,8 +1489,6 @@ wl_surface_destructor (struct wl_resource *resource)
   g_hash_table_destroy (surface->shortcut_inhibited_seats);
 
   g_object_unref (surface);
-
-  meta_wayland_compositor_repick (compositor);
 }
 
 MetaWaylandSurface *
@@ -1460,6 +1517,8 @@ meta_wayland_surface_create (MetaWaylandCompositor *compositor,
 
   surface->outputs = g_hash_table_new (NULL, NULL);
   surface->shortcut_inhibited_seats = g_hash_table_new (NULL, NULL);
+
+  wl_list_init (&surface->presentation_time.feedback_list);
 
   meta_wayland_compositor_notify_surface_id (compositor, id, surface);
 

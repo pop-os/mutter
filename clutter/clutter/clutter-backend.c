@@ -40,8 +40,6 @@
 
 #include "clutter-build-config.h"
 
-#define CLUTTER_ENABLE_EXPERIMENTAL_API
-
 #include "clutter-backend-private.h"
 #include "clutter-debug.h"
 #include "clutter-event-private.h"
@@ -93,28 +91,20 @@ clutter_backend_dispose (GObject *gobject)
   /* clear the events still in the queue of the main context */
   _clutter_clear_events_queue ();
 
-  g_clear_pointer (&backend->dummy_onscreen, cogl_object_unref);
+  g_clear_object (&backend->dummy_onscreen);
   if (backend->stage_window)
     {
       g_object_remove_weak_pointer (G_OBJECT (backend->stage_window),
                                     (gpointer *) &backend->stage_window);
+      backend->stage_window = NULL;
     }
 
-  G_OBJECT_CLASS (clutter_backend_parent_class)->dispose (gobject);
-}
-
-static void
-clutter_backend_finalize (GObject *gobject)
-{
-  ClutterBackend *backend = CLUTTER_BACKEND (gobject);
-
-  g_source_destroy (backend->cogl_source);
-
-  g_free (backend->font_name);
-  clutter_backend_set_font_options (backend, NULL);
+  g_clear_pointer (&backend->cogl_source, g_source_destroy);
+  g_clear_pointer (&backend->font_name, g_free);
+  g_clear_pointer (&backend->font_options, cairo_font_options_destroy);
   g_clear_object (&backend->input_method);
 
-  G_OBJECT_CLASS (clutter_backend_parent_class)->finalize (gobject);
+  G_OBJECT_CLASS (clutter_backend_parent_class)->dispose (gobject);
 }
 
 static gfloat
@@ -447,18 +437,11 @@ _clutter_create_backend (void)
 }
 
 static void
-clutter_backend_real_init_events (ClutterBackend *backend)
-{
-  g_error ("Unknown input backend");
-}
-
-static void
 clutter_backend_class_init (ClutterBackendClass *klass)
 {
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
 
   gobject_class->dispose = clutter_backend_dispose;
-  gobject_class->finalize = clutter_backend_finalize;
 
   /**
    * ClutterBackend::resolution-changed:
@@ -514,7 +497,6 @@ clutter_backend_class_init (ClutterBackendClass *klass)
   klass->resolution_changed = clutter_backend_real_resolution_changed;
   klass->font_changed = clutter_backend_real_font_changed;
 
-  klass->init_events = clutter_backend_real_init_events;
   klass->create_context = clutter_backend_real_create_context;
   klass->get_features = clutter_backend_real_get_features;
 }
@@ -653,17 +635,6 @@ _clutter_backend_get_features (ClutterBackend *backend)
   return 0;
 }
 
-void
-_clutter_backend_init_events (ClutterBackend *backend)
-{
-  ClutterBackendClass *klass;
-
-  g_assert (CLUTTER_IS_BACKEND (backend));
-
-  klass = CLUTTER_BACKEND_GET_CLASS (backend);
-  klass->init_events (backend);
-}
-
 gfloat
 _clutter_backend_get_units_per_em (ClutterBackend       *backend,
                                    PangoFontDescription *font_desc)
@@ -676,31 +647,6 @@ _clutter_backend_get_units_per_em (ClutterBackend       *backend,
     backend->units_per_em = get_units_per_em (backend, NULL);
 
   return backend->units_per_em;
-}
-
-void
-_clutter_backend_copy_event_data (ClutterBackend     *backend,
-                                  const ClutterEvent *src,
-                                  ClutterEvent       *dest)
-{
-  ClutterSeatClass *seat_class;
-  ClutterSeat *seat;
-
-  seat = clutter_backend_get_default_seat (backend);
-  seat_class = CLUTTER_SEAT_GET_CLASS (seat);
-  seat_class->copy_event_data (seat, src, dest);
-}
-
-void
-_clutter_backend_free_event_data (ClutterBackend *backend,
-                                  ClutterEvent   *event)
-{
-  ClutterSeatClass *seat_class;
-  ClutterSeat *seat;
-
-  seat = clutter_backend_get_default_seat (backend);
-  seat_class = CLUTTER_SEAT_GET_CLASS (seat);
-  seat_class->free_event_data (seat, event);
 }
 
 /**
@@ -976,4 +922,11 @@ gboolean
 clutter_backend_is_display_server (ClutterBackend *backend)
 {
   return CLUTTER_BACKEND_GET_CLASS (backend)->is_display_server (backend);
+}
+
+void
+clutter_backend_destroy (ClutterBackend *backend)
+{
+  g_object_run_dispose (G_OBJECT (backend));
+  g_object_unref (backend);
 }

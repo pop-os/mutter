@@ -22,15 +22,30 @@
 
 #include <xf86drmMode.h>
 
-#include "backends/native/meta-kms-types.h"
+#include "backends/native/meta-kms-crtc.h"
 
-MetaKmsCrtc * meta_kms_crtc_new (MetaKmsImplDevice *impl_device,
-                                 drmModeCrtc       *drm_crtc,
-                                 int                idx);
+typedef enum _MetaKmsCrtcProp
+{
+  META_KMS_CRTC_PROP_MODE_ID = 0,
+  META_KMS_CRTC_PROP_ACTIVE,
+  META_KMS_CRTC_PROP_GAMMA_LUT,
+  META_KMS_CRTC_N_PROPS
+} MetaKmsCrtcProp;
+
+MetaKmsCrtc * meta_kms_crtc_new (MetaKmsImplDevice  *impl_device,
+                                 drmModeCrtc        *drm_crtc,
+                                 int                 idx,
+                                 GError            **error);
 
 void meta_kms_crtc_update_state (MetaKmsCrtc *crtc);
 
 void meta_kms_crtc_predict_state (MetaKmsCrtc   *crtc,
                                   MetaKmsUpdate *update);
+
+uint32_t meta_kms_crtc_get_prop_id (MetaKmsCrtc     *crtc,
+                                    MetaKmsCrtcProp  prop);
+
+const char * meta_kms_crtc_get_prop_name (MetaKmsCrtc     *crtc,
+                                          MetaKmsCrtcProp  prop);
 
 #endif /* META_KMS_CRTC_PRIVATE_H */

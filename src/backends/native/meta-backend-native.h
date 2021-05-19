@@ -32,6 +32,7 @@
 #include "backends/native/meta-udev.h"
 
 #define META_TYPE_BACKEND_NATIVE (meta_backend_native_get_type ())
+META_EXPORT_TEST
 G_DECLARE_FINAL_TYPE (MetaBackendNative, meta_backend_native,
                       META, BACKEND_NATIVE, MetaBackend)
 
@@ -47,6 +48,8 @@ MetaUdev * meta_backend_native_get_udev (MetaBackendNative *native);
 
 MetaKms * meta_backend_native_get_kms (MetaBackendNative *native);
 
-void meta_backend_native_set_seat_id (const gchar *seat_id);
+const char * meta_backend_native_get_seat_id (MetaBackendNative *backend_native);
+
+gboolean meta_backend_native_is_headless (MetaBackendNative *backend_native);
 
 #endif /* META_BACKEND_NATIVE_H */

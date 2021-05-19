@@ -89,7 +89,6 @@ typedef struct _MetaWaylandXdgSurfacePrivate
   struct wl_resource *resource;
   MetaWaylandXdgShellClient *shell_client;
   MetaRectangle geometry;
-  MetaRectangle unconstrained_geometry;
 
   guint configure_sent : 1;
   guint first_buffer_attached : 1;
@@ -811,7 +810,7 @@ meta_wayland_xdg_toplevel_post_apply_state (MetaWaylandSurfaceRole  *surface_rol
     META_WAYLAND_SURFACE_ROLE_CLASS (meta_wayland_xdg_toplevel_parent_class);
   surface_role_class->post_apply_state (surface_role, pending);
 
-  if (!surface->buffer_ref->buffer)
+  if (!pending->newly_attached)
     return;
 
   window_geometry = meta_wayland_xdg_surface_get_window_geometry (xdg_surface);
@@ -1487,6 +1486,15 @@ xdg_surface_set_window_geometry (struct wl_client   *client,
   MetaWaylandSurface *surface = surface_from_xdg_surface_resource (resource);
   MetaWaylandSurfaceState *pending;
 
+  if (width == 0 || height == 0)
+    {
+      g_warning ("Invalid geometry %dx%d+%d+%d set on xdg_surface@%d. Ignoring for "
+                 "now, but this will result in client termination in the future.",
+                 width, height, x, y,
+                 wl_resource_get_id (resource));
+      return;
+    }
+
   pending = meta_wayland_surface_get_pending_state (surface);
   pending->has_new_geometry = TRUE;
   pending->new_geometry.x = x;
@@ -1537,7 +1545,6 @@ meta_wayland_xdg_surface_real_reset (MetaWaylandXdgSurface *xdg_surface)
   priv->first_buffer_attached = FALSE;
   priv->configure_sent = FALSE;
   priv->geometry = (MetaRectangle) { 0 };
-  priv->unconstrained_geometry = (MetaRectangle) { 0 };
   priv->has_set_geometry = FALSE;
 }
 
@@ -1580,19 +1587,21 @@ meta_wayland_xdg_surface_post_apply_state (MetaWaylandSurfaceRole  *surface_role
 
   if (pending->has_new_geometry)
     {
-      priv->unconstrained_geometry = pending->new_geometry;
       meta_wayland_shell_surface_determine_geometry (shell_surface,
                                                      &pending->new_geometry,
                                                      &priv->geometry);
+      if (priv->geometry.width == 0 || priv->geometry.height == 0)
+        {
+          g_warning ("Invalid window geometry for xdg_surface@%d. Ignoring "
+                     "for now, but this will result in client termination "
+                     "in the future.",
+                     wl_resource_get_id (priv->resource));
+          return;
+        }
+
       priv->has_set_geometry = TRUE;
     }
-  else if (priv->has_set_geometry)
-    {
-      meta_wayland_shell_surface_determine_geometry (shell_surface,
-                                                     &priv->unconstrained_geometry,
-                                                     &priv->geometry);
-    }
-  else
+  else if (!priv->has_set_geometry)
     {
       MetaRectangle new_geometry = { 0 };
 
