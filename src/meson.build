@@ -147,7 +147,6 @@ mutter_deps = [
 
 mutter_c_args = [
   '-DCLUTTER_ENABLE_COMPOSITOR_API',
-  '-DCLUTTER_ENABLE_EXPERIMENTAL_API',
   '-DCOGL_ENABLE_EXPERIMENTAL_API',
   '-DCOGL_ENABLE_EXPERIMENTAL_2_0_API',
   '-DCOGL_ENABLE_MUTTER_API',
@@ -197,6 +196,8 @@ mutter_sources = [
   'backends/meta-input-mapper-private.h',
   'backends/meta-input-settings.c',
   'backends/meta-input-settings-private.h',
+  'backends/meta-input-settings-dummy.c',
+  'backends/meta-input-settings-dummy.h',
   'backends/meta-keymap-utils.c',
   'backends/meta-keymap-utils.h',
   'backends/meta-logical-monitor.c',
@@ -233,6 +234,10 @@ mutter_sources = [
   'backends/meta-settings-private.h',
   'backends/meta-stage.c',
   'backends/meta-stage-private.h',
+  'backends/meta-viewport-info.c',
+  'backends/meta-viewport-info.h',
+  'backends/meta-virtual-monitor.c',
+  'backends/meta-virtual-monitor.h',
   'backends/x11/cm/meta-backend-x11-cm.c',
   'backends/x11/cm/meta-backend-x11-cm.h',
   'backends/x11/cm/meta-cursor-sprite-xfixes.c',
@@ -374,6 +379,7 @@ mutter_sources = [
   'core/meta-inhibit-shortcuts-dialog-default.c',
   'core/meta-inhibit-shortcuts-dialog-default-private.h',
   'core/meta-launch-context.c',
+  'core/meta-pad-action-mapper.c',
   'core/meta-selection.c',
   'core/meta-selection-source.c',
   'core/meta-selection-source-memory.c',
@@ -474,6 +480,10 @@ if have_remote_desktop
     'backends/meta-screen-cast-monitor-stream.h',
     'backends/meta-screen-cast-monitor-stream-src.c',
     'backends/meta-screen-cast-monitor-stream-src.h',
+    'backends/meta-screen-cast-virtual-stream-src.c',
+    'backends/meta-screen-cast-virtual-stream-src.h',
+    'backends/meta-screen-cast-virtual-stream.c',
+    'backends/meta-screen-cast-virtual-stream.h',
     'backends/meta-screen-cast-window-stream-src.c',
     'backends/meta-screen-cast-window-stream-src.h',
     'backends/meta-screen-cast-window-stream.c',
@@ -484,6 +494,8 @@ if have_remote_desktop
     'backends/meta-screen-cast-stream.h',
     'backends/meta-screen-cast-stream-src.c',
     'backends/meta-screen-cast-stream-src.h',
+    'core/meta-selection-source-remote.c',
+    'core/meta-selection-source-remote.h',
   ]
 endif
 
@@ -558,6 +570,8 @@ if have_wayland
     'wayland/meta-wayland-pointer.h',
     'wayland/meta-wayland-popup.c',
     'wayland/meta-wayland-popup.h',
+    'wayland/meta-wayland-presentation-time.c',
+    'wayland/meta-wayland-presentation-time-private.h',
     'wayland/meta-wayland-private.h',
     'wayland/meta-wayland-region.c',
     'wayland/meta-wayland-region.h',
@@ -637,8 +651,14 @@ if have_native_backend
     'backends/native/meta-cogl-utils.h',
     'backends/native/meta-crtc-kms.c',
     'backends/native/meta-crtc-kms.h',
+    'backends/native/meta-crtc-native.c',
+    'backends/native/meta-crtc-native.h',
     'backends/native/meta-crtc-mode-kms.c',
     'backends/native/meta-crtc-mode-kms.h',
+    'backends/native/meta-crtc-mode-virtual.c',
+    'backends/native/meta-crtc-mode-virtual.h',
+    'backends/native/meta-crtc-virtual.c',
+    'backends/native/meta-crtc-virtual.h',
     'backends/native/meta-cursor-renderer-native.c',
     'backends/native/meta-cursor-renderer-native.h',
     'backends/native/meta-drm-buffer-dumb.c',
@@ -647,10 +667,9 @@ if have_native_backend
     'backends/native/meta-drm-buffer-gbm.h',
     'backends/native/meta-drm-buffer-import.c',
     'backends/native/meta-drm-buffer-import.h',
+    'backends/native/meta-drm-buffer-private.h',
     'backends/native/meta-drm-buffer.c',
     'backends/native/meta-drm-buffer.h',
-    'backends/native/meta-event-native.c',
-    'backends/native/meta-event-native.h',
     'backends/native/meta-gpu-kms.c',
     'backends/native/meta-gpu-kms.h',
     'backends/native/meta-input-device-native.c',
@@ -663,11 +682,14 @@ if have_native_backend
     'backends/native/meta-keymap-native.h',
     'backends/native/meta-launcher.c',
     'backends/native/meta-launcher.h',
-    'backends/native/meta-monitor-manager-kms.c',
-    'backends/native/meta-monitor-manager-kms.h',
+    'backends/native/meta-monitor-manager-native.c',
+    'backends/native/meta-monitor-manager-native.h',
     'backends/native/meta-output-kms.c',
     'backends/native/meta-output-kms.h',
-    'backends/native/meta-renderer-native.c',
+    'backends/native/meta-output-native.c',
+    'backends/native/meta-output-native.h',
+    'backends/native/meta-output-virtual.c',
+    'backends/native/meta-output-virtual.h',
     'backends/native/meta-kms-connector-private.h',
     'backends/native/meta-kms-connector.c',
     'backends/native/meta-kms-connector.h',
@@ -677,12 +699,18 @@ if have_native_backend
     'backends/native/meta-kms-device-private.h',
     'backends/native/meta-kms-device.c',
     'backends/native/meta-kms-device.h',
+    'backends/native/meta-kms-impl-device-atomic.c',
+    'backends/native/meta-kms-impl-device-atomic.h',
+    'backends/native/meta-kms-impl-device-dummy.c',
+    'backends/native/meta-kms-impl-device-dummy.h',
+    'backends/native/meta-kms-impl-device-simple.c',
+    'backends/native/meta-kms-impl-device-simple.h',
     'backends/native/meta-kms-impl-device.c',
     'backends/native/meta-kms-impl-device.h',
-    'backends/native/meta-kms-impl-simple.c',
-    'backends/native/meta-kms-impl-simple.h',
     'backends/native/meta-kms-impl.c',
     'backends/native/meta-kms-impl.h',
+    'backends/native/meta-kms-mode.c',
+    'backends/native/meta-kms-mode.h',
     'backends/native/meta-kms-page-flip.c',
     'backends/native/meta-kms-page-flip-private.h',
     'backends/native/meta-kms-plane.c',
@@ -697,9 +725,17 @@ if have_native_backend
     'backends/native/meta-kms-utils.h',
     'backends/native/meta-kms.c',
     'backends/native/meta-kms.h',
+    'backends/native/meta-onscreen-native.c',
+    'backends/native/meta-onscreen-native.h',
+    'backends/native/meta-pointer-constraint-native.c',
+    'backends/native/meta-pointer-constraint-native.h',
     'backends/native/meta-renderer-native-gles3.c',
     'backends/native/meta-renderer-native-gles3.h',
+    'backends/native/meta-renderer-native-private.h',
+    'backends/native/meta-renderer-native.c',
     'backends/native/meta-renderer-native.h',
+    'backends/native/meta-seat-impl.c',
+    'backends/native/meta-seat-impl.h',
     'backends/native/meta-seat-native.c',
     'backends/native/meta-seat-native.h',
     'backends/native/meta-stage-native.c',
@@ -708,6 +744,8 @@ if have_native_backend
     'backends/native/meta-udev.h',
     'backends/native/meta-virtual-input-device-native.c',
     'backends/native/meta-virtual-input-device-native.h',
+    'backends/native/meta-virtual-monitor-native.c',
+    'backends/native/meta-virtual-monitor-native.h',
     'backends/native/meta-xkb-utils.c',
     'backends/native/meta-xkb-utils.h',
     'compositor/meta-compositor-native.c',
@@ -722,13 +760,26 @@ if have_wayland_eglstream
   ]
 endif
 
-mutter_built_sources = []
+mutter_private_enum_sources = []
 
 if have_remote_desktop
+  mutter_private_enum_sources += [
+    'backends/meta-screen-cast.h',
+  ]
+endif
+
+if have_native_backend
+  mutter_private_enum_sources += [
+    'backends/native/meta-backend-native-types.h',
+    'backends/native/meta-kms-types.h',
+  ]
+endif
+
+mutter_built_sources = []
+
+if mutter_private_enum_sources.length() > 0
   mutter_private_enum_types = gnome.mkenums('meta-private-enum-types',
-    sources: [
-      'backends/meta-screen-cast.h',
-    ],
+    sources: mutter_private_enum_sources,
     c_template: 'meta-private-enum-types.c.in',
     h_template: 'meta-private-enum-types.h.in',
   )
@@ -750,14 +801,6 @@ dbus_idle_monitor_built_sources = gnome.gdbus_codegen('meta-dbus-idle-monitor',
     object_manager: true,
   )
 mutter_built_sources += dbus_idle_monitor_built_sources
-
-mutter_marshal = gnome.genmarshal('meta-marshal',
-    sources: ['meta-marshal.list'],
-    prefix: 'meta_marshal',
-    internal: true,
-    valist_marshallers: true,
-  )
-mutter_built_sources += mutter_marshal
 
 if have_profiler
   mutter_sources += [
@@ -790,22 +833,10 @@ if have_native_backend
   )
   mutter_built_sources += default_modes_h
 
-  gdbus_codegen = find_program('gdbus-codegen')
-  dbus_login1_built_sources = custom_target('meta-dbus-login1',
-    input: 'org.freedesktop.login1.xml',
-    output: [
-      'meta-dbus-login1.c',
-      'meta-dbus-login1.h',
-    ],
-    command: [
-      gdbus_codegen,
-      '--interface-prefix', 'org.freedesktop.login1',
-      '--c-namespace', 'Login1',
-      '--generate-c-code', 'meta-dbus-login1',
-      '--output-directory', meson.current_build_dir(),
-      '--c-generate-autocleanup', 'all',
-      '@INPUT@',
-    ]
+  dbus_login1_built_sources = gnome.gdbus_codegen('meta-dbus-login1',
+    'org.freedesktop.login1.xml',
+    interface_prefix: 'org.freedesktop.login1.',
+    namespace: 'MetaDbusLogin1',
   )
   mutter_built_sources += dbus_login1_built_sources
 endif
@@ -843,6 +874,7 @@ if have_wayland
     ['linux-dmabuf', 'unstable', 'v1', ],
     ['pointer-constraints', 'unstable', 'v1', ],
     ['pointer-gestures', 'unstable', 'v1', ],
+    ['presentation-time', 'stable', ],
     ['primary-selection', 'unstable', 'v1', ],
     ['relative-pointer', 'unstable', 'v1', ],
     ['tablet', 'unstable', 'v2', ],
@@ -932,7 +964,6 @@ mutter_built_sources += wayland_protocol_sources
 subdir('meta')
 
 mutter_built_sources += mutter_enum_types
-mutter_built_sources += mutter_version
 
 libmutter = shared_library(libmutter_name,
   mutter_sources,
@@ -999,7 +1030,6 @@ if have_introspection
 
   libmutter_gir = gnome.generate_gir(libmutter,
     sources: [
-      mutter_version,
       mutter_enum_types[1],
       mutter_introspected_sources,
       mutter_public_header_files

@@ -30,6 +30,8 @@
 #include <glib-unix.h>
 #include <glib.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/un.h>
 #if defined(HAVE_SYS_RANDOM)
 #include <sys/random.h>
@@ -39,6 +41,9 @@
 #include <unistd.h>
 #include <X11/extensions/Xrandr.h>
 #include <X11/Xauth.h>
+#include <X11/Xlib-xcb.h>
+
+#include <xcb/res.h>
 
 #include "backends/meta-monitor-manager-private.h"
 #include "backends/meta-settings-private.h"
@@ -47,6 +52,15 @@
 #include "meta/meta-backend.h"
 #include "wayland/meta-xwayland-surface.h"
 #include "x11/meta-x11-display-private.h"
+
+#ifdef HAVE_XWAYLAND_LISTENFD
+#define XWAYLAND_LISTENFD "-listenfd"
+#else
+#define XWAYLAND_LISTENFD "-listen"
+#endif
+
+#define X11_TMP_UNIX_DIR     "/tmp/.X11-unix"
+#define X11_TMP_UNIX_PATH    "/tmp/.X11-unix/X"
 
 static int display_number_override = -1;
 
@@ -124,10 +138,151 @@ meta_xwayland_is_xwayland_surface (MetaWaylandSurface *surface)
   return wl_resource_get_client (surface->resource) == manager->client;
 }
 
+static char *
+meta_xwayland_get_exe_from_proc_entry (const char *proc_entry)
+{
+  g_autofree char *exepath;
+  char *executable;
+  char *p;
+
+  exepath = g_file_read_link (proc_entry, NULL);
+  if (!exepath)
+    return NULL;
+
+  p = strrchr (exepath, G_DIR_SEPARATOR);
+  if (p)
+    executable = g_strdup (++p);
+  else
+    executable = g_strdup (exepath);
+
+  return executable;
+}
+
+static char *
+meta_xwayland_get_exe_from_pid (uint32_t pid)
+{
+  g_autofree char *proc_entry;
+  char *executable;
+
+  proc_entry = g_strdup_printf ("/proc/%i/exe", pid);
+  executable = meta_xwayland_get_exe_from_proc_entry (proc_entry);
+
+  return executable;
+}
+
+static char *
+meta_xwayland_get_self_exe (void)
+{
+  g_autofree char *proc_entry;
+  char *executable;
+
+  proc_entry = g_strdup_printf ("/proc/self/exe");
+  executable = meta_xwayland_get_exe_from_proc_entry (proc_entry);
+
+  return executable;
+}
+
 static gboolean
-try_display (int    display,
-             char **filename_out,
-             int   *fd_out)
+can_xwayland_ignore_exe (const char *executable,
+                         const char *self)
+{
+  char ** ignore_executables;
+  gboolean ret;
+
+  if (!g_strcmp0 (executable, self))
+    return TRUE;
+
+  ignore_executables = g_strsplit_set (XWAYLAND_IGNORE_EXECUTABLES, ",", -1);
+  ret = g_strv_contains ((const char * const *) ignore_executables, executable);
+  g_strfreev (ignore_executables);
+
+  return ret;
+}
+
+static uint32_t
+meta_xwayland_get_client_pid (xcb_connection_t *xcb,
+                              uint32_t          client)
+{
+  xcb_res_client_id_spec_t spec = { 0 };
+  xcb_res_query_client_ids_cookie_t cookie;
+  xcb_res_query_client_ids_reply_t *reply = NULL;
+  uint32_t pid = 0, *value;
+
+  spec.client = client;
+  spec.mask = XCB_RES_CLIENT_ID_MASK_LOCAL_CLIENT_PID;
+
+  cookie = xcb_res_query_client_ids (xcb, 1, &spec);
+  reply = xcb_res_query_client_ids_reply (xcb, cookie, NULL);
+
+  if (reply == NULL)
+    return 0;
+
+  xcb_res_client_id_value_iterator_t it;
+  for (it = xcb_res_query_client_ids_ids_iterator (reply);
+       it.rem;
+       xcb_res_client_id_value_next (&it))
+    {
+      spec = it.data->spec;
+      if (spec.mask & XCB_RES_CLIENT_ID_MASK_LOCAL_CLIENT_PID)
+        {
+          value = xcb_res_client_id_value_value (it.data);
+          pid = *value;
+          break;
+        }
+    }
+  free (reply);
+
+  return pid;
+}
+
+static gboolean
+can_terminate_xwayland (Display *xdisplay)
+{
+  xcb_connection_t *xcb = XGetXCBConnection (xdisplay);
+  xcb_res_query_clients_cookie_t cookie;
+  xcb_res_query_clients_reply_t *reply = NULL;
+  xcb_res_client_iterator_t it;
+  gboolean can_terminate;
+  char *self;
+
+  cookie = xcb_res_query_clients (xcb);
+  reply = xcb_res_query_clients_reply (xcb, cookie, NULL);
+
+  /* Could not get the list of X11 clients, better not terminate Xwayland */
+  if (reply == NULL)
+    return FALSE;
+
+  can_terminate = TRUE;
+  self = meta_xwayland_get_self_exe ();
+  for (it = xcb_res_query_clients_clients_iterator (reply);
+       it.rem && can_terminate;
+       xcb_res_client_next (&it))
+    {
+      uint32_t pid;
+      char *executable;
+
+      pid = meta_xwayland_get_client_pid (xcb, it.data->resource_base);
+      if (pid == 0)
+        {
+          /* Unknown PID, don't risk terminating it */
+          can_terminate = FALSE;
+          break;
+        }
+
+      executable = meta_xwayland_get_exe_from_pid (pid);
+      can_terminate = can_xwayland_ignore_exe (executable, self);
+      g_free (executable);
+    }
+  free (reply);
+
+  return can_terminate;
+}
+
+static gboolean
+try_display (int      display,
+             char   **filename_out,
+             int     *fd_out,
+             GError **error)
 {
   gboolean ret = FALSE;
   char *filename;
@@ -143,11 +298,32 @@ try_display (int    display,
       char pid[11];
       char *end;
       pid_t other;
+      int read_bytes;
 
       fd = open (filename, O_CLOEXEC, O_RDONLY);
-      if (fd < 0 || read (fd, pid, 11) != 11)
+      if (fd < 0)
         {
-          g_warning ("can't read lock file %s: %m", filename);
+          g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                       "Failed to open lock file %s: %s",
+                       filename, g_strerror (errno));
+          goto out;
+        }
+
+      read_bytes = read (fd, pid, 11);
+      if (read_bytes != 11)
+        {
+          if (read_bytes < 0)
+            {
+              g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                           "Failed to read from lock file %s: %s",
+                           filename, g_strerror (errno));
+            }
+          else
+            {
+              g_set_error (error, G_IO_ERROR, G_IO_ERROR_PARTIAL_INPUT,
+                           "Only read %d bytes (needed 11) from lock file: %s",
+                           read_bytes, filename);
+            }
           goto out;
         }
       close (fd);
@@ -157,7 +333,8 @@ try_display (int    display,
       other = strtol (pid, &end, 0);
       if (end != pid + 10)
         {
-          g_warning ("can't parse lock file %s", filename);
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                       "Can't parse lock file %s", filename);
           goto out;
         }
 
@@ -166,18 +343,24 @@ try_display (int    display,
           /* Process is dead. Try unlinking the lock file and trying again. */
           if (unlink (filename) < 0)
             {
-              g_warning ("failed to unlink stale lock file %s: %m", filename);
+              g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                           "Failed to unlink stale lock file %s: %s",
+                           filename, g_strerror (errno));
               goto out;
             }
 
           goto again;
         }
 
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Lock file %s is already occupied", filename);
       goto out;
     }
   else if (fd < 0)
     {
-      g_warning ("failed to create lock file %s: %m", filename);
+      g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                  "Failed to create lock file %s: %s",
+                  filename, g_strerror (errno));
       goto out;
     }
 
@@ -202,24 +385,34 @@ try_display (int    display,
 }
 
 static char *
-create_lock_file (int display, int *display_out)
+create_lock_file (int      display,
+                  int     *display_out,
+                  GError **error)
 {
   char *filename;
   int fd;
-
   char pid[12];
   int size;
   int number_of_tries = 0;
+  g_autoptr (GError) local_error = NULL;
 
-  while (!try_display (display, &filename, &fd))
+  while (!try_display (display, &filename, &fd, &local_error))
     {
+      meta_topic (META_DEBUG_WAYLAND,
+                  "Failed to lock X11 display: %s", local_error->message);
+      g_clear_error (&local_error);
       display++;
       number_of_tries++;
 
       /* If we can't get a display after 50 times, then something's wrong. Just
        * abort in this case. */
       if (number_of_tries >= 50)
-        return NULL;
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                       "Gave up after trying to lock different "
+                       "X11 display lock file 50 times");
+          return NULL;
+        }
     }
 
   /* Subtle detail: we use the pid of the wayland compositor, not the xserver
@@ -227,11 +420,23 @@ create_lock_file (int display, int *display_out)
    * it _would've_ written without either the NUL or the size clamping, hence
    * the disparity in size. */
   size = snprintf (pid, 12, "%10d\n", getpid ());
+  errno = 0;
   if (size != 11 || write (fd, pid, 11) != 11)
     {
+      if (errno != 0)
+        {
+          g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                       "Failed to write pid to lock file %s: %s",
+                       filename, g_strerror (errno));
+        }
+      else
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                       "Failed to write pid to lock file %s", filename);
+        }
+
       unlink (filename);
       close (fd);
-      g_warning ("failed to write pid to lock file %s", filename);
       g_free (filename);
       return NULL;
     }
@@ -243,8 +448,8 @@ create_lock_file (int display, int *display_out)
 }
 
 static int
-bind_to_abstract_socket (int       display,
-                         gboolean *fatal)
+bind_to_abstract_socket (int      display,
+                         GError **error)
 {
   struct sockaddr_un addr;
   socklen_t size, name_size;
@@ -253,28 +458,29 @@ bind_to_abstract_socket (int       display,
   fd = socket (PF_LOCAL, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (fd < 0)
     {
-      *fatal = TRUE;
-      g_warning ("Failed to create socket: %m");
+      g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                   "Failed to create socket: %s", g_strerror (errno));
       return -1;
     }
 
   addr.sun_family = AF_LOCAL;
   name_size = snprintf (addr.sun_path, sizeof addr.sun_path,
-                        "%c/tmp/.X11-unix/X%d", 0, display);
+                        "%c%s%d", 0, X11_TMP_UNIX_PATH, display);
   size = offsetof (struct sockaddr_un, sun_path) + name_size;
   if (bind (fd, (struct sockaddr *) &addr, size) < 0)
     {
-      *fatal = errno != EADDRINUSE;
-      g_warning ("failed to bind to @%s: %m", addr.sun_path + 1);
+      g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                   "Failed to bind to %s: %s",
+                   addr.sun_path + 1, g_strerror (errno));
       close (fd);
       return -1;
     }
 
   if (listen (fd, 1) < 0)
     {
-      *fatal = errno != EADDRINUSE;
-      g_warning ("Failed to listen on abstract socket @%s: %m",
-                 addr.sun_path + 1);
+      g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                   "Failed to listen to %s: %s",
+                   addr.sun_path + 1, g_strerror (errno));
       close (fd);
       return -1;
     }
@@ -283,7 +489,8 @@ bind_to_abstract_socket (int       display,
 }
 
 static int
-bind_to_unix_socket (int display)
+bind_to_unix_socket (int      display,
+                     GError **error)
 {
   struct sockaddr_un addr;
   socklen_t size, name_size;
@@ -291,22 +498,31 @@ bind_to_unix_socket (int display)
 
   fd = socket (PF_LOCAL, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (fd < 0)
-    return -1;
+    {
+      g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                   "Failed to create socket: %s", g_strerror (errno));
+      return -1;
+    }
 
   addr.sun_family = AF_LOCAL;
   name_size = snprintf (addr.sun_path, sizeof addr.sun_path,
-                        "/tmp/.X11-unix/X%d", display) + 1;
+                        "%s%d", X11_TMP_UNIX_PATH, display) + 1;
   size = offsetof (struct sockaddr_un, sun_path) + name_size;
   unlink (addr.sun_path);
   if (bind (fd, (struct sockaddr *) &addr, size) < 0)
     {
-      g_warning ("failed to bind to %s: %m\n", addr.sun_path);
+      g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                   "Failed to bind to %s: %s",
+                   addr.sun_path, g_strerror (errno));
       close (fd);
       return -1;
     }
 
   if (listen (fd, 1) < 0)
     {
+      g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                   "Failed to listen to %s: %s",
+                   addr.sun_path, g_strerror (errno));
       unlink (addr.sun_path);
       close (fd);
       return -1;
@@ -346,25 +562,46 @@ xserver_died (GObject      *source,
   else if (meta_get_x11_display_policy () == META_DISPLAY_POLICY_ON_DEMAND)
     {
       MetaWaylandCompositor *compositor = meta_wayland_compositor_get_default ();
+      g_autoptr (GError) error = NULL;
 
       if (display->x11_display)
         meta_display_shutdown_x11 (display);
 
       if (!meta_xwayland_init (&compositor->xwayland_manager,
-                               compositor->wayland_display))
-        g_warning ("Failed to init X sockets");
+                               compositor->wayland_display,
+                               &error))
+        g_warning ("Failed to init X sockets: %s", error->message);
     }
+}
+
+static void
+meta_xwayland_terminate (MetaXWaylandManager *manager)
+{
+  MetaDisplay *display = meta_get_display ();
+
+  g_clear_handle_id (&manager->xserver_grace_period_id, g_source_remove);
+  meta_display_shutdown_x11 (display);
+  meta_xwayland_stop_xserver (manager);
 }
 
 static gboolean
 shutdown_xwayland_cb (gpointer data)
 {
   MetaXWaylandManager *manager = data;
+  MetaDisplay *display = meta_get_display ();
+  MetaBackend *backend = meta_get_backend ();
+
+  if (!meta_settings_is_experimental_feature_enabled (meta_backend_get_settings (backend),
+                                                      META_EXPERIMENTAL_FEATURE_AUTOCLOSE_XWAYLAND))
+    return G_SOURCE_REMOVE;
+
+  if (display->x11_display &&
+      !can_terminate_xwayland (display->x11_display->xdisplay))
+    return G_SOURCE_CONTINUE;
 
   meta_verbose ("Shutting down Xwayland");
   manager->xserver_grace_period_id = 0;
-  meta_display_shutdown_x11 (meta_get_display ());
-  meta_xwayland_stop_xserver (manager);
+  meta_xwayland_terminate (manager);
   return G_SOURCE_REMOVE;
 }
 
@@ -379,6 +616,32 @@ x_io_error (Display *display)
   return 0;
 }
 
+static int
+x_io_error_noop (Display *display)
+{
+  return 0;
+}
+
+#ifdef HAVE_XSETIOERROREXITHANDLER
+static void
+x_io_error_exit (Display *display,
+                 void    *data)
+{
+  MetaWaylandCompositor *compositor = meta_wayland_compositor_get_default ();
+  MetaXWaylandManager *manager = &compositor->xwayland_manager;
+
+  g_warning ("Xwayland just died, attempting to recover");
+  manager->xserver_grace_period_id =
+    g_idle_add (shutdown_xwayland_cb, manager);
+}
+
+static void
+x_io_error_exit_noop (Display *display,
+                      void    *data)
+{
+}
+#endif
+
 void
 meta_xwayland_override_display_number (int number)
 {
@@ -386,23 +649,81 @@ meta_xwayland_override_display_number (int number)
 }
 
 static gboolean
-open_display_sockets (MetaXWaylandManager *manager,
-                      int                  display_index,
-                      int                 *abstract_fd_out,
-                      int                 *unix_fd_out,
-                      gboolean            *fatal)
+ensure_x11_unix_perms (GError **error)
+{
+  struct stat buf;
+
+  if (lstat (X11_TMP_UNIX_DIR, &buf) != 0)
+    {
+      g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                   "Failed to check permissions on directory \"%s\": %s",
+                   X11_TMP_UNIX_DIR, g_strerror (errno));
+      return FALSE;
+    }
+
+  /* If the directory already exists, it should belong to root or ourselves ... */
+  if (buf.st_uid != 0 && buf.st_uid != getuid ())
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                   "Wrong ownership for directory \"%s\"",
+                   X11_TMP_UNIX_DIR);
+      return FALSE;
+    }
+
+  /* ... be writable ... */
+  if ((buf.st_mode & 0022) != 0022)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                   "Directory \"%s\" is not writable",
+                   X11_TMP_UNIX_DIR);
+      return FALSE;
+    }
+
+  /* ... and have the sticky bit set */
+  if ((buf.st_mode & 01000) != 01000)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                   "Directory \"%s\" is missing the sticky bit",
+                   X11_TMP_UNIX_DIR);
+      return FALSE;
+    }
+
+  return TRUE;
+}
+
+static gboolean
+ensure_x11_unix_dir (GError **error)
+{
+  if (mkdir (X11_TMP_UNIX_DIR, 01777) != 0)
+    {
+      if (errno == EEXIST)
+        return ensure_x11_unix_perms (error);
+
+      g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                   "Failed to create directory \"%s\": %s",
+                   X11_TMP_UNIX_DIR, g_strerror (errno));
+      return FALSE;
+    }
+
+  return TRUE;
+}
+
+static gboolean
+open_display_sockets (MetaXWaylandManager  *manager,
+                      int                   display_index,
+                      int                  *abstract_fd_out,
+                      int                  *unix_fd_out,
+                      GError              **error)
 {
   int abstract_fd, unix_fd;
 
-  abstract_fd = bind_to_abstract_socket (display_index,
-                                         fatal);
+  abstract_fd = bind_to_abstract_socket (display_index, error);
   if (abstract_fd < 0)
     return FALSE;
 
-  unix_fd = bind_to_unix_socket (display_index);
+  unix_fd = bind_to_unix_socket (display_index, error);
   if (unix_fd < 0)
     {
-      *fatal = FALSE;
       close (abstract_fd);
       return FALSE;
     }
@@ -414,51 +735,52 @@ open_display_sockets (MetaXWaylandManager *manager,
 }
 
 static gboolean
-choose_xdisplay (MetaXWaylandManager    *manager,
-                 MetaXWaylandConnection *connection)
+choose_xdisplay (MetaXWaylandManager     *manager,
+                 MetaXWaylandConnection  *connection,
+                 int                     *display,
+                 GError                 **error)
 {
-  int display = 0;
+  int number_of_tries = 0;
   char *lock_file = NULL;
-  gboolean fatal = FALSE;
 
-  if (display_number_override != -1)
-    display = display_number_override;
-  else if (g_getenv ("RUNNING_UNDER_GDM"))
-    display = 1024;
+  if (!ensure_x11_unix_dir (error))
+    return FALSE;
 
   do
     {
-      lock_file = create_lock_file (display, &display);
+      g_autoptr (GError) local_error = NULL;
+
+      lock_file = create_lock_file (*display, display, &local_error);
       if (!lock_file)
         {
-          g_warning ("Failed to create an X lock file");
+          g_prefix_error (&local_error, "Failed to create an X lock file: ");
+          g_propagate_error (error, g_steal_pointer (&local_error));
           return FALSE;
         }
 
-      if (!open_display_sockets (manager, display,
+      if (!open_display_sockets (manager, *display,
                                  &connection->abstract_fd,
                                  &connection->unix_fd,
-                                 &fatal))
+                                 &local_error))
         {
           unlink (lock_file);
 
-          if (!fatal)
+          if (++number_of_tries >= 50)
             {
-              display++;
-              continue;
-            }
-          else
-            {
-              g_warning ("Failed to bind X11 socket");
+              g_prefix_error (&local_error, "Failed to bind X11 socket: ");
+              g_propagate_error (error, g_steal_pointer (&local_error));
               return FALSE;
             }
+
+          (*display)++;
+          continue;
         }
 
       break;
     }
   while (1);
 
-  connection->display_index = display;
+  connection->display_index = *display;
   connection->name = g_strdup_printf (":%d", connection->display_index);
   connection->lock_file = lock_file;
 
@@ -468,7 +790,8 @@ choose_xdisplay (MetaXWaylandManager    *manager,
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (FILE, fclose)
 
 static gboolean
-prepare_auth_file (MetaXWaylandManager *manager)
+prepare_auth_file (MetaXWaylandManager  *manager,
+                   GError              **error)
 {
   Xauth auth_entry = { 0 };
   g_autoptr (FILE) fp = NULL;
@@ -481,7 +804,8 @@ prepare_auth_file (MetaXWaylandManager *manager)
 
   if (getrandom (auth_data, sizeof (auth_data), 0) != sizeof (auth_data))
     {
-      g_warning ("Failed to get random data: %s", g_strerror (errno));
+      g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                   "Failed to get random data: %s", g_strerror (errno));
       return FALSE;
     }
 
@@ -496,34 +820,39 @@ prepare_auth_file (MetaXWaylandManager *manager)
   fd = g_mkstemp (manager->auth_file);
   if (fd < 0)
     {
-      g_warning ("Failed to open Xauthority file: %s", g_strerror (errno));
+      g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                   "Failed to open Xauthority file: %s", g_strerror (errno));
       return FALSE;
     }
 
   fp = fdopen (fd, "w+");
   if (!fp)
     {
-      g_warning ("Failed to open Xauthority stream: %s", g_strerror (errno));
+      g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                   "Failed to open Xauthority stream: %s", g_strerror (errno));
       close (fd);
       return FALSE;
     }
 
   if (!XauWriteAuth (fp, &auth_entry))
     {
-      g_warning ("Error writing to Xauthority file: %s", g_strerror (errno));
+      g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                   "Error writing to Xauthority file: %s", g_strerror (errno));
       return FALSE;
     }
 
   auth_entry.family = FamilyWild;
   if (!XauWriteAuth (fp, &auth_entry))
     {
-      g_warning ("Error writing to Xauthority file: %s", g_strerror (errno));
+      g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                   "Error writing to Xauthority file: %s", g_strerror (errno));
       return FALSE;
     }
 
   if (fflush (fp) == EOF)
     {
-      g_warning ("Error writing to Xauthority file: %s", g_strerror (errno));
+      g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                   "Error writing to Xauthority file: %s", g_strerror (errno));
       return FALSE;
     }
 
@@ -555,7 +884,7 @@ on_init_x11_cb (MetaDisplay  *display,
   g_autoptr (GError) error = NULL;
 
   if (!meta_display_init_x11_finish (display, result, &error))
-    g_warning ("Failed to initialize X11 display: %s\n", error->message);
+    g_warning ("Failed to initialize X11 display: %s", error->message);
 }
 
 static gboolean
@@ -569,10 +898,18 @@ on_displayfd_ready (int          fd,
    * socket when it's ready. We don't care about the data
    * in the socket, just that it wrote something, since
    * that means it's ready. */
-  g_task_return_boolean (task, TRUE);
+  g_task_return_boolean (task, !!(condition & G_IO_IN));
   g_object_unref (task);
 
   return G_SOURCE_REMOVE;
+}
+
+static int
+steal_fd (int *fd_ptr)
+{
+  int fd = *fd_ptr;
+  *fd_ptr = -1;
+  return fd;
 }
 
 void
@@ -618,6 +955,9 @@ meta_xwayland_start_xserver (MetaXWaylandManager *manager,
 
   if (socketpair (AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, displayfd) < 0)
     {
+      close (xwayland_client_fd[0]);
+      close (xwayland_client_fd[1]);
+
       g_task_return_new_error (task,
                                G_IO_ERROR,
                                g_io_error_from_errno (errno),
@@ -641,11 +981,16 @@ meta_xwayland_start_xserver (MetaXWaylandManager *manager,
 
   launcher = g_subprocess_launcher_new (flags);
 
-  g_subprocess_launcher_take_fd (launcher, xwayland_client_fd[1], 3);
-  g_subprocess_launcher_take_fd (launcher, manager->public_connection.abstract_fd, 4);
-  g_subprocess_launcher_take_fd (launcher, manager->public_connection.unix_fd, 5);
-  g_subprocess_launcher_take_fd (launcher, displayfd[1], 6);
-  g_subprocess_launcher_take_fd (launcher, manager->private_connection.abstract_fd, 7);
+  g_subprocess_launcher_take_fd (launcher,
+                                 steal_fd (&xwayland_client_fd[1]), 3);
+  g_subprocess_launcher_take_fd (launcher,
+                                 steal_fd (&manager->public_connection.abstract_fd), 4);
+  g_subprocess_launcher_take_fd (launcher,
+                                 steal_fd (&manager->public_connection.unix_fd), 5);
+  g_subprocess_launcher_take_fd (launcher,
+                                 steal_fd (&displayfd[1]), 6);
+  g_subprocess_launcher_take_fd (launcher,
+                                 steal_fd (&manager->private_connection.abstract_fd), 7);
 
   g_subprocess_launcher_setenv (launcher, "WAYLAND_SOCKET", "3", TRUE);
 
@@ -658,17 +1003,17 @@ meta_xwayland_start_xserver (MetaXWaylandManager *manager,
   args[i++] = "-core";
   args[i++] = "-auth";
   args[i++] = manager->auth_file;
-  args[i++] = "-listen";
+  args[i++] = XWAYLAND_LISTENFD;
   args[i++] = "4";
-  args[i++] = "-listen";
+  args[i++] = XWAYLAND_LISTENFD;
   args[i++] = "5";
   args[i++] = "-displayfd";
-  args[i++] = "6",
+  args[i++] = "6";
 #ifdef HAVE_XWAYLAND_INITFD
   args[i++] = "-initfd";
   args[i++] = "7";
 #else
-  args[i++] = "-listen";
+  args[i++] = XWAYLAND_LISTENFD;
   args[i++] = "7";
 #endif
   for (j = 0; j <  G_N_ELEMENTS (x11_extension_names); j++)
@@ -692,6 +1037,9 @@ meta_xwayland_start_xserver (MetaXWaylandManager *manager,
 
   if (!manager->proc)
     {
+      close (displayfd[0]);
+      close (xwayland_client_fd[0]);
+
       g_task_return_error (task, error);
       return;
     }
@@ -789,20 +1137,29 @@ meta_xwayland_stop_xserver (MetaXWaylandManager *manager)
 }
 
 gboolean
-meta_xwayland_init (MetaXWaylandManager *manager,
-                    struct wl_display   *wl_display)
+meta_xwayland_init (MetaXWaylandManager  *manager,
+                    struct wl_display    *wl_display,
+                    GError              **error)
 {
   MetaDisplayPolicy policy;
-  gboolean fatal;
+  int display = 0;
+
+  if (display_number_override != -1)
+    display = display_number_override;
+  else if (g_getenv ("RUNNING_UNDER_GDM"))
+    display = 1024;
+
 
   if (!manager->public_connection.name)
     {
-      if (!choose_xdisplay (manager, &manager->public_connection))
-        return FALSE;
-      if (!choose_xdisplay (manager, &manager->private_connection))
+      if (!choose_xdisplay (manager, &manager->public_connection, &display, error))
         return FALSE;
 
-      if (!prepare_auth_file (manager))
+      display++;
+      if (!choose_xdisplay (manager, &manager->private_connection, &display, error))
+        return FALSE;
+
+      if (!prepare_auth_file (manager, error))
         return FALSE;
     }
   else
@@ -811,16 +1168,20 @@ meta_xwayland_init (MetaXWaylandManager *manager,
                                  manager->public_connection.display_index,
                                  &manager->public_connection.abstract_fd,
                                  &manager->public_connection.unix_fd,
-                                 &fatal))
+                                 error))
         return FALSE;
 
       if (!open_display_sockets (manager,
                                  manager->private_connection.display_index,
                                  &manager->private_connection.abstract_fd,
                                  &manager->private_connection.unix_fd,
-                                 &fatal))
+                                 error))
         return FALSE;
     }
+
+  g_message ("Using public X11 display %s, (using %s for managed services)",
+             manager->public_connection.name,
+             manager->private_connection.name);
 
   manager->wayland_display = wl_display;
   policy = meta_get_x11_display_policy ();
@@ -896,6 +1257,9 @@ meta_xwayland_complete_init (MetaDisplay *display,
      we won't reset the tty).
   */
   XSetIOErrorHandler (x_io_error);
+#ifdef HAVE_XSETIOERROREXITHANDLER
+  XSetIOErrorExitHandler (xdisplay, x_io_error_exit, display);
+#endif
 
   g_signal_connect (display, "x11-display-closing",
                     G_CALLBACK (on_x11_display_closing), NULL);
@@ -921,14 +1285,32 @@ meta_xwayland_connection_release (MetaXWaylandConnection *connection)
 void
 meta_xwayland_shutdown (MetaXWaylandManager *manager)
 {
+#ifdef HAVE_XSETIOERROREXITHANDLER
+  MetaDisplay *display = meta_get_display ();
+  MetaX11Display *x11_display;
+#endif
   char path[256];
 
   g_cancellable_cancel (manager->xserver_died_cancellable);
 
-  snprintf (path, sizeof path, "/tmp/.X11-unix/X%d", manager->public_connection.display_index);
+  XSetIOErrorHandler (x_io_error_noop);
+#ifdef HAVE_XSETIOERROREXITHANDLER
+  x11_display = display->x11_display;
+  if (x11_display)
+    {
+      XSetIOErrorExitHandler (meta_x11_display_get_xdisplay (x11_display),
+                              x_io_error_exit_noop, NULL);
+    }
+#endif
+
+  meta_xwayland_terminate (manager);
+
+  snprintf (path, sizeof path, "%s%d", X11_TMP_UNIX_PATH,
+            manager->public_connection.display_index);
   unlink (path);
 
-  snprintf (path, sizeof path, "/tmp/.X11-unix/X%d", manager->private_connection.display_index);
+  snprintf (path, sizeof path, "%s%d", X11_TMP_UNIX_PATH,
+            manager->private_connection.display_index);
   unlink (path);
 
   g_clear_pointer (&manager->public_connection.name, g_free);

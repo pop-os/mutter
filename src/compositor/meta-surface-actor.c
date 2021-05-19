@@ -83,7 +83,7 @@ get_scaled_region (MetaSurfaceActor     *surface_actor,
                    ScalePerspectiveType  scale_perspective)
 {
   MetaWindowActor *window_actor;
-  cairo_region_t *scaled_region;
+  cairo_region_t *scaled_region = NULL;
   int geometry_scale;
   float x, y;
 
@@ -107,6 +107,7 @@ get_scaled_region (MetaSurfaceActor     *surface_actor,
       break;
     }
 
+  g_assert (scaled_region != NULL);
   cairo_region_translate (region, -x, -y);
   cairo_region_translate (scaled_region, -x, -y);
 
@@ -184,7 +185,7 @@ meta_surface_actor_pick (ClutterActor       *actor,
   ClutterActorIter iter;
   ClutterActor *child;
 
-  if (!clutter_actor_should_pick_paint (actor))
+  if (!clutter_actor_should_pick (actor, pick_context))
     return;
 
   /* If there is no region then use the regular pick */
@@ -612,6 +613,9 @@ meta_surface_actor_set_frozen (MetaSurfaceActor *self,
 {
   MetaSurfaceActorPrivate *priv =
     meta_surface_actor_get_instance_private (self);
+
+  if (priv->frozen == frozen)
+    return;
 
   priv->frozen = frozen;
 

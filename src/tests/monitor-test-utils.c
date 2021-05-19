@@ -226,8 +226,9 @@ logical_monitor_from_layout (MetaMonitorManager *monitor_manager,
 }
 
 static void
-check_logical_monitor (MetaMonitorManager            *monitor_manager,
-                       MonitorTestCaseLogicalMonitor *test_logical_monitor)
+check_logical_monitor (MetaMonitorManager             *monitor_manager,
+                       MonitorTestCaseLogicalMonitor  *test_logical_monitor,
+                       GList                         **all_crtcs)
 {
   MetaLogicalMonitor *logical_monitor;
   MetaOutput *primary_output;
@@ -288,6 +289,8 @@ check_logical_monitor (MetaMonitorManager            *monitor_manager,
           MetaOutput *output = l_output->data;
           MetaCrtc *crtc;
 
+          g_assert (meta_output_get_monitor (output) == monitor);
+
           if (meta_output_is_primary (output))
             {
               g_assert_null (primary_output);
@@ -295,8 +298,19 @@ check_logical_monitor (MetaMonitorManager            *monitor_manager,
             }
 
           crtc = meta_output_get_assigned_crtc (output);
-          g_assert (!crtc ||
-                    meta_monitor_get_logical_monitor (monitor) == logical_monitor);
+          if (crtc)
+            {
+              g_assert (meta_monitor_get_logical_monitor (monitor) ==
+                        logical_monitor);
+              g_assert (g_list_find ((GList *) meta_crtc_get_outputs (crtc),
+                                     output));
+              *all_crtcs = g_list_remove (*all_crtcs, crtc);
+            }
+          else
+            {
+              g_assert_null (crtc);
+            }
+
           g_assert_cmpint (logical_monitor->is_presentation,
                            ==,
                            meta_output_is_presentation (output));
@@ -311,6 +325,7 @@ void
 check_monitor_configuration (MonitorTestCaseExpect *expect)
 {
   MetaBackend *backend = meta_get_backend ();
+  MetaRenderer *renderer = meta_backend_get_renderer (backend);
   MetaMonitorManager *monitor_manager =
     meta_backend_get_monitor_manager (backend);
   MetaMonitorManagerTest *monitor_manager_test =
@@ -320,6 +335,7 @@ check_monitor_configuration (MonitorTestCaseExpect *expect)
   GList *monitors;
   GList *crtcs;
   int n_logical_monitors;
+  GList *all_crtcs;
   GList *l;
   int i;
 
@@ -349,6 +365,8 @@ check_monitor_configuration (MonitorTestCaseExpect *expect)
   for (l = monitors, i = 0; l; l = l->next, i++)
     {
       MetaMonitor *monitor = l->data;
+      MetaOutput *main_output;
+      const MetaOutputInfo *main_output_info;
       GList *outputs;
       GList *l_output;
       int j;
@@ -383,6 +401,19 @@ check_monitor_configuration (MonitorTestCaseExpect *expect)
       g_assert_cmpint (height_mm,
                        ==,
                        expect->monitors[i].height_mm);
+
+      main_output = meta_monitor_get_main_output (monitor);
+      main_output_info = meta_output_get_info (main_output);
+      g_assert_cmpstr (meta_monitor_get_connector (monitor), ==,
+                       main_output_info->name);
+      g_assert_cmpstr (meta_monitor_get_vendor (monitor), ==,
+                       main_output_info->vendor);
+      g_assert_cmpstr (meta_monitor_get_product (monitor), ==,
+                       main_output_info->product);
+      g_assert_cmpstr (meta_monitor_get_serial (monitor), ==,
+                       main_output_info->serial);
+      g_assert_cmpint (meta_monitor_get_connector_type (monitor), ==,
+                       main_output_info->connector_type);
 
       modes = meta_monitor_get_modes (monitor);
       g_assert_cmpint (g_list_length (modes),
@@ -488,14 +519,31 @@ check_monitor_configuration (MonitorTestCaseExpect *expect)
       g_assert (logical_monitor == monitor_manager->primary_logical_monitor);
     }
 
+  all_crtcs = NULL;
+  for (l = meta_backend_get_gpus (backend); l; l = l->next)
+    {
+      MetaGpu *gpu = l->data;
+
+      all_crtcs = g_list_concat (all_crtcs,
+                                 g_list_copy (meta_gpu_get_crtcs (gpu)));
+    }
+
   for (i = 0; i < expect->n_logical_monitors; i++)
     {
       MonitorTestCaseLogicalMonitor *test_logical_monitor =
         &expect->logical_monitors[i];
 
-      check_logical_monitor (monitor_manager, test_logical_monitor);
+      check_logical_monitor (monitor_manager, test_logical_monitor, &all_crtcs);
     }
   g_assert_cmpint (n_logical_monitors, ==, i);
+
+  for (l = all_crtcs; l; l = l->next)
+    {
+      MetaCrtc *crtc = l->data;
+
+      g_assert_null (meta_crtc_get_outputs (crtc));
+    }
+  g_list_free (all_crtcs);
 
   crtcs = meta_gpu_get_crtcs (gpu);
   for (l = crtcs, i = 0; l; l = l->next, i++)
@@ -505,11 +553,25 @@ check_monitor_configuration (MonitorTestCaseExpect *expect)
 
       if (expect->crtcs[i].current_mode == -1)
         {
+          g_assert_null (meta_crtc_get_outputs (crtc));
           g_assert_null (crtc_config);
         }
       else
         {
           MetaCrtcMode *expected_current_mode;
+          const GList *l_output;
+          MetaRendererView *view;
+          cairo_rectangle_int_t view_layout;
+
+          for (l_output = meta_crtc_get_outputs (crtc);
+               l_output;
+               l_output = l_output->next)
+            {
+              MetaOutput *output = l_output->data;
+
+              g_assert (meta_output_get_assigned_crtc (output) == crtc);
+              g_assert_null (g_list_find (l_output->next, output));
+            }
 
           g_assert_nonnull (crtc_config);
 
@@ -527,6 +589,23 @@ check_monitor_configuration (MonitorTestCaseExpect *expect)
                                           FLT_EPSILON);
           g_assert_cmpfloat_with_epsilon (crtc_config->layout.origin.y,
                                           expect->crtcs[i].y,
+                                          FLT_EPSILON);
+
+          view = meta_renderer_get_view_for_crtc (renderer, crtc);
+          g_assert_nonnull (view);
+          clutter_stage_view_get_layout (CLUTTER_STAGE_VIEW (view),
+                                         &view_layout);
+          g_assert_cmpfloat_with_epsilon (crtc_config->layout.origin.x,
+                                          view_layout.x,
+                                          FLT_EPSILON);
+          g_assert_cmpfloat_with_epsilon (crtc_config->layout.origin.y,
+                                          view_layout.y,
+                                          FLT_EPSILON);
+          g_assert_cmpfloat_with_epsilon (crtc_config->layout.size.width,
+                                          view_layout.width,
+                                          FLT_EPSILON);
+          g_assert_cmpfloat_with_epsilon (crtc_config->layout.size.height,
+                                          view_layout.height,
                                           FLT_EPSILON);
         }
     }

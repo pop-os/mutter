@@ -114,14 +114,41 @@ struct _ClutterPerspective
   gfloat z_far;
 };
 
+typedef enum
+{
+  CLUTTER_FRAME_INFO_FLAG_NONE = 0,
+  /* presentation_time timestamp was provided by the hardware */
+  CLUTTER_FRAME_INFO_FLAG_HW_CLOCK = 1 << 0,
+  /*
+   * The presentation of this frame was done zero-copy. This means the buffer
+   * from the client was given to display hardware as is, without copying it.
+   * Compositing with OpenGL counts as copying, even if textured directly from
+   * the client buffer. Possible zero-copy cases include direct scanout of a
+   * fullscreen surface and a surface on a hardware overlay.
+   */
+  CLUTTER_FRAME_INFO_FLAG_ZERO_COPY = 1 << 1,
+  /*
+   * The presentation was synchronized to the "vertical retrace" by the display
+   * hardware such that tearing does not happen. Relying on user space
+   * scheduling is not acceptable for this flag. If presentation is done by a
+   * copy to the active frontbuffer, then it must guarantee that tearing cannot
+   * happen.
+   */
+  CLUTTER_FRAME_INFO_FLAG_VSYNC = 1 << 2,
+} ClutterFrameInfoFlag;
+
 /**
  * ClutterFrameInfo: (skip)
  */
 struct _ClutterFrameInfo
 {
   int64_t frame_counter;
-  int64_t presentation_time;
+  int64_t presentation_time; /* microseconds; CLOCK_MONOTONIC */
   float refresh_rate;
+
+  ClutterFrameInfoFlag flags;
+
+  unsigned int sequence;
 };
 
 typedef struct _ClutterCapture
@@ -195,24 +222,15 @@ void            clutter_stage_ensure_viewport                   (ClutterStage   
 CLUTTER_EXPORT
 gboolean        clutter_stage_is_redraw_queued_on_view          (ClutterStage          *stage,
                                                                  ClutterStageView      *view);
-
-#ifdef CLUTTER_ENABLE_EXPERIMENTAL_API
-CLUTTER_EXPORT
-void            clutter_stage_set_sync_delay                    (ClutterStage          *stage,
-                                                                 gint                   sync_delay);
-CLUTTER_EXPORT
-void            clutter_stage_skip_sync_delay                   (ClutterStage          *stage);
-#endif
-
 CLUTTER_EXPORT
 void clutter_stage_schedule_update (ClutterStage *stage);
 
 CLUTTER_EXPORT
 gboolean clutter_stage_get_capture_final_size (ClutterStage          *stage,
                                                cairo_rectangle_int_t *rect,
-                                               int                   *width,
-                                               int                   *height,
-                                               float                 *scale);
+                                               int                   *out_width,
+                                               int                   *out_height,
+                                               float                 *out_scale);
 
 CLUTTER_EXPORT
 void clutter_stage_paint_to_framebuffer (ClutterStage                *stage,
@@ -235,6 +253,11 @@ CLUTTER_EXPORT
 ClutterStageView * clutter_stage_get_view_at (ClutterStage *stage,
                                               float         x,
                                               float         y);
+
+CLUTTER_EXPORT
+ClutterActor * clutter_stage_get_device_actor (ClutterStage         *stage,
+                                               ClutterInputDevice   *device,
+                                               ClutterEventSequence *sequence);
 
 G_END_DECLS
 

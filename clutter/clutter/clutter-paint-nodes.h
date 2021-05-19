@@ -160,7 +160,8 @@ CLUTTER_EXPORT
 GType clutter_actor_node_get_type (void) G_GNUC_CONST;
 
 CLUTTER_EXPORT
-ClutterPaintNode * clutter_actor_node_new (ClutterActor *actor);
+ClutterPaintNode * clutter_actor_node_new (ClutterActor *actor,
+                                           int           opacity);
 
 #define CLUTTER_TYPE_ROOT_NODE                  (clutter_root_node_get_type ())
 #define CLUTTER_ROOT_NODE(obj)                  (G_TYPE_CHECK_INSTANCE_CAST ((obj), CLUTTER_TYPE_ROOT_NODE, ClutterRootNode))
@@ -202,11 +203,15 @@ CLUTTER_EXPORT
 GType clutter_layer_node_get_type (void) G_GNUC_CONST;
 
 CLUTTER_EXPORT
-ClutterPaintNode *      clutter_layer_node_new          (const CoglMatrix        *projection,
+ClutterPaintNode *      clutter_layer_node_new          (const graphene_matrix_t *projection,
                                                          const cairo_rectangle_t *viewport,
                                                          float                    width,
                                                          float                    height,
                                                          guint8                   opacity);
+
+CLUTTER_EXPORT
+ClutterPaintNode * clutter_layer_node_new_to_framebuffer (CoglFramebuffer *framebuffer,
+                                                          CoglPipeline    *pipeline);
 
 
 #define CLUTTER_TYPE_TRANSFORM_NODE             (clutter_transform_node_get_type ())
@@ -228,7 +233,56 @@ CLUTTER_EXPORT
 GType clutter_transform_node_get_type (void) G_GNUC_CONST;
 
 CLUTTER_EXPORT
-ClutterPaintNode *      clutter_transform_node_new          (const CoglMatrix *projection);
+ClutterPaintNode *      clutter_transform_node_new          (const graphene_matrix_t *projection);
+
+#define CLUTTER_TYPE_BLIT_NODE                  (clutter_blit_node_get_type ())
+#define CLUTTER_BLIT_NODE(obj)                  (G_TYPE_CHECK_INSTANCE_CAST ((obj), CLUTTER_TYPE_BLIT_NODE, ClutterBlitNode))
+#define CLUTTER_IS_BLIT_NODE(obj)               (G_TYPE_CHECK_INSTANCE_TYPE ((obj), CLUTTER_TYPE_BLIT_NODE))
+
+/*
+ * ClutterBlitNode:
+ *
+ * The #ClutterBlitNode structure is an opaque
+ * type whose members cannot be directly accessed.
+ */
+typedef struct _ClutterBlitNode                 ClutterBlitNode;
+typedef struct _ClutterPaintNodeClass           ClutterBlitNodeClass;
+
+CLUTTER_EXPORT
+GType clutter_blit_node_get_type (void) G_GNUC_CONST;
+
+CLUTTER_EXPORT
+ClutterPaintNode * clutter_blit_node_new (CoglFramebuffer *src);
+
+CLUTTER_EXPORT
+void clutter_blit_node_add_blit_rectangle (ClutterBlitNode *blit_node,
+                                           int              src_x,
+                                           int              src_y,
+                                           int              dst_x,
+                                           int              dst_y,
+                                           int              width,
+                                           int              height);
+
+#define CLUTTER_TYPE_BLUR_NODE                  (clutter_blur_node_get_type ())
+#define CLUTTER_BLUR_NODE(obj)                  (G_TYPE_CHECK_INSTANCE_CAST ((obj), CLUTTER_TYPE_BLUR_NODE, ClutterBlurNode))
+#define CLUTTER_IS_BLUR_NODE(obj)               (G_TYPE_CHECK_INSTANCE_TYPE ((obj), CLUTTER_TYPE_BLUR_NODE))
+
+/**
+ * ClutterBlurNode:
+ *
+ * The #ClutterBurNode structure is an opaque
+ * type whose members cannot be directly accessed.
+ */
+typedef struct _ClutterBlurNode                 ClutterBlurNode;
+typedef struct _ClutterLayerNodeClass           ClutterBlurNodeClass;
+
+CLUTTER_EXPORT
+GType clutter_blur_node_get_type (void) G_GNUC_CONST;
+
+CLUTTER_EXPORT
+ClutterPaintNode * clutter_blur_node_new (unsigned int width,
+                                          unsigned int height,
+                                          float        sigma);
 
 G_END_DECLS
 

@@ -19,7 +19,7 @@
 
 #include "config.h"
 
-#include "backends/native/meta-input-device-tool-native.h"
+#include "backends/native/meta-input-thread.h"
 
 G_DEFINE_TYPE (MetaInputDeviceToolNative, meta_input_device_tool_native,
                CLUTTER_TYPE_INPUT_DEVICE_TOOL)
@@ -49,6 +49,27 @@ meta_input_device_tool_native_init (MetaInputDeviceToolNative *tool)
   tool->button_map = g_hash_table_new (NULL, NULL);
 }
 
+static ClutterInputAxisFlags
+translate_axes (struct libinput_tablet_tool *tool)
+{
+  ClutterInputAxisFlags axes = 0;
+
+  if (libinput_tablet_tool_has_pressure (tool))
+    axes |= CLUTTER_INPUT_AXIS_FLAG_PRESSURE;
+  if (libinput_tablet_tool_has_distance (tool))
+    axes |= CLUTTER_INPUT_AXIS_FLAG_DISTANCE;
+  if (libinput_tablet_tool_has_rotation (tool))
+    axes |= CLUTTER_INPUT_AXIS_FLAG_ROTATION;
+  if (libinput_tablet_tool_has_slider (tool))
+    axes |= CLUTTER_INPUT_AXIS_FLAG_SLIDER;
+  if (libinput_tablet_tool_has_wheel (tool))
+    axes |= CLUTTER_INPUT_AXIS_FLAG_WHEEL;
+  if (libinput_tablet_tool_has_tilt (tool))
+    axes |= CLUTTER_INPUT_AXIS_FLAG_XTILT | CLUTTER_INPUT_AXIS_FLAG_YTILT;
+
+  return axes;
+}
+
 ClutterInputDeviceTool *
 meta_input_device_tool_native_new (struct libinput_tablet_tool *tool,
                                    uint64_t                     serial,
@@ -60,6 +81,7 @@ meta_input_device_tool_native_new (struct libinput_tablet_tool *tool,
                              "type", type,
                              "serial", serial,
                              "id", libinput_tablet_tool_get_tool_id (tool),
+                             "axes", translate_axes (tool),
                              NULL);
 
   evdev_tool->tool = libinput_tablet_tool_ref (tool);
@@ -68,8 +90,8 @@ meta_input_device_tool_native_new (struct libinput_tablet_tool *tool,
 }
 
 void
-meta_input_device_tool_native_set_pressure_curve (ClutterInputDeviceTool *tool,
-                                                  double                  curve[4])
+meta_input_device_tool_native_set_pressure_curve_in_impl (ClutterInputDeviceTool *tool,
+                                                          double                  curve[4])
 {
   MetaInputDeviceToolNative *evdev_tool;
 
@@ -87,9 +109,9 @@ meta_input_device_tool_native_set_pressure_curve (ClutterInputDeviceTool *tool,
 }
 
 void
-meta_input_device_tool_native_set_button_code (ClutterInputDeviceTool *tool,
-                                               uint32_t                button,
-                                               uint32_t                evcode)
+meta_input_device_tool_native_set_button_code_in_impl (ClutterInputDeviceTool *tool,
+                                                       uint32_t                button,
+                                                       uint32_t                evcode)
 {
   MetaInputDeviceToolNative *evdev_tool;
 
@@ -130,8 +152,8 @@ calculate_bezier_position (double pos,
 }
 
 double
-meta_input_device_tool_native_translate_pressure (ClutterInputDeviceTool *tool,
-                                                  double                  pressure)
+meta_input_device_tool_native_translate_pressure_in_impl (ClutterInputDeviceTool *tool,
+                                                          double                  pressure)
 {
   MetaInputDeviceToolNative *evdev_tool;
 
@@ -147,8 +169,8 @@ meta_input_device_tool_native_translate_pressure (ClutterInputDeviceTool *tool,
 }
 
 uint32_t
-meta_input_device_tool_native_get_button_code (ClutterInputDeviceTool *tool,
-                                               uint32_t                button)
+meta_input_device_tool_native_get_button_code_in_impl (ClutterInputDeviceTool *tool,
+                                                       uint32_t                button)
 {
   MetaInputDeviceToolNative *evdev_tool;
 

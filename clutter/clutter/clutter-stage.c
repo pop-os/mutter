@@ -48,7 +48,6 @@
 #include <cairo-gobject.h>
 
 #define CLUTTER_DISABLE_DEPRECATION_WARNINGS
-#define CLUTTER_ENABLE_EXPERIMENTAL_API
 
 #include "clutter-stage.h"
 #include "deprecated/clutter-container.h"
@@ -77,12 +76,13 @@
 
 #include "cogl/cogl.h"
 
-struct _ClutterStageQueueRedrawEntry
+#define MAX_FRUSTA 64
+
+typedef struct _QueueRedrawEntry
 {
-  ClutterActor *actor;
   gboolean has_clip;
   ClutterPaintVolume clip;
-};
+} QueueRedrawEntry;
 
 typedef struct _PickRecord
 {
@@ -97,15 +97,24 @@ typedef struct _PickClipRecord
   graphene_point_t vertex[4];
 } PickClipRecord;
 
+typedef struct _PointerDeviceEntry
+{
+  ClutterStage *stage;
+  ClutterInputDevice *device;
+  ClutterEventSequence *sequence;
+  graphene_point_t coords;
+  ClutterActor *current_actor;
+} PointerDeviceEntry;
+
 struct _ClutterStagePrivate
 {
   /* the stage implementation */
   ClutterStageWindow *impl;
 
   ClutterPerspective perspective;
-  CoglMatrix projection;
-  CoglMatrix inverse_projection;
-  CoglMatrix view;
+  graphene_matrix_t projection;
+  graphene_matrix_t inverse_projection;
+  graphene_matrix_t view;
   float viewport[4];
 
   gchar *title;
@@ -115,34 +124,17 @@ struct _ClutterStagePrivate
 
   GArray *paint_volume_stack;
 
-  ClutterPlane current_clip_planes[4];
-
   GSList *pending_relayouts;
-  GList *pending_queue_redraws;
-
-  gint sync_delay;
-
-  GTimer *fps_timer;
-  gint32 timer_n_frames;
-
-  GArray *pick_stack;
-  GArray *pick_clip_stack;
-  int pick_clip_stack_top;
-  gboolean pick_stack_frozen;
-  ClutterPickMode cached_pick_mode;
-
-#ifdef CLUTTER_ENABLE_DEBUG
-  gulong redraw_count;
-#endif /* CLUTTER_ENABLE_DEBUG */
-
-  ClutterStageState current_state;
+  GHashTable *pending_queue_redraws;
 
   int update_freeze_count;
 
   gboolean needs_update_devices;
   gboolean pending_finish_queue_redraws;
 
-  guint redraw_pending         : 1;
+  GHashTable *pointer_devices;
+  GHashTable *touch_sequences;
+
   guint throttle_motion_events : 1;
   guint min_size_changed       : 1;
   guint motion_events_enabled  : 1;
@@ -181,13 +173,8 @@ static guint stage_signals[LAST_SIGNAL] = { 0, };
 
 static const ClutterColor default_stage_color = { 255, 255, 255, 255 };
 
-static void free_queue_redraw_entry (ClutterStageQueueRedrawEntry *entry);
-static void capture_view_into (ClutterStage          *stage,
-                               gboolean               paint,
-                               ClutterStageView      *view,
-                               cairo_rectangle_int_t *rect,
-                               uint8_t               *data,
-                               int                    stride);
+static void free_queue_redraw_entry (QueueRedrawEntry *entry);
+static void free_pointer_device_entry (PointerDeviceEntry *entry);
 static void clutter_stage_update_view_perspective (ClutterStage *stage);
 static void clutter_stage_set_viewport (ClutterStage *stage,
                                         float         width,
@@ -235,266 +222,6 @@ clutter_stage_get_preferred_height (ClutterActor *self,
 
   if (natural_height_p)
     *natural_height_p = geom.height;
-}
-
-static void
-add_pick_stack_weak_refs (ClutterStage *stage)
-{
-  ClutterStagePrivate *priv = stage->priv;
-  int i;
-
-  if (priv->pick_stack_frozen)
-    return;
-
-  for (i = 0; i < priv->pick_stack->len; i++)
-    {
-      PickRecord *rec = &g_array_index (priv->pick_stack, PickRecord, i);
-
-      if (rec->actor)
-        g_object_add_weak_pointer (G_OBJECT (rec->actor),
-                                   (gpointer) &rec->actor);
-    }
-
-  priv->pick_stack_frozen = TRUE;
-}
-
-static void
-remove_pick_stack_weak_refs (ClutterStage *stage)
-{
-  ClutterStagePrivate *priv = stage->priv;
-  int i;
-
-  if (!priv->pick_stack_frozen)
-    return;
-
-  for (i = 0; i < priv->pick_stack->len; i++)
-    {
-      PickRecord *rec = &g_array_index (priv->pick_stack, PickRecord, i);
-
-      if (rec->actor)
-        g_object_remove_weak_pointer (G_OBJECT (rec->actor),
-                                      (gpointer) &rec->actor);
-    }
-
-  priv->pick_stack_frozen = FALSE;
-}
-
-static void
-_clutter_stage_clear_pick_stack (ClutterStage *stage)
-{
-  ClutterStagePrivate *priv = stage->priv;
-
-  remove_pick_stack_weak_refs (stage);
-  g_array_set_size (priv->pick_stack, 0);
-  g_array_set_size (priv->pick_clip_stack, 0);
-  priv->pick_clip_stack_top = -1;
-  priv->cached_pick_mode = CLUTTER_PICK_NONE;
-}
-
-void
-clutter_stage_log_pick (ClutterStage           *stage,
-                        const graphene_point_t *vertices,
-                        ClutterActor           *actor)
-{
-  ClutterStagePrivate *priv;
-  PickRecord rec;
-
-  g_return_if_fail (CLUTTER_IS_STAGE (stage));
-  g_return_if_fail (actor != NULL);
-
-  priv = stage->priv;
-
-  g_assert (!priv->pick_stack_frozen);
-
-  memcpy (rec.vertex, vertices, 4 * sizeof (graphene_point_t));
-  rec.actor = actor;
-  rec.clip_stack_top = priv->pick_clip_stack_top;
-
-  g_array_append_val (priv->pick_stack, rec);
-}
-
-void
-clutter_stage_push_pick_clip (ClutterStage           *stage,
-                              const graphene_point_t *vertices)
-{
-  ClutterStagePrivate *priv;
-  PickClipRecord clip;
-
-  g_return_if_fail (CLUTTER_IS_STAGE (stage));
-
-  priv = stage->priv;
-
-  g_assert (!priv->pick_stack_frozen);
-
-  clip.prev = priv->pick_clip_stack_top;
-  memcpy (clip.vertex, vertices, 4 * sizeof (graphene_point_t));
-
-  g_array_append_val (priv->pick_clip_stack, clip);
-  priv->pick_clip_stack_top = priv->pick_clip_stack->len - 1;
-}
-
-void
-clutter_stage_pop_pick_clip (ClutterStage *stage)
-{
-  ClutterStagePrivate *priv;
-  const PickClipRecord *top;
-
-  g_return_if_fail (CLUTTER_IS_STAGE (stage));
-
-  priv = stage->priv;
-
-  g_assert (!priv->pick_stack_frozen);
-  g_assert (priv->pick_clip_stack_top >= 0);
-
-  /* Individual elements of pick_clip_stack are not freed. This is so they
-   * can be shared as part of a tree of different stacks used by different
-   * actors in the pick_stack. The whole pick_clip_stack does however get
-   * freed later in _clutter_stage_clear_pick_stack.
-   */
-
-  top = &g_array_index (priv->pick_clip_stack,
-                        PickClipRecord,
-                        priv->pick_clip_stack_top);
-
-  priv->pick_clip_stack_top = top->prev;
-}
-
-static gboolean
-is_quadrilateral_axis_aligned_rectangle (const graphene_point_t *vertices)
-{
-  int i;
-
-  for (i = 0; i < 4; i++)
-    {
-      if (!G_APPROX_VALUE (vertices[i].x,
-                           vertices[(i + 1) % 4].x,
-                           FLT_EPSILON) &&
-          !G_APPROX_VALUE (vertices[i].y,
-                           vertices[(i + 1) % 4].y,
-                           FLT_EPSILON))
-        return FALSE;
-    }
-  return TRUE;
-}
-
-static gboolean
-is_inside_axis_aligned_rectangle (const graphene_point_t *point,
-                                  const graphene_point_t *vertices)
-{
-  float min_x = FLT_MAX;
-  float max_x = -FLT_MAX;
-  float min_y = FLT_MAX;
-  float max_y = -FLT_MAX;
-  int i;
-
-  for (i = 0; i < 3; i++)
-    {
-      min_x = MIN (min_x, vertices[i].x);
-      min_y = MIN (min_y, vertices[i].y);
-      max_x = MAX (max_x, vertices[i].x);
-      max_y = MAX (max_y, vertices[i].y);
-    }
-
-  return (point->x >= min_x &&
-          point->y >= min_y &&
-          point->x < max_x &&
-          point->y < max_y);
-}
-
-static int
-clutter_point_compare_line (const graphene_point_t *p,
-                            const graphene_point_t *a,
-                            const graphene_point_t *b)
-{
-  graphene_vec3_t vec_pa;
-  graphene_vec3_t vec_pb;
-  graphene_vec3_t cross;
-  float cross_z;
-
-  graphene_vec3_init (&vec_pa, p->x - a->x, p->y - a->y, 0.f);
-  graphene_vec3_init (&vec_pb, p->x - b->x, p->y - b->y, 0.f);
-  graphene_vec3_cross (&vec_pa, &vec_pb, &cross);
-  cross_z = graphene_vec3_get_z (&cross);
-
-  if (cross_z > 0.f)
-    return 1;
-  else if (cross_z < 0.f)
-    return -1;
-  else
-    return 0;
-}
-
-static gboolean
-is_inside_unaligned_rectangle (const graphene_point_t *point,
-                               const graphene_point_t *vertices)
-{
-  unsigned int i;
-  int first_side;
-
-  first_side = 0;
-
-  for (i = 0; i < 4; i++)
-    {
-      int side;
-
-      side = clutter_point_compare_line (point,
-                                         &vertices[i],
-                                         &vertices[(i + 1) % 4]);
-
-      if (side)
-        {
-          if (first_side == 0)
-            first_side = side;
-          else if (side != first_side)
-            return FALSE;
-        }
-    }
-
-  if (first_side == 0)
-    return FALSE;
-
-  return TRUE;
-}
-
-static gboolean
-is_inside_input_region (const graphene_point_t *point,
-                        const graphene_point_t *vertices)
-{
-
-  if (is_quadrilateral_axis_aligned_rectangle (vertices))
-    return is_inside_axis_aligned_rectangle (point, vertices);
-  else
-    return is_inside_unaligned_rectangle (point, vertices);
-}
-
-static gboolean
-pick_record_contains_point (ClutterStage     *stage,
-                            const PickRecord *rec,
-                            float             x,
-                            float             y)
-{
-  const graphene_point_t point = GRAPHENE_POINT_INIT (x, y);
-  ClutterStagePrivate *priv;
-  int clip_index;
-
-  if (!is_inside_input_region (&point, rec->vertex))
-      return FALSE;
-
-  priv = stage->priv;
-  clip_index = rec->clip_stack_top;
-  while (clip_index >= 0)
-    {
-      const PickClipRecord *clip = &g_array_index (priv->pick_clip_stack,
-                                                   PickClipRecord,
-                                                   clip_index);
-
-      if (!is_inside_input_region (&point, clip->vertex))
-        return FALSE;
-
-      clip_index = clip->prev;
-    }
-
-  return TRUE;
 }
 
 static void
@@ -653,186 +380,63 @@ clutter_stage_allocate (ClutterActor           *self,
   clutter_stage_set_viewport (CLUTTER_STAGE (self), new_width, new_height);
 }
 
-typedef struct _Vector4
-{
-  float x, y, z, w;
-} Vector4;
-
 static void
-_cogl_util_get_eye_planes_for_screen_poly (float *polygon,
-                                           int n_vertices,
-                                           float *viewport,
-                                           const CoglMatrix *projection,
-                                           const CoglMatrix *inverse_project,
-                                           ClutterPlane *planes)
-{
-  float Wc;
-  Vector4 *tmp_poly;
-  ClutterPlane *plane;
-  int i;
-  Vector4 *poly;
-  graphene_vec3_t b;
-  graphene_vec3_t c;
-  int count;
-
-  tmp_poly = g_alloca (sizeof (Vector4) * n_vertices * 2);
-
-#define DEPTH -50
-
-  /* Determine W in clip-space (Wc) for a point (0, 0, DEPTH, 1)
-   *
-   * Note: the depth could be anything except 0.
-   *
-   * We will transform the polygon into clip coordinates using this
-   * depth and then into eye coordinates. Our clip planes will be
-   * defined by triangles that extend between points of the polygon at
-   * DEPTH and corresponding points of the same polygon at DEPTH * 2.
-   *
-   * NB: Wc defines the position of the clip planes in clip
-   * coordinates. Given a screen aligned cross section through the
-   * frustum; coordinates range from [-Wc,Wc] left to right on the
-   * x-axis and [Wc,-Wc] top to bottom on the y-axis.
-   */
-  Wc = DEPTH * projection->wz + projection->ww;
-
-#define CLIP_X(X) ((((float)X - viewport[0]) * (2.0 / viewport[2])) - 1) * Wc
-#define CLIP_Y(Y) ((((float)Y - viewport[1]) * (2.0 / viewport[3])) - 1) * -Wc
-
-  for (i = 0; i < n_vertices; i++)
-    {
-      tmp_poly[i].x = CLIP_X (polygon[i * 2]);
-      tmp_poly[i].y = CLIP_Y (polygon[i * 2 + 1]);
-      tmp_poly[i].z = DEPTH;
-      tmp_poly[i].w = Wc;
-    }
-
-  Wc = DEPTH * 2 * projection->wz + projection->ww;
-
-  /* FIXME: technically we don't need to project all of the points
-   * twice, it would be enough project every other point since
-   * we can share points in this set to define the plane vectors. */
-  for (i = 0; i < n_vertices; i++)
-    {
-      tmp_poly[n_vertices + i].x = CLIP_X (polygon[i * 2]);
-      tmp_poly[n_vertices + i].y = CLIP_Y (polygon[i * 2 + 1]);
-      tmp_poly[n_vertices + i].z = DEPTH * 2;
-      tmp_poly[n_vertices + i].w = Wc;
-    }
-
-#undef CLIP_X
-#undef CLIP_Y
-
-  cogl_matrix_project_points (inverse_project,
-                              4,
-                              sizeof (Vector4),
-                              tmp_poly,
-                              sizeof (Vector4),
-                              tmp_poly,
-                              n_vertices * 2);
-
-  /* XXX: It's quite ugly that we end up with these casts between
-   * Vector4 types and CoglVector3s, it might be better if the
-   * cogl_vector APIs just took pointers to floats.
-   */
-
-  count = n_vertices - 1;
-  for (i = 0; i < count; i++)
-    {
-      plane = &planes[i];
-
-      poly = &tmp_poly[i];
-      graphene_vec3_init (&plane->v0, poly->x, poly->y, poly->z);
-
-      poly = &tmp_poly[n_vertices + i];
-      graphene_vec3_init (&b, poly->x, poly->y, poly->z);
-
-      poly = &tmp_poly[n_vertices + i + 1];
-      graphene_vec3_init (&c, poly->x, poly->y, poly->z);
-
-      graphene_vec3_subtract (&b, &plane->v0, &b);
-      graphene_vec3_subtract (&c, &plane->v0, &c);
-      graphene_vec3_cross (&b, &c, &plane->n);
-      graphene_vec3_normalize (&plane->n, &plane->n);
-    }
-
-  plane = &planes[n_vertices - 1];
-
-  poly = &tmp_poly[0];
-  graphene_vec3_init (&plane->v0, poly->x, poly->y, poly->z);
-
-  poly = &tmp_poly[2 * n_vertices - 1];
-  graphene_vec3_init (&b, poly->x, poly->y, poly->z);
-
-  poly = &tmp_poly[n_vertices];
-  graphene_vec3_init (&c, poly->x, poly->y, poly->z);
-
-  graphene_vec3_subtract (&b, &plane->v0, &b);
-  graphene_vec3_subtract (&c, &plane->v0, &c);
-  graphene_vec3_cross (&b, &c, &plane->n);
-  graphene_vec3_normalize (&plane->n, &plane->n);
-}
-
-/* XXX: Instead of having a toplevel 2D clip region, it might be
- * better to have a clip volume within the view frustum. This could
- * allow us to avoid projecting actors into window coordinates to
- * be able to cull them.
- */
-static void
-setup_view_for_pick_or_paint (ClutterStage                *stage,
-                              ClutterStageView            *view,
-                              const cairo_rectangle_int_t *clip)
+setup_clip_frustum (ClutterStage                *stage,
+                    const cairo_rectangle_int_t *clip,
+                    graphene_frustum_t          *frustum)
 {
   ClutterStagePrivate *priv = stage->priv;
-  cairo_rectangle_int_t view_layout;
-  float clip_poly[8];
-  float viewport[4];
   cairo_rectangle_int_t geom;
-
-  /* Any mode of painting/picking invalidates the pick cache, unless we're
-   * in the middle of building it. So we reset the cached flag but don't
-   * completely clear the pick stack.
-   */
-  priv->cached_pick_mode = CLUTTER_PICK_NONE;
+  graphene_point3d_t camera_position;
+  graphene_point3d_t p[4];
+  graphene_plane_t planes[6];
+  graphene_vec4_t v;
+  int i;
 
   _clutter_stage_window_get_geometry (priv->impl, &geom);
 
-  viewport[0] = priv->viewport[0];
-  viewport[1] = priv->viewport[1];
-  viewport[2] = priv->viewport[2];
-  viewport[3] = priv->viewport[3];
+  CLUTTER_NOTE (CLIPPING, "Creating stage clip frustum for "
+                "x=%d, y=%d, width=%d, height=%d",
+                clip->x, clip->y, clip->width, clip->height);
 
-  if (!clip)
+  camera_position = GRAPHENE_POINT3D_INIT_ZERO;
+
+  p[0] = GRAPHENE_POINT3D_INIT (MAX (clip->x, 0), MAX (clip->y, 0), 0.f);
+  p[2] = GRAPHENE_POINT3D_INIT (MIN (clip->x + clip->width, geom.width),
+                                MIN (clip->y + clip->height, geom.height),
+                                0.f);
+
+  for (i = 0; i < 2; i++)
     {
-      clutter_stage_view_get_layout (view, &view_layout);
-      clip = &view_layout;
+      float w = 1.0;
+      cogl_graphene_matrix_project_point (&priv->view,
+                                          &p[2 * i].x,
+                                          &p[2 * i].y,
+                                          &p[2 * i].z,
+                                          &w);
     }
 
-  clip_poly[0] = MAX (clip->x, 0);
-  clip_poly[1] = MAX (clip->y, 0);
+  graphene_point3d_init (&p[1], p[2].x, p[0].y, p[0].z);
+  graphene_point3d_init (&p[3], p[0].x, p[2].y, p[0].z);
 
-  clip_poly[2] = MIN (clip->x + clip->width, geom.width);
-  clip_poly[3] = clip_poly[1];
+  for (i = 0; i < 4; i++)
+    {
+      graphene_plane_init_from_points (&planes[i],
+                                       &camera_position,
+                                       &p[i],
+                                       &p[(i + 1) % 4]);
+    }
 
-  clip_poly[4] = clip_poly[2];
-  clip_poly[5] = MIN (clip->y + clip->height, geom.height);
+  graphene_vec4_init (&v, 0.f, 0.f, -1.f, priv->perspective.z_near);
+  graphene_plane_init_from_vec4 (&planes[4], &v);
 
-  clip_poly[6] = clip_poly[0];
-  clip_poly[7] = clip_poly[5];
+  graphene_vec4_init (&v, 0.f, 0.f, 1.f, priv->perspective.z_far);
+  graphene_plane_init_from_vec4 (&planes[5], &v);
 
-  CLUTTER_NOTE (CLIPPING, "Setting stage clip too: "
-                "x=%f, y=%f, width=%f, height=%f",
-                clip_poly[0], clip_poly[1],
-                clip_poly[2] - clip_poly[0],
-                clip_poly[5] - clip_poly[1]);
-
-  _cogl_util_get_eye_planes_for_screen_poly (clip_poly,
-                                             4,
-                                             viewport,
-                                             &priv->projection,
-                                             &priv->inverse_projection,
-                                             priv->current_clip_planes);
-
-  _clutter_stage_paint_volume_stack_free_all (stage);
+  graphene_frustum_init (frustum,
+                         &planes[0], &planes[1],
+                         &planes[2], &planes[3],
+                         &planes[4], &planes[5]);
 }
 
 static void
@@ -842,12 +446,46 @@ clutter_stage_do_paint_view (ClutterStage         *stage,
 {
   ClutterPaintContext *paint_context;
   cairo_rectangle_int_t clip_rect;
+  g_autoptr (GArray) clip_frusta = NULL;
+  graphene_frustum_t clip_frustum;
+  int n_rectangles;
 
-  paint_context = clutter_paint_context_new_for_view (view, redraw_clip,
+  n_rectangles = redraw_clip ? cairo_region_num_rectangles (redraw_clip) : 0;
+  if (redraw_clip && n_rectangles < MAX_FRUSTA)
+    {
+      int i;
+
+      clip_frusta = g_array_sized_new (FALSE, FALSE,
+                                       sizeof (graphene_frustum_t),
+                                       n_rectangles);
+
+      for (i = 0; i < n_rectangles; i++)
+        {
+          cairo_region_get_rectangle (redraw_clip, i, &clip_rect);
+          setup_clip_frustum (stage, &clip_rect, &clip_frustum);
+          g_array_append_val (clip_frusta, clip_frustum);
+        }
+    }
+  else
+    {
+      clip_frusta = g_array_sized_new (FALSE, FALSE,
+                                       sizeof (graphene_frustum_t),
+                                       1);
+      if (redraw_clip)
+        cairo_region_get_extents (redraw_clip, &clip_rect);
+      else
+        clutter_stage_view_get_layout (view, &clip_rect);
+
+      setup_clip_frustum (stage, &clip_rect, &clip_frustum);
+      g_array_append_val (clip_frusta, clip_frustum);
+    }
+
+  _clutter_stage_paint_volume_stack_free_all (stage);
+
+  paint_context = clutter_paint_context_new_for_view (view,
+                                                      redraw_clip,
+                                                      clip_frusta,
                                                       CLUTTER_PAINT_FLAG_NONE);
-
-  cairo_region_get_extents (redraw_clip, &clip_rect);
-  setup_view_for_pick_or_paint (stage, view, &clip_rect);
 
   clutter_actor_paint (CLUTTER_ACTOR (stage), paint_context);
   clutter_paint_context_destroy (paint_context);
@@ -974,7 +612,6 @@ clutter_stage_hide (ClutterActor *self)
   ClutterStagePrivate *priv = CLUTTER_STAGE (self)->priv;
 
   g_assert (priv->impl != NULL);
-  _clutter_stage_clear_pick_stack (CLUTTER_STAGE (self));
   _clutter_stage_window_hide (priv->impl);
 
   CLUTTER_ACTOR_CLASS (clutter_stage_parent_class)->hide (self);
@@ -1013,7 +650,6 @@ _clutter_stage_queue_event (ClutterStage *stage,
 {
   ClutterStagePrivate *priv;
   gboolean first_event;
-  ClutterInputDevice *device;
 
   g_return_if_fail (CLUTTER_IS_STAGE (stage));
 
@@ -1023,25 +659,6 @@ _clutter_stage_queue_event (ClutterStage *stage,
 
   if (copy_event)
     event = clutter_event_copy (event);
-
-  /* if needed, update the state of the input device of the event.
-   * we do it here to avoid calling the same code from every backend
-   * event processing function
-   */
-  device = clutter_event_get_device (event);
-  if (device != NULL &&
-      event->type != CLUTTER_PROXIMITY_IN &&
-      event->type != CLUTTER_PROXIMITY_OUT)
-    {
-      ClutterEventSequence *sequence = clutter_event_get_event_sequence (event);
-      guint32 event_time = clutter_event_get_time (event);
-      gfloat event_x, event_y;
-
-      clutter_event_get_coords (event, &event_x, &event_y);
-
-      _clutter_input_device_set_coords (device, sequence, event_x, event_y, stage);
-      _clutter_input_device_set_time (device, event_time);
-    }
 
   if (first_event)
     {
@@ -1072,6 +689,32 @@ _clutter_stage_has_queued_events (ClutterStage *stage)
   priv = stage->priv;
 
   return priv->event_queue->length > 0;
+}
+
+static void
+clutter_stage_compress_motion (ClutterStage       *stage,
+                               ClutterEvent       *event,
+                               const ClutterEvent *to_discard)
+{
+  double dx, dy;
+  double dx_unaccel, dy_unaccel;
+  double dst_dx = 0.0, dst_dy = 0.0;
+  double dst_dx_unaccel = 0.0, dst_dy_unaccel = 0.0;
+
+  if (!clutter_event_get_relative_motion (to_discard,
+                                          &dx, &dy,
+                                          &dx_unaccel, &dy_unaccel))
+    return;
+
+  clutter_event_get_relative_motion (event,
+                                     &dst_dx, &dst_dy,
+                                     &dst_dx_unaccel, &dst_dy_unaccel);
+
+  event->motion.flags |= CLUTTER_EVENT_FLAG_RELATIVE_MOTION;
+  event->motion.dx = dx + dst_dx;
+  event->motion.dy = dy + dst_dy;
+  event->motion.dx_unaccel = dx_unaccel + dst_dx_unaccel;
+  event->motion.dy_unaccel = dy_unaccel + dst_dy_unaccel;
 }
 
 void
@@ -1141,11 +784,7 @@ _clutter_stage_process_queued_events (ClutterStage *stage)
                             (int) event->motion.y);
 
               if (next_event->type == CLUTTER_MOTION)
-                {
-                  ClutterSeat *seat = clutter_input_device_get_seat (device);
-
-                  clutter_seat_compress_motion (seat, next_event, event);
-                }
+                clutter_stage_compress_motion (stage, next_event, event);
 
               goto next_event;
             }
@@ -1262,64 +901,36 @@ GSList *
 clutter_stage_find_updated_devices (ClutterStage *stage)
 {
   ClutterStagePrivate *priv = stage->priv;
-  ClutterBackend *backend;
-  ClutterSeat *seat;
   GSList *updating = NULL;
-  const GList *l, *devices;
-  graphene_point_t point;
+  GHashTableIter iter;
+  gpointer value;
 
   if (!priv->needs_update_devices)
     return NULL;
 
   priv->needs_update_devices = FALSE;
 
-  backend = clutter_get_default_backend ();
-  seat = clutter_backend_get_default_seat (backend);
-  devices = clutter_seat_peek_devices (seat);
-
-  for (l = devices; l; l = l->next)
+  g_hash_table_iter_init (&iter, priv->pointer_devices);
+  while (g_hash_table_iter_next (&iter, NULL, &value))
     {
-      ClutterInputDevice *dev = l->data;
+      PointerDeviceEntry *entry = value;
       ClutterStageView *view;
       const cairo_region_t *clip;
 
-      if (clutter_input_device_get_device_mode (dev) !=
-          CLUTTER_INPUT_MODE_LOGICAL)
+      view = clutter_stage_get_view_at (stage, entry->coords.x, entry->coords.y);
+      if (!view)
         continue;
 
-      switch (clutter_input_device_get_device_type (dev))
-        {
-        case CLUTTER_POINTER_DEVICE:
-        case CLUTTER_TABLET_DEVICE:
-        case CLUTTER_PEN_DEVICE:
-        case CLUTTER_ERASER_DEVICE:
-        case CLUTTER_CURSOR_DEVICE:
-          if (!clutter_input_device_get_coords (dev, NULL, &point))
-            continue;
-
-          view = clutter_stage_get_view_at (stage, point.x, point.y);
-          if (!view)
-            continue;
-
-          clip = clutter_stage_view_peek_redraw_clip (view);
-          if (!clip || cairo_region_contains_point (clip, point.x, point.y))
-            updating = g_slist_prepend (updating, dev);
-          break;
-        default:
-          /* Any other devices don't need checking, either because they
-           * don't have x/y coordinates, or because they're implicitly
-           * grabbed on an actor by default as it's the case of
-           * touch(screens).
-           */
-          break;
-        }
+      clip = clutter_stage_view_peek_redraw_clip (view);
+      if (!clip || cairo_region_contains_point (clip, entry->coords.x, entry->coords.y))
+        updating = g_slist_prepend (updating, entry->device);
     }
 
   return updating;
 }
 
 void
-clutter_stage_update_actor_stage_views (ClutterStage *stage)
+clutter_stage_finish_layout (ClutterStage *stage)
 {
   ClutterActor *actor = CLUTTER_ACTOR (stage);
   ClutterStagePrivate *priv = stage->priv;
@@ -1333,20 +944,21 @@ clutter_stage_update_actor_stage_views (ClutterStage *stage)
    * the paint.
    *
    * We're doing the whole thing twice and pass the phase to
-   * clutter_actor_update_stage_views() to allow actors to detect loops:
+   * clutter_actor_finish_layout() to allow actors to detect loops:
    * If the resource scale changes again after the relayout, the new
    * allocation of an actor probably moved the actor onto another stage
    * view, so if an actor sees phase == 1, it can choose a "final" scale.
    */
   for (phase = 0; phase < 2; phase++)
     {
-      clutter_actor_update_stage_views (actor, phase);
+      clutter_actor_finish_layout (actor, phase);
 
       if (!priv->actor_needs_immediate_relayout)
         break;
 
       priv->actor_needs_immediate_relayout = FALSE;
       clutter_stage_maybe_relayout (actor);
+      clutter_stage_maybe_finish_queue_redraws (stage);
     }
 
   g_warn_if_fail (!priv->actor_needs_immediate_relayout);
@@ -1356,6 +968,7 @@ void
 clutter_stage_update_devices (ClutterStage *stage,
                               GSList       *devices)
 {
+  ClutterStagePrivate *priv = stage->priv;
   GSList *l;
 
   COGL_TRACE_BEGIN (ClutterStageUpdateDevices, "UpdateDevices");
@@ -1363,7 +976,23 @@ clutter_stage_update_devices (ClutterStage *stage,
   for (l = devices; l; l = l->next)
     {
       ClutterInputDevice *device = l->data;
-      clutter_input_device_update (device, NULL, TRUE);
+      PointerDeviceEntry *entry = NULL;
+      ClutterActor *new_actor;
+
+      entry = g_hash_table_lookup (priv->pointer_devices, device);
+      g_assert (entry != NULL);
+
+      new_actor = _clutter_stage_do_pick (stage,
+                                          entry->coords.x,
+                                          entry->coords.y,
+                                          CLUTTER_PICK_REACTIVE);
+
+      clutter_stage_update_device (stage,
+                                   device, NULL,
+                                   entry->coords,
+                                   CLUTTER_CURRENT_TIME,
+                                   new_actor,
+                                   TRUE);
     }
 }
 
@@ -1396,68 +1025,6 @@ is_full_stage_redraw_queued (ClutterStage *stage)
   return TRUE;
 }
 
-static gboolean
-clutter_stage_real_queue_redraw (ClutterActor       *actor,
-                                 ClutterActor       *leaf,
-                                 ClutterPaintVolume *redraw_clip)
-{
-  ClutterStage *stage = CLUTTER_STAGE (actor);
-  ClutterStageWindow *stage_window;
-  ClutterActorBox bounding_box;
-  ClutterActorBox intersection_box;
-  cairo_rectangle_int_t geom, stage_clip;
-
-  if (CLUTTER_ACTOR_IN_DESTRUCTION (actor))
-    return TRUE;
-
-  /* If the backend can't do anything with redraw clips (e.g. it already knows
-   * it needs to redraw everything anyway) then don't spend time transforming
-   * any clip volume into stage coordinates... */
-  stage_window = _clutter_stage_get_window (stage);
-  if (stage_window == NULL)
-    return TRUE;
-
-  if (is_full_stage_redraw_queued (stage))
-    return FALSE;
-
-  if (redraw_clip == NULL)
-    {
-      clutter_stage_add_redraw_clip (stage, NULL);
-      return FALSE;
-    }
-
-  if (redraw_clip->is_empty)
-    return TRUE;
-
-  /* Convert the clip volume into stage coordinates and then into an
-   * axis aligned stage coordinates bounding box... */
-  _clutter_paint_volume_get_stage_paint_box (redraw_clip,
-                                             stage,
-                                             &bounding_box);
-
-  _clutter_stage_window_get_geometry (stage_window, &geom);
-
-  intersection_box.x1 = MAX (bounding_box.x1, 0);
-  intersection_box.y1 = MAX (bounding_box.y1, 0);
-  intersection_box.x2 = MIN (bounding_box.x2, geom.width);
-  intersection_box.y2 = MIN (bounding_box.y2, geom.height);
-
-  /* There is no need to track degenerate/empty redraw clips */
-  if (intersection_box.x2 <= intersection_box.x1 ||
-      intersection_box.y2 <= intersection_box.y1)
-    return TRUE;
-
-  /* when converting to integer coordinates make sure we round the edges of the
-   * clip rectangle outwards... */
-  stage_clip.x = intersection_box.x1;
-  stage_clip.y = intersection_box.y1;
-  stage_clip.width = intersection_box.x2 - stage_clip.x;
-  stage_clip.height = intersection_box.y2 - stage_clip.y;
-
-  clutter_stage_add_redraw_clip (stage, &stage_clip);
-  return FALSE;
-}
-
 gboolean
 _clutter_stage_has_full_redraw_queued (ClutterStage *stage)
 {
@@ -1467,6 +1034,37 @@ _clutter_stage_has_full_redraw_queued (ClutterStage *stage)
   return is_full_stage_redraw_queued (stage);
 }
 
+static void
+setup_ray_for_coordinates (ClutterStage       *stage,
+                           float               x,
+                           float               y,
+                           graphene_point3d_t *point,
+                           graphene_ray_t     *ray)
+{
+  ClutterStagePrivate *priv = stage->priv;
+  graphene_point3d_t camera_position;
+  graphene_point3d_t p;
+  graphene_vec3_t direction;
+  graphene_vec3_t cv;
+  graphene_vec3_t v;
+
+  camera_position = GRAPHENE_POINT3D_INIT_ZERO;
+  graphene_vec3_init (&cv,
+                      camera_position.x,
+                      camera_position.y,
+                      camera_position.z);
+
+  p = GRAPHENE_POINT3D_INIT (x, y, 0.f);
+  graphene_matrix_transform_point3d (&priv->view, &p, &p);
+
+  graphene_vec3_init (&v, p.x, p.y, p.z);
+  graphene_vec3_subtract (&v, &cv, &direction);
+  graphene_vec3_normalize (&direction, &direction);
+
+  graphene_ray_init (ray, &camera_position, &direction);
+  graphene_point3d_init_from_point (point, &p);
+}
+
 static ClutterActor *
 _clutter_stage_do_pick_on_view (ClutterStage     *stage,
                                 float             x,
@@ -1474,44 +1072,24 @@ _clutter_stage_do_pick_on_view (ClutterStage     *stage,
                                 ClutterPickMode   mode,
                                 ClutterStageView *view)
 {
-  ClutterMainContext *context = _clutter_context_get_default ();
-  ClutterStagePrivate *priv = stage->priv;
-  int i;
+  g_autoptr (ClutterPickStack) pick_stack = NULL;
+  ClutterPickContext *pick_context;
+  graphene_point3d_t p;
+  graphene_ray_t ray;
+  ClutterActor *actor;
 
-  g_assert (context->pick_mode == CLUTTER_PICK_NONE);
+  COGL_TRACE_BEGIN_SCOPED (ClutterStagePickView, "Pick (view)");
 
-  if (mode != priv->cached_pick_mode)
-    {
-      ClutterPickContext *pick_context;
+  setup_ray_for_coordinates (stage, x, y, &p, &ray);
 
-      _clutter_stage_clear_pick_stack (stage);
+  pick_context = clutter_pick_context_new_for_view (view, mode, &p, &ray);
 
-      pick_context = clutter_pick_context_new_for_view (view);
+  clutter_actor_pick (CLUTTER_ACTOR (stage), pick_context);
+  pick_stack = clutter_pick_context_steal_stack (pick_context);
+  clutter_pick_context_destroy (pick_context);
 
-      context->pick_mode = mode;
-      setup_view_for_pick_or_paint (stage, view, NULL);
-      clutter_actor_pick (CLUTTER_ACTOR (stage), pick_context);
-      context->pick_mode = CLUTTER_PICK_NONE;
-      priv->cached_pick_mode = mode;
-
-      clutter_pick_context_destroy (pick_context);
-
-      add_pick_stack_weak_refs (stage);
-    }
-
-  /* Search all "painted" pickable actors from front to back. A linear search
-   * is required, and also performs fine since there is typically only
-   * on the order of dozens of actors in the list (on screen) at a time.
-   */
-  for (i = priv->pick_stack->len - 1; i >= 0; i--)
-    {
-      const PickRecord *rec = &g_array_index (priv->pick_stack, PickRecord, i);
-
-      if (rec->actor && pick_record_contains_point (stage, rec, x, y))
-        return rec->actor;
-    }
-
-  return CLUTTER_ACTOR (stage);
+  actor = clutter_pick_stack_search_actor (pick_stack, &p, &ray);
+  return actor ? actor : CLUTTER_ACTOR (stage);
 }
 
 /**
@@ -1575,15 +1153,14 @@ _clutter_stage_do_pick (ClutterStage   *stage,
 }
 
 static void
-clutter_stage_real_apply_transform (ClutterActor *stage,
-                                    CoglMatrix   *matrix)
+clutter_stage_real_apply_transform (ClutterActor      *stage,
+                                    graphene_matrix_t *matrix)
 {
   ClutterStagePrivate *priv = CLUTTER_STAGE (stage)->priv;
 
   /* FIXME: we probably shouldn't be explicitly resetting the matrix
    * here... */
-  cogl_matrix_init_identity (matrix);
-  cogl_matrix_multiply (matrix, matrix, &priv->view);
+  graphene_matrix_init_from_matrix (matrix, &priv->view);
 }
 
 static void
@@ -1695,9 +1272,7 @@ clutter_stage_dispose (GObject *object)
 
   clutter_actor_destroy_all_children (CLUTTER_ACTOR (object));
 
-  g_list_free_full (priv->pending_queue_redraws,
-                    (GDestroyNotify) free_queue_redraw_entry);
-  priv->pending_queue_redraws = NULL;
+  g_hash_table_remove_all (priv->pending_queue_redraws);
 
   g_slist_free_full (priv->pending_relayouts,
                      (GDestroyNotify) g_object_unref);
@@ -1719,16 +1294,12 @@ clutter_stage_finalize (GObject *object)
   g_queue_foreach (priv->event_queue, (GFunc) clutter_event_free, NULL);
   g_queue_free (priv->event_queue);
 
+  g_hash_table_destroy (priv->pointer_devices);
+  g_hash_table_destroy (priv->touch_sequences);
+
   g_free (priv->title);
 
   g_array_free (priv->paint_volume_stack, TRUE);
-
-  _clutter_stage_clear_pick_stack (stage);
-  g_array_free (priv->pick_clip_stack, TRUE);
-  g_array_free (priv->pick_stack, TRUE);
-
-  if (priv->fps_timer != NULL)
-    g_timer_destroy (priv->fps_timer);
 
   G_OBJECT_CLASS (clutter_stage_parent_class)->finalize (object);
 }
@@ -1763,7 +1334,6 @@ clutter_stage_class_init (ClutterStageClass *klass)
   actor_class->hide = clutter_stage_hide;
   actor_class->hide_all = clutter_stage_hide_all;
   actor_class->queue_relayout = clutter_stage_real_queue_relayout;
-  actor_class->queue_redraw = clutter_stage_real_queue_redraw;
   actor_class->apply_transform = clutter_stage_real_apply_transform;
 
   klass->paint_view = clutter_stage_real_paint_view;
@@ -1781,7 +1351,8 @@ clutter_stage_class_init (ClutterStageClass *klass)
                           P_("Perspective"),
                           P_("Perspective projection parameters"),
                           CLUTTER_TYPE_PERSPECTIVE,
-                          CLUTTER_PARAM_READABLE);
+                          CLUTTER_PARAM_READABLE |
+                          G_PARAM_EXPLICIT_NOTIFY);
 
   /**
    * ClutterStage:title:
@@ -1795,7 +1366,8 @@ clutter_stage_class_init (ClutterStageClass *klass)
                            P_("Title"),
                            P_("Stage Title"),
                            NULL,
-                           CLUTTER_PARAM_READWRITE);
+                           CLUTTER_PARAM_READWRITE |
+                           G_PARAM_EXPLICIT_NOTIFY);
 
   /**
    * ClutterStage:key-focus:
@@ -1812,7 +1384,8 @@ clutter_stage_class_init (ClutterStageClass *klass)
                            P_("Key Focus"),
                            P_("The currently key focused actor"),
                            CLUTTER_TYPE_ACTOR,
-                           CLUTTER_PARAM_READWRITE);
+                           CLUTTER_PARAM_READWRITE |
+                           G_PARAM_EXPLICIT_NOTIFY);
 
   g_object_class_install_properties (gobject_class, PROP_LAST, obj_props);
 
@@ -2019,8 +1592,14 @@ clutter_stage_init (ClutterStage *self)
 
   priv->throttle_motion_events = TRUE;
   priv->min_size_changed = FALSE;
-  priv->sync_delay = -1;
   priv->motion_events_enabled = TRUE;
+
+  priv->pointer_devices =
+    g_hash_table_new_full (NULL, NULL,
+                           NULL, (GDestroyNotify) free_pointer_device_entry);
+  priv->touch_sequences =
+    g_hash_table_new_full (NULL, NULL,
+                           NULL, (GDestroyNotify) free_pointer_device_entry);
 
   clutter_actor_set_background_color (CLUTTER_ACTOR (self),
                                       &default_stage_color);
@@ -2038,13 +1617,13 @@ clutter_stage_init (ClutterStage *self)
 
   clutter_stage_set_viewport (self, geom.width, geom.height);
 
+  priv->pending_queue_redraws =
+    g_hash_table_new_full (NULL, NULL,
+                           g_object_unref,
+                           (GDestroyNotify) free_queue_redraw_entry);
+
   priv->paint_volume_stack =
     g_array_new (FALSE, FALSE, sizeof (ClutterPaintVolume));
-
-  priv->pick_stack = g_array_new (FALSE, FALSE, sizeof (PickRecord));
-  priv->pick_clip_stack = g_array_new (FALSE, FALSE, sizeof (PickClipRecord));
-  priv->pick_clip_stack_top = -1;
-  priv->cached_pick_mode = CLUTTER_PICK_NONE;
 }
 
 static void
@@ -2061,13 +1640,12 @@ clutter_stage_set_perspective (ClutterStage       *stage,
 
   priv->perspective = *perspective;
 
-  cogl_matrix_init_identity (&priv->projection);
-  cogl_matrix_perspective (&priv->projection,
-                           priv->perspective.fovy,
-                           priv->perspective.aspect,
-                           priv->perspective.z_near,
-                           priv->perspective.z_far);
-  cogl_matrix_get_inverse (&priv->projection,
+  graphene_matrix_init_perspective (&priv->projection,
+                                    priv->perspective.fovy,
+                                    priv->perspective.aspect,
+                                    priv->perspective.z_near,
+                                    priv->perspective.z_far);
+  graphene_matrix_inverse (&priv->projection,
                            &priv->inverse_projection);
 
   _clutter_stage_dirty_projection (stage);
@@ -2095,7 +1673,7 @@ clutter_stage_get_perspective (ClutterStage       *stage,
 /*
  * clutter_stage_get_projection_matrix:
  * @stage: A #ClutterStage
- * @projection: return location for a #CoglMatrix representing the
+ * @projection: return location for a #graphene_matrix_t representing the
  *              perspective projection applied to actors on the given
  *              @stage.
  *
@@ -2105,8 +1683,8 @@ clutter_stage_get_perspective (ClutterStage       *stage,
  * Since: 1.6
  */
 void
-_clutter_stage_get_projection_matrix (ClutterStage *stage,
-                                      CoglMatrix *projection)
+_clutter_stage_get_projection_matrix (ClutterStage      *stage,
+                                      graphene_matrix_t *projection)
 {
   g_return_if_fail (CLUTTER_IS_STAGE (stage));
   g_return_if_fail (projection != NULL);
@@ -2396,45 +1974,6 @@ clutter_stage_get_actor_at_pos (ClutterStage    *stage,
 }
 
 /**
- * clutter_stage_event:
- * @stage: a #ClutterStage
- * @event: a #ClutterEvent
- *
- * This function is used to emit an event on the main stage.
- *
- * You should rarely need to use this function, except for
- * synthetised events.
- *
- * Return value: the return value from the signal emission
- *
- * Since: 0.4
- */
-gboolean
-clutter_stage_event (ClutterStage *stage,
-                     ClutterEvent *event)
-{
-  g_return_val_if_fail (CLUTTER_IS_STAGE (stage), FALSE);
-  g_return_val_if_fail (event != NULL, FALSE);
-
-  if (event->type != CLUTTER_STAGE_STATE)
-    return FALSE;
-
-  /* emit raw event */
-  if (clutter_actor_event (CLUTTER_ACTOR (stage), event, FALSE))
-    return TRUE;
-
-  if (event->stage_state.changed_mask & CLUTTER_STAGE_STATE_ACTIVATED)
-    {
-      if (event->stage_state.new_state & CLUTTER_STAGE_STATE_ACTIVATED)
-	g_signal_emit (stage, stage_signals[ACTIVATE], 0);
-      else
-	g_signal_emit (stage, stage_signals[DEACTIVATE], 0);
-    }
-
-  return TRUE;
-}
-
-/**
  * clutter_stage_set_title:
  * @stage: A #ClutterStage
  * @title: A utf8 string for the stage windows title.
@@ -2575,7 +2114,7 @@ static gpointer
 clutter_perspective_copy (gpointer data)
 {
   if (G_LIKELY (data))
-    return g_slice_dup (ClutterPerspective, data);
+    return g_memdup2 (data, sizeof (ClutterPerspective));
 
   return NULL;
 }
@@ -2584,7 +2123,7 @@ static void
 clutter_perspective_free (gpointer data)
 {
   if (G_LIKELY (data))
-    g_slice_free (ClutterPerspective, data);
+    g_free (data);
 }
 
 G_DEFINE_BOXED_TYPE (ClutterPerspective, clutter_perspective,
@@ -2753,6 +2292,40 @@ calculate_z_translation (float z_near)
 }
 
 static void
+view_2d_in_perspective (graphene_matrix_t *matrix,
+                        float              fov_y,
+                        float              aspect,
+                        float              z_near,
+                        float              z_2d,
+                        float              width_2d,
+                        float              height_2d)
+{
+  float top = z_near * tan (fov_y * G_PI / 360.0);
+  float left = -top * aspect;
+  float right = top * aspect;
+  float bottom = -top;
+
+  float left_2d_plane = left / z_near * z_2d;
+  float right_2d_plane = right / z_near * z_2d;
+  float bottom_2d_plane = bottom / z_near * z_2d;
+  float top_2d_plane = top / z_near * z_2d;
+
+  float width_2d_start = right_2d_plane - left_2d_plane;
+  float height_2d_start = top_2d_plane - bottom_2d_plane;
+
+  /* Factors to scale from framebuffer geometry to frustum
+   * cross-section geometry. */
+  float width_scale = width_2d_start / width_2d;
+  float height_scale = height_2d_start / height_2d;
+
+  graphene_matrix_init_scale (matrix, width_scale, -height_scale, width_scale);
+  graphene_matrix_translate (matrix,
+                             &GRAPHENE_POINT3D_INIT (left_2d_plane,
+                                                     top_2d_plane,
+                                                     -z_2d));
+}
+
+static void
 clutter_stage_update_view_perspective (ClutterStage *stage)
 {
   ClutterStagePrivate *priv = stage->priv;
@@ -2762,7 +2335,7 @@ clutter_stage_update_view_perspective (ClutterStage *stage)
   perspective = priv->perspective;
 
   perspective.fovy = 60.0; /* 60 Degrees */
-  perspective.z_near = 0.1;
+  perspective.z_near = 1.0;
   perspective.aspect = priv->viewport[2] / priv->viewport[3];
   z_2d = calculate_z_translation (perspective.z_near);
 
@@ -2776,14 +2349,13 @@ clutter_stage_update_view_perspective (ClutterStage *stage)
 
   clutter_stage_set_perspective (stage, &perspective);
 
-  cogl_matrix_init_identity (&priv->view);
-  cogl_matrix_view_2d_in_perspective (&priv->view,
-                                      perspective.fovy,
-                                      perspective.aspect,
-                                      perspective.z_near,
-                                      z_2d,
-                                      priv->viewport[2],
-                                      priv->viewport[3]);
+  view_2d_in_perspective (&priv->view,
+                          perspective.fovy,
+                          perspective.aspect,
+                          perspective.z_near,
+                          z_2d,
+                          priv->viewport[2],
+                          priv->viewport[3]);
 
   clutter_actor_invalidate_transform (CLUTTER_ACTOR (stage));
 }
@@ -3063,14 +2635,6 @@ _clutter_stage_paint_volume_stack_free_all (ClutterStage *stage)
   g_array_set_size (paint_volume_stack, 0);
 }
 
-/* The is an out-of-band parameter available while painting that
- * can be used to cull actors. */
-const ClutterPlane *
-_clutter_stage_get_clip (ClutterStage *stage)
-{
-  return stage->priv->current_clip_planes;
-}
-
 /* When an actor queues a redraw we add it to a list on the stage that
  * gets processed once all updates to the stage have been finished.
  *
@@ -3082,22 +2646,16 @@ _clutter_stage_get_clip (ClutterStage *stage)
  * paint volume so we can clip the redraw request even if the user
  * didn't explicitly do so.
  */
-ClutterStageQueueRedrawEntry *
-_clutter_stage_queue_actor_redraw (ClutterStage                 *stage,
-                                   ClutterStageQueueRedrawEntry *entry,
-                                   ClutterActor                 *actor,
-                                   const ClutterPaintVolume     *clip)
+void
+clutter_stage_queue_actor_redraw (ClutterStage             *stage,
+                                  ClutterActor             *actor,
+                                  const ClutterPaintVolume *clip)
 {
   ClutterStagePrivate *priv = stage->priv;
+  QueueRedrawEntry *entry = NULL;
 
   CLUTTER_NOTE (CLIPPING, "stage_queue_actor_redraw (actor=%s, clip=%p): ",
                 _clutter_actor_get_debug_name (actor), clip);
-
-  /* Queuing a redraw or clip change invalidates the pick cache, unless we're
-   * in the middle of building it. So we reset the cached flag but don't
-   * completely clear the pick stack...
-   */
-  priv->cached_pick_mode = CLUTTER_PICK_NONE;
 
   if (!priv->pending_finish_queue_redraws)
     {
@@ -3113,22 +2671,7 @@ _clutter_stage_queue_actor_redraw (ClutterStage                 *stage,
       priv->pending_finish_queue_redraws = TRUE;
     }
 
-  if (!priv->redraw_pending)
-    {
-      CLUTTER_NOTE (PAINT, "First redraw request");
-
-      clutter_stage_schedule_update (stage);
-      priv->redraw_pending = TRUE;
-    }
-#ifdef CLUTTER_ENABLE_DEBUG
-  else
-    {
-      CLUTTER_NOTE (PAINT, "Redraw request number %lu",
-                    priv->redraw_count + 1);
-
-      priv->redraw_count += 1;
-    }
-#endif /* CLUTTER_ENABLE_DEBUG */
+  entry = g_hash_table_lookup (priv->pending_queue_redraws, actor);
 
   if (entry)
     {
@@ -3139,7 +2682,7 @@ _clutter_stage_queue_actor_redraw (ClutterStage                 *stage,
           CLUTTER_NOTE (CLIPPING, "Bail from stage_queue_actor_redraw (%s): "
                         "Unclipped redraw of actor already queued",
                         _clutter_actor_get_debug_name (actor));
-          return entry;
+          return;
         }
 
       /* If queuing a clipped redraw and a clipped redraw has
@@ -3152,12 +2695,10 @@ _clutter_stage_queue_actor_redraw (ClutterStage                 *stage,
           clutter_paint_volume_free (&entry->clip);
           entry->has_clip = FALSE;
         }
-      return entry;
     }
   else
     {
-      entry = g_slice_new (ClutterStageQueueRedrawEntry);
-      entry->actor = g_object_ref (actor);
+      entry = g_new0 (QueueRedrawEntry, 1);
 
       if (clip)
         {
@@ -3168,46 +2709,87 @@ _clutter_stage_queue_actor_redraw (ClutterStage                 *stage,
       else
         entry->has_clip = FALSE;
 
-      stage->priv->pending_queue_redraws =
-        g_list_prepend (stage->priv->pending_queue_redraws, entry);
-
-      return entry;
+      g_hash_table_insert (priv->pending_queue_redraws,
+                           g_object_ref (actor), entry);
     }
 }
 
 static void
-free_queue_redraw_entry (ClutterStageQueueRedrawEntry *entry)
+free_queue_redraw_entry (QueueRedrawEntry *entry)
 {
-  if (entry->actor)
-    g_object_unref (entry->actor);
   if (entry->has_clip)
     clutter_paint_volume_free (&entry->clip);
-  g_slice_free (ClutterStageQueueRedrawEntry, entry);
+  g_free (entry);
 }
 
 void
-_clutter_stage_queue_redraw_entry_invalidate (ClutterStageQueueRedrawEntry *entry)
+clutter_stage_dequeue_actor_redraw (ClutterStage *self,
+                                    ClutterActor *actor)
 {
-  if (entry == NULL)
+  g_hash_table_remove (self->priv->pending_queue_redraws, actor);
+}
+
+static void
+add_to_stage_clip (ClutterStage       *stage,
+                   ClutterPaintVolume *redraw_clip)
+{
+  ClutterStageWindow *stage_window;
+  ClutterActorBox bounding_box;
+  ClutterActorBox intersection_box;
+  cairo_rectangle_int_t geom, stage_clip;
+
+  if (CLUTTER_ACTOR_IN_DESTRUCTION (CLUTTER_ACTOR (stage)))
     return;
 
-  if (entry->actor != NULL)
+  stage_window = _clutter_stage_get_window (stage);
+  if (stage_window == NULL)
+    return;
+
+  if (is_full_stage_redraw_queued (stage))
+    return;
+
+  if (redraw_clip == NULL)
     {
-      g_object_unref (entry->actor);
-      entry->actor = NULL;
+      clutter_stage_add_redraw_clip (stage, NULL);
+      return;
     }
 
-  if (entry->has_clip)
-    {
-      clutter_paint_volume_free (&entry->clip);
-      entry->has_clip = FALSE;
-    }
+  if (redraw_clip->is_empty)
+    return;
+
+  /* Now transform and project the clip volume to view coordinates and get
+   * the axis aligned bounding box that's aligned to the pixel grid.
+   */
+  _clutter_paint_volume_get_stage_paint_box (redraw_clip,
+                                             stage,
+                                             &bounding_box);
+
+  _clutter_stage_window_get_geometry (stage_window, &geom);
+
+  intersection_box.x1 = MAX (bounding_box.x1, 0);
+  intersection_box.y1 = MAX (bounding_box.y1, 0);
+  intersection_box.x2 = MIN (bounding_box.x2, geom.width);
+  intersection_box.y2 = MIN (bounding_box.y2, geom.height);
+
+  /* There is no need to track degenerate/empty redraw clips */
+  if (intersection_box.x2 <= intersection_box.x1 ||
+      intersection_box.y2 <= intersection_box.y1)
+    return;
+
+  stage_clip.x = intersection_box.x1;
+  stage_clip.y = intersection_box.y1;
+  stage_clip.width = intersection_box.x2 - stage_clip.x;
+  stage_clip.height = intersection_box.y2 - stage_clip.y;
+
+  clutter_stage_add_redraw_clip (stage, &stage_clip);
 }
 
 void
 clutter_stage_maybe_finish_queue_redraws (ClutterStage *stage)
 {
   ClutterStagePrivate *priv = stage->priv;
+  GHashTableIter iter;
+  gpointer key, value;
 
   COGL_TRACE_BEGIN_SCOPED (ClutterStageFinishQueueRedraws, "FinishQueueRedraws");
 
@@ -3216,38 +2798,53 @@ clutter_stage_maybe_finish_queue_redraws (ClutterStage *stage)
 
   priv->pending_finish_queue_redraws = FALSE;
 
-  /* Note: we have to repeat until the pending_queue_redraws list is
-   * empty because actors are allowed to queue redraws in response to
-   * the queue-redraw signal. For example Clone actors or
-   * texture_new_from_actor actors will have to queue a redraw if
-   * their source queues a redraw.
-   */
-  while (stage->priv->pending_queue_redraws)
+  g_hash_table_iter_init (&iter, priv->pending_queue_redraws);
+  while (g_hash_table_iter_next (&iter, &key, &value))
     {
-      GList *l;
-      /* XXX: we need to allow stage->priv->pending_queue_redraws to
-       * be updated while we process the current entries in the list
-       * so we steal the list pointer and then reset it to an empty
-       * list before processing... */
-      GList *stolen_list = stage->priv->pending_queue_redraws;
-      stage->priv->pending_queue_redraws = NULL;
+      ClutterActor *redraw_actor = key;
+      QueueRedrawEntry *entry = value;
+      ClutterPaintVolume old_actor_pv, new_actor_pv;
 
-      for (l = stolen_list; l; l = l->next)
+      g_hash_table_iter_steal (&iter);
+
+      _clutter_paint_volume_init_static (&old_actor_pv, NULL);
+      _clutter_paint_volume_init_static (&new_actor_pv, NULL);
+
+      if (entry->has_clip)
         {
-          ClutterStageQueueRedrawEntry *entry = l->data;
-          ClutterPaintVolume *clip;
-
-          /* NB: Entries may be invalidated if the actor gets destroyed */
-          if (G_LIKELY (entry->actor != NULL))
-	    {
-	      clip = entry->has_clip ? &entry->clip : NULL;
-
-	      _clutter_actor_finish_queue_redraw (entry->actor, clip);
-	    }
-
-          free_queue_redraw_entry (entry);
+          add_to_stage_clip (stage, &entry->clip);
         }
-      g_list_free (stolen_list);
+      else if (clutter_actor_get_redraw_clip (redraw_actor,
+                                              &old_actor_pv,
+                                              &new_actor_pv))
+        {
+          /* Add both the old paint volume of the actor (which is
+           * currently visible on the screen) and the new paint volume
+           * (which will be visible on the screen after this redraw)
+           * to the redraw clip.
+           * The former we do to ensure the old texture on the screen
+           * will be fully painted over in case the actor was moved.
+           */
+          add_to_stage_clip (stage, &old_actor_pv);
+          add_to_stage_clip (stage, &new_actor_pv);
+        }
+      else
+        {
+          /* If there's no clip we can use, we have to trigger an
+           * unclipped full stage redraw.
+           */
+          add_to_stage_clip (stage, NULL);
+        }
+
+      g_object_unref (redraw_actor);
+      free_queue_redraw_entry (entry);
+
+      /* get_paint_volume() vfuncs might queue redraws and can cause our
+       * iterator to now be invalidated. So start over. This isn't wasting
+       * any time since we already stole (removed) the elements previously
+       * visited.
+       */
+      g_hash_table_iter_init (&iter, priv->pending_queue_redraws);
     }
 }
 
@@ -3423,111 +3020,6 @@ _clutter_stage_remove_touch_drag_actor (ClutterStage         *stage,
                        NULL);
 }
 
-/*< private >
- * _clutter_stage_get_state:
- * @stage: a #ClutterStage
- *
- * Retrieves the current #ClutterStageState flags associated to the @stage.
- *
- * Return value: a bitwise OR of #ClutterStageState flags
- */
-ClutterStageState
-_clutter_stage_get_state (ClutterStage *stage)
-{
-  return stage->priv->current_state;
-}
-
-/*< private >
- * _clutter_stage_is_activated:
- * @stage: a #ClutterStage
- *
- * Checks whether the @stage state includes %CLUTTER_STAGE_STATE_ACTIVATED.
- *
- * Return value: %TRUE if the @stage is active
- */
-gboolean
-_clutter_stage_is_activated (ClutterStage *stage)
-{
-  return (stage->priv->current_state & CLUTTER_STAGE_STATE_ACTIVATED) != 0;
-}
-
-/*< private >
- * _clutter_stage_update_state:
- * @stage: a #ClutterStage
- * @unset_flags: flags to unset
- * @set_flags: flags to set
- *
- * Updates the state of @stage, by unsetting the @unset_flags and setting
- * the @set_flags.
- *
- * If the stage state has been changed, this function will queue a
- * #ClutterEvent of type %CLUTTER_STAGE_STATE.
- *
- * Return value: %TRUE if the state was updated, and %FALSE otherwise
- */
-gboolean
-_clutter_stage_update_state (ClutterStage      *stage,
-                             ClutterStageState  unset_flags,
-                             ClutterStageState  set_flags)
-{
-  ClutterStageState new_state;
-  ClutterEvent *event;
-
-  new_state = stage->priv->current_state;
-  new_state |= set_flags;
-  new_state &= ~unset_flags;
-
-  if (new_state == stage->priv->current_state)
-    return FALSE;
-
-  event = clutter_event_new (CLUTTER_STAGE_STATE);
-  clutter_event_set_stage (event, stage);
-
-  event->stage_state.new_state = new_state;
-  event->stage_state.changed_mask = new_state ^ stage->priv->current_state;
-
-  stage->priv->current_state = new_state;
-
-  clutter_stage_event (stage, event);
-  clutter_event_free (event);
-
-  return TRUE;
-}
-
-/**
- * clutter_stage_set_sync_delay:
- * @stage: a #ClutterStage
- * @sync_delay: number of milliseconds after frame presentation to wait
- *   before painting the next frame. If less than zero, restores the
- *   default behavior where redraw is throttled to the refresh rate but
- *   not synchronized to it.
- *
- * This function enables an alternate behavior where Clutter draws at
- * a fixed point in time after the frame presentation time (also known
- * as the VBlank time). This is most useful when the application
- * wants to show incoming data with predictable latency. (The primary
- * example of this would be a window system compositor.) By synchronizing
- * to provide new data before Clutter redraws, an external source of
- * updates (in the compositor, an application) can get a reliable latency.
- *
- * The appropriate value of @sync_delay depends on the complexity of
- * drawing the stage's scene graph - in general a value of between 0
- * and 8 ms (up to one-half of a typical 60hz frame rate) is appropriate.
- * using a larger value will reduce latency but risks skipping a frame if
- * drawing the stage takes too long.
- *
- * Since: 1.14
- * Stability: unstable
- */
-void
-clutter_stage_set_sync_delay (ClutterStage *stage,
-                              gint          sync_delay)
-{
-  g_return_if_fail (CLUTTER_IS_STAGE (stage));
-
-  stage->priv->sync_delay = sync_delay;
-}
-
 int64_t
 clutter_stage_get_frame_counter (ClutterStage          *stage)
 {
@@ -3545,6 +3037,20 @@ clutter_stage_presented (ClutterStage     *stage,
   g_signal_emit (stage, stage_signals[PRESENTED], 0, view, frame_info);
 }
 
+/**
+ * clutter_stage_get_capture_final_size:
+ * @stage: a #ClutterStage actor
+ * @rect: a #cairo_rectangle_int_t
+ * @out_width: (out) (optional): the final width
+ * @out_height: (out) (optional): the final height
+ * @out_scale: (out) (optional): the final scale factor
+ *
+ * Get the size of the framebuffer one must pass to
+ * clutter_stage_paint_to_buffer() or clutter_stage_paint_to_framebuffer()
+ * would be used with the same @rect.
+ *
+ * Returns: %TRUE if the size has been retrieved, %FALSE otherwise.
+ */
 gboolean
 clutter_stage_get_capture_final_size (ClutterStage          *stage,
                                       cairo_rectangle_int_t *rect,
@@ -3642,6 +3148,21 @@ clutter_stage_paint_to_framebuffer (ClutterStage                *stage,
   clutter_paint_context_destroy (paint_context);
 }
 
+/**
+ * clutter_stage_paint_to_buffer:
+ * @stage: a #ClutterStage actor
+ * @rect: a #cairo_rectangle_int_t
+ * @scale: the scale
+ * @data: (inout) (array) (element-type guint8): a pointer to the data
+ * @stride: stride of the image surface
+ * @format: the pixel format
+ * @paint_flags: the #ClutterPaintFlag
+ * @error: the error
+ *
+ * Take a snapshot of the stage to a provided buffer.
+ *
+ * Returns: %TRUE is the buffer has been paint successfully, %FALSE otherwise.
+ */
 gboolean
 clutter_stage_paint_to_buffer (ClutterStage                 *stage,
                                const cairo_rectangle_int_t  *rect,
@@ -3697,18 +3218,17 @@ clutter_stage_paint_to_buffer (ClutterStage                 *stage,
                                             bitmap);
 
   cogl_object_unref (bitmap);
-  cogl_object_unref (framebuffer);
+  g_object_unref (framebuffer);
 
   return TRUE;
 }
 
-static void
-capture_view_into (ClutterStage          *stage,
-                   gboolean               paint,
-                   ClutterStageView      *view,
-                   cairo_rectangle_int_t *rect,
-                   uint8_t               *data,
-                   int                    stride)
+void
+clutter_stage_capture_view_into (ClutterStage          *stage,
+                                 ClutterStageView      *view,
+                                 cairo_rectangle_int_t *rect,
+                                 uint8_t               *data,
+                                 int                    stride)
 {
   CoglFramebuffer *framebuffer;
   ClutterBackend *backend;
@@ -3723,15 +3243,10 @@ capture_view_into (ClutterStage          *stage,
 
   framebuffer = clutter_stage_view_get_framebuffer (view);
 
-  if (paint)
-    {
-      cairo_region_t *region;
+  clutter_stage_view_get_layout (view, &view_layout);
 
-      _clutter_stage_maybe_setup_viewport (stage, view);
-      region = cairo_region_create_rectangle (rect);
-      clutter_stage_do_paint_view (stage, view, region);
-      cairo_region_destroy (region);
-    }
+  if (!rect)
+    rect = &view_layout;
 
   view_scale = clutter_stage_view_get_scale (view);
   texture_width = roundf (rect->width * view_scale);
@@ -3745,8 +3260,6 @@ capture_view_into (ClutterStage          *stage,
                                      stride,
                                      data);
 
-  clutter_stage_view_get_layout (view, &view_layout);
-
   cogl_framebuffer_read_pixels_into_bitmap (framebuffer,
                                             roundf ((rect->x - view_layout.x) * view_scale),
                                             roundf ((rect->y - view_layout.y) * view_scale),
@@ -3758,16 +3271,14 @@ capture_view_into (ClutterStage          *stage,
 
 void
 clutter_stage_capture_into (ClutterStage          *stage,
-                            gboolean               paint,
                             cairo_rectangle_int_t *rect,
-                            uint8_t               *data)
+                            float                  scale,
+                            uint8_t               *data,
+                            int                    stride)
 {
   ClutterStagePrivate *priv = stage->priv;
   GList *l;
   int bpp = 4;
-  int stride;
-
-  stride = rect->width * 4;
 
   for (l = _clutter_stage_window_get_views (priv->impl); l; l = l->next)
     {
@@ -3784,13 +3295,15 @@ clutter_stage_capture_into (ClutterStage          *stage,
       cairo_region_get_extents (region, &capture_rect);
       cairo_region_destroy (region);
 
-      x_offset = capture_rect.x - rect->x;
-      y_offset = capture_rect.y - rect->y;
+      x_offset = roundf ((capture_rect.x - rect->x) * scale);
+      y_offset = roundf ((capture_rect.y - rect->y) * scale);
 
-      capture_view_into (stage, paint, view,
-                         &capture_rect,
-                         data + (x_offset * bpp) + (y_offset * stride),
-                         stride);
+      clutter_stage_capture_view_into (stage, view,
+                                       &capture_rect,
+                                       (data +
+                                        (x_offset * bpp) +
+                                        (y_offset * stride)),
+                                       stride);
     }
 }
 
@@ -3841,4 +3354,200 @@ clutter_stage_set_actor_needs_immediate_relayout (ClutterStage *stage)
   ClutterStagePrivate *priv = stage->priv;
 
   priv->actor_needs_immediate_relayout = TRUE;
+}
+
+static void
+on_device_actor_reactive_changed (ClutterActor       *actor,
+                                  GParamSpec         *pspec,
+                                  PointerDeviceEntry *entry)
+{
+  ClutterStage *self = entry->stage;
+  ClutterActor *new_device_actor;
+
+  g_assert (!clutter_actor_get_reactive (actor));
+
+  new_device_actor =
+    _clutter_stage_do_pick (self,
+                            entry->coords.x,
+                            entry->coords.y,
+                            CLUTTER_PICK_REACTIVE);
+
+  clutter_stage_update_device (self,
+                               entry->device, entry->sequence,
+                               entry->coords,
+                               CLUTTER_CURRENT_TIME,
+                               new_device_actor,
+                               TRUE);
+}
+
+static void
+on_device_actor_destroyed (ClutterActor       *actor,
+                           PointerDeviceEntry *entry)
+{
+  /* Simply unset the current_actor pointer here, there's no need to
+   * unset has_pointer or to disconnect any signals because the actor
+   * is gone anyway.
+   * Also, as soon as the next repaint happens, a repick should be triggered
+   * and the PointerDeviceEntry will get updated again, so no need to
+   * trigger a repick here.
+   */
+  entry->current_actor = NULL;
+}
+
+static void
+free_pointer_device_entry (PointerDeviceEntry *entry)
+{
+  if (entry->current_actor)
+    {
+      ClutterActor *actor = entry->current_actor;
+
+      g_signal_handlers_disconnect_by_func (actor,
+                                            G_CALLBACK (on_device_actor_reactive_changed),
+                                            entry);
+      g_signal_handlers_disconnect_by_func (actor,
+                                            G_CALLBACK (on_device_actor_destroyed),
+                                            entry);
+
+      _clutter_actor_set_has_pointer (actor, FALSE);
+   }
+
+  g_free (entry);
+}
+
+void
+clutter_stage_update_device_entry (ClutterStage         *self,
+                                   ClutterInputDevice   *device,
+                                   ClutterEventSequence *sequence,
+                                   graphene_point_t      coords,
+                                   ClutterActor         *actor)
+{
+  ClutterStagePrivate *priv = self->priv;
+  PointerDeviceEntry *entry = NULL;
+
+  g_assert (device != NULL);
+
+  if (sequence != NULL)
+    entry = g_hash_table_lookup (priv->touch_sequences, sequence);
+  else
+    entry = g_hash_table_lookup (priv->pointer_devices, device);
+
+  if (!entry)
+    {
+      entry = g_new0 (PointerDeviceEntry, 1);
+
+      if (sequence != NULL)
+        g_hash_table_insert (priv->touch_sequences, sequence, entry);
+      else
+        g_hash_table_insert (priv->pointer_devices, device, entry);
+
+      entry->stage = self;
+      entry->device = device;
+      entry->sequence = sequence;
+    }
+
+  entry->coords = coords;
+
+  if (entry->current_actor != actor)
+    {
+      if (entry->current_actor)
+        {
+          ClutterActor *old_actor = entry->current_actor;
+
+          g_signal_handlers_disconnect_by_func (old_actor,
+                                                G_CALLBACK (on_device_actor_reactive_changed),
+                                                entry);
+          g_signal_handlers_disconnect_by_func (old_actor,
+                                                G_CALLBACK (on_device_actor_destroyed),
+                                                entry);
+
+          _clutter_actor_set_has_pointer (old_actor, FALSE);
+        }
+
+      entry->current_actor = actor;
+
+      if (actor)
+        {
+          g_signal_connect (actor, "notify::reactive",
+                            G_CALLBACK (on_device_actor_reactive_changed), entry);
+          g_signal_connect (actor, "destroy",
+                            G_CALLBACK (on_device_actor_destroyed), entry);
+
+          _clutter_actor_set_has_pointer (actor, TRUE);
+        }
+    }
+}
+
+void
+clutter_stage_remove_device_entry (ClutterStage         *self,
+                                   ClutterInputDevice   *device,
+                                   ClutterEventSequence *sequence)
+{
+  ClutterStagePrivate *priv = self->priv;
+  gboolean removed;
+
+  g_assert (device != NULL);
+
+  if (sequence != NULL)
+    removed = g_hash_table_remove (priv->touch_sequences, sequence);
+  else
+    removed = g_hash_table_remove (priv->pointer_devices, device);
+
+  g_assert (removed);
+}
+
+/**
+ * clutter_stage_get_device_actor:
+ * @stage: a #ClutterStage
+ * @device: a #ClutterInputDevice
+ * @sequence: (allow-none): an optional #ClutterEventSequence
+ *
+ * Retrieves the #ClutterActor underneath the pointer or touch point
+ * of @device and @sequence.
+ *
+ * Return value: (transfer none): a pointer to the #ClutterActor or %NULL
+ */
+ClutterActor *
+clutter_stage_get_device_actor (ClutterStage         *stage,
+                                ClutterInputDevice   *device,
+                                ClutterEventSequence *sequence)
+{
+  ClutterStagePrivate *priv = stage->priv;
+  PointerDeviceEntry *entry = NULL;
+
+  g_return_val_if_fail (CLUTTER_IS_STAGE (stage), NULL);
+  g_return_val_if_fail (device != NULL, NULL);
+
+  if (sequence != NULL)
+    entry = g_hash_table_lookup (priv->touch_sequences, sequence);
+  else
+    entry = g_hash_table_lookup (priv->pointer_devices, device);
+
+  if (entry)
+    return entry->current_actor;
+
+  return NULL;
+}
+
+/**
+ * clutter_stage_get_device_coords: (skip):
+ */
+void
+clutter_stage_get_device_coords (ClutterStage         *stage,
+                                 ClutterInputDevice   *device,
+                                 ClutterEventSequence *sequence,
+                                 graphene_point_t     *coords)
+{
+  ClutterStagePrivate *priv = stage->priv;
+  PointerDeviceEntry *entry = NULL;
+
+  g_return_if_fail (CLUTTER_IS_STAGE (stage));
+  g_return_if_fail (device != NULL);
+
+  if (sequence != NULL)
+    entry = g_hash_table_lookup (priv->touch_sequences, sequence);
+  else
+    entry = g_hash_table_lookup (priv->pointer_devices, device);
+
+  if (entry && coords)
+    *coords = entry->coords;
 }

@@ -30,25 +30,31 @@
 #include "backends/native/meta-gpu-kms.h"
 #include "backends/native/meta-output-kms.h"
 #include "backends/native/meta-kms-device.h"
+#include "backends/native/meta-kms-mode.h"
 #include "backends/native/meta-kms-plane.h"
 #include "backends/native/meta-kms-update.h"
+#include "backends/native/meta-kms.h"
+#include "backends/native/meta-monitor-manager-native.h"
 
 #define ALL_TRANSFORMS_MASK ((1 << META_MONITOR_N_TRANSFORMS) - 1)
 
 struct _MetaCrtcKms
 {
-  MetaCrtc parent;
+  MetaCrtcNative parent;
 
   MetaKmsCrtc *kms_crtc;
 
   MetaKmsPlane *primary_plane;
 
   gpointer cursor_renderer_private;
+  GDestroyNotify cursor_renderer_private_destroy_notify;
+
+  gboolean is_gamma_valid;
 };
 
 static GQuark kms_crtc_crtc_kms_quark;
 
-G_DEFINE_TYPE (MetaCrtcKms, meta_crtc_kms, META_TYPE_CRTC)
+G_DEFINE_TYPE (MetaCrtcKms, meta_crtc_kms, META_TYPE_CRTC_NATIVE)
 
 gpointer
 meta_crtc_kms_get_cursor_renderer_private (MetaCrtcKms *crtc_kms)
@@ -57,21 +63,35 @@ meta_crtc_kms_get_cursor_renderer_private (MetaCrtcKms *crtc_kms)
 }
 
 void
-meta_crtc_kms_set_cursor_renderer_private (MetaCrtcKms *crtc_kms,
-                                           gpointer     cursor_renderer_private)
+meta_crtc_kms_set_cursor_renderer_private (MetaCrtcKms    *crtc_kms,
+                                           gpointer        cursor_renderer_private,
+                                           GDestroyNotify  destroy_notify)
 {
+  g_clear_pointer (&crtc_kms->cursor_renderer_private,
+                   crtc_kms->cursor_renderer_private_destroy_notify);
+
   crtc_kms->cursor_renderer_private = cursor_renderer_private;
+  crtc_kms->cursor_renderer_private_destroy_notify = destroy_notify;
 }
 
-gboolean
-meta_crtc_kms_is_transform_handled (MetaCrtcKms          *crtc_kms,
-                                    MetaMonitorTransform  transform)
+static gboolean
+is_transform_handled (MetaCrtcKms          *crtc_kms,
+                      MetaMonitorTransform  transform)
 {
   if (!crtc_kms->primary_plane)
     return FALSE;
 
   return meta_kms_plane_is_transform_handled (crtc_kms->primary_plane,
                                               transform);
+}
+
+static gboolean
+meta_crtc_kms_is_transform_handled (MetaCrtcNative       *crtc_native,
+                                    MetaMonitorTransform  transform)
+{
+  MetaCrtcKms *crtc_kms = META_CRTC_KMS (crtc_native);
+
+  return is_transform_handled (crtc_kms, transform);
 }
 
 void
@@ -85,9 +105,9 @@ meta_crtc_kms_apply_transform (MetaCrtcKms            *crtc_kms,
   crtc_config = meta_crtc_get_config (crtc);
 
   hw_transform = crtc_config->transform;
-  if (!meta_crtc_kms_is_transform_handled (crtc_kms, hw_transform))
+  if (!is_transform_handled (crtc_kms, hw_transform))
     hw_transform = META_MONITOR_TRANSFORM_NORMAL;
-  if (!meta_crtc_kms_is_transform_handled (crtc_kms, hw_transform))
+  if (!is_transform_handled (crtc_kms, hw_transform))
     return;
 
   meta_kms_plane_update_set_rotation (crtc_kms->primary_plane,
@@ -97,14 +117,14 @@ meta_crtc_kms_apply_transform (MetaCrtcKms            *crtc_kms,
 
 void
 meta_crtc_kms_assign_primary_plane (MetaCrtcKms   *crtc_kms,
-                                    uint32_t       fb_id,
+                                    MetaDrmBuffer *buffer,
                                     MetaKmsUpdate *kms_update)
 {
   MetaCrtc *crtc = META_CRTC (crtc_kms);
   const MetaCrtcConfig *crtc_config;
   const MetaCrtcModeInfo *crtc_mode_info;
   MetaFixed16Rectangle src_rect;
-  MetaFixed16Rectangle dst_rect;
+  MetaRectangle dst_rect;
   MetaKmsAssignPlaneFlag flags;
   MetaKmsCrtc *kms_crtc;
   MetaKmsDevice *kms_device;
@@ -120,11 +140,11 @@ meta_crtc_kms_assign_primary_plane (MetaCrtcKms   *crtc_kms,
     .width = meta_fixed_16_from_int (crtc_mode_info->width),
     .height = meta_fixed_16_from_int (crtc_mode_info->height),
   };
-  dst_rect = (MetaFixed16Rectangle) {
-    .x = meta_fixed_16_from_int (0),
-    .y = meta_fixed_16_from_int (0),
-    .width = meta_fixed_16_from_int (crtc_mode_info->width),
-    .height = meta_fixed_16_from_int (crtc_mode_info->height),
+  dst_rect = (MetaRectangle) {
+    .x = 0,
+    .y = 0,
+    .width = crtc_mode_info->width,
+    .height = crtc_mode_info->height,
   };
 
   flags = META_KMS_ASSIGN_PLANE_FLAG_NONE;
@@ -136,7 +156,7 @@ meta_crtc_kms_assign_primary_plane (MetaCrtcKms   *crtc_kms,
   plane_assignment = meta_kms_update_assign_plane (kms_update,
                                                    kms_crtc,
                                                    primary_kms_plane,
-                                                   fb_id,
+                                                   buffer,
                                                    src_rect,
                                                    dst_rect,
                                                    flags);
@@ -169,13 +189,46 @@ generate_crtc_connector_list (MetaGpu  *gpu,
 }
 
 void
+meta_crtc_kms_maybe_set_gamma (MetaCrtcKms   *crtc_kms,
+                               MetaKmsDevice *kms_device)
+{
+  MetaGpu *gpu = meta_crtc_get_gpu (META_CRTC (crtc_kms));
+  MetaBackend *backend = meta_gpu_get_backend (gpu);
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
+  MetaMonitorManagerNative *monitor_manager_native =
+    META_MONITOR_MANAGER_NATIVE (monitor_manager);
+  MetaKms *kms = meta_kms_device_get_kms (kms_device);
+  MetaKmsUpdate *kms_update;
+  MetaKmsCrtcGamma *gamma;
+
+  if (crtc_kms->is_gamma_valid)
+    return;
+
+  gamma = meta_monitor_manager_native_get_cached_crtc_gamma (monitor_manager_native,
+                                                             crtc_kms);
+  if (!gamma)
+    return;
+
+  kms_update = meta_kms_ensure_pending_update (kms, kms_device);
+  meta_kms_update_set_crtc_gamma (kms_update,
+                                  meta_crtc_kms_get_kms_crtc (crtc_kms),
+                                  gamma->size,
+                                  gamma->red,
+                                  gamma->green,
+                                  gamma->blue);
+
+  crtc_kms->is_gamma_valid = TRUE;
+}
+
+void
 meta_crtc_kms_set_mode (MetaCrtcKms   *crtc_kms,
                         MetaKmsUpdate *kms_update)
 {
   MetaCrtc *crtc = META_CRTC (crtc_kms);
   MetaGpu *gpu = meta_crtc_get_gpu (crtc);
   GList *connectors;
-  const drmModeModeInfo *mode;
+  MetaKmsMode *kms_mode;
 
   connectors = generate_crtc_connector_list (gpu, crtc);
 
@@ -184,37 +237,25 @@ meta_crtc_kms_set_mode (MetaCrtcKms   *crtc_kms,
       const MetaCrtcConfig *crtc_config = meta_crtc_get_config (crtc);
       MetaCrtcModeKms *crtc_mode_kms = META_CRTC_MODE_KMS (crtc_config->mode);
 
-      mode = meta_crtc_mode_kms_get_drm_mode (crtc_mode_kms);
+      kms_mode = meta_crtc_mode_kms_get_kms_mode (crtc_mode_kms);
 
-      g_debug ("Setting CRTC (%" G_GUINT64_FORMAT ") mode to %s",
-               meta_crtc_get_id (crtc), mode->name);
+      meta_topic (META_DEBUG_KMS,
+                  "Setting CRTC (%" G_GUINT64_FORMAT ") mode to %s",
+                  meta_crtc_get_id (crtc), meta_kms_mode_get_name (kms_mode));
     }
   else
     {
-      mode = NULL;
+      kms_mode = NULL;
 
-      g_debug ("Unsetting CRTC (%" G_GUINT64_FORMAT ") mode",
-               meta_crtc_get_id (crtc));
+      meta_topic (META_DEBUG_KMS,
+                  "Unsetting CRTC (%" G_GUINT64_FORMAT ") mode",
+                  meta_crtc_get_id (crtc));
     }
 
   meta_kms_update_mode_set (kms_update,
                             meta_crtc_kms_get_kms_crtc (crtc_kms),
                             g_steal_pointer (&connectors),
-                            mode);
-}
-
-void
-meta_crtc_kms_page_flip (MetaCrtcKms                   *crtc_kms,
-                         const MetaKmsPageFlipFeedback *page_flip_feedback,
-                         MetaKmsPageFlipFlag            flags,
-                         gpointer                       user_data,
-                         MetaKmsUpdate                 *kms_update)
-{
-  meta_kms_update_page_flip (kms_update,
-                             meta_crtc_kms_get_kms_crtc (crtc_kms),
-                             page_flip_feedback,
-                             flags,
-                             user_data);
+                            kms_mode);
 }
 
 MetaKmsCrtc *
@@ -274,6 +315,12 @@ meta_crtc_kms_supports_format (MetaCrtcKms *crtc_kms,
                                              drm_format);
 }
 
+void
+meta_crtc_kms_invalidate_gamma (MetaCrtcKms *crtc_kms)
+{
+  crtc_kms->is_gamma_valid = FALSE;
+}
+
 MetaCrtcKms *
 meta_crtc_kms_from_kms_crtc (MetaKmsCrtc *kms_crtc)
 {
@@ -312,6 +359,17 @@ meta_crtc_kms_new (MetaGpuKms  *gpu_kms,
 }
 
 static void
+meta_crtc_kms_dispose (GObject *object)
+{
+  MetaCrtcKms *crtc_kms = META_CRTC_KMS (object);
+
+  g_clear_pointer (&crtc_kms->cursor_renderer_private,
+                   crtc_kms->cursor_renderer_private_destroy_notify);
+
+  G_OBJECT_CLASS (meta_crtc_kms_parent_class)->dispose (object);
+}
+
+static void
 meta_crtc_kms_init (MetaCrtcKms *crtc_kms)
 {
 }
@@ -319,4 +377,10 @@ meta_crtc_kms_init (MetaCrtcKms *crtc_kms)
 static void
 meta_crtc_kms_class_init (MetaCrtcKmsClass *klass)
 {
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
+  MetaCrtcNativeClass *crtc_native_class = META_CRTC_NATIVE_CLASS (klass);
+
+  object_class->dispose = meta_crtc_kms_dispose;
+
+  crtc_native_class->is_transform_handled = meta_crtc_kms_is_transform_handled;
 }

@@ -385,7 +385,7 @@ data_device_end_drag_grab (MetaWaylandDragGrab *drag_grab)
       meta_display_sync_wayland_input_focus (meta_get_display ());
     }
 
-  g_slice_free (MetaWaylandDragGrab, drag_grab);
+  g_free (drag_grab);
 }
 
 static gboolean
@@ -583,7 +583,7 @@ meta_wayland_data_device_start_drag (MetaWaylandDataDevice                 *data
   ClutterModifierType modifiers;
   MetaSurfaceActor *surface_actor;
 
-  data_device->current_grab = drag_grab = g_slice_new0 (MetaWaylandDragGrab);
+  data_device->current_grab = drag_grab = g_new0 (MetaWaylandDragGrab, 1);
 
   drag_grab->generic.interface = funcs;
   drag_grab->generic.pointer = seat->pointer;
@@ -610,7 +610,8 @@ meta_wayland_data_device_start_drag (MetaWaylandDataDevice                 *data
 
   drag_grab->need_initial_focus = TRUE;
 
-  modifiers = clutter_input_device_get_modifier_state (seat->pointer->device);
+  clutter_seat_query_state (clutter_input_device_get_seat (seat->pointer->device),
+                            seat->pointer->device, NULL, NULL, &modifiers);
   drag_grab->buttons = modifiers &
     (CLUTTER_BUTTON1_MASK | CLUTTER_BUTTON2_MASK | CLUTTER_BUTTON3_MASK |
      CLUTTER_BUTTON4_MASK | CLUTTER_BUTTON5_MASK);
@@ -639,7 +640,8 @@ meta_wayland_data_device_start_drag (MetaWaylandDataDevice                 *data
                                       0, 0);
       clutter_actor_add_child (drag_grab->feedback_actor, drag_surface_actor);
 
-      clutter_input_device_get_coords (seat->pointer->device, NULL, &pos);
+      clutter_seat_query_state (clutter_input_device_get_seat (seat->pointer->device),
+                                seat->pointer->device, NULL, &pos, NULL);
       meta_feedback_actor_set_position (META_FEEDBACK_ACTOR (drag_grab->feedback_actor),
                                         pos.x, pos.y);
     }
@@ -936,7 +938,11 @@ data_device_set_selection (struct wl_client *client,
 
   if (wl_resource_get_client (resource) !=
       meta_wayland_keyboard_get_focus_client (seat->keyboard))
-    return;
+    {
+      if (source)
+        meta_wayland_data_source_cancel (source);
+      return;
+    }
 
   /* FIXME: Store serial and check against incoming serial here. */
   meta_wayland_data_device_set_selection (data_device, source, serial);
@@ -1010,9 +1016,19 @@ get_data_device (struct wl_client *client,
 {
   MetaWaylandSeat *seat = wl_resource_get_user_data (seat_resource);
   struct wl_resource *cr;
+  struct wl_resource *data_device_resource;
 
   cr = wl_resource_create (client, &wl_data_device_interface, wl_resource_get_version (manager_resource), id);
   wl_resource_set_implementation (cr, &data_device_interface, &seat->data_device, unbind_resource);
+
+  data_device_resource =
+    wl_resource_find_for_client (&seat->data_device.resource_list, client);
+  if (data_device_resource)
+    {
+      wl_list_remove (wl_resource_get_link (data_device_resource));
+      wl_list_init (wl_resource_get_link (data_device_resource));
+    }
+
   wl_list_insert (&seat->data_device.resource_list, wl_resource_get_link (cr));
 
   ensure_owners_changed_handler_connected (&seat->data_device);

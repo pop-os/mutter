@@ -26,6 +26,7 @@
 #include <xf86drmMode.h>
 
 #include "backends/meta-monitor-transform.h"
+#include "backends/native/meta-drm-buffer.h"
 #include "backends/native/meta-kms-types.h"
 #include "meta/boxes.h"
 
@@ -39,21 +40,25 @@ typedef enum _MetaKmsAssignPlaneFlag
 {
   META_KMS_ASSIGN_PLANE_FLAG_NONE = 0,
   META_KMS_ASSIGN_PLANE_FLAG_FB_UNCHANGED = 1 << 0,
+  META_KMS_ASSIGN_PLANE_FLAG_ALLOW_FAIL = 1 << 1,
 } MetaKmsAssignPlaneFlag;
 
-typedef enum _MetaKmsPageFlipFlag
+enum _MetaKmsPageFlipListenerFlag
 {
-  META_KMS_PAGE_FLIP_FLAG_NONE = 0,
-  META_KMS_PAGE_FLIP_FLAG_NO_DISCARD_FEEDBACK = 1 << 0,
-} MetaKmsPageFlipFlag;
+  META_KMS_PAGE_FLIP_LISTENER_FLAG_NONE = 0,
+  META_KMS_PAGE_FLIP_LISTENER_FLAG_NO_DISCARD = 1 << 0,
+};
 
-struct _MetaKmsPageFlipFeedback
+struct _MetaKmsPageFlipListenerVtable
 {
   void (* flipped) (MetaKmsCrtc  *crtc,
                     unsigned int  sequence,
                     unsigned int  tv_sec,
                     unsigned int  tv_usec,
                     gpointer      user_data);
+
+  void (* ready) (MetaKmsCrtc *crtc,
+                  gpointer     user_data);
 
   void (* mode_set_fallback) (MetaKmsCrtc *crtc,
                               gpointer     user_data);
@@ -73,51 +78,73 @@ typedef struct _MetaKmsPlaneFeedback
   GError *error;
 } MetaKmsPlaneFeedback;
 
+typedef void (* MetaKmsResultListenerFunc) (const MetaKmsFeedback *feedback,
+                                            gpointer               user_data);
+
 void meta_kms_feedback_free (MetaKmsFeedback *feedback);
 
-MetaKmsFeedbackResult meta_kms_feedback_get_result (MetaKmsFeedback *feedback);
+MetaKmsFeedbackResult meta_kms_feedback_get_result (const MetaKmsFeedback *feedback);
 
-GList * meta_kms_feedback_get_failed_planes (MetaKmsFeedback *feedback);
+GList * meta_kms_feedback_get_failed_planes (const MetaKmsFeedback *feedback);
 
-const GError * meta_kms_feedback_get_error (MetaKmsFeedback *feedback);
+const GError * meta_kms_feedback_get_error (const MetaKmsFeedback *feedback);
 
-MetaKmsUpdate * meta_kms_update_new (void);
+MetaKmsUpdate * meta_kms_update_new (MetaKmsDevice *device);
 
 void meta_kms_update_free (MetaKmsUpdate *update);
 
-void meta_kms_update_mode_set (MetaKmsUpdate         *update,
-                               MetaKmsCrtc           *crtc,
-                               GList                 *connectors,
-                               const drmModeModeInfo *drm_mode);
+void meta_kms_update_set_underscanning (MetaKmsUpdate    *update,
+                                        MetaKmsConnector *connector,
+                                        uint64_t          hborder,
+                                        uint64_t          vborder);
+
+void meta_kms_update_unset_underscanning (MetaKmsUpdate    *update,
+                                          MetaKmsConnector *connector);
+
+void meta_kms_update_set_power_save (MetaKmsUpdate *update);
+
+void meta_kms_update_mode_set (MetaKmsUpdate *update,
+                               MetaKmsCrtc   *crtc,
+                               GList         *connectors,
+                               MetaKmsMode   *mode);
+
+void meta_kms_update_set_crtc_gamma (MetaKmsUpdate  *update,
+                                     MetaKmsCrtc    *crtc,
+                                     int             size,
+                                     const uint16_t *red,
+                                     const uint16_t *green,
+                                     const uint16_t *blue);
 
 MetaKmsPlaneAssignment * meta_kms_update_assign_plane (MetaKmsUpdate          *update,
                                                        MetaKmsCrtc            *crtc,
                                                        MetaKmsPlane           *plane,
-                                                       uint32_t                fb_id,
+                                                       MetaDrmBuffer          *buffer,
                                                        MetaFixed16Rectangle    src_rect,
-                                                       MetaFixed16Rectangle    dst_rect,
+                                                       MetaRectangle           dst_rect,
                                                        MetaKmsAssignPlaneFlag  flags);
 
 MetaKmsPlaneAssignment * meta_kms_update_unassign_plane (MetaKmsUpdate *update,
                                                          MetaKmsCrtc   *crtc,
                                                          MetaKmsPlane  *plane);
 
-void meta_kms_update_page_flip (MetaKmsUpdate                 *update,
-                                MetaKmsCrtc                   *crtc,
-                                const MetaKmsPageFlipFeedback *feedback,
-                                MetaKmsPageFlipFlag            flags,
-                                gpointer                       user_data);
+void meta_kms_update_add_page_flip_listener (MetaKmsUpdate                       *update,
+                                             MetaKmsCrtc                         *crtc,
+                                             const MetaKmsPageFlipListenerVtable *vtable,
+                                             MetaKmsPageFlipListenerFlag          flags,
+                                             gpointer                             user_data,
+                                             GDestroyNotify                       destroy_notify);
 
-void meta_kms_update_custom_page_flip (MetaKmsUpdate                 *update,
-                                       MetaKmsCrtc                   *crtc,
-                                       const MetaKmsPageFlipFeedback *feedback,
-                                       gpointer                       user_data,
-                                       MetaKmsCustomPageFlipFunc      custom_page_flip_func,
-                                       gpointer                       custom_page_flip_user_data);
+void meta_kms_update_set_custom_page_flip (MetaKmsUpdate             *update,
+                                           MetaKmsCustomPageFlipFunc  func,
+                                           gpointer                   user_data);
 
 void meta_kms_plane_assignment_set_cursor_hotspot (MetaKmsPlaneAssignment *plane_assignment,
                                                    int                     x,
                                                    int                     y);
+
+void meta_kms_update_add_result_listener (MetaKmsUpdate             *update,
+                                          MetaKmsResultListenerFunc  func,
+                                          gpointer                   user_data);
 
 static inline MetaFixed16
 meta_fixed_16_from_int (int16_t d)

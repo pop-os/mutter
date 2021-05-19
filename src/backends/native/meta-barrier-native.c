@@ -36,14 +36,14 @@
 
 #include "backends/meta-backend-private.h"
 #include "backends/meta-barrier-private.h"
-#include "backends/native/meta-backend-native.h"
-#include "backends/native/meta-backend-native-private.h"
+#include "backends/native/meta-seat-native.h"
 #include "meta/barrier.h"
 #include "meta/util.h"
 
 struct _MetaBarrierManagerNative
 {
   GHashTable *barriers;
+  GMutex mutex;
 };
 
 typedef enum
@@ -78,6 +78,7 @@ struct _MetaBarrierImplNative
   int                       trigger_serial;
   guint32                   last_event_time;
   MetaBarrierDirection      blocked_dir;
+  GMainContext             *main_context;
 };
 
 G_DEFINE_TYPE (MetaBarrierImplNative,
@@ -341,6 +342,49 @@ typedef struct _MetaBarrierEventData
   float               dy;
 } MetaBarrierEventData;
 
+typedef struct
+{
+  MetaBarrierEvent *event;
+  MetaBarrier *barrier;
+  MetaBarrierState state;
+} MetaBarrierIdleData;
+
+static gboolean
+emit_event_idle (MetaBarrierIdleData *idle_data)
+{
+  if (idle_data->state == META_BARRIER_STATE_HELD)
+    _meta_barrier_emit_hit_signal (idle_data->barrier, idle_data->event);
+  else
+    _meta_barrier_emit_left_signal (idle_data->barrier, idle_data->event);
+
+  meta_barrier_event_unref (idle_data->event);
+
+  return G_SOURCE_REMOVE;
+}
+
+static void
+queue_event (MetaBarrierImplNative *self,
+             MetaBarrierEvent      *event)
+{
+  MetaBarrierIdleData *idle_data;
+  GSource *source;
+
+  idle_data = g_new0 (MetaBarrierIdleData, 1);
+  idle_data->state = self->state;
+  idle_data->barrier = self->barrier;
+  idle_data->event = event;
+
+  source = g_idle_source_new ();
+  g_source_set_priority (source, G_PRIORITY_HIGH);
+  g_source_set_callback (source,
+                         (GSourceFunc) emit_event_idle,
+                         idle_data,
+                         g_free);
+
+  g_source_attach (source, self->main_context);
+  g_source_unref (source);
+}
+
 static void
 emit_barrier_event (MetaBarrierImplNative *self,
                     guint32                time,
@@ -351,8 +395,7 @@ emit_barrier_event (MetaBarrierImplNative *self,
                     float                  dx,
                     float                  dy)
 {
-  MetaBarrier *barrier = self->barrier;
-  MetaBarrierEvent *event = g_slice_new0 (MetaBarrierEvent);
+  MetaBarrierEvent *event = g_new0 (MetaBarrierEvent, 1);
   MetaBarrierState old_state = self->state;
 
   switch (self->state)
@@ -390,12 +433,7 @@ emit_barrier_event (MetaBarrierImplNative *self,
 
   self->last_event_time = time;
 
-  if (self->state == META_BARRIER_STATE_HELD)
-    _meta_barrier_emit_hit_signal (barrier, event);
-  else
-    _meta_barrier_emit_left_signal (barrier, event);
-
-  meta_barrier_event_unref (event);
+  queue_event (self, event);
 }
 
 static void
@@ -462,11 +500,11 @@ clamp_to_barrier (MetaBarrierImplNative *self,
 }
 
 void
-meta_barrier_manager_native_process (MetaBarrierManagerNative *manager,
-                                     ClutterInputDevice       *device,
-                                     guint32                   time,
-                                     float                    *x,
-                                     float                    *y)
+meta_barrier_manager_native_process_in_impl (MetaBarrierManagerNative *manager,
+                                             ClutterInputDevice       *device,
+                                             guint32                   time,
+                                             float                    *x,
+                                             float                    *y)
 {
   graphene_point_t prev_pos;
   float prev_x;
@@ -477,8 +515,11 @@ meta_barrier_manager_native_process (MetaBarrierManagerNative *manager,
   MetaBarrierEventData barrier_event_data;
   MetaBarrierImplNative *barrier_impl;
 
-  if (!clutter_input_device_get_coords (device, NULL, &prev_pos))
+  if (!clutter_seat_query_state (clutter_input_device_get_seat (device),
+                                 device, NULL, &prev_pos, NULL))
     return;
+
+  g_mutex_lock (&manager->mutex);
 
   prev_x = prev_pos.x;
   prev_y = prev_pos.y;
@@ -524,6 +565,8 @@ meta_barrier_manager_native_process (MetaBarrierManagerNative *manager,
   g_hash_table_foreach (manager->barriers,
                         maybe_emit_barrier_event,
                         &barrier_event_data);
+
+  g_mutex_unlock (&manager->mutex);
 }
 
 static gboolean
@@ -550,7 +593,10 @@ _meta_barrier_impl_native_destroy (MetaBarrierImpl *impl)
 {
   MetaBarrierImplNative *self = META_BARRIER_IMPL_NATIVE (impl);
 
+  g_mutex_lock (&self->manager->mutex);
   g_hash_table_remove (self->manager->barriers, self);
+  g_mutex_unlock (&self->manager->mutex);
+  g_main_context_unref (self->main_context);
   self->is_active = FALSE;
 }
 
@@ -558,18 +604,21 @@ MetaBarrierImpl *
 meta_barrier_impl_native_new (MetaBarrier *barrier)
 {
   MetaBarrierImplNative *self;
-  MetaBackendNative *native;
   MetaBarrierManagerNative *manager;
+  ClutterBackend *backend = clutter_get_default_backend ();
+  ClutterSeat *seat = clutter_backend_get_default_seat (backend);
 
   self = g_object_new (META_TYPE_BARRIER_IMPL_NATIVE, NULL);
 
   self->barrier = barrier;
   self->is_active = TRUE;
+  self->main_context = g_main_context_ref_thread_default ();
 
-  native = META_BACKEND_NATIVE (meta_get_backend ());
-  manager = meta_backend_native_get_barrier_manager (native);
+  manager = meta_seat_native_get_barrier_manager (META_SEAT_NATIVE (seat));
   self->manager = manager;
+  g_mutex_lock (&manager->mutex);
   g_hash_table_add (manager->barriers, self);
+  g_mutex_unlock (&manager->mutex);
 
   return META_BARRIER_IMPL (self);
 }
@@ -597,6 +646,7 @@ meta_barrier_manager_native_new (void)
   manager = g_new0 (MetaBarrierManagerNative, 1);
 
   manager->barriers = g_hash_table_new (NULL, NULL);
+  g_mutex_init (&manager->mutex);
 
   return manager;
 }

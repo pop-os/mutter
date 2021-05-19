@@ -59,7 +59,7 @@ _clutter_paint_volume_new (ClutterActor *actor)
 
   g_return_val_if_fail (actor != NULL, NULL);
 
-  pv = g_slice_new (ClutterPaintVolume);
+  pv = g_new0 (ClutterPaintVolume, 1);
 
   pv->actor = actor;
 
@@ -78,7 +78,7 @@ _clutter_paint_volume_new (ClutterActor *actor)
  * traversal of a Clutter scene graph and since paint volumes often
  * have a very short life cycle that maps well to stack allocation we
  * allow initializing a static ClutterPaintVolume variable to avoid
- * hammering the slice allocator.
+ * hammering the memory allocator.
  *
  * We were seeing slice allocation take about 1% cumulative CPU time
  * for some very simple clutter tests which although it isn't a *lot*
@@ -133,7 +133,7 @@ clutter_paint_volume_copy (const ClutterPaintVolume *pv)
 
   g_return_val_if_fail (pv != NULL, NULL);
 
-  copy = g_slice_dup (ClutterPaintVolume, pv);
+  copy = g_memdup2 (pv, sizeof (ClutterPaintVolume));
   copy->is_static = FALSE;
 
   return copy;
@@ -164,7 +164,7 @@ clutter_paint_volume_free (ClutterPaintVolume *pv)
   if (G_LIKELY (pv->is_static))
     return;
 
-  g_slice_free (ClutterPaintVolume, pv);
+  g_free (pv);
 }
 
 /**
@@ -533,15 +533,17 @@ clutter_paint_volume_union (ClutterPaintVolume *pv,
                             const ClutterPaintVolume *another_pv)
 {
   ClutterPaintVolume aligned_pv;
+  graphene_point3d_t min;
+  graphene_point3d_t max;
+  graphene_box_t another_box;
+  graphene_box_t union_box;
+  graphene_box_t box;
 
   g_return_if_fail (pv != NULL);
   g_return_if_fail (another_pv != NULL);
 
   /* Both volumes have to belong to the same local coordinate space */
   g_return_if_fail (pv->actor == another_pv->actor);
-
-  /* NB: we only have to update vertices 0, 1, 3 and 4
-   * (See the ClutterPaintVolume typedef for more details) */
 
   /* We special case empty volumes because otherwise we'd end up
    * calculating a bounding box that would enclose the origin of
@@ -559,78 +561,34 @@ clutter_paint_volume_union (ClutterPaintVolume *pv,
   if (!pv->is_axis_aligned)
     _clutter_paint_volume_axis_align (pv);
 
-  if (!another_pv->is_axis_aligned)
+  _clutter_paint_volume_complete (pv);
+
+  if (!another_pv->is_axis_aligned || !another_pv->is_complete)
     {
       _clutter_paint_volume_copy_static (another_pv, &aligned_pv);
       _clutter_paint_volume_axis_align (&aligned_pv);
+      _clutter_paint_volume_complete (&aligned_pv);
       another_pv = &aligned_pv;
     }
 
-  /* grow left*/
-  /* left vertices 0, 3, 4, 7 */
-  if (another_pv->vertices[0].x < pv->vertices[0].x)
-    {
-      int min_x = another_pv->vertices[0].x;
-      pv->vertices[0].x = min_x;
-      pv->vertices[3].x = min_x;
-      pv->vertices[4].x = min_x;
-      /* pv->vertices[7].x = min_x; */
-    }
+  if (G_LIKELY (pv->is_2d))
+    graphene_box_init_from_points (&box, 4, pv->vertices);
+  else
+    graphene_box_init_from_points (&box, 8, pv->vertices);
 
-  /* grow right */
-  /* right vertices 1, 2, 5, 6 */
-  if (another_pv->vertices[1].x > pv->vertices[1].x)
-    {
-      int max_x = another_pv->vertices[1].x;
-      pv->vertices[1].x = max_x;
-      /* pv->vertices[2].x = max_x; */
-      /* pv->vertices[5].x = max_x; */
-      /* pv->vertices[6].x = max_x; */
-    }
+  if (G_LIKELY (another_pv->is_2d))
+    graphene_box_init_from_points (&another_box, 4, another_pv->vertices);
+  else
+    graphene_box_init_from_points (&another_box, 8, another_pv->vertices);
 
-  /* grow up */
-  /* top vertices 0, 1, 4, 5 */
-  if (another_pv->vertices[0].y < pv->vertices[0].y)
-    {
-      int min_y = another_pv->vertices[0].y;
-      pv->vertices[0].y = min_y;
-      pv->vertices[1].y = min_y;
-      pv->vertices[4].y = min_y;
-      /* pv->vertices[5].y = min_y; */
-    }
+  graphene_box_union (&box, &another_box, &union_box);
 
-  /* grow down */
-  /* bottom vertices 2, 3, 6, 7 */
-  if (another_pv->vertices[3].y > pv->vertices[3].y)
-    {
-      int may_y = another_pv->vertices[3].y;
-      /* pv->vertices[2].y = may_y; */
-      pv->vertices[3].y = may_y;
-      /* pv->vertices[6].y = may_y; */
-      /* pv->vertices[7].y = may_y; */
-    }
-
-  /* grow forward */
-  /* front vertices 0, 1, 2, 3 */
-  if (another_pv->vertices[0].z < pv->vertices[0].z)
-    {
-      int min_z = another_pv->vertices[0].z;
-      pv->vertices[0].z = min_z;
-      pv->vertices[1].z = min_z;
-      /* pv->vertices[2].z = min_z; */
-      pv->vertices[3].z = min_z;
-    }
-
-  /* grow backward */
-  /* back vertices 4, 5, 6, 7 */
-  if (another_pv->vertices[4].z > pv->vertices[4].z)
-    {
-      int maz_z = another_pv->vertices[4].z;
-      pv->vertices[4].z = maz_z;
-      /* pv->vertices[5].z = maz_z; */
-      /* pv->vertices[6].z = maz_z; */
-      /* pv->vertices[7].z = maz_z; */
-    }
+  graphene_box_get_min (&union_box, &min);
+  graphene_box_get_max (&union_box, &max);
+  graphene_point3d_init (&pv->vertices[0], min.x, min.y, min.z);
+  graphene_point3d_init (&pv->vertices[1], max.x, min.y, min.z);
+  graphene_point3d_init (&pv->vertices[3], min.x, max.y, min.z);
+  graphene_point3d_init (&pv->vertices[4], min.x, min.y, max.z);
 
   if (pv->vertices[4].z == pv->vertices[0].z)
     pv->is_2d = TRUE;
@@ -808,8 +766,8 @@ _clutter_paint_volume_get_bounding_box (ClutterPaintVolume *pv,
 
 void
 _clutter_paint_volume_project (ClutterPaintVolume *pv,
-                               const CoglMatrix *modelview,
-                               const CoglMatrix *projection,
+                               const graphene_matrix_t *modelview,
+                               const graphene_matrix_t *projection,
                                const float *viewport)
 {
   int transform_count;
@@ -849,7 +807,7 @@ _clutter_paint_volume_project (ClutterPaintVolume *pv,
 
 void
 _clutter_paint_volume_transform (ClutterPaintVolume *pv,
-                                 const CoglMatrix *matrix)
+                                 const graphene_matrix_t *matrix)
 {
   int transform_count;
 
@@ -857,11 +815,11 @@ _clutter_paint_volume_transform (ClutterPaintVolume *pv,
     {
       gfloat w = 1;
       /* Just transform the origin */
-      cogl_matrix_transform_point (matrix,
-                                   &pv->vertices[0].x,
-                                   &pv->vertices[0].y,
-                                   &pv->vertices[0].z,
-                                   &w);
+      cogl_graphene_matrix_project_point (matrix,
+                                          &pv->vertices[0].x,
+                                          &pv->vertices[0].y,
+                                          &pv->vertices[0].z,
+                                          &w);
       return;
     }
 
@@ -876,13 +834,13 @@ _clutter_paint_volume_transform (ClutterPaintVolume *pv,
   else
     transform_count = 8;
 
-  cogl_matrix_transform_points (matrix,
-                                3,
-                                sizeof (graphene_point3d_t),
-                                pv->vertices,
-                                sizeof (graphene_point3d_t),
-                                pv->vertices,
-                                transform_count);
+  cogl_graphene_matrix_transform_points (matrix,
+                                         3,
+                                         sizeof (graphene_point3d_t),
+                                         pv->vertices,
+                                         sizeof (graphene_point3d_t),
+                                         pv->vertices,
+                                         transform_count);
 
   pv->is_axis_aligned = FALSE;
 }
@@ -1071,14 +1029,11 @@ _clutter_paint_volume_set_reference_actor (ClutterPaintVolume *pv,
 }
 
 ClutterCullResult
-_clutter_paint_volume_cull (ClutterPaintVolume *pv,
-                            const ClutterPlane *planes)
+_clutter_paint_volume_cull (ClutterPaintVolume       *pv,
+                            const graphene_frustum_t *frustum)
 {
   int vertex_count;
-  graphene_point3d_t *vertices = pv->vertices;
-  gboolean partial = FALSE;
-  int i;
-  int j;
+  graphene_box_t box;
 
   if (pv->is_empty)
     return CLUTTER_CULL_RESULT_OUT;
@@ -1095,33 +1050,12 @@ _clutter_paint_volume_cull (ClutterPaintVolume *pv,
   else
     vertex_count = 8;
 
-  for (i = 0; i < 4; i++)
-    {
-      const ClutterPlane *plane = &planes[i];
-      int out = 0;
-      for (j = 0; j < vertex_count; j++)
-        {
-          graphene_vec3_t v;
+  graphene_box_init_from_points (&box, vertex_count, pv->vertices);
 
-          graphene_vec3_init (&v,
-                              vertices[j].x - graphene_vec3_get_x (&plane->v0),
-                              vertices[j].y - graphene_vec3_get_y (&plane->v0),
-                              vertices[j].z - graphene_vec3_get_z (&plane->v0));
-
-          if (graphene_vec3_dot (&plane->n, &v) < 0)
-            out++;
-        }
-
-      if (out == vertex_count)
-        return CLUTTER_CULL_RESULT_OUT;
-      else if (out != 0)
-        partial = TRUE;
-    }
-
-  if (partial)
-    return CLUTTER_CULL_RESULT_PARTIAL;
-  else
+  if (graphene_frustum_intersects_box (frustum, &box))
     return CLUTTER_CULL_RESULT_IN;
+  else
+    return CLUTTER_CULL_RESULT_OUT;
 }
 
 void
@@ -1130,13 +1064,13 @@ _clutter_paint_volume_get_stage_paint_box (ClutterPaintVolume *pv,
                                            ClutterActorBox *box)
 {
   ClutterPaintVolume projected_pv;
-  CoglMatrix modelview;
-  CoglMatrix projection;
+  graphene_matrix_t modelview;
+  graphene_matrix_t projection;
   float viewport[4];
 
   _clutter_paint_volume_copy_static (pv, &projected_pv);
 
-  cogl_matrix_init_identity (&modelview);
+  graphene_matrix_init_identity (&modelview);
 
   /* If the paint volume isn't already in eye coordinates... */
   if (pv->actor)
@@ -1181,7 +1115,7 @@ void
 _clutter_paint_volume_transform_relative (ClutterPaintVolume *pv,
                                           ClutterActor *relative_to_ancestor)
 {
-  CoglMatrix matrix;
+  graphene_matrix_t matrix;
   ClutterActor *actor;
 
   actor = pv->actor;
@@ -1190,10 +1124,32 @@ _clutter_paint_volume_transform_relative (ClutterPaintVolume *pv,
 
   _clutter_paint_volume_set_reference_actor (pv, relative_to_ancestor);
 
-  cogl_matrix_init_identity (&matrix);
+  graphene_matrix_init_identity (&matrix);
   _clutter_actor_apply_relative_transformation_matrix (actor,
                                                        relative_to_ancestor,
                                                       &matrix);
 
   _clutter_paint_volume_transform (pv, &matrix);
+}
+
+void
+clutter_paint_volume_to_box (ClutterPaintVolume *pv,
+                             graphene_box_t     *box)
+{
+  int vertex_count;
+
+  if (pv->is_empty)
+    {
+      graphene_box_init_from_box (box, graphene_box_empty ());
+      return;
+    }
+
+  _clutter_paint_volume_complete (pv);
+
+  if (G_LIKELY (pv->is_2d))
+    vertex_count = 4;
+  else
+    vertex_count = 8;
+
+  graphene_box_init_from_points (box, vertex_count, pv->vertices);
 }

@@ -43,7 +43,7 @@ cogl_frame_info_new (int64_t global_frame_counter)
 {
   CoglFrameInfo *info;
 
-  info = g_slice_new0 (CoglFrameInfo);
+  info = g_new0 (CoglFrameInfo, 1);
   info->global_frame_counter = global_frame_counter;
 
   return _cogl_frame_info_object_new (info);
@@ -52,7 +52,7 @@ cogl_frame_info_new (int64_t global_frame_counter)
 static void
 _cogl_frame_info_free (CoglFrameInfo *info)
 {
-  g_slice_free (CoglFrameInfo, info);
+  g_free (info);
 }
 
 int64_t
@@ -62,14 +62,18 @@ cogl_frame_info_get_frame_counter (CoglFrameInfo *info)
 }
 
 int64_t
-cogl_frame_info_get_presentation_time (CoglFrameInfo *info)
+cogl_frame_info_get_presentation_time_us (CoglFrameInfo *info)
 {
-  return info->presentation_time;
+  g_warn_if_fail (!(info->flags & COGL_FRAME_INFO_FLAG_SYMBOLIC));
+
+  return info->presentation_time_us;
 }
 
 float
 cogl_frame_info_get_refresh_rate (CoglFrameInfo *info)
 {
+  g_warn_if_fail (!(info->flags & COGL_FRAME_INFO_FLAG_SYMBOLIC));
+
   return info->refresh_rate;
 }
 
@@ -77,4 +81,36 @@ int64_t
 cogl_frame_info_get_global_frame_counter (CoglFrameInfo *info)
 {
   return info->global_frame_counter;
+}
+
+gboolean
+cogl_frame_info_get_is_symbolic (CoglFrameInfo *info)
+{
+  return !!(info->flags & COGL_FRAME_INFO_FLAG_SYMBOLIC);
+}
+
+gboolean
+cogl_frame_info_is_hw_clock (CoglFrameInfo *info)
+{
+  return !!(info->flags & COGL_FRAME_INFO_FLAG_HW_CLOCK);
+}
+
+gboolean
+cogl_frame_info_is_zero_copy (CoglFrameInfo *info)
+{
+  return !!(info->flags & COGL_FRAME_INFO_FLAG_ZERO_COPY);
+}
+
+gboolean
+cogl_frame_info_is_vsync (CoglFrameInfo *info)
+{
+  return !!(info->flags & COGL_FRAME_INFO_FLAG_VSYNC);
+}
+
+unsigned int
+cogl_frame_info_get_sequence (CoglFrameInfo *info)
+{
+  g_warn_if_fail (!(info->flags & COGL_FRAME_INFO_FLAG_SYMBOLIC));
+
+  return info->sequence;
 }

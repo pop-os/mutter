@@ -32,19 +32,26 @@
 #ifndef __COGL_FRAMEBUFFER_PRIVATE_H
 #define __COGL_FRAMEBUFFER_PRIVATE_H
 
+#include "cogl-framebuffer-driver.h"
 #include "cogl-object-private.h"
 #include "cogl-matrix-stack-private.h"
 #include "cogl-journal-private.h"
 #include "winsys/cogl-winsys-private.h"
 #include "cogl-attribute-private.h"
-#include "cogl-offscreen.h"
-#include "cogl-gl-header.h"
 #include "cogl-clip-stack.h"
 
-typedef enum _CoglFramebufferType {
-  COGL_FRAMEBUFFER_TYPE_ONSCREEN,
-  COGL_FRAMEBUFFER_TYPE_OFFSCREEN
-} CoglFramebufferType;
+typedef enum
+{
+  COGL_FRAMEBUFFER_DRIVER_TYPE_FBO,
+  COGL_FRAMEBUFFER_DRIVER_TYPE_BACK,
+} CoglFramebufferDriverType;
+
+struct _CoglFramebufferDriverConfig
+{
+  CoglFramebufferDriverType type;
+
+  gboolean disable_depth_and_stencil;
+};
 
 typedef struct
 {
@@ -53,12 +60,6 @@ typedef struct
   int samples_per_pixel;
   gboolean stereo_enabled;
 } CoglFramebufferConfig;
-
-/* Flags to pass to _cogl_offscreen_new_with_texture_full */
-typedef enum
-{
-  COGL_OFFSCREEN_DISABLE_DEPTH_AND_STENCIL = 1
-} CoglOffscreenFlags;
 
 /* XXX: The order of these indices determines the order they are
  * flushed.
@@ -105,7 +106,7 @@ typedef enum
   COGL_READ_PIXELS_NO_FLIP = 1L << 30
 } CoglPrivateReadPixelsFlags;
 
-typedef struct
+typedef struct _CoglFramebufferBits
 {
   int red;
   int blue;
@@ -115,113 +116,24 @@ typedef struct
   int stencil;
 } CoglFramebufferBits;
 
-struct _CoglFramebuffer
-{
-  CoglObject          _parent;
-  CoglContext        *context;
-  CoglFramebufferType  type;
-
-  /* The user configuration before allocation... */
-  CoglFramebufferConfig config;
-
-  int                 width;
-  int                 height;
-  /* Format of the pixels in the framebuffer (including the expected
-     premult state) */
-  CoglPixelFormat     internal_format;
-  gboolean            allocated;
-
-  CoglMatrixStack    *modelview_stack;
-  CoglMatrixStack    *projection_stack;
-  float               viewport_x;
-  float               viewport_y;
-  float               viewport_width;
-  float               viewport_height;
-  int                 viewport_age;
-  int                 viewport_age_for_scissor_workaround;
-
-  CoglClipStack      *clip_stack;
-
-  gboolean            dither_enabled;
-  gboolean            depth_writing_enabled;
-  CoglStereoMode      stereo_mode;
-
-  /* We journal the textured rectangles we want to submit to OpenGL so
-   * we have an opportunity to batch them together into less draw
-   * calls. */
-  CoglJournal        *journal;
-
-  /* The scene of a given framebuffer may depend on images in other
-   * framebuffers... */
-  GList              *deps;
-
-  /* As part of an optimization for reading-back single pixels from a
-   * framebuffer in some simple cases where the geometry is still
-   * available in the journal we need to track the bounds of the last
-   * region cleared, its color and we need to track when something
-   * does in fact draw to that region so it is no longer clear.
-   */
-  float               clear_color_red;
-  float               clear_color_green;
-  float               clear_color_blue;
-  float               clear_color_alpha;
-  int                 clear_clip_x0;
-  int                 clear_clip_y0;
-  int                 clear_clip_x1;
-  int                 clear_clip_y1;
-  gboolean            clear_clip_dirty;
-
-  /* driver specific */
-  gboolean            dirty_bitmasks;
-  CoglFramebufferBits bits;
-
-  int                 samples_per_pixel;
-
-  /* Whether the depth buffer was enabled for this framebuffer,
-   * usually means it needs to be cleared before being reused next.
-   */
-  gboolean            depth_buffer_clear_needed;
-};
-
-typedef enum
-{
-  COGL_OFFSCREEN_ALLOCATE_FLAG_DEPTH_STENCIL    = 1L<<0,
-  COGL_OFFSCREEN_ALLOCATE_FLAG_DEPTH            = 1L<<1,
-  COGL_OFFSCREEN_ALLOCATE_FLAG_STENCIL          = 1L<<2
-} CoglOffscreenAllocateFlags;
-
-typedef struct _CoglGLFramebuffer
-{
-  GLuint fbo_handle;
-  GList *renderbuffers;
-  int samples_per_pixel;
-} CoglGLFramebuffer;
-
-struct _CoglOffscreen
-{
-  CoglFramebuffer  _parent;
-
-  CoglGLFramebuffer gl_framebuffer;
-
-  CoglTexture    *texture;
-  int             texture_level;
-
-  CoglTexture *depth_texture;
-
-  CoglOffscreenAllocateFlags allocation_flags;
-
-  /* FIXME: _cogl_offscreen_new_with_texture_full should be made to use
-   * fb->config to configure if we want a depth or stencil buffer so
-   * we can get rid of these flags */
-  CoglOffscreenFlags create_flags;
-};
+gboolean
+cogl_framebuffer_is_allocated (CoglFramebuffer *framebuffer);
 
 void
-_cogl_framebuffer_init (CoglFramebuffer *framebuffer,
-                        CoglContext *ctx,
-                        CoglFramebufferType type,
-                        int width,
-                        int height);
+cogl_framebuffer_init_config (CoglFramebuffer             *framebuffer,
+                              const CoglFramebufferConfig *config);
+
+const CoglFramebufferConfig *
+cogl_framebuffer_get_config (CoglFramebuffer *framebuffer);
+
+void
+cogl_framebuffer_update_samples_per_pixel (CoglFramebuffer *framebuffer,
+                                           int              samples_per_pixel);
+
+void
+cogl_framebuffer_update_size (CoglFramebuffer *framebuffer,
+                              int              width,
+                              int              height);
 
 /* XXX: For a public api we might instead want a way to explicitly
  * set the _premult status of a framebuffer or what components we
@@ -239,6 +151,9 @@ void
 _cogl_framebuffer_set_internal_format (CoglFramebuffer *framebuffer,
                                        CoglPixelFormat internal_format);
 
+CoglPixelFormat
+cogl_framebuffer_get_internal_format (CoglFramebuffer *framebuffer);
+
 void _cogl_framebuffer_free (CoglFramebuffer *framebuffer);
 
 const CoglWinsysVtable *
@@ -254,6 +169,9 @@ _cogl_framebuffer_clear_without_flush4f (CoglFramebuffer *framebuffer,
 
 void
 _cogl_framebuffer_mark_clear_clip_dirty (CoglFramebuffer *framebuffer);
+
+void
+cogl_framebuffer_set_depth_buffer_clear_needed (CoglFramebuffer *framebuffer);
 
 /*
  * _cogl_framebuffer_get_clip_stack:
@@ -285,9 +203,10 @@ void
 _cogl_framebuffer_flush_dependency_journals (CoglFramebuffer *framebuffer);
 
 void
-_cogl_framebuffer_flush_state (CoglFramebuffer *draw_buffer,
-                               CoglFramebuffer *read_buffer,
-                               CoglFramebufferState state);
+cogl_context_flush_framebuffer_state (CoglContext          *context,
+                                      CoglFramebuffer      *draw_buffer,
+                                      CoglFramebuffer      *read_buffer,
+                                      CoglFramebufferState  state);
 
 CoglFramebuffer *
 _cogl_get_read_framebuffer (void);
@@ -298,32 +217,11 @@ _cogl_create_framebuffer_stack (void);
 void
 _cogl_free_framebuffer_stack (GSList *stack);
 
-/*
- * _cogl_offscreen_new_with_texture_full:
- * @texture: A #CoglTexture pointer
- * @create_flags: Flags specifying how to create the FBO
- * @level: The mipmap level within the texture to target
- *
- * Creates a new offscreen buffer which will target the given
- * texture. By default the buffer will have a depth and stencil
- * buffer. This can be disabled by passing
- * %COGL_OFFSCREEN_DISABLE_DEPTH_AND_STENCIL in @create_flags.
- *
- * Return value: the new CoglOffscreen object.
- */
-CoglOffscreen *
-_cogl_offscreen_new_with_texture_full (CoglTexture *texture,
-                                       CoglOffscreenFlags create_flags,
-                                       int level);
-
 void
 _cogl_framebuffer_save_clip_stack (CoglFramebuffer *framebuffer);
 
 void
 _cogl_framebuffer_restore_clip_stack (CoglFramebuffer *framebuffer);
-
-void
-_cogl_framebuffer_unref (CoglFramebuffer *framebuffer);
 
 /* This can be called directly by the CoglJournal to draw attributes
  * skipping the implicit journal flush, the framebuffer flush and
@@ -352,6 +250,13 @@ _cogl_framebuffer_draw_indexed_attributes (CoglFramebuffer *framebuffer,
 void
 cogl_framebuffer_set_viewport4fv (CoglFramebuffer *framebuffer,
                                   float *viewport);
+
+void
+cogl_framebuffer_get_viewport4f (CoglFramebuffer *framebuffer,
+                                 float           *viewport_x,
+                                 float           *viewport_y,
+                                 float           *viewport_width,
+                                 float           *viewport_height);
 
 unsigned long
 _cogl_framebuffer_compare (CoglFramebuffer *a,
@@ -395,5 +300,21 @@ _cogl_framebuffer_read_pixels_into_bitmap (CoglFramebuffer *framebuffer,
  */
 COGL_EXPORT int
 _cogl_framebuffer_get_stencil_bits (CoglFramebuffer *framebuffer);
+
+CoglJournal *
+cogl_framebuffer_get_journal (CoglFramebuffer *framebuffer);
+
+CoglFramebufferDriver *
+cogl_framebuffer_get_driver (CoglFramebuffer *framebuffer);
+
+/**
+ * cogl_framebuffer_is_y_flipped:
+ * @framebuffer: a #CoglFramebuffer
+ *
+ * Returns %TRUE if the Y coordinate 0 means the bottom of the framebuffer, and
+ * %FALSE if the Y coordinate means the top.
+ */
+gboolean
+cogl_framebuffer_is_y_flipped (CoglFramebuffer *framebuffer);
 
 #endif /* __COGL_FRAMEBUFFER_PRIVATE_H */

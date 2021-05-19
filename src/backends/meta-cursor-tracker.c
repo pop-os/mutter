@@ -31,15 +31,12 @@
 
 #include "backends/meta-cursor-tracker-private.h"
 
-#include <gdk/gdk.h>
-#include <gdk/gdkx.h>
 #include <string.h>
 
 #include "backends/meta-backend-private.h"
 #include "cogl/cogl.h"
 #include "core/display-private.h"
 #include "clutter/clutter.h"
-#include "meta-marshal.h"
 #include "meta/main.h"
 #include "meta/util.h"
 
@@ -85,7 +82,7 @@ G_DEFINE_TYPE_WITH_PRIVATE (MetaCursorTracker, meta_cursor_tracker,
 enum
 {
   CURSOR_CHANGED,
-  CURSOR_MOVED,
+  POSITION_INVALIDATED,
   VISIBILITY_CHANGED,
   LAST_SIGNAL
 };
@@ -193,13 +190,20 @@ meta_cursor_tracker_real_get_sprite (MetaCursorTracker *tracker)
   return priv->displayed_cursor;
 }
 
+void
+meta_cursor_tracker_destroy (MetaCursorTracker *tracker)
+{
+  g_object_run_dispose (G_OBJECT (tracker));
+  g_object_unref (tracker);
+}
+
 static void
 meta_cursor_tracker_init (MetaCursorTracker *tracker)
 {
   MetaCursorTrackerPrivate *priv =
     meta_cursor_tracker_get_instance_private (tracker);
 
-  priv->is_showing = TRUE;
+  priv->is_showing = FALSE;
   priv->x = -1.0;
   priv->y = -1.0;
 }
@@ -247,7 +251,7 @@ meta_cursor_tracker_set_property (GObject      *object,
 }
 
 static void
-meta_cursor_tracker_finalize (GObject *object)
+meta_cursor_tracker_dispose (GObject *object)
 {
   MetaCursorTracker *tracker = META_CURSOR_TRACKER (object);
   MetaCursorTrackerPrivate *priv =
@@ -257,7 +261,7 @@ meta_cursor_tracker_finalize (GObject *object)
   g_clear_object (&priv->displayed_cursor);
   g_clear_object (&priv->root_cursor);
 
-  G_OBJECT_CLASS (meta_cursor_tracker_parent_class)->finalize (object);
+  G_OBJECT_CLASS (meta_cursor_tracker_parent_class)->dispose (object);
 }
 
 static void
@@ -267,7 +271,7 @@ meta_cursor_tracker_class_init (MetaCursorTrackerClass *klass)
 
   object_class->get_property = meta_cursor_tracker_get_property;
   object_class->set_property = meta_cursor_tracker_set_property;
-  object_class->finalize = meta_cursor_tracker_finalize;
+  object_class->dispose = meta_cursor_tracker_dispose;
 
   klass->set_force_track_position =
     meta_cursor_tracker_real_set_force_track_position;
@@ -291,26 +295,12 @@ meta_cursor_tracker_class_init (MetaCursorTrackerClass *klass)
                                           NULL, NULL, NULL,
                                           G_TYPE_NONE, 0);
 
-  /**
-   * MetaCursorTracker::cursor-moved:
-   * @cursor: The #MetaCursorTracker
-   * @x: The new X coordinate of the cursor
-   * @y: The new Y coordinate of the cursor
-   *
-   * Notifies when the cursor has moved to a new location.
-   */
-  signals[CURSOR_MOVED] = g_signal_new ("cursor-moved",
-                                        G_TYPE_FROM_CLASS (klass),
-                                        G_SIGNAL_RUN_LAST,
-                                        0,
-                                        NULL, NULL,
-                                        meta_marshal_VOID__FLOAT_FLOAT,
-                                        G_TYPE_NONE, 2,
-                                        G_TYPE_FLOAT,
-                                        G_TYPE_FLOAT);
-  g_signal_set_va_marshaller (signals[CURSOR_MOVED],
-                              G_TYPE_FROM_CLASS (klass),
-                              meta_marshal_VOID__FLOAT_FLOATv);
+  signals[POSITION_INVALIDATED] = g_signal_new ("position-invalidated",
+                                                G_TYPE_FROM_CLASS (klass),
+                                                G_SIGNAL_RUN_LAST,
+                                                0,
+                                                NULL, NULL, NULL,
+                                                G_TYPE_NONE, 0);
 
   signals[VISIBILITY_CHANGED] = g_signal_new ("visibility-changed",
                                               G_TYPE_FROM_CLASS (klass),
@@ -437,88 +427,23 @@ meta_cursor_tracker_set_root_cursor (MetaCursorTracker *tracker,
 }
 
 void
-meta_cursor_tracker_update_position (MetaCursorTracker *tracker,
-                                     float              new_x,
-                                     float              new_y)
+meta_cursor_tracker_invalidate_position (MetaCursorTracker *tracker)
 {
-  MetaCursorTrackerPrivate *priv =
-    meta_cursor_tracker_get_instance_private (tracker);
-  MetaCursorRenderer *cursor_renderer =
-    meta_backend_get_cursor_renderer (priv->backend);
-  gboolean position_changed;
-
-  if (priv->x != new_x || priv->y != new_y)
-    {
-      position_changed = TRUE;
-      priv->x = new_x;
-      priv->y = new_y;
-    }
-  else
-    {
-      position_changed = FALSE;
-    }
-
-  meta_cursor_renderer_set_position (cursor_renderer, new_x, new_y);
-
-  if (position_changed)
-    g_signal_emit (tracker, signals[CURSOR_MOVED], 0, new_x, new_y);
-}
-
-static void
-get_pointer_position_gdk (int         *x,
-                          int         *y,
-                          int         *mods)
-{
-  GdkSeat *gseat;
-  GdkDevice *gdevice;
-  GdkScreen *gscreen;
-
-  gseat = gdk_display_get_default_seat (gdk_display_get_default ());
-  gdevice = gdk_seat_get_pointer (gseat);
-
-  gdk_device_get_position (gdevice, &gscreen, x, y);
-  if (mods)
-    gdk_device_get_state (gdevice,
-                          gdk_screen_get_root_window (gscreen),
-                          NULL, (GdkModifierType*)mods);
-}
-
-static void
-get_pointer_position_clutter (int         *x,
-                              int         *y,
-                              int         *mods)
-{
-  ClutterSeat *seat;
-  ClutterInputDevice *cdevice;
-  graphene_point_t point;
-
-  seat = clutter_backend_get_default_seat (clutter_get_default_backend ());
-  cdevice = clutter_seat_get_pointer (seat);
-
-  clutter_input_device_get_coords (cdevice, NULL, &point);
-  if (x)
-    *x = point.x;
-  if (y)
-    *y = point.y;
-  if (mods)
-    *mods = clutter_input_device_get_modifier_state (cdevice);
+  g_signal_emit (tracker, signals[POSITION_INVALIDATED], 0);
 }
 
 void
 meta_cursor_tracker_get_pointer (MetaCursorTracker   *tracker,
-                                 int                 *x,
-                                 int                 *y,
+                                 graphene_point_t    *coords,
                                  ClutterModifierType *mods)
 {
-  /* We can't use the clutter interface when not running as a wayland compositor,
-     because we need to query the server, rather than using the last cached value.
-     OTOH, on wayland we can't use GDK, because that only sees the events
-     we forward to xwayland.
-  */
-  if (meta_is_wayland_compositor ())
-    get_pointer_position_clutter (x, y, (int*)mods);
-  else
-    get_pointer_position_gdk (x, y, (int*)mods);
+  ClutterSeat *seat;
+  ClutterInputDevice *cdevice;
+
+  seat = clutter_backend_get_default_seat (clutter_get_default_backend ());
+  cdevice = clutter_seat_get_pointer (seat);
+
+  clutter_seat_query_state (seat, cdevice, NULL, coords, mods);
 }
 
 void

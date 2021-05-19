@@ -8,6 +8,7 @@
  * Copyright (C) 2003 Rob Adams
  * Copyright (C) 2004-2006 Elijah Newren
  * Copyright (C) 2013 Red Hat Inc.
+ * Copyright (C) 2020 NVIDIA CORPORATION
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -528,7 +529,7 @@ apply_crtc_assignments (MetaMonitorManager    *manager,
               const MetaCrtcModeInfo *crtc_mode_info =
                 meta_crtc_mode_get_info (crtc_mode);
 
-              meta_warning ("Configuring CRTC %d with mode %d (%d x %d @ %f) at position %d, %d and transform %u failed\n",
+              meta_warning ("Configuring CRTC %d with mode %d (%d x %d @ %f) at position %d, %d and transform %u failed",
                             (unsigned) meta_crtc_get_id (crtc),
                             (unsigned) mode,
                             crtc_mode_info->width, crtc_mode_info->height,
@@ -676,9 +677,9 @@ meta_monitor_manager_xrandr_get_crtc_gamma (MetaMonitorManager  *manager,
                            (XID) meta_crtc_get_id (crtc));
 
   *size = gamma->size;
-  *red = g_memdup (gamma->red, sizeof (unsigned short) * gamma->size);
-  *green = g_memdup (gamma->green, sizeof (unsigned short) * gamma->size);
-  *blue = g_memdup (gamma->blue, sizeof (unsigned short) * gamma->size);
+  *red = g_memdup2 (gamma->red, sizeof (unsigned short) * gamma->size);
+  *green = g_memdup2 (gamma->green, sizeof (unsigned short) * gamma->size);
+  *blue = g_memdup2 (gamma->blue, sizeof (unsigned short) * gamma->size);
 
   XRRFreeGamma (gamma);
 }
@@ -970,8 +971,8 @@ meta_monitor_manager_xrandr_calculate_supported_scales (MetaMonitorManager      
   ensure_supported_monitor_scales (manager);
 
   *n_supported_scales = manager_xrandr->n_supported_scales;
-  return g_memdup (manager_xrandr->supported_scales,
-                   manager_xrandr->n_supported_scales * sizeof (float));
+  return g_memdup2 (manager_xrandr->supported_scales,
+                    manager_xrandr->n_supported_scales * sizeof (float));
 }
 
 static MetaMonitorManagerCapability
@@ -999,6 +1000,13 @@ static MetaLogicalMonitorLayoutMode
 meta_monitor_manager_xrandr_get_default_layout_mode (MetaMonitorManager *manager)
 {
   return META_LOGICAL_MONITOR_LAYOUT_MODE_PHYSICAL;
+}
+
+static void
+meta_monitor_manager_xrandr_set_output_ctm (MetaOutput          *output,
+                                            const MetaOutputCtm *ctm)
+{
+  meta_output_xrandr_set_ctm (META_OUTPUT_XRANDR (output), ctm);
 }
 
 static void
@@ -1086,6 +1094,7 @@ meta_monitor_manager_xrandr_class_init (MetaMonitorManagerXrandrClass *klass)
   manager_class->get_capabilities = meta_monitor_manager_xrandr_get_capabilities;
   manager_class->get_max_screen_size = meta_monitor_manager_xrandr_get_max_screen_size;
   manager_class->get_default_layout_mode = meta_monitor_manager_xrandr_get_default_layout_mode;
+  manager_class->set_output_ctm = meta_monitor_manager_xrandr_set_output_ctm;
 
   quark_meta_monitor_xrandr_data =
     g_quark_from_static_string ("-meta-monitor-xrandr-data");
@@ -1117,7 +1126,7 @@ meta_monitor_manager_xrandr_handle_xevent (MetaMonitorManagerXrandr *manager_xra
                           manager_xrandr->last_xrandr_set_timestamp);
   if (is_hotplug)
     {
-      meta_monitor_manager_on_hotplug (manager);
+      meta_monitor_manager_reconfigure (manager);
     }
   else
     {

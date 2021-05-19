@@ -34,71 +34,32 @@
 #ifndef __COGL_FRAMEBUFFER_GL_PRIVATE_H__
 #define __COGL_FRAMEBUFFER_GL_PRIVATE_H__
 
-gboolean
-_cogl_offscreen_gl_allocate (CoglOffscreen *offscreen,
-                             GError **error);
+#include "cogl-attribute-private.h"
+#include "cogl-framebuffer-driver.h"
+#include "cogl-gl-header.h"
+
+#define COGL_TYPE_GL_FRAMEBUFFER (cogl_gl_framebuffer_get_type ())
+G_DECLARE_DERIVABLE_TYPE (CoglGlFramebuffer, cogl_gl_framebuffer,
+                          COGL, GL_FRAMEBUFFER,
+                          CoglFramebufferDriver)
+
+struct _CoglGlFramebufferClass
+{
+  CoglFramebufferDriverClass parent_class;
+
+  void (* bind) (CoglGlFramebuffer *gl_framebuffer,
+                 GLenum             target);
+
+  void (* flush_stereo_mode_state) (CoglGlFramebuffer *gl_framebuffer);
+};
 
 void
-_cogl_offscreen_gl_free (CoglOffscreen *offscreen);
+cogl_gl_framebuffer_bind (CoglGlFramebuffer *gl_framebuffer,
+                          GLenum             target);
 
 void
-_cogl_framebuffer_gl_flush_state (CoglFramebuffer *draw_buffer,
-                                  CoglFramebuffer *read_buffer,
-                                  CoglFramebufferState state);
-
-void
-_cogl_framebuffer_gl_clear (CoglFramebuffer *framebuffer,
-                            unsigned long buffers,
-                            float red,
-                            float green,
-                            float blue,
-                            float alpha);
-
-void
-_cogl_framebuffer_gl_query_bits (CoglFramebuffer *framebuffer,
-                                 CoglFramebufferBits *bits);
-
-void
-_cogl_framebuffer_gl_finish (CoglFramebuffer *framebuffer);
-
-void
-_cogl_framebuffer_gl_flush (CoglFramebuffer *framebuffer);
-
-void
-_cogl_framebuffer_gl_discard_buffers (CoglFramebuffer *framebuffer,
-                                      unsigned long buffers);
-
-void
-_cogl_framebuffer_gl_bind (CoglFramebuffer *framebuffer, GLenum target);
-
-void
-_cogl_framebuffer_gl_draw_attributes (CoglFramebuffer *framebuffer,
-                                      CoglPipeline *pipeline,
-                                      CoglVerticesMode mode,
-                                      int first_vertex,
-                                      int n_vertices,
-                                      CoglAttribute **attributes,
-                                      int n_attributes,
-                                      CoglDrawFlags flags);
-
-void
-_cogl_framebuffer_gl_draw_indexed_attributes (CoglFramebuffer *framebuffer,
-                                              CoglPipeline *pipeline,
-                                              CoglVerticesMode mode,
-                                              int first_vertex,
-                                              int n_vertices,
-                                              CoglIndices *indices,
-                                              CoglAttribute **attributes,
-                                              int n_attributes,
-                                              CoglDrawFlags flags);
-
-gboolean
-_cogl_framebuffer_gl_read_pixels_into_bitmap (CoglFramebuffer *framebuffer,
-                                              int x,
-                                              int y,
-                                              CoglReadPixelsFlags source,
-                                              CoglBitmap *bitmap,
-                                              GError **error);
+cogl_gl_framebuffer_flush_state_differences (CoglGlFramebuffer *gl_framebuffer,
+                                             unsigned long      differences);
 
 #endif /* __COGL_FRAMEBUFFER_GL_PRIVATE_H__ */
 

@@ -39,19 +39,21 @@
 #include "backends/native/meta-backend-native.h"
 #include "backends/native/meta-clutter-backend-native.h"
 #include "backends/native/meta-cursor-renderer-native.h"
+#include "backends/native/meta-input-thread.h"
 #include "backends/native/meta-renderer-native.h"
-#include "backends/native/meta-seat-native.h"
 #include "clutter/clutter.h"
 
 #include "meta-dbus-login1.h"
 
 struct _MetaLauncher
 {
-  Login1Session *session_proxy;
-  Login1Seat *seat_proxy;
+  MetaDbusLogin1Session *session_proxy;
+  MetaDbusLogin1Seat *seat_proxy;
   char *seat_id;
 
-  GHashTable *sysfs_fds;
+  struct {
+    GHashTable *sysfs_fds;
+  } impl;
   gboolean session_active;
 };
 
@@ -222,14 +224,15 @@ find_systemd_session (gchar **session_id,
   return TRUE;
 }
 
-static Login1Session *
+static MetaDbusLogin1Session *
 get_session_proxy (GCancellable *cancellable,
                    GError      **error)
 {
   g_autofree char *proxy_path = NULL;
   g_autofree char *session_id = NULL;
   g_autoptr (GError) local_error = NULL;
-  Login1Session *session_proxy;
+  GDBusProxyFlags flags;
+  MetaDbusLogin1Session *session_proxy;
 
   if (!find_systemd_session (&session_id, &local_error))
     {
@@ -241,28 +244,35 @@ get_session_proxy (GCancellable *cancellable,
 
   proxy_path = get_escaped_dbus_path ("/org/freedesktop/login1/session", session_id);
 
-  session_proxy = login1_session_proxy_new_for_bus_sync (G_BUS_TYPE_SYSTEM,
-                                                         G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
-                                                         "org.freedesktop.login1",
-                                                         proxy_path,
-                                                         cancellable, error);
+  flags = G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START;
+  session_proxy =
+    meta_dbus_login1_session_proxy_new_for_bus_sync (G_BUS_TYPE_SYSTEM,
+                                                     flags,
+                                                     "org.freedesktop.login1",
+                                                     proxy_path,
+                                                     cancellable, error);
   if (!session_proxy)
     g_prefix_error(error, "Could not get session proxy: ");
 
   return session_proxy;
 }
 
-static Login1Seat *
+static MetaDbusLogin1Seat *
 get_seat_proxy (gchar        *seat_id,
                 GCancellable *cancellable,
                 GError      **error)
 {
   g_autofree char *seat_proxy_path = get_escaped_dbus_path ("/org/freedesktop/login1/seat", seat_id);
-  Login1Seat *seat = login1_seat_proxy_new_for_bus_sync (G_BUS_TYPE_SYSTEM,
-                                                         G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
-                                                         "org.freedesktop.login1",
-                                                         seat_proxy_path,
-                                                         cancellable, error);
+  GDBusProxyFlags flags;
+  MetaDbusLogin1Seat *seat;
+
+  flags = G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START;
+  seat =
+    meta_dbus_login1_seat_proxy_new_for_bus_sync (G_BUS_TYPE_SYSTEM,
+                                                  flags,
+                                                  "org.freedesktop.login1",
+                                                  seat_proxy_path,
+                                                  cancellable, error);
   if (!seat)
     g_prefix_error(error, "Could not get seat proxy: ");
 
@@ -270,26 +280,26 @@ get_seat_proxy (gchar        *seat_id,
 }
 
 static gboolean
-take_device (Login1Session *session_proxy,
-             int            dev_major,
-             int            dev_minor,
-             int           *out_fd,
-             GCancellable  *cancellable,
-             GError       **error)
+take_device (MetaDbusLogin1Session  *session_proxy,
+             int                     dev_major,
+             int                     dev_minor,
+             int                    *out_fd,
+             GCancellable           *cancellable,
+             GError                **error)
 {
   g_autoptr (GVariant) fd_variant = NULL;
   g_autoptr (GUnixFDList) fd_list = NULL;
   int fd = -1;
 
-  if (!login1_session_call_take_device_sync (session_proxy,
-                                             dev_major,
-                                             dev_minor,
-                                             NULL,
-                                             &fd_variant,
-                                             NULL, /* paused */
-                                             &fd_list,
-                                             cancellable,
-                                             error))
+  if (!meta_dbus_login1_session_call_take_device_sync (session_proxy,
+                                                       dev_major,
+                                                       dev_minor,
+                                                       NULL,
+                                                       &fd_variant,
+                                                       NULL, /* paused */
+                                                       &fd_list,
+                                                       cancellable,
+                                                       error))
     return FALSE;
 
   fd = g_unix_fd_list_get (fd_list, g_variant_get_handle (fd_variant), error);
@@ -361,6 +371,7 @@ void
 meta_launcher_close_restricted (MetaLauncher *launcher,
                                 int           fd)
 {
+  MetaDbusLogin1Session *session_proxy = launcher->session_proxy;
   int major, minor;
   GError *error = NULL;
 
@@ -370,9 +381,9 @@ meta_launcher_close_restricted (MetaLauncher *launcher,
       goto out;
     }
 
-  if (!login1_session_call_release_device_sync (launcher->session_proxy,
-                                                major, minor,
-                                                NULL, &error))
+  if (!meta_dbus_login1_session_call_release_device_sync (session_proxy,
+                                                          major, minor,
+                                                          NULL, &error))
     {
       g_warning ("Could not release device (%d,%d): %s",
                  major, minor, error->message);
@@ -383,10 +394,10 @@ out:
 }
 
 static int
-on_evdev_device_open (const char  *path,
-                      int          flags,
-                      gpointer     user_data,
-                      GError     **error)
+on_evdev_device_open_in_input_impl (const char  *path,
+                                    int          flags,
+                                    gpointer     user_data,
+                                    GError     **error)
 {
   MetaLauncher *self = user_data;
 
@@ -410,7 +421,7 @@ on_evdev_device_open (const char  *path,
           return -1;
         }
 
-      g_hash_table_add (self->sysfs_fds, GINT_TO_POINTER (fd));
+      g_hash_table_add (self->impl.sysfs_fds, GINT_TO_POINTER (fd));
       return fd;
     }
 
@@ -418,15 +429,15 @@ on_evdev_device_open (const char  *path,
 }
 
 static void
-on_evdev_device_close (int      fd,
-                       gpointer user_data)
+on_evdev_device_close_in_input_impl (int      fd,
+                                     gpointer user_data)
 {
   MetaLauncher *self = user_data;
 
-  if (g_hash_table_lookup (self->sysfs_fds, GINT_TO_POINTER (fd)))
+  if (g_hash_table_lookup (self->impl.sysfs_fds, GINT_TO_POINTER (fd)))
     {
       /* /sys/ paths just need close() here */
-      g_hash_table_remove (self->sysfs_fds, GINT_TO_POINTER (fd));
+      g_hash_table_remove (self->impl.sysfs_fds, GINT_TO_POINTER (fd));
       close (fd);
       return;
     }
@@ -439,8 +450,10 @@ sync_active (MetaLauncher *self)
 {
   MetaBackend *backend = meta_get_backend ();
   MetaBackendNative *backend_native = META_BACKEND_NATIVE (backend);
-  gboolean active = login1_session_get_active (LOGIN1_SESSION (self->session_proxy));
+  MetaDbusLogin1Session *session_proxy = self->session_proxy;
+  gboolean active;
 
+  active = meta_dbus_login1_session_get_active (session_proxy);
   if (active == self->session_active)
     return;
 
@@ -453,9 +466,9 @@ sync_active (MetaLauncher *self)
 }
 
 static void
-on_active_changed (Login1Session *session,
-                   GParamSpec    *pspec,
-                   gpointer       user_data)
+on_active_changed (MetaDbusLogin1Session *session,
+                   GParamSpec            *pspec,
+                   gpointer               user_data)
 {
   MetaLauncher *self = user_data;
   sync_active (self);
@@ -494,8 +507,8 @@ MetaLauncher *
 meta_launcher_new (GError **error)
 {
   MetaLauncher *self = NULL;
-  g_autoptr (Login1Session) session_proxy = NULL;
-  g_autoptr (Login1Seat) seat_proxy = NULL;
+  g_autoptr (MetaDbusLogin1Session) session_proxy = NULL;
+  g_autoptr (MetaDbusLogin1Seat) seat_proxy = NULL;
   g_autofree char *seat_id = NULL;
   gboolean have_control = FALSE;
 
@@ -503,7 +516,10 @@ meta_launcher_new (GError **error)
   if (!session_proxy)
     goto fail;
 
-  if (!login1_session_call_take_control_sync (session_proxy, FALSE, NULL, error))
+  if (!meta_dbus_login1_session_call_take_control_sync (session_proxy,
+                                                        FALSE,
+                                                        NULL,
+                                                        error))
     {
       g_prefix_error (error, "Could not take control: ");
       goto fail;
@@ -519,18 +535,16 @@ meta_launcher_new (GError **error)
   if (!seat_proxy)
     goto fail;
 
-  self = g_slice_new0 (MetaLauncher);
+  self = g_new0 (MetaLauncher, 1);
   self->session_proxy = g_object_ref (session_proxy);
   self->seat_proxy = g_object_ref (seat_proxy);
   self->seat_id = g_steal_pointer (&seat_id);
-  self->sysfs_fds = g_hash_table_new (NULL, NULL);
+  self->impl.sysfs_fds = g_hash_table_new (NULL, NULL);
   self->session_active = TRUE;
 
-  meta_clutter_backend_native_set_seat_id (self->seat_id);
-
-  meta_seat_native_set_device_callbacks (on_evdev_device_open,
-                                         on_evdev_device_close,
-                                         self);
+  meta_seat_impl_set_device_callbacks (on_evdev_device_open_in_input_impl,
+                                       on_evdev_device_close_in_input_impl,
+                                       self);
 
   g_signal_connect (self->session_proxy, "notify::active", G_CALLBACK (on_active_changed), self);
 
@@ -538,29 +552,22 @@ meta_launcher_new (GError **error)
 
  fail:
   if (have_control)
-    login1_session_call_release_control_sync (session_proxy, NULL, NULL);
+    {
+      meta_dbus_login1_session_call_release_control_sync (session_proxy,
+                                                          NULL, NULL);
+    }
   return NULL;
 }
 
 void
 meta_launcher_free (MetaLauncher *self)
 {
+  meta_seat_impl_set_device_callbacks (NULL, NULL, NULL);
   g_free (self->seat_id);
   g_object_unref (self->seat_proxy);
   g_object_unref (self->session_proxy);
-  g_hash_table_destroy (self->sysfs_fds);
-  g_slice_free (MetaLauncher, self);
-}
-
-gboolean
-meta_launcher_activate_session (MetaLauncher  *launcher,
-                                GError       **error)
-{
-  if (!login1_session_call_activate_sync (launcher->session_proxy, NULL, error))
-    return FALSE;
-
-  sync_active (launcher);
-  return TRUE;
+  g_hash_table_destroy (self->impl.sysfs_fds);
+  g_free (self);
 }
 
 gboolean
@@ -568,5 +575,6 @@ meta_launcher_activate_vt (MetaLauncher  *launcher,
                            signed char    vt,
                            GError       **error)
 {
-  return login1_seat_call_switch_to_sync (launcher->seat_proxy, vt, NULL, error);
+  return meta_dbus_login1_seat_call_switch_to_sync (launcher->seat_proxy, vt,
+                                                    NULL, error);
 }

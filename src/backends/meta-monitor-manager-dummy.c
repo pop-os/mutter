@@ -34,6 +34,7 @@
 #include "backends/meta-monitor.h"
 #include "backends/meta-monitor-config-manager.h"
 #include "backends/meta-output.h"
+#include "meta/main.h"
 #include "meta/util.h"
 
 #define MAX_MONITORS 5
@@ -167,10 +168,6 @@ append_monitor (MetaMonitorManager *manager,
             {
               CrtcModeSpec *spec;
 
-              if (width < META_MONITOR_MANAGER_MIN_SCREEN_WIDTH ||
-                  height < META_MONITOR_MANAGER_MIN_SCREEN_HEIGHT)
-                continue;
-
               spec = g_new0 (CrtcModeSpec, 1);
               spec->width = width;
               spec->height = height;
@@ -185,9 +182,15 @@ append_monitor (MetaMonitorManager *manager,
         {
           CrtcModeSpec *spec;
 
-          spec = g_memdup (&default_specs[i], sizeof (CrtcModeSpec));
+          spec = g_memdup2 (&default_specs[i], sizeof (CrtcModeSpec));
           mode_specs = g_list_prepend (mode_specs, spec);
         }
+    }
+
+  if (!mode_specs)
+    {
+      g_warning ("Cannot create dummy output: No valid mode specs.");
+      meta_exit (META_EXIT_ERROR);
     }
 
   for (l = mode_specs; l; l = l->next)
@@ -445,7 +448,7 @@ meta_monitor_manager_dummy_read_current (MetaMonitorManager *manager)
       scales_str_list = g_strsplit (monitor_scales_str, ",", -1);
       if (g_strv_length (scales_str_list) != num_monitors)
         meta_warning ("Number of specified monitor scales differ from number "
-                      "of monitors (defaults to 1).\n");
+                      "of monitors (defaults to 1).");
       for (i = 0; i < num_monitors && scales_str_list[i]; i++)
         {
           float scale = g_ascii_strtod (scales_str_list[i], NULL);

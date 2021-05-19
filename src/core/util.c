@@ -49,7 +49,6 @@ meta_topic_real_valist (MetaDebugTopic topic,
 #endif
 
 static gint verbose_topics = 0;
-static gboolean is_debugging = FALSE;
 static gboolean replace_current = FALSE;
 static int no_prefix = 0;
 static gboolean is_wayland_compositor = FALSE;
@@ -80,7 +79,7 @@ ensure_logfile (void)
 
       if (err != NULL)
         {
-          meta_warning ("Failed to open debug log: %s\n",
+          meta_warning ("Failed to open debug log: %s",
                         err->message);
           g_error_free (err);
           return;
@@ -90,13 +89,13 @@ ensure_logfile (void)
 
       if (logfile == NULL)
         {
-          meta_warning ("Failed to fdopen() log file %s: %s\n",
+          meta_warning ("Failed to fdopen() log file %s: %s",
                         filename, strerror (errno));
           close (fd);
         }
       else
         {
-          g_printerr ("Opened log file %s\n", filename);
+          g_printerr ("Opened log file %s", filename);
         }
 
       g_free (filename);
@@ -115,10 +114,7 @@ meta_set_verbose (gboolean setting)
 {
 #ifndef WITH_VERBOSE_MODE
   if (setting)
-    meta_fatal (_("Mutter was compiled without support for verbose mode\n"));
-#else
-  if (setting)
-    ensure_logfile ();
+    meta_fatal (_("Mutter was compiled without support for verbose mode"));
 #endif
 
   if (setting)
@@ -139,6 +135,9 @@ meta_add_verbose_topic (MetaDebugTopic topic)
 {
   if (verbose_topics == META_DEBUG_VERBOSE)
     return;
+
+  ensure_logfile ();
+
   if (topic == META_DEBUG_VERBOSE)
     verbose_topics = META_DEBUG_VERBOSE;
   else
@@ -162,23 +161,6 @@ meta_remove_verbose_topic (MetaDebugTopic topic)
     verbose_topics = 0;
   else
     verbose_topics &= ~topic;
-}
-
-gboolean
-meta_is_debugging (void)
-{
-  return is_debugging;
-}
-
-void
-meta_set_debugging (gboolean setting)
-{
-#ifdef WITH_VERBOSE_MODE
-  if (setting)
-    ensure_logfile ();
-#endif
-
-  is_debugging = setting;
 }
 
 gboolean
@@ -240,33 +222,6 @@ utf8_fputs (const char *str,
 
 #ifdef WITH_VERBOSE_MODE
 void
-meta_debug_spew_real (const char *format, ...)
-{
-  va_list args;
-  gchar *str;
-  FILE *out;
-
-  g_return_if_fail (format != NULL);
-
-  if (!is_debugging)
-    return;
-
-  va_start (args, format);
-  str = g_strdup_vprintf (format, args);
-  va_end (args);
-
-  out = logfile ? logfile : stderr;
-
-  if (no_prefix == 0)
-    utf8_fputs ("Window manager: ", out);
-  utf8_fputs (str, out);
-
-  fflush (out);
-
-  g_free (str);
-}
-
-void
 meta_verbose_real (const char *format, ...)
 {
   va_list args;
@@ -287,8 +242,6 @@ topic_name (MetaDebugTopic topic)
       return "WORKAREA";
     case META_DEBUG_STACK:
       return "STACK";
-    case META_DEBUG_THEMES:
-      return "THEMES";
     case META_DEBUG_SM:
       return "SM";
     case META_DEBUG_EVENTS:
@@ -303,14 +256,10 @@ topic_name (MetaDebugTopic topic)
       return "GEOMETRY";
     case META_DEBUG_PING:
       return "PING";
-    case META_DEBUG_XINERAMA:
-      return "XINERAMA";
     case META_DEBUG_KEYBINDINGS:
       return "KEYBINDINGS";
     case META_DEBUG_SYNC:
       return "SYNC";
-    case META_DEBUG_ERRORS:
-      return "ERRORS";
     case META_DEBUG_STARTUP:
       return "STARTUP";
     case META_DEBUG_PREFS:
@@ -321,22 +270,40 @@ topic_name (MetaDebugTopic topic)
       return "RESIZING";
     case META_DEBUG_SHAPES:
       return "SHAPES";
-    case META_DEBUG_COMPOSITOR:
-      return "COMPOSITOR";
     case META_DEBUG_EDGE_RESISTANCE:
       return "EDGE_RESISTANCE";
     case META_DEBUG_DBUS:
       return "DBUS";
     case META_DEBUG_INPUT:
       return "INPUT";
+    case META_DEBUG_KMS:
+      return "KMS";
+    case META_DEBUG_SCREEN_CAST:
+      return "SCREEN_CAST";
+    case META_DEBUG_REMOTE_DESKTOP:
+      return "REMOTE_DESKTOP";
     case META_DEBUG_VERBOSE:
       return "VERBOSE";
+    case META_DEBUG_WAYLAND:
+      return "WAYLAND";
     }
 
   return "WM";
 }
 
 static int sync_count = 0;
+
+gboolean
+meta_is_topic_enabled (MetaDebugTopic topic)
+{
+  if (verbose_topics == 0)
+    return FALSE;
+
+  if (topic == META_DEBUG_VERBOSE && verbose_topics != META_DEBUG_VERBOSE)
+    return FALSE;
+
+  return !!(verbose_topics & topic);
+}
 
 static void
 meta_topic_real_valist (MetaDebugTopic topic,
@@ -348,9 +315,7 @@ meta_topic_real_valist (MetaDebugTopic topic,
 
   g_return_if_fail (format != NULL);
 
-  if (verbose_topics == 0
-      || (topic == META_DEBUG_VERBOSE && verbose_topics != META_DEBUG_VERBOSE)
-      || (!(verbose_topics & topic)))
+  if (!meta_is_topic_enabled (topic))
     return;
 
   str = g_strdup_vprintf (format, args);
@@ -367,6 +332,7 @@ meta_topic_real_valist (MetaDebugTopic topic,
     }
 
   utf8_fputs (str, out);
+  utf8_fputs ("\n", out);
 
   fflush (out);
 
@@ -408,6 +374,7 @@ meta_bug (const char *format, ...)
   if (no_prefix == 0)
     utf8_fputs ("Bug in window manager: ", out);
   utf8_fputs (str, out);
+  utf8_fputs ("\n", out);
 
   fflush (out);
 
@@ -439,6 +406,7 @@ meta_warning (const char *format, ...)
   if (no_prefix == 0)
     utf8_fputs ("Window manager warning: ", out);
   utf8_fputs (str, out);
+  utf8_fputs ("\n", out);
 
   fflush (out);
 
@@ -469,6 +437,7 @@ meta_fatal (const char *format, ...)
   if (no_prefix == 0)
     utf8_fputs ("Window manager error: ", out);
   utf8_fputs (str, out);
+  utf8_fputs ("\n", out);
 
   fflush (out);
 
@@ -700,7 +669,7 @@ meta_show_dialog (const char *type,
 
   if (error)
     {
-      meta_warning ("%s\n", error->message);
+      meta_warning ("%s", error->message);
       g_error_free (error);
     }
 

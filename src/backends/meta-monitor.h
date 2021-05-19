@@ -65,6 +65,7 @@ typedef enum _MetaMonitorScalesConstraint
 } MetaMonitorScalesConstraint;
 
 #define META_TYPE_MONITOR (meta_monitor_get_type ())
+META_EXPORT_TEST
 G_DECLARE_DERIVABLE_TYPE (MetaMonitor, meta_monitor, META, MONITOR, GObject)
 
 struct _MetaMonitorClass
@@ -95,21 +96,15 @@ G_DECLARE_FINAL_TYPE (MetaMonitorTiled, meta_monitor_tiled,
                       META, MONITOR_TILED,
                       MetaMonitor)
 
-META_EXPORT_TEST
-MetaMonitorTiled * meta_monitor_tiled_new (MetaGpu            *gpu,
-                                           MetaMonitorManager *monitor_manager,
+MetaMonitorTiled * meta_monitor_tiled_new (MetaMonitorManager *monitor_manager,
                                            MetaOutput         *output);
 
-META_EXPORT_TEST
-MetaMonitorNormal * meta_monitor_normal_new (MetaGpu            *gpu,
-                                             MetaMonitorManager *monitor_manager,
+MetaMonitorNormal * meta_monitor_normal_new (MetaMonitorManager *monitor_manager,
                                              MetaOutput         *output);
 
-META_EXPORT_TEST
 MetaMonitorSpec * meta_monitor_get_spec (MetaMonitor *monitor);
 
-META_EXPORT_TEST
-MetaGpu * meta_monitor_get_gpu (MetaMonitor *monitor);
+MetaBackend * meta_monitor_get_backend (MetaMonitor *monitor);
 
 META_EXPORT_TEST
 gboolean meta_monitor_is_active (MetaMonitor *monitor);
@@ -117,31 +112,24 @@ gboolean meta_monitor_is_active (MetaMonitor *monitor);
 META_EXPORT_TEST
 MetaOutput * meta_monitor_get_main_output (MetaMonitor *monitor);
 
-META_EXPORT_TEST
 gboolean meta_monitor_is_primary (MetaMonitor *monitor);
 
-META_EXPORT_TEST
 gboolean meta_monitor_supports_underscanning (MetaMonitor *monitor);
 
-META_EXPORT_TEST
 gboolean meta_monitor_is_underscanning (MetaMonitor *monitor);
 
-META_EXPORT_TEST
 gboolean meta_monitor_is_laptop_panel (MetaMonitor *monitor);
 
-META_EXPORT_TEST
 gboolean meta_monitor_is_same_as (MetaMonitor *monitor,
                                   MetaMonitor *other_monitor);
 
 META_EXPORT_TEST
 GList * meta_monitor_get_outputs (MetaMonitor *monitor);
 
-META_EXPORT_TEST
 void meta_monitor_get_current_resolution (MetaMonitor *monitor,
                                           int           *width,
                                           int           *height);
 
-META_EXPORT_TEST
 void meta_monitor_derive_layout (MetaMonitor   *monitor,
                                  MetaRectangle *layout);
 
@@ -150,7 +138,6 @@ void meta_monitor_get_physical_dimensions (MetaMonitor *monitor,
                                            int         *width_mm,
                                            int         *height_mm);
 
-META_EXPORT_TEST
 CoglSubpixelOrder meta_monitor_get_subpixel_order (MetaMonitor *monitor);
 
 META_EXPORT_TEST
@@ -263,6 +250,10 @@ gboolean meta_monitor_mode_foreach_output (MetaMonitor          *monitor,
                                            MetaMonitorModeFunc   func,
                                            gpointer              user_data,
                                            GError              **error);
+
+MetaMonitorCrtcMode * meta_monitor_get_crtc_mode_for_output (MetaMonitor     *monitor,
+                                                             MetaMonitorMode *mode,
+                                                             MetaOutput      *output);
 
 META_EXPORT_TEST
 gboolean meta_monitor_mode_should_be_advertised (MetaMonitorMode *monitor_mode);

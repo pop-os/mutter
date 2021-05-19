@@ -25,6 +25,7 @@
 
 #include "clutter/clutter-damage-history.h"
 #include "clutter/clutter-frame-clock.h"
+#include "clutter/clutter-frame-private.h"
 #include "clutter/clutter-private.h"
 #include "clutter/clutter-mutter.h"
 #include "clutter/clutter-stage-private.h"
@@ -79,6 +80,14 @@ typedef struct _ClutterStageViewPrivate
 
   float refresh_rate;
   ClutterFrameClock *frame_clock;
+
+  struct {
+    int frame_count;
+    int64_t last_print_time_us;
+    int64_t cumulative_draw_time_us;
+    int64_t began_draw_time_us;
+    int64_t worst_draw_time_us;
+  } frame_timings;
 
   guint dirty_viewport   : 1;
   guint dirty_projection : 1;
@@ -213,7 +222,7 @@ paint_transformed_framebuffer (ClutterStageView     *view,
                                CoglFramebuffer      *dst_framebuffer,
                                const cairo_region_t *redraw_clip)
 {
-  CoglMatrix matrix;
+  graphene_matrix_t matrix;
   unsigned int n_rectangles, i;
   int dst_width, dst_height;
   cairo_rectangle_int_t view_layout;
@@ -236,13 +245,14 @@ paint_transformed_framebuffer (ClutterStageView     *view,
 
   cogl_framebuffer_push_matrix (dst_framebuffer);
 
-  cogl_matrix_init_identity (&matrix);
-  cogl_matrix_scale (&matrix,
-                     1.0 / (dst_width / 2.0),
-                     -1.0 / (dst_height / 2.0), 0);
-  cogl_matrix_translate (&matrix,
-                         -(dst_width / 2.0),
-                         -(dst_height / 2.0), 0);
+  graphene_matrix_init_translate (&matrix,
+                                  &GRAPHENE_POINT3D_INIT (-dst_width / 2.0,
+                                                          -dst_height / 2.0,
+                                                          0.f));
+  graphene_matrix_scale (&matrix,
+                         1.0 / (dst_width / 2.0),
+                         -1.0 / (dst_height / 2.0),
+                         0.f);
   cogl_framebuffer_set_projection_matrix (dst_framebuffer, &matrix);
   cogl_framebuffer_set_viewport (dst_framebuffer,
                                  0, 0, dst_width, dst_height);
@@ -320,7 +330,7 @@ init_dma_buf_shadowfbs (ClutterStageView  *view,
       return FALSE;
     }
 
-  if (!cogl_is_onscreen (priv->framebuffer))
+  if (!COGL_IS_ONSCREEN (priv->framebuffer))
     {
       g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
                    "Tried to use shadow buffer without onscreen");
@@ -347,7 +357,7 @@ init_dma_buf_shadowfbs (ClutterStageView  *view,
 
   initial_shadowfb =
     cogl_dma_buf_handle_get_framebuffer (priv->shadow.dma_buf.handles[0]);
-  priv->shadow.framebuffer = cogl_object_ref (initial_shadowfb);
+  priv->shadow.framebuffer = COGL_OFFSCREEN (g_object_ref (initial_shadowfb));
 
   return TRUE;
 }
@@ -375,7 +385,7 @@ create_offscreen_framebuffer (CoglContext  *context,
   cogl_object_unref (texture);
   if (!cogl_framebuffer_allocate (COGL_FRAMEBUFFER (framebuffer), error))
     {
-      cogl_object_unref (framebuffer);
+      g_object_unref (framebuffer);
       return FALSE;
     }
 
@@ -634,8 +644,8 @@ swap_dma_buf_framebuffer (ClutterStageView *view)
   next_dma_buf_handle = priv->shadow.dma_buf.handles[next_idx];
   next_framebuffer =
     cogl_dma_buf_handle_get_framebuffer (next_dma_buf_handle);
-  cogl_clear_object (&priv->shadow.framebuffer);
-  priv->shadow.framebuffer = cogl_object_ref (next_framebuffer);
+  g_clear_object (&priv->shadow.framebuffer);
+  priv->shadow.framebuffer = COGL_OFFSCREEN (g_object_ref (next_framebuffer));
 }
 
 static void
@@ -886,8 +896,8 @@ clutter_stage_view_invalidate_projection (ClutterStageView *view)
 }
 
 void
-clutter_stage_view_set_projection (ClutterStageView *view,
-                                   const CoglMatrix *matrix)
+clutter_stage_view_set_projection (ClutterStageView        *view,
+                                   const graphene_matrix_t *matrix)
 {
   ClutterStageViewPrivate *priv =
     clutter_stage_view_get_instance_private (view);
@@ -899,8 +909,8 @@ clutter_stage_view_set_projection (ClutterStageView *view,
 }
 
 void
-clutter_stage_view_get_offscreen_transformation_matrix (ClutterStageView *view,
-                                                        CoglMatrix       *matrix)
+clutter_stage_view_get_offscreen_transformation_matrix (ClutterStageView  *view,
+                                                        graphene_matrix_t *matrix)
 {
   ClutterStageViewClass *view_class = CLUTTER_STAGE_VIEW_GET_CLASS (view);
 
@@ -988,10 +998,10 @@ clutter_stage_view_take_redraw_clip (ClutterStageView *view)
 }
 
 static void
-clutter_stage_default_get_offscreen_transformation_matrix (ClutterStageView *view,
-                                                           CoglMatrix       *matrix)
+clutter_stage_default_get_offscreen_transformation_matrix (ClutterStageView  *view,
+                                                           graphene_matrix_t *matrix)
 {
-  cogl_matrix_init_identity (matrix);
+  graphene_matrix_init_identity (matrix);
 }
 
 void
@@ -1067,6 +1077,70 @@ handle_frame_clock_before_frame (ClutterFrameClock *frame_clock,
   _clutter_stage_process_queued_events (priv->stage);
 }
 
+static void
+begin_frame_timing_measurement (ClutterStageView *view)
+{
+  ClutterStageViewPrivate *priv =
+    clutter_stage_view_get_instance_private (view);
+
+  priv->frame_timings.began_draw_time_us = g_get_monotonic_time ();
+}
+
+static void
+end_frame_timing_measurement (ClutterStageView *view)
+{
+  ClutterStageViewPrivate *priv =
+    clutter_stage_view_get_instance_private (view);
+  int64_t now_us = g_get_monotonic_time ();
+  int64_t draw_time_us;
+
+  draw_time_us = now_us - priv->frame_timings.began_draw_time_us;
+
+  priv->frame_timings.frame_count++;
+  priv->frame_timings.cumulative_draw_time_us += draw_time_us;
+  if (draw_time_us > priv->frame_timings.worst_draw_time_us)
+    priv->frame_timings.worst_draw_time_us = draw_time_us;
+
+  if (priv->frame_timings.frame_count && priv->frame_timings.last_print_time_us)
+    {
+      float time_since_last_print_s;
+
+      time_since_last_print_s =
+        (now_us - priv->frame_timings.last_print_time_us) /
+        (float) G_USEC_PER_SEC;
+
+      if (time_since_last_print_s >= 1.0)
+        {
+          float avg_fps, avg_draw_time_ms, worst_draw_time_ms;
+
+          avg_fps = priv->frame_timings.frame_count / time_since_last_print_s;
+
+          avg_draw_time_ms =
+            (priv->frame_timings.cumulative_draw_time_us / 1000.0) /
+            priv->frame_timings.frame_count;
+
+          worst_draw_time_ms = priv->frame_timings.worst_draw_time_us / 1000.0;
+
+          g_print ("*** %s frame timings over %.01fs: "
+                   "%.02f FPS, average: %.01fms, peak: %.01fms\n",
+                   priv->name,
+                   time_since_last_print_s,
+                   avg_fps,
+                   avg_draw_time_ms,
+                   worst_draw_time_ms);
+
+          priv->frame_timings.frame_count = 0;
+          priv->frame_timings.cumulative_draw_time_us = 0;
+          priv->frame_timings.worst_draw_time_us = 0;
+          priv->frame_timings.last_print_time_us = now_us;
+        }
+    }
+  else if (!priv->frame_timings.last_print_time_us)
+    {
+      priv->frame_timings.last_print_time_us = now_us;
+    }
+}
+
 static ClutterFrameResult
 handle_frame_clock_frame (ClutterFrameClock *frame_clock,
                           int64_t            frame_count,
@@ -1077,8 +1151,9 @@ handle_frame_clock_frame (ClutterFrameClock *frame_clock,
   ClutterStageViewPrivate *priv =
     clutter_stage_view_get_instance_private (view);
   ClutterStage *stage = priv->stage;
+  ClutterStageWindow *stage_window = _clutter_stage_get_window (stage);
   g_autoptr (GSList) devices = NULL;
-  ClutterFrameResult result;
+  ClutterFrame frame;
 
   if (CLUTTER_ACTOR_IN_DESTRUCTION (stage))
     return CLUTTER_FRAME_RESULT_IDLE;
@@ -1089,41 +1164,43 @@ handle_frame_clock_frame (ClutterFrameClock *frame_clock,
   if (!clutter_actor_is_mapped (CLUTTER_ACTOR (stage)))
     return CLUTTER_FRAME_RESULT_IDLE;
 
+  if (_clutter_context_get_show_fps ())
+    begin_frame_timing_measurement (view);
+
   _clutter_run_repaint_functions (CLUTTER_REPAINT_FLAGS_PRE_PAINT);
   clutter_stage_emit_before_update (stage, view);
 
   clutter_stage_maybe_relayout (CLUTTER_ACTOR (stage));
-  clutter_stage_update_actor_stage_views (stage);
   clutter_stage_maybe_finish_queue_redraws (stage);
+
+  clutter_stage_finish_layout (stage);
 
   devices = clutter_stage_find_updated_devices (stage);
 
+  frame = CLUTTER_FRAME_INIT;
+
+  _clutter_stage_window_prepare_frame (stage_window, view, &frame);
+
   if (clutter_stage_view_has_redraw_clip (view))
     {
-      ClutterStageWindow *stage_window;
-
       clutter_stage_emit_before_paint (stage, view);
 
-      stage_window = _clutter_stage_get_window (stage);
-      _clutter_stage_window_redraw_view (stage_window, view);
+      _clutter_stage_window_redraw_view (stage_window, view, &frame);
 
       clutter_stage_emit_after_paint (stage, view);
 
-      _clutter_stage_window_finish_frame (stage_window);
+      if (_clutter_context_get_show_fps ())
+        end_frame_timing_measurement (view);
+    }
 
-      result = CLUTTER_FRAME_RESULT_PENDING_PRESENTED;
-    }
-  else
-    {
-      result = CLUTTER_FRAME_RESULT_IDLE;
-    }
+  _clutter_stage_window_finish_frame (stage_window, view, &frame);
 
   clutter_stage_update_devices (stage, devices);
 
   _clutter_run_repaint_functions (CLUTTER_REPAINT_FLAGS_POST_PAINT);
   clutter_stage_emit_after_update (stage, view);
 
-  return result;
+  return clutter_frame_get_result (&frame);
 }
 
 static const ClutterFrameListenerIface frame_clock_listener_iface = {
@@ -1140,6 +1217,15 @@ clutter_stage_view_notify_presented (ClutterStageView *view,
 
   clutter_stage_presented (priv->stage, view, frame_info);
   clutter_frame_clock_notify_presented (priv->frame_clock, frame_info);
+}
+
+void
+clutter_stage_view_notify_ready (ClutterStageView *view)
+{
+  ClutterStageViewPrivate *priv =
+    clutter_stage_view_get_instance_private (view);
+
+  clutter_frame_clock_notify_ready (priv->frame_clock);
 }
 
 static void
@@ -1168,7 +1254,7 @@ clutter_stage_view_set_framebuffer (ClutterStageView *view,
   g_warn_if_fail (!priv->framebuffer);
   if (framebuffer)
     {
-      priv->framebuffer = cogl_object_ref (framebuffer);
+      priv->framebuffer = g_object_ref (framebuffer);
       sanity_check_framebuffer (view);
     }
 }
@@ -1195,10 +1281,10 @@ clutter_stage_view_get_property (GObject    *object,
       g_value_set_boxed (value, &priv->layout);
       break;
     case PROP_FRAMEBUFFER:
-      g_value_set_boxed (value, priv->framebuffer);
+      g_value_set_object (value, priv->framebuffer);
       break;
     case PROP_OFFSCREEN:
-      g_value_set_boxed (value, priv->offscreen);
+      g_value_set_object (value, priv->offscreen);
       break;
     case PROP_USE_SHADOWFB:
       g_value_set_boolean (value, priv->use_shadowfb);
@@ -1238,10 +1324,10 @@ clutter_stage_view_set_property (GObject      *object,
       priv->layout = *layout;
       break;
     case PROP_FRAMEBUFFER:
-      clutter_stage_view_set_framebuffer (view, g_value_get_boxed (value));
+      clutter_stage_view_set_framebuffer (view, g_value_get_object (value));
       break;
     case PROP_OFFSCREEN:
-      priv->offscreen = g_value_dup_boxed (value);
+      priv->offscreen = g_value_dup_object (value);
       break;
     case PROP_USE_SHADOWFB:
       priv->use_shadowfb = g_value_get_boolean (value);
@@ -1284,7 +1370,7 @@ clutter_stage_view_dispose (GObject *object)
 
   g_clear_pointer (&priv->name, g_free);
 
-  g_clear_pointer (&priv->shadow.framebuffer, cogl_object_unref);
+  g_clear_object (&priv->shadow.framebuffer);
   for (i = 0; i < G_N_ELEMENTS (priv->shadow.dma_buf.handles); i++)
     {
       g_clear_pointer (&priv->shadow.dma_buf.handles[i],
@@ -1293,7 +1379,7 @@ clutter_stage_view_dispose (GObject *object)
   g_clear_pointer (&priv->shadow.dma_buf.damage_history,
                    clutter_damage_history_free);
 
-  g_clear_pointer (&priv->offscreen, cogl_object_unref);
+  g_clear_object (&priv->offscreen);
   g_clear_pointer (&priv->offscreen_pipeline, cogl_object_unref);
   g_clear_pointer (&priv->redraw_clip, cairo_region_destroy);
   g_clear_pointer (&priv->frame_clock, clutter_frame_clock_destroy);
@@ -1308,7 +1394,7 @@ clutter_stage_view_finalize (GObject *object)
   ClutterStageViewPrivate *priv =
     clutter_stage_view_get_instance_private (view);
 
-  g_clear_pointer (&priv->framebuffer, cogl_object_unref);
+  g_clear_object (&priv->framebuffer);
 
   G_OBJECT_CLASS (clutter_stage_view_parent_class)->dispose (object);
 }
@@ -1367,22 +1453,22 @@ clutter_stage_view_class_init (ClutterStageViewClass *klass)
                         G_PARAM_STATIC_STRINGS);
 
   obj_props[PROP_FRAMEBUFFER] =
-    g_param_spec_boxed ("framebuffer",
-                        "View framebuffer",
-                        "The front buffer of the view",
-                        COGL_TYPE_HANDLE,
-                        G_PARAM_READWRITE |
-                        G_PARAM_CONSTRUCT |
-                        G_PARAM_STATIC_STRINGS);
+    g_param_spec_object ("framebuffer",
+                         "View framebuffer",
+                         "The front buffer of the view",
+                         COGL_TYPE_FRAMEBUFFER,
+                         G_PARAM_READWRITE |
+                         G_PARAM_CONSTRUCT |
+                         G_PARAM_STATIC_STRINGS);
 
   obj_props[PROP_OFFSCREEN] =
-    g_param_spec_boxed ("offscreen",
-                        "Offscreen buffer",
-                        "Framebuffer used as intermediate buffer",
-                        COGL_TYPE_HANDLE,
-                        G_PARAM_READWRITE |
-                        G_PARAM_CONSTRUCT_ONLY |
-                        G_PARAM_STATIC_STRINGS);
+    g_param_spec_object ("offscreen",
+                         "Offscreen buffer",
+                         "Framebuffer used as intermediate buffer",
+                         COGL_TYPE_OFFSCREEN,
+                         G_PARAM_READWRITE |
+                         G_PARAM_CONSTRUCT_ONLY |
+                         G_PARAM_STATIC_STRINGS);
 
   obj_props[PROP_USE_SHADOWFB] =
     g_param_spec_boolean ("use-shadowfb",

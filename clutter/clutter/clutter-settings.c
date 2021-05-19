@@ -32,6 +32,7 @@
 #include "clutter-stage-private.h"
 #include "clutter-private.h"
 
+#include <gdesktop-enums.h>
 #include <stdlib.h>
 
 #define DEFAULT_FONT_NAME       "Sans 12"
@@ -65,7 +66,9 @@ struct _ClutterSettings
   GObject parent_instance;
 
   ClutterBackend *backend;
-  GSettings *xsettings;
+  GSettings *font_settings;
+  GSettings *mouse_settings;
+  GSettings *mouse_a11y_settings;
 
   gint double_click_time;
   gint double_click_distance;
@@ -281,10 +284,10 @@ settings_update_fontmap (ClutterSettings *self,
 }
 
 static void
-get_font_gsettings (GSettings    *xsettings,
+get_font_gsettings (GSettings    *settings,
                     FontSettings *output)
 {
-  /* org.gnome.settings-daemon.GsdFontAntialiasingMode */
+  /* org.gnome.desktop.GDesktopFontAntialiasingMode */
   static const struct
   {
     cairo_antialias_t cairo_antialias;
@@ -297,7 +300,7 @@ get_font_gsettings (GSettings    *xsettings,
     /* rgba=2      */ {CAIRO_ANTIALIAS_SUBPIXEL, 1},
   };
 
-  /* org.gnome.settings-daemon.GsdFontHinting */
+  /* org.gnome.desktop.GDesktopFontHinting */
   static const struct
   {
     cairo_hint_style_t cairo_hint_style;
@@ -311,7 +314,7 @@ get_font_gsettings (GSettings    *xsettings,
     /* full=3   */ {CAIRO_HINT_STYLE_FULL,   "hintfull"},
   };
 
-  /* org.gnome.settings-daemon.GsdFontRgbaOrder */
+  /* org.gnome.desktop.GDesktopFontRgbaOrder */
   static const struct
   {
     cairo_subpixel_order_t cairo_subpixel_order;
@@ -327,7 +330,7 @@ get_font_gsettings (GSettings    *xsettings,
   };
   guint i;
 
-  i = g_settings_get_enum (xsettings, "hinting");
+  i = g_settings_get_enum (settings, "font-hinting");
   if (i < G_N_ELEMENTS (hintings))
     {
       output->cairo_hint_style = hintings[i].cairo_hint_style;
@@ -339,7 +342,7 @@ get_font_gsettings (GSettings    *xsettings,
       output->clutter_font_hint_style = NULL;
     }
 
-  i = g_settings_get_enum (xsettings, "antialiasing");
+  i = g_settings_get_enum (settings, "font-antialiasing");
   if (i < G_N_ELEMENTS (antialiasings))
     {
       output->cairo_antialias = antialiasings[i].cairo_antialias;
@@ -351,7 +354,7 @@ get_font_gsettings (GSettings    *xsettings,
       output->clutter_font_antialias = -1;
     }
 
-  i = g_settings_get_enum (xsettings, "rgba-order");
+  i = g_settings_get_enum (settings, "font-rgba-order");
   if (i < G_N_ELEMENTS (rgba_orders))
     {
       output->cairo_subpixel_order = rgba_orders[i].cairo_subpixel_order;
@@ -370,11 +373,11 @@ get_font_gsettings (GSettings    *xsettings,
 static void
 init_font_options (ClutterSettings *self)
 {
-  GSettings *xsettings = self->xsettings;
+  GSettings *settings = self->font_settings;
   cairo_font_options_t *options = cairo_font_options_create ();
   FontSettings fs;
 
-  get_font_gsettings (xsettings, &fs);
+  get_font_gsettings (settings, &fs);
 
   cairo_font_options_set_hint_style (options, fs.cairo_hint_style);
   cairo_font_options_set_antialias (options, fs.cairo_antialias);
@@ -385,17 +388,32 @@ init_font_options (ClutterSettings *self)
   cairo_font_options_destroy (options);
 }
 
+static void
+sync_mouse_options (ClutterSettings *self)
+{
+  int double_click;
+  int drag_threshold;
+
+  double_click = g_settings_get_int (self->mouse_settings, "double-click");
+  drag_threshold = g_settings_get_int (self->mouse_settings, "drag-threshold");
+
+  g_object_set (self,
+		"double-click-time", double_click,
+		"dnd-drag-threshold", drag_threshold,
+                NULL);
+}
+
 static gboolean
-on_xsettings_change_event (GSettings *xsettings,
-                           gpointer   keys,
-                           gint       n_keys,
-                           gpointer   user_data)
+on_font_settings_change_event (GSettings *settings,
+			       gpointer   keys,
+			       gint       n_keys,
+			       gpointer   user_data)
 {
   ClutterSettings *self = CLUTTER_SETTINGS (user_data);
   FontSettings fs;
   gint hinting;
 
-  get_font_gsettings (xsettings, &fs);
+  get_font_gsettings (settings, &fs);
   hinting = fs.cairo_hint_style == CAIRO_HINT_STYLE_NONE ? 0 : 1;
   g_object_set (self,
                 "font-hinting",        hinting,
@@ -407,29 +425,171 @@ on_xsettings_change_event (GSettings *xsettings,
   return FALSE;
 }
 
+static gboolean
+on_mouse_settings_change_event (GSettings *settings,
+				gpointer   keys,
+				gint       n_keys,
+				gpointer   user_data)
+{
+  ClutterSettings *self = CLUTTER_SETTINGS (user_data);
+
+  sync_mouse_options (self);
+
+  return FALSE;
+}
+
+struct _pointer_a11y_settings_flags_pair {
+  const char *name;
+  ClutterPointerA11yFlags flag;
+} pointer_a11y_settings_flags_pair[] = {
+  { "secondary-click-enabled", CLUTTER_A11Y_SECONDARY_CLICK_ENABLED },
+  { "dwell-click-enabled",     CLUTTER_A11Y_DWELL_ENABLED },
+};
+
+static ClutterPointerA11yDwellDirection
+pointer_a11y_dwell_direction_from_setting (ClutterSettings *self,
+                                           const char      *key)
+{
+  GDesktopMouseDwellDirection dwell_gesture_direction;
+
+  dwell_gesture_direction = g_settings_get_enum (self->mouse_a11y_settings,
+                                                 key);
+  switch (dwell_gesture_direction)
+    {
+    case G_DESKTOP_MOUSE_DWELL_DIRECTION_LEFT:
+      return CLUTTER_A11Y_DWELL_DIRECTION_LEFT;
+      break;
+    case G_DESKTOP_MOUSE_DWELL_DIRECTION_RIGHT:
+      return CLUTTER_A11Y_DWELL_DIRECTION_RIGHT;
+      break;
+    case G_DESKTOP_MOUSE_DWELL_DIRECTION_UP:
+      return CLUTTER_A11Y_DWELL_DIRECTION_UP;
+      break;
+    case G_DESKTOP_MOUSE_DWELL_DIRECTION_DOWN:
+      return CLUTTER_A11Y_DWELL_DIRECTION_DOWN;
+      break;
+    default:
+      break;
+    }
+  return CLUTTER_A11Y_DWELL_DIRECTION_NONE;
+}
+
+static void
+sync_pointer_a11y_settings (ClutterSettings *self,
+                            ClutterSeat     *seat)
+{
+  ClutterPointerA11ySettings pointer_a11y_settings;
+  GDesktopMouseDwellMode dwell_mode;
+  int i;
+
+  clutter_seat_get_pointer_a11y_settings (seat, &pointer_a11y_settings);
+  pointer_a11y_settings.controls = 0;
+  for (i = 0; i < G_N_ELEMENTS (pointer_a11y_settings_flags_pair); i++)
+    {
+      if (!g_settings_get_boolean (self->mouse_a11y_settings,
+                                   pointer_a11y_settings_flags_pair[i].name))
+        continue;
+
+      pointer_a11y_settings.controls |=
+        pointer_a11y_settings_flags_pair[i].flag;
+    }
+
+  /* "secondary-click-time" is expressed in seconds */
+  pointer_a11y_settings.secondary_click_delay =
+    (1000 * g_settings_get_double (self->mouse_a11y_settings,
+                                   "secondary-click-time"));
+  /* "dwell-time" is expressed in seconds */
+  pointer_a11y_settings.dwell_delay =
+    (1000 * g_settings_get_double (self->mouse_a11y_settings, "dwell-time"));
+  pointer_a11y_settings.dwell_threshold =
+    g_settings_get_int (self->mouse_a11y_settings, "dwell-threshold");
+
+  dwell_mode = g_settings_get_enum (self->mouse_a11y_settings, "dwell-mode");
+  if (dwell_mode == G_DESKTOP_MOUSE_DWELL_MODE_WINDOW)
+    pointer_a11y_settings.dwell_mode = CLUTTER_A11Y_DWELL_MODE_WINDOW;
+  else
+    pointer_a11y_settings.dwell_mode = CLUTTER_A11Y_DWELL_MODE_GESTURE;
+
+  pointer_a11y_settings.dwell_gesture_single =
+    pointer_a11y_dwell_direction_from_setting (self, "dwell-gesture-single");
+  pointer_a11y_settings.dwell_gesture_double =
+    pointer_a11y_dwell_direction_from_setting (self, "dwell-gesture-double");
+  pointer_a11y_settings.dwell_gesture_drag =
+    pointer_a11y_dwell_direction_from_setting (self, "dwell-gesture-drag");
+  pointer_a11y_settings.dwell_gesture_secondary =
+    pointer_a11y_dwell_direction_from_setting (self, "dwell-gesture-secondary");
+
+  clutter_seat_set_pointer_a11y_settings (seat, &pointer_a11y_settings);
+}
+
+static gboolean
+on_mouse_a11y_settings_change_event (GSettings *settings,
+                                     gpointer   keys,
+                                     int        n_keys,
+                                     gpointer   user_data)
+{
+  ClutterSettings *self = CLUTTER_SETTINGS (user_data);
+  ClutterSeat *seat = clutter_backend_get_default_seat (self->backend);
+
+  sync_pointer_a11y_settings (self, seat);
+
+  return FALSE;
+}
+
 static void
 load_initial_settings (ClutterSettings *self)
 {
-  static const gchar xsettings_path[] =
-    "org.gnome.settings-daemon.plugins.xsettings";
+  static const gchar *font_settings_path = "org.gnome.desktop.interface";
+  static const gchar *mouse_settings_path = "org.gnome.desktop.peripherals.mouse";
+  static const char *mouse_a11y_settings_path = "org.gnome.desktop.a11y.mouse";
   GSettingsSchemaSource *source = g_settings_schema_source_get_default ();
   GSettingsSchema *schema;
 
-  schema = g_settings_schema_source_lookup (source, xsettings_path, TRUE);
+  schema = g_settings_schema_source_lookup (source, font_settings_path, TRUE);
   if (!schema)
     {
-      g_warning ("Failed to find schema: %s", xsettings_path);
+      g_warning ("Failed to find schema: %s", font_settings_path);
     }
   else
     {
-      self->xsettings = g_settings_new_full (schema, NULL, NULL);
-      if (self->xsettings)
+      self->font_settings = g_settings_new_full (schema, NULL, NULL);
+      if (self->font_settings)
         {
           init_font_options (self);
-          g_signal_connect (self->xsettings, "change-event",
-                            G_CALLBACK (on_xsettings_change_event),
+          g_signal_connect (self->font_settings, "change-event",
+                            G_CALLBACK (on_font_settings_change_event),
                             self);
         }
+    }
+
+  schema = g_settings_schema_source_lookup (source, mouse_settings_path, TRUE);
+  if (!schema)
+    {
+      g_warning ("Failed to find schema: %s", mouse_settings_path);
+    }
+  else
+    {
+      self->mouse_settings = g_settings_new_full (schema, NULL, NULL);
+      if (self->mouse_settings)
+        {
+          sync_mouse_options (self);
+          g_signal_connect (self->mouse_settings, "change-event",
+                            G_CALLBACK (on_mouse_settings_change_event),
+                            self);
+        }
+    }
+
+  schema = g_settings_schema_source_lookup (source, mouse_a11y_settings_path, TRUE);
+  if (!schema)
+    {
+      g_warning ("Failed to find schema: %s", mouse_settings_path);
+    }
+  else
+    {
+      self->mouse_a11y_settings = g_settings_new_full (schema, NULL, NULL);
+      g_signal_connect (self->mouse_a11y_settings, "change-event",
+                        G_CALLBACK (on_mouse_a11y_settings_change_event),
+                        self);
     }
 }
 
@@ -442,7 +602,9 @@ clutter_settings_finalize (GObject *gobject)
   g_free (self->xft_hint_style);
   g_free (self->xft_rgba);
 
-  g_clear_object (&self->xsettings);
+  g_clear_object (&self->font_settings);
+  g_clear_object (&self->mouse_settings);
+  g_clear_object (&self->mouse_a11y_settings);
 
   G_OBJECT_CLASS (clutter_settings_parent_class)->finalize (gobject);
 }
@@ -912,105 +1074,9 @@ _clutter_settings_set_backend (ClutterSettings *settings,
   load_initial_settings (settings);
 }
 
-#define SETTINGS_GROUP  "Settings"
-
 void
-_clutter_settings_read_from_key_file (ClutterSettings *settings,
-                                      GKeyFile        *keyfile)
+clutter_settings_ensure_pointer_a11y_settings (ClutterSettings *settings,
+                                               ClutterSeat     *seat)
 {
-  GObjectClass *settings_class;
-  GObject *settings_obj;
-  GParamSpec **pspecs;
-  guint n_pspecs, i;
-
-  if (!g_key_file_has_group (keyfile, SETTINGS_GROUP))
-    return;
-
-  settings_obj = G_OBJECT (settings);
-  settings_class = G_OBJECT_GET_CLASS (settings);
-  pspecs = g_object_class_list_properties (settings_class, &n_pspecs);
-
-  for (i = 0; i < n_pspecs; i++)
-    {
-      GParamSpec *pspec = pspecs[i];
-      const gchar *p_name = pspec->name;
-      GType p_type = G_TYPE_FUNDAMENTAL (pspec->value_type);
-      GValue value = G_VALUE_INIT;
-      GError *key_error = NULL;
-
-      g_value_init (&value, p_type);
-
-      switch (p_type)
-        {
-        case G_TYPE_INT:
-        case G_TYPE_UINT:
-          {
-            gint val;
-
-            val = g_key_file_get_integer (keyfile,
-                                          SETTINGS_GROUP, p_name,
-                                          &key_error);
-            if (p_type == G_TYPE_INT)
-              g_value_set_int (&value, val);
-            else
-              g_value_set_uint (&value, val);
-          }
-          break;
-
-        case G_TYPE_BOOLEAN:
-          {
-            gboolean val;
-
-            val = g_key_file_get_boolean (keyfile,
-                                          SETTINGS_GROUP, p_name,
-                                          &key_error);
-            g_value_set_boolean (&value, val);
-          }
-          break;
-
-        case G_TYPE_FLOAT:
-        case G_TYPE_DOUBLE:
-          {
-            gdouble val;
-
-            val = g_key_file_get_double (keyfile,
-                                         SETTINGS_GROUP, p_name,
-                                         &key_error);
-            if (p_type == G_TYPE_FLOAT)
-              g_value_set_float (&value, val);
-            else
-              g_value_set_double (&value, val);
-          }
-          break;
-
-        case G_TYPE_STRING:
-          {
-            gchar *val;
-
-            val = g_key_file_get_string (keyfile,
-                                         SETTINGS_GROUP, p_name,
-                                         &key_error);
-            g_value_take_string (&value, val);
-          }
-          break;
-        }
-
-      if (key_error != NULL &&
-          key_error->domain != G_KEY_FILE_ERROR &&
-          key_error->code != G_KEY_FILE_ERROR_KEY_NOT_FOUND)
-        {
-          g_critical ("Unable to read the value for setting '%s': %s",
-                      p_name,
-                      key_error->message);
-        }
-
-      if (key_error == NULL)
-        g_object_set_property (settings_obj, p_name, &value);
-      else
-        g_error_free (key_error);
-
-      g_value_unset (&value);
-    }
-
-  g_free (pspecs);
+  sync_pointer_a11y_settings (settings, seat);
 }

@@ -79,7 +79,6 @@ cogl_headers = [
   'cogl-context.h',
   'cogl-frame-info.h',
   'cogl-framebuffer.h',
-  'cogl-matrix.h',
   'cogl-object.h',
   'cogl-offscreen.h',
   'cogl-onscreen.h',
@@ -123,6 +122,7 @@ cogl_nonintrospected_headers = [
   'cogl-gtype-private.h',
   'cogl-glib-source.h',
   'cogl-scanout.h',
+  'cogl-graphene.h',
 ]
 
 cogl_nodist_headers = [
@@ -130,8 +130,8 @@ cogl_nodist_headers = [
 
 cogl_noop_driver_sources = [
   'driver/nop/cogl-driver-nop.c',
-  'driver/nop/cogl-framebuffer-nop-private.h',
-  'driver/nop/cogl-framebuffer-nop.c',
+  'driver/nop/cogl-nop-framebuffer.c',
+  'driver/nop/cogl-nop-framebuffer.h',
   'driver/nop/cogl-attribute-nop-private.h',
   'driver/nop/cogl-attribute-nop.c',
   'driver/nop/cogl-clip-stack-nop-private.h',
@@ -153,6 +153,10 @@ cogl_common_driver_sources = [
   'driver/gl/cogl-util-gl.c',
   'driver/gl/cogl-framebuffer-gl-private.h',
   'driver/gl/cogl-framebuffer-gl.c',
+  'driver/gl/cogl-gl-framebuffer-back.c',
+  'driver/gl/cogl-gl-framebuffer-back.h',
+  'driver/gl/cogl-gl-framebuffer-fbo.c',
+  'driver/gl/cogl-gl-framebuffer-fbo.h',
   'driver/gl/cogl-texture-gl-private.h',
   'driver/gl/cogl-texture-gl.c',
   'driver/gl/cogl-texture-2d-gl-private.h',
@@ -257,8 +261,6 @@ cogl_sources = [
   'cogl-attribute.c',
   'cogl-primitive-private.h',
   'cogl-primitive.c',
-  'cogl-matrix.c',
-  'cogl-matrix-private.h',
   'cogl-matrix-stack.c',
   'cogl-matrix-stack-private.h',
   'cogl-depth-state.c',
@@ -310,8 +312,12 @@ cogl_sources = [
   'cogl-spans.c',
   'cogl-journal-private.h',
   'cogl-journal.c',
+  'cogl-offscreen-private.h',
+  'cogl-offscreen.c',
   'cogl-frame-info-private.h',
   'cogl-frame-info.c',
+  'cogl-framebuffer-driver.c',
+  'cogl-framebuffer-driver.h',
   'cogl-framebuffer-private.h',
   'cogl-framebuffer.c',
   'cogl-onscreen-private.h',
@@ -354,6 +360,7 @@ cogl_sources = [
   'deprecated/cogl-clutter.c',
   'cogl-glib-source.c',
   'cogl-mutter.h',
+  'cogl-graphene.c',
 ]
 
 if have_x11
@@ -362,6 +369,8 @@ if have_x11
     'cogl-xlib.h',
   ]
   cogl_sources += [
+    'cogl-x11-onscreen.c',
+    'cogl-x11-onscreen.h',
     'cogl-x11-renderer-private.h',
     'cogl-xlib-private.h',
     'cogl-xlib-renderer-private.h',
@@ -381,6 +390,8 @@ if have_glx
   cogl_sources += [
     'winsys/cogl-glx-display-private.h',
     'winsys/cogl-glx-renderer-private.h',
+    'winsys/cogl-onscreen-glx.c',
+    'winsys/cogl-onscreen-glx.h',
     'winsys/cogl-winsys-glx-feature-functions.h',
     'winsys/cogl-winsys-glx-private.h',
     'winsys/cogl-winsys-glx.c',
@@ -400,6 +411,8 @@ if have_egl
   ]
   cogl_sources += [
     'cogl-egl-private.h',
+    'winsys/cogl-onscreen-egl.c',
+    'winsys/cogl-onscreen-egl.h',
     'winsys/cogl-winsys-egl.c',
     'winsys/cogl-winsys-egl-feature-functions.h',
     'winsys/cogl-winsys-egl-private.h',
@@ -408,6 +421,8 @@ endif
 
 if have_egl_xlib
   cogl_sources += [
+    'winsys/cogl-onscreen-xlib.c',
+    'winsys/cogl-onscreen-xlib.h',
     'winsys/cogl-winsys-egl-x11.c',
     'winsys/cogl-winsys-egl-x11-private.h',
   ]

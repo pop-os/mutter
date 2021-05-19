@@ -35,19 +35,6 @@
 #ifndef __COGL_FRAMEBUFFER_H
 #define __COGL_FRAMEBUFFER_H
 
-/* We forward declare the CoglFramebuffer type here to avoid some circular
- * dependency issues with the following headers.
- */
-#if defined(__COGL_H_INSIDE__) && !defined(COGL_ENABLE_MUTTER_API) && \
-  !defined(COGL_GIR_SCANNING)
-/* For the public C api we typedef interface types as void to avoid needing
- * lots of casting in code and instead we will rely on runtime type checking
- * for these objects. */
-typedef void CoglFramebuffer;
-#else
-typedef struct _CoglFramebuffer CoglFramebuffer;
-#define COGL_FRAMEBUFFER(X) ((CoglFramebuffer *)(X))
-#endif
 
 #include <cogl/cogl-pipeline.h>
 #include <cogl/cogl-indices.h>
@@ -98,13 +85,22 @@ G_BEGIN_DECLS
  * configuration.
  */
 
-/**
- * cogl_framebuffer_get_gtype:
- *
- * Returns: a #GType that can be used with the GLib type system.
- */
+typedef struct _CoglFramebufferDriverConfig CoglFramebufferDriverConfig;
+
+#define COGL_TYPE_FRAMEBUFFER (cogl_framebuffer_get_type ())
 COGL_EXPORT
-GType cogl_framebuffer_get_gtype (void);
+G_DECLARE_DERIVABLE_TYPE (CoglFramebuffer, cogl_framebuffer,
+                          COGL, FRAMEBUFFER, GObject)
+
+struct _CoglFramebufferClass
+{
+  /*< private >*/
+  GObjectClass parent_class;
+
+  gboolean (* allocate) (CoglFramebuffer  *framebuffer,
+                         GError          **error);
+  gboolean (* is_y_flipped) (CoglFramebuffer *framebuffer);
+};
 
 /**
  * cogl_framebuffer_allocate:
@@ -390,8 +386,8 @@ cogl_framebuffer_rotate_euler (CoglFramebuffer *framebuffer,
  * Stability: unstable
  */
 COGL_EXPORT void
-cogl_framebuffer_transform (CoglFramebuffer *framebuffer,
-                            const CoglMatrix *matrix);
+cogl_framebuffer_transform (CoglFramebuffer         *framebuffer,
+                            const graphene_matrix_t *matrix);
 
 /**
  * cogl_framebuffer_get_modelview_matrix:
@@ -404,8 +400,8 @@ cogl_framebuffer_transform (CoglFramebuffer *framebuffer,
  * Stability: unstable
  */
 COGL_EXPORT void
-cogl_framebuffer_get_modelview_matrix (CoglFramebuffer *framebuffer,
-                                       CoglMatrix *matrix);
+cogl_framebuffer_get_modelview_matrix (CoglFramebuffer   *framebuffer,
+                                       graphene_matrix_t *matrix);
 
 /**
  * cogl_framebuffer_set_modelview_matrix:
@@ -418,8 +414,8 @@ cogl_framebuffer_get_modelview_matrix (CoglFramebuffer *framebuffer,
  * Stability: unstable
  */
 COGL_EXPORT void
-cogl_framebuffer_set_modelview_matrix (CoglFramebuffer *framebuffer,
-                                       const CoglMatrix *matrix);
+cogl_framebuffer_set_modelview_matrix (CoglFramebuffer         *framebuffer,
+                                       const graphene_matrix_t *matrix);
 
 /**
  * cogl_framebuffer_perspective:
@@ -518,8 +514,8 @@ cogl_framebuffer_orthographic (CoglFramebuffer *framebuffer,
  * Stability: unstable
  */
 COGL_EXPORT void
-cogl_framebuffer_get_projection_matrix (CoglFramebuffer *framebuffer,
-                                        CoglMatrix *matrix);
+cogl_framebuffer_get_projection_matrix (CoglFramebuffer   *framebuffer,
+                                        graphene_matrix_t *matrix);
 
 /**
  * cogl_framebuffer_set_projection_matrix:
@@ -532,8 +528,8 @@ cogl_framebuffer_get_projection_matrix (CoglFramebuffer *framebuffer,
  * Stability: unstable
  */
 COGL_EXPORT void
-cogl_framebuffer_set_projection_matrix (CoglFramebuffer *framebuffer,
-                                        const CoglMatrix *matrix);
+cogl_framebuffer_set_projection_matrix (CoglFramebuffer         *framebuffer,
+                                        const graphene_matrix_t *matrix);
 
 /**
  * cogl_framebuffer_push_scissor_clip:
@@ -1495,8 +1491,8 @@ cogl_is_framebuffer (void *object);
 
 /**
  * cogl_blit_framebuffer:
- * @src: The source #CoglFramebuffer
- * @dest: The destination #CoglFramebuffer
+ * @framebuffer: The source #CoglFramebuffer
+ * @dst: The destination #CoglFramebuffer
  * @src_x: Source x position
  * @src_y: Source y position
  * @dst_x: Destination x position
@@ -1546,8 +1542,8 @@ cogl_is_framebuffer (void *object);
  * COGL_SYSTEM_ERROR will be created.
  */
 COGL_EXPORT gboolean
-cogl_blit_framebuffer (CoglFramebuffer *src,
-                       CoglFramebuffer *dest,
+cogl_blit_framebuffer (CoglFramebuffer *framebuffer,
+                       CoglFramebuffer *dst,
                        int src_x,
                        int src_y,
                        int dst_x,
@@ -1565,7 +1561,7 @@ cogl_blit_framebuffer (CoglFramebuffer *src,
  *
  * Unlike cogl_framebuffer_finish(), this does not block the CPU.
  */
-void
+COGL_EXPORT void
 cogl_framebuffer_flush (CoglFramebuffer *framebuffer);
 
 G_END_DECLS

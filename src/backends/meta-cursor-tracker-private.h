@@ -41,9 +41,7 @@ void     meta_cursor_tracker_unset_window_cursor (MetaCursorTracker *tracker);
 void     meta_cursor_tracker_set_root_cursor     (MetaCursorTracker *tracker,
                                                   MetaCursorSprite  *cursor_sprite);
 
-void     meta_cursor_tracker_update_position (MetaCursorTracker *tracker,
-                                              float              new_x,
-                                              float              new_y);
+void     meta_cursor_tracker_invalidate_position (MetaCursorTracker *tracker);
 
 void meta_cursor_tracker_track_position (MetaCursorTracker *tracker);
 
@@ -52,5 +50,7 @@ void meta_cursor_tracker_untrack_position (MetaCursorTracker *tracker);
 MetaBackend * meta_cursor_tracker_get_backend (MetaCursorTracker *tracker);
 
 void meta_cursor_tracker_notify_cursor_changed (MetaCursorTracker *tracker);
+
+void meta_cursor_tracker_destroy (MetaCursorTracker *tracker);
 
 #endif

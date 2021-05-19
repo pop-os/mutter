@@ -83,7 +83,7 @@ destroy_dbus_watch (gpointer data)
   g_free (watch->dbus_name);
   g_bus_unwatch_name (watch->name_watcher_id);
 
-  g_slice_free (DBusWatch, watch);
+  g_free (watch);
 }
 
 static void
@@ -120,7 +120,7 @@ make_dbus_watch (MetaDBusIdleMonitor   *skeleton,
 {
   DBusWatch *watch;
 
-  watch = g_slice_new (DBusWatch);
+  watch = g_new0 (DBusWatch, 1);
   watch->dbus_monitor = g_object_ref (skeleton);
   watch->monitor = g_object_ref (monitor);
   watch->dbus_name = g_strdup (g_dbus_method_invocation_get_sender (invocation));
@@ -235,7 +235,7 @@ on_name_acquired (GDBusConnection *connection,
                   const char      *name,
                   gpointer         user_data)
 {
-  meta_verbose ("Acquired name %s\n", name);
+  meta_verbose ("Acquired name %s", name);
 }
 
 static void
@@ -243,7 +243,7 @@ on_name_lost (GDBusConnection *connection,
               const char      *name,
               gpointer         user_data)
 {
-  meta_verbose ("Lost or failed to acquire name %s\n", name);
+  meta_verbose ("Lost or failed to acquire name %s", name);
 }
 
 void

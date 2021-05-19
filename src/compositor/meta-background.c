@@ -94,37 +94,22 @@ free_fbos (MetaBackground *self)
   for (i = 0; i < self->n_monitors; i++)
     {
       MetaBackgroundMonitor *monitor = &self->monitors[i];
-      if (monitor->fbo)
-        {
-          cogl_object_unref (monitor->fbo);
-          monitor->fbo = NULL;
-        }
-      if (monitor->texture)
-        {
-          cogl_object_unref (monitor->texture);
-          monitor->texture = NULL;
-        }
+
+      g_clear_object (&monitor->fbo);
+      cogl_clear_object (&monitor->texture);
     }
 }
 
 static void
 free_color_texture (MetaBackground *self)
 {
-  if (self->color_texture != NULL)
-    {
-      cogl_object_unref (self->color_texture);
-      self->color_texture = NULL;
-    }
+  cogl_clear_object (&self->color_texture);
 }
 
 static void
 free_wallpaper_texture (MetaBackground *self)
 {
-  if (self->wallpaper_texture != NULL)
-    {
-      cogl_object_unref (self->wallpaper_texture);
-      self->wallpaper_texture = NULL;
-    }
+  cogl_clear_object (&self->wallpaper_texture);
 
   self->wallpaper_allocation_failed = FALSE;
 }
@@ -133,8 +118,7 @@ static void
 invalidate_monitor_backgrounds (MetaBackground *self)
 {
   free_fbos (self);
-  g_free (self->monitors);
-  self->monitors = NULL;
+  g_clear_pointer (&self->monitors, g_free);
   self->n_monitors = 0;
 
   if (self->display)
@@ -263,8 +247,7 @@ set_file (MetaBackground       *self,
           g_signal_handlers_disconnect_by_func (*imagep,
                                                 (gpointer)on_background_loaded,
                                                 self);
-          g_object_unref (*imagep);
-          *imagep = NULL;
+          g_clear_object (imagep);
         }
 
       g_set_object (filep, file);
@@ -611,7 +594,7 @@ ensure_color_texture (MetaBackground *self)
 
       if (error != NULL)
         {
-          meta_warning ("Failed to allocate color texture: %s\n", error->message);
+          meta_warning ("Failed to allocate color texture: %s", error->message);
           g_error_free (error);
         }
     }
@@ -696,9 +679,8 @@ ensure_wallpaper_texture (MetaBackground *self,
            */
           g_error_free (catch_error);
 
-          cogl_object_unref (self->wallpaper_texture);
-          self->wallpaper_texture = NULL;
-          cogl_object_unref (fbo);
+          cogl_clear_object (&self->wallpaper_texture);
+          g_object_unref (fbo);
 
           self->wallpaper_allocation_failed = TRUE;
           return FALSE;
@@ -723,7 +705,7 @@ ensure_wallpaper_texture (MetaBackground *self,
           cogl_object_unref (pipeline);
         }
 
-      cogl_object_unref (fbo);
+      g_object_unref (fbo);
     }
 
   return self->wallpaper_texture != NULL;
@@ -838,7 +820,7 @@ meta_background_get_texture (MetaBackground         *self,
 
           monitor->texture = meta_create_texture (texture_width,
                                                   texture_height,
-                                                  COGL_TEXTURE_COMPONENTS_RGBA,
+                                                  COGL_TEXTURE_COMPONENTS_RGB,
                                                   META_TEXTURE_FLAGS_NONE);
           offscreen = cogl_offscreen_new_with_texture (monitor->texture);
           monitor->fbo = COGL_FRAMEBUFFER (offscreen);
@@ -858,10 +840,8 @@ meta_background_get_texture (MetaBackground         *self,
            * we'll try again the next time this is called. (MetaBackgroundActor
            * caches the result, so user might be left without a background.)
            */
-          cogl_object_unref (monitor->texture);
-          monitor->texture = NULL;
-          cogl_object_unref (monitor->fbo);
-          monitor->fbo = NULL;
+          cogl_clear_object (&monitor->texture);
+          g_clear_object (&monitor->fbo);
 
           g_error_free (catch_error);
           return NULL;

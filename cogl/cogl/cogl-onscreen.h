@@ -47,58 +47,50 @@
 
 G_BEGIN_DECLS
 
-typedef struct _CoglOnscreen CoglOnscreen;
-#define COGL_ONSCREEN(X) ((CoglOnscreen *)(X))
-
 typedef struct _CoglScanout CoglScanout;
 
-/**
- * cogl_onscreen_get_gtype:
- *
- * Returns: a #GType that can be used with the GLib type system.
- */
+#define COGL_TYPE_ONSCREEN (cogl_onscreen_get_type ())
 COGL_EXPORT
-GType cogl_onscreen_get_gtype (void);
+G_DECLARE_DERIVABLE_TYPE (CoglOnscreen, cogl_onscreen,
+                          COGL, ONSCREEN,
+                          CoglFramebuffer)
 
-/**
- * cogl_onscreen_new: (constructor) (skip)
- * @context: A #CoglContext
- * @width: The desired framebuffer width
- * @height: The desired framebuffer height
- *
- * Instantiates an "unallocated" #CoglOnscreen framebuffer that may be
- * configured before later being allocated, either implicitly when
- * it is first used or explicitly via cogl_framebuffer_allocate().
- *
- * Return value: (transfer full): A newly instantiated #CoglOnscreen framebuffer
- * Since: 1.8
- * Stability: unstable
- */
-COGL_EXPORT CoglOnscreen *
-cogl_onscreen_new (CoglContext *context, int width, int height);
+struct _CoglOnscreenClass
+{
+  /*< private >*/
+  CoglFramebufferClass parent_class;
 
-#ifdef COGL_HAS_X11
-/**
- * cogl_x11_onscreen_get_window_xid:
- * @onscreen: A #CoglOnscreen framebuffer
- *
- * Assuming you know the given @onscreen framebuffer is based on an x11 window
- * this queries the XID of that window. If
- * cogl_x11_onscreen_set_foreign_window_xid() was previously called then it
- * will return that same XID otherwise it will be the XID of a window Cogl
- * created internally. If the window has not been allocated yet and a foreign
- * xid has not been set then it's undefined what value will be returned.
- *
- * It's undefined what this function does if called when not using an x11 based
- * renderer.
- *
- * Since: 1.10
- * Stability: unstable
- */
-COGL_EXPORT uint32_t
-cogl_x11_onscreen_get_window_xid (CoglOnscreen *onscreen);
+  void (* bind) (CoglOnscreen *onscreen);
 
-#endif /* COGL_HAS_X11 */
+  void (* swap_buffers_with_damage) (CoglOnscreen  *onscreen,
+                                     const int     *rectangles,
+                                     int            n_rectangles,
+                                     CoglFrameInfo *info,
+                                     gpointer       user_data);
+
+  void (* swap_region) (CoglOnscreen  *onscreen,
+                        const int     *rectangles,
+                        int            n_rectangles,
+                        CoglFrameInfo *info,
+                        gpointer       user_data);
+
+  gboolean (* direct_scanout) (CoglOnscreen   *onscreen,
+                               CoglScanout    *scanout,
+                               CoglFrameInfo  *info,
+                               gpointer        user_data,
+                               GError        **error);
+
+  int (* get_buffer_age) (CoglOnscreen *onscreen);
+};
+
+#define COGL_SCANOUT_ERROR (cogl_scanout_error_quark ())
+COGL_EXPORT GQuark
+cogl_scanout_error_quark (void);
+
+typedef enum _CoglScanoutError
+{
+  COGL_SCANOUT_ERROR_INHIBITED,
+} CoglScanoutError;
 
 /**
  * cogl_onscreen_show:
@@ -179,7 +171,8 @@ cogl_onscreen_hide (CoglOnscreen *onscreen);
  */
 COGL_EXPORT void
 cogl_onscreen_swap_buffers (CoglOnscreen  *onscreen,
-                            CoglFrameInfo *frame_info);
+                            CoglFrameInfo *frame_info,
+                            gpointer       user_data);
 
 
 /**
@@ -286,7 +279,8 @@ COGL_EXPORT void
 cogl_onscreen_swap_buffers_with_damage (CoglOnscreen *onscreen,
                                         const int *rectangles,
                                         int n_rectangles,
-                                        CoglFrameInfo *info);
+                                        CoglFrameInfo *info,
+                                        gpointer user_data);
 
 /**
  * cogl_onscreen_direct_scanout: (skip)
@@ -295,7 +289,15 @@ COGL_EXPORT gboolean
 cogl_onscreen_direct_scanout (CoglOnscreen   *onscreen,
                               CoglScanout    *scanout,
                               CoglFrameInfo  *info,
+                              gpointer        user_data,
                               GError        **error);
+
+/**
+ * cogl_onscreen_add_frame_info: (skip)
+ */
+COGL_EXPORT void
+cogl_onscreen_add_frame_info (CoglOnscreen  *onscreen,
+                              CoglFrameInfo *info);
 
 /**
  * cogl_onscreen_swap_region:
@@ -321,7 +323,8 @@ COGL_EXPORT void
 cogl_onscreen_swap_region (CoglOnscreen *onscreen,
                            const int *rectangles,
                            int n_rectangles,
-                           CoglFrameInfo *info);
+                           CoglFrameInfo *info,
+                           gpointer user_data);
 
 /**
  * CoglFrameEvent:
@@ -470,168 +473,6 @@ cogl_onscreen_remove_frame_callback (CoglOnscreen *onscreen,
                                      CoglFrameClosure *closure);
 
 /**
- * cogl_onscreen_set_resizable:
- * @onscreen: A #CoglOnscreen framebuffer
- *
- * Lets you request Cogl to mark an @onscreen framebuffer as
- * resizable or not.
- *
- * By default, if possible, a @onscreen will be created by Cogl
- * as non resizable, but it is not guaranteed that this is always
- * possible for all window systems.
- *
- * <note>Cogl does not know whether marking the @onscreen framebuffer
- * is truly meaningful for your current window system (consider
- * applications being run fullscreen on a phone or TV) so this
- * function may not have any useful effect. If you are running on a
- * multi windowing system such as X11 or Win32 or OSX then Cogl will
- * request to the window system that users be allowed to resize the
- * @onscreen, although it's still possible that some other window
- * management policy will block this possibility.</note>
- *
- * <note>Whenever an @onscreen framebuffer is resized the viewport
- * will be automatically updated to match the new size of the
- * framebuffer with an origin of (0,0). If your application needs more
- * specialized control of the viewport it will need to register a
- * resize handler using cogl_onscreen_add_resize_callback() so that it
- * can track when the viewport has been changed automatically.</note>
- *
- * Since: 2.0
- */
-COGL_EXPORT void
-cogl_onscreen_set_resizable (CoglOnscreen *onscreen,
-                             gboolean resizable);
-
-/**
- * cogl_onscreen_get_resizable:
- * @onscreen: A #CoglOnscreen framebuffer
- *
- * Lets you query whether @onscreen has been marked as resizable via
- * the cogl_onscreen_set_resizable() api.
- *
- * By default, if possible, a @onscreen will be created by Cogl
- * as non resizable, but it is not guaranteed that this is always
- * possible for all window systems.
- *
- * <note>If cogl_onscreen_set_resizable(@onscreen, %TRUE) has been
- * previously called then this function will return %TRUE, but it's
- * possible that the current windowing system being used does not
- * support window resizing (consider fullscreen windows on a phone or
- * a TV). This function is not aware of whether resizing is truly
- * meaningful with your window system, only whether the @onscreen has
- * been marked as resizable.</note>
- *
- * Return value: Returns whether @onscreen has been marked as
- *               resizable or not.
- * Since: 2.0
- */
-COGL_EXPORT gboolean
-cogl_onscreen_get_resizable (CoglOnscreen *onscreen);
-
-/**
- * CoglOnscreenResizeCallback:
- * @onscreen: A #CoglOnscreen framebuffer that was resized
- * @width: The new width of @onscreen
- * @height: The new height of @onscreen
- * @user_data: The private passed to
- *             cogl_onscreen_add_resize_callback()
- *
- * Is a callback type used with the
- * cogl_onscreen_add_resize_callback() allowing applications to be
- * notified whenever an @onscreen framebuffer is resized.
- *
- * <note>Cogl automatically updates the viewport of an @onscreen
- * framebuffer that is resized so this callback is also an indication
- * that the viewport has been modified too</note>
- *
- * <note>A resize callback will only ever be called while dispatching
- * Cogl events from the system mainloop; so for example during
- * cogl_poll_renderer_dispatch(). This is so that callbacks shouldn't
- * occur while an application might have arbitrary locks held for
- * example.</note>
- *
- * Since: 2.0
- */
-typedef void (*CoglOnscreenResizeCallback) (CoglOnscreen *onscreen,
-                                            int width,
-                                            int height,
-                                            void *user_data);
-
-/**
- * CoglOnscreenResizeClosure:
- *
- * An opaque type that tracks a #CoglOnscreenResizeCallback and
- * associated user data. A #CoglOnscreenResizeClosure pointer will be
- * returned from cogl_onscreen_add_resize_callback() and it allows you
- * to remove a callback later using
- * cogl_onscreen_remove_resize_callback().
- *
- * Since: 2.0
- * Stability: unstable
- */
-typedef struct _CoglClosure CoglOnscreenResizeClosure;
-
-/**
- * cogl_onscreen_resize_closure_get_gtype:
- *
- * Returns: a #GType that can be used with the GLib type system.
- */
-COGL_EXPORT
-GType cogl_onscreen_resize_closure_get_gtype (void);
-
-/**
- * cogl_onscreen_add_resize_callback:
- * @onscreen: A #CoglOnscreen framebuffer
- * @callback: (scope notified): A #CoglOnscreenResizeCallback to call when
- *            the @onscreen changes size.
- * @user_data: (closure): Private data to be passed to @callback.
- * @destroy: (allow-none): An optional callback to destroy @user_data
- *           when the @callback is removed or @onscreen is freed.
- *
- * Registers a @callback with @onscreen that will be called whenever
- * the @onscreen framebuffer changes size.
- *
- * The @callback can be removed using
- * cogl_onscreen_remove_resize_callback() passing the returned closure
- * pointer.
- *
- * <note>Since Cogl automatically updates the viewport of an @onscreen
- * framebuffer that is resized, a resize callback can also be used to
- * track when the viewport has been changed automatically by Cogl in
- * case your application needs more specialized control over the
- * viewport.</note>
- *
- * <note>A resize callback will only ever be called while dispatching
- * Cogl events from the system mainloop; so for example during
- * cogl_poll_renderer_dispatch(). This is so that callbacks shouldn't
- * occur while an application might have arbitrary locks held for
- * example.</note>
- *
- * Return value: a #CoglOnscreenResizeClosure pointer that can be used to
- *               remove the callback and associated @user_data later.
- * Since: 2.0
- */
-COGL_EXPORT CoglOnscreenResizeClosure *
-cogl_onscreen_add_resize_callback (CoglOnscreen *onscreen,
-                                   CoglOnscreenResizeCallback callback,
-                                   void *user_data,
-                                   CoglUserDataDestroyCallback destroy);
-
-/**
- * cogl_onscreen_remove_resize_callback:
- * @onscreen: A #CoglOnscreen framebuffer
- * @closure: An identifier returned from cogl_onscreen_add_resize_callback()
- *
- * Removes a resize @callback and @user_data pair that were previously
- * associated with @onscreen via cogl_onscreen_add_resize_callback().
- *
- * Since: 2.0
- */
-COGL_EXPORT void
-cogl_onscreen_remove_resize_callback (CoglOnscreen *onscreen,
-                                      CoglOnscreenResizeClosure *closure);
-
-/**
  * CoglOnscreenDirtyInfo:
  * @x: Left edge of the dirty rectangle
  * @y: Top edge of the dirty rectangle, measured from the top of the window
@@ -749,20 +590,6 @@ cogl_onscreen_add_dirty_callback (CoglOnscreen *onscreen,
 COGL_EXPORT void
 cogl_onscreen_remove_dirty_callback (CoglOnscreen *onscreen,
                                      CoglOnscreenDirtyClosure *closure);
-
-/**
- * cogl_is_onscreen:
- * @object: A #CoglObject pointer
- *
- * Gets whether the given object references a #CoglOnscreen.
- *
- * Return value: %TRUE if the object references a #CoglOnscreen
- *   and %FALSE otherwise.
- * Since: 1.10
- * Stability: unstable
- */
-COGL_EXPORT gboolean
-cogl_is_onscreen (void *object);
 
 /**
  * cogl_onscreen_get_frame_counter:

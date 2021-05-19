@@ -28,6 +28,8 @@
 
 #include "backends/meta-backend-types.h"
 #include "backends/meta-crtc.h"
+#include "backends/native/meta-crtc-native.h"
+#include "backends/native/meta-drm-buffer.h"
 #include "backends/native/meta-gpu-kms.h"
 #include "backends/native/meta-kms-crtc.h"
 #include "backends/native/meta-kms-update.h"
@@ -35,31 +37,23 @@
 #define META_TYPE_CRTC_KMS (meta_crtc_kms_get_type ())
 G_DECLARE_FINAL_TYPE (MetaCrtcKms, meta_crtc_kms,
                       META, CRTC_KMS,
-                      MetaCrtc)
+                      MetaCrtcNative)
 
 gpointer meta_crtc_kms_get_cursor_renderer_private (MetaCrtcKms *crtc_kms);
 
-void meta_crtc_kms_set_cursor_renderer_private (MetaCrtcKms *crtc_kms,
-                                                gpointer     cursor_renderer_private);
-
-gboolean meta_crtc_kms_is_transform_handled (MetaCrtcKms          *crtc_kms,
-                                             MetaMonitorTransform  transform);
+void meta_crtc_kms_set_cursor_renderer_private (MetaCrtcKms    *crtc_kms,
+                                                gpointer        cursor_renderer_private,
+                                                GDestroyNotify  destroy_notify);
 
 void meta_crtc_kms_apply_transform (MetaCrtcKms            *crtc_kms,
                                     MetaKmsPlaneAssignment *kms_plane_assignment);
 
 void meta_crtc_kms_assign_primary_plane (MetaCrtcKms   *crtc_kms,
-                                         uint32_t       fb_id,
+                                         MetaDrmBuffer *buffer,
                                          MetaKmsUpdate *kms_update);
 
 void meta_crtc_kms_set_mode (MetaCrtcKms   *crtc_kms,
                              MetaKmsUpdate *kms_update);
-
-void meta_crtc_kms_page_flip (MetaCrtcKms                   *crtc_kms,
-                              const MetaKmsPageFlipFeedback *page_flip_feedback,
-                              MetaKmsPageFlipFlag            flags,
-                              gpointer                       user_data,
-                              MetaKmsUpdate                 *kms_update);
 
 void meta_crtc_kms_set_is_underscanning (MetaCrtcKms *crtc_kms,
                                          gboolean     is_underscanning);
@@ -75,6 +69,11 @@ meta_crtc_kms_copy_drm_format_list (MetaCrtcKms *crtc_kms);
 gboolean
 meta_crtc_kms_supports_format (MetaCrtcKms *crtc_kms,
                                uint32_t     drm_format);
+
+void meta_crtc_kms_invalidate_gamma (MetaCrtcKms *crtc_kms);
+
+void meta_crtc_kms_maybe_set_gamma (MetaCrtcKms   *crtc_kms,
+                                    MetaKmsDevice *kms_device);
 
 MetaCrtcKms * meta_crtc_kms_from_kms_crtc (MetaKmsCrtc *kms_crtc);
 

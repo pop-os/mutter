@@ -62,7 +62,7 @@ struct _ClutterPaintVolume
 
   /* As an optimization for internally managed PaintVolumes we allow
    * initializing ClutterPaintVolume variables allocated on the stack
-   * so we can avoid hammering the slice allocator. */
+   * so we can avoid hammering the memory allocator. */
   guint is_static:1;
 
   /* A newly initialized PaintVolume is considered empty as it is
@@ -111,20 +111,20 @@ void                _clutter_paint_volume_set_from_volume      (ClutterPaintVolu
                                                                 const ClutterPaintVolume *src);
 
 void                _clutter_paint_volume_complete             (ClutterPaintVolume *pv);
-void                _clutter_paint_volume_transform            (ClutterPaintVolume *pv,
-                                                                const CoglMatrix *matrix);
-void                _clutter_paint_volume_project              (ClutterPaintVolume *pv,
-                                                                const CoglMatrix   *modelview,
-                                                                const CoglMatrix   *projection,
-                                                                const float        *viewport);
+void                _clutter_paint_volume_transform            (ClutterPaintVolume      *pv,
+                                                                const graphene_matrix_t *matrix);
+void                _clutter_paint_volume_project              (ClutterPaintVolume      *pv,
+                                                                const graphene_matrix_t *modelview,
+                                                                const graphene_matrix_t *projection,
+                                                                const float             *viewport);
 void                _clutter_paint_volume_get_bounding_box     (ClutterPaintVolume *pv,
                                                                 ClutterActorBox    *box);
 void                _clutter_paint_volume_axis_align           (ClutterPaintVolume *pv);
 void                _clutter_paint_volume_set_reference_actor  (ClutterPaintVolume *pv,
                                                                 ClutterActor *actor);
 
-ClutterCullResult   _clutter_paint_volume_cull                 (ClutterPaintVolume *pv,
-                                                                const ClutterPlane       *planes);
+ClutterCullResult   _clutter_paint_volume_cull                 (ClutterPaintVolume       *pv,
+                                                                const graphene_frustum_t *frustum);
 
 void                _clutter_paint_volume_get_stage_paint_box  (ClutterPaintVolume *pv,
                                                                 ClutterStage *stage,
@@ -132,6 +132,9 @@ void                _clutter_paint_volume_get_stage_paint_box  (ClutterPaintVolu
 
 void                _clutter_paint_volume_transform_relative   (ClutterPaintVolume *pv,
                                                                 ClutterActor *relative_to_ancestor);
+
+void                clutter_paint_volume_to_box                (ClutterPaintVolume *pv,
+                                                                graphene_box_t     *box);
 
 G_END_DECLS
 

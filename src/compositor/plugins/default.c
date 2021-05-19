@@ -233,7 +233,7 @@ static void
 free_actor_private (gpointer data)
 {
   if (G_LIKELY (data != NULL))
-    g_slice_free (ActorPrivate, data);
+    g_free (data);
 }
 
 static ActorPrivate *
@@ -246,7 +246,7 @@ get_actor_private (MetaWindowActor *actor)
 
   if (G_UNLIKELY (!priv))
     {
-      priv = g_slice_new0 (ActorPrivate);
+      priv = g_new0 (ActorPrivate, 1);
 
       g_object_set_qdata_full (G_OBJECT (actor),
                                actor_data_quark, priv,
@@ -338,6 +338,9 @@ on_monitors_changed (MetaMonitorManager *monitor_manager,
       MetaRectangle rect;
       ClutterActor *background_actor;
       MetaBackground *background;
+      uint8_t red;
+      uint8_t green;
+      uint8_t blue;
       ClutterColor color;
 
       meta_display_get_monitor_geometry (display, i, &rect);
@@ -353,11 +356,11 @@ on_monitors_changed (MetaMonitorManager *monitor_manager,
          parsing the driconf XML, but it's nice if the colors are
          reproducible.
       */
-      clutter_color_init (&color,
-                          g_rand_int_range (rand, 0, 255),
-                          g_rand_int_range (rand, 0, 255),
-                          g_rand_int_range (rand, 0, 255),
-                          255);
+
+      blue = g_rand_int_range (rand, 0, 255);
+      green = g_rand_int_range (rand, 0, 255);
+      red = g_rand_int_range (rand, 0, 255);
+      clutter_color_init (&color, red, green, blue, 255);
 
       background = meta_background_new (display);
       meta_background_set_color (background, &color);
@@ -755,7 +758,7 @@ free_display_tile_preview (DisplayTilePreview *preview)
 
   if (G_LIKELY (preview != NULL)) {
     clutter_actor_destroy (preview->actor);
-    g_slice_free (DisplayTilePreview, preview);
+    g_free (preview);
   }
 }
 
@@ -781,7 +784,7 @@ get_display_tile_preview (MetaDisplay *display)
                                 display_tile_preview_data_quark);
   if (!preview)
     {
-      preview = g_slice_new0 (DisplayTilePreview);
+      preview = g_new0 (DisplayTilePreview, 1);
 
       preview->actor = clutter_actor_new ();
       clutter_actor_set_background_color (preview->actor, CLUTTER_COLOR_Blue);

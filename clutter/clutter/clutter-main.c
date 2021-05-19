@@ -65,6 +65,7 @@
 #include "clutter-paint-node-private.h"
 #include "clutter-private.h"
 #include "clutter-settings-private.h"
+#include "clutter-stage.h"
 #include "clutter-stage-manager.h"
 #include "clutter-stage-private.h"
 #include "clutter-backend-private.h"
@@ -129,199 +130,6 @@ static const GDebugKey clutter_paint_debug_keys[] = {
   { "paint-deform-tiles", CLUTTER_DEBUG_PAINT_DEFORM_TILES },
   { "damage-region", CLUTTER_DEBUG_PAINT_DAMAGE_REGION },
 };
-
-#define ENVIRONMENT_GROUP       "Environment"
-#define DEBUG_GROUP             "Debug"
-
-static void
-clutter_config_read_from_key_file (GKeyFile *keyfile)
-{
-  GError *key_error = NULL;
-  gboolean bool_value;
-  gint int_value;
-  gchar *str_value;
-
-  if (!g_key_file_has_group (keyfile, ENVIRONMENT_GROUP))
-    return;
-
-  str_value =
-    g_key_file_get_string (keyfile, ENVIRONMENT_GROUP,
-                           "Drivers",
-                           &key_error);
-  if (key_error != NULL)
-    g_clear_error (&key_error);
-  else
-    clutter_set_allowed_drivers (str_value);
-
-  g_free (str_value);
-
-  bool_value =
-    g_key_file_get_boolean (keyfile, ENVIRONMENT_GROUP,
-                            "ShowFps",
-                            &key_error);
-
-  if (key_error != NULL)
-    g_clear_error (&key_error);
-  else
-    clutter_show_fps = bool_value;
-
-  bool_value =
-    g_key_file_get_boolean (keyfile, ENVIRONMENT_GROUP,
-                            "DisableMipmappedText",
-                            &key_error);
-
-  if (key_error != NULL)
-    g_clear_error (&key_error);
-  else
-    clutter_disable_mipmap_text = bool_value;
-
-  bool_value =
-    g_key_file_get_boolean (keyfile, ENVIRONMENT_GROUP,
-                            "EnableAccessibility",
-                            &key_error);
-
-  if (key_error != NULL)
-    g_clear_error (&key_error);
-  else
-    clutter_enable_accessibility = bool_value;
-
-  int_value =
-    g_key_file_get_integer (keyfile, ENVIRONMENT_GROUP,
-                            "DefaultFps",
-                            &key_error);
-
-  if (key_error != NULL)
-    g_clear_error (&key_error);
-  else
-    clutter_default_fps = int_value;
-
-  str_value =
-    g_key_file_get_string (keyfile, ENVIRONMENT_GROUP,
-                           "TextDirection",
-                           &key_error);
-
-  if (key_error != NULL)
-    g_clear_error (&key_error);
-  else
-    {
-      if (g_strcmp0 (str_value, "rtl") == 0)
-        clutter_text_direction = CLUTTER_TEXT_DIRECTION_RTL;
-      else
-        clutter_text_direction = CLUTTER_TEXT_DIRECTION_LTR;
-    }
-
-  g_free (str_value);
-}
-
-#ifdef CLUTTER_ENABLE_DEBUG
-static void
-clutter_debug_read_from_key_file (GKeyFile *keyfile)
-{
-  GError *key_error = NULL;
-  gchar *value;
-
-  if (!g_key_file_has_group (keyfile, DEBUG_GROUP))
-    return;
-
-  value = g_key_file_get_value (keyfile, DEBUG_GROUP,
-                                "Debug",
-                                &key_error);
-  if (key_error == NULL)
-    {
-      clutter_debug_flags |=
-        g_parse_debug_string (value,
-                              clutter_debug_keys,
-                              G_N_ELEMENTS (clutter_debug_keys));
-    }
-  else
-    g_clear_error (&key_error);
-
-  g_free (value);
-
-  value = g_key_file_get_value (keyfile, DEBUG_GROUP,
-                                "PaintDebug",
-                                &key_error);
-  if (key_error == NULL)
-    {
-      clutter_paint_debug_flags |=
-        g_parse_debug_string (value,
-                              clutter_paint_debug_keys,
-                              G_N_ELEMENTS (clutter_paint_debug_keys));
-    }
-  else
-    g_clear_error (&key_error);
-
-  g_free (value);
-
-  value = g_key_file_get_value (keyfile, DEBUG_GROUP,
-                                "PickDebug",
-                                &key_error);
-  if (key_error == NULL)
-    {
-      clutter_pick_debug_flags |=
-        g_parse_debug_string (value,
-                              clutter_pick_debug_keys,
-                              G_N_ELEMENTS (clutter_pick_debug_keys));
-    }
-  else
-    g_clear_error (&key_error);
-
-  g_free (value);
-}
-#endif
-
-static void
-clutter_config_read_from_file (const gchar *config_path)
-{
-  ClutterSettings *settings = clutter_settings_get_default ();
-  GKeyFile *key_file = g_key_file_new ();
-  GError *error = NULL;
-
-  g_key_file_load_from_file (key_file, config_path, G_KEY_FILE_NONE, &error);
-  if (error == NULL)
-    {
-      CLUTTER_NOTE (MISC, "Reading configuration from '%s'", config_path);
-
-      clutter_config_read_from_key_file (key_file);
-#ifdef CLUTTER_ENABLE_DEBUG
-      clutter_debug_read_from_key_file (key_file);
-#endif
-      _clutter_settings_read_from_key_file (settings, key_file);
-    }
-  else
-    {
-      g_warning ("Unable to read configuration settings from '%s': %s",
-                 config_path,
-                 error->message);
-      g_error_free (error);
-    }
-
-  g_key_file_free (key_file);
-}
-
-static void
-clutter_config_read (void)
-{
-  gchar *config_path;
-
-  config_path = g_build_filename (CLUTTER_SYSCONFDIR,
-                                  "clutter-1.0",
-                                  "settings.ini",
-                                  NULL);
-  if (g_file_test (config_path, G_FILE_TEST_EXISTS))
-    clutter_config_read_from_file (config_path);
-
-  g_free (config_path);
-
-  config_path = g_build_filename (g_get_user_config_dir (),
-                                  "clutter-1.0",
-                                  "settings.ini",
-                                  NULL);
-  if (g_file_test (config_path, G_FILE_TEST_EXISTS))
-    clutter_config_read_from_file (config_path);
-
-  g_free (config_path);
-}
 
 gboolean
 _clutter_context_get_show_fps (void)
@@ -455,7 +263,7 @@ _clutter_threads_dispatch_free (gpointer data)
   if (dispatch->notify)
     dispatch->notify (dispatch->data);
 
-  g_slice_free (ClutterThreadsDispatch, dispatch);
+  g_free (dispatch);
 }
 
 /**
@@ -555,7 +363,7 @@ clutter_threads_add_idle_full (gint           priority,
 
   g_return_val_if_fail (func != NULL, 0);
 
-  dispatch = g_slice_new (ClutterThreadsDispatch);
+  dispatch = g_new0 (ClutterThreadsDispatch, 1);
   dispatch->func = func;
   dispatch->data = data;
   dispatch->notify = notify;
@@ -626,7 +434,7 @@ clutter_threads_add_timeout_full (gint           priority,
 
   g_return_val_if_fail (func != NULL, 0);
 
-  dispatch = g_slice_new (ClutterThreadsDispatch);
+  dispatch = g_new0 (ClutterThreadsDispatch, 1);
   dispatch->func = func;
   dispatch->data = data;
   dispatch->notify = notify;
@@ -678,12 +486,6 @@ _clutter_context_get_default (void)
     {
       ClutterMainContext *ctx;
 
-      /* Read the configuration file, if any, before we set up the
-       * whole thing, so that we can override things like the backend
-       * and the driver
-       */
-      clutter_config_read ();
-
       ClutterCntx = ctx = g_new0 (ClutterMainContext, 1);
 
       ctx->is_initialized = FALSE;
@@ -696,6 +498,8 @@ _clutter_context_get_default (void)
        */
       ctx->settings = clutter_settings_get_default ();
       _clutter_settings_set_backend (ctx->settings, ctx->backend);
+
+      ctx->events_queue = g_async_queue_new ();
 
       ctx->last_repaint_id = 1;
     }
@@ -803,9 +607,6 @@ clutter_init_real (GError **error)
     return CLUTTER_INIT_ERROR_BACKEND;
 
   clutter_text_direction = clutter_get_text_direction ();
-
-  /* Initiate event collection */
-  _clutter_backend_init_events (ctx->backend);
 
   clutter_is_initialized = TRUE;
   ctx->is_initialized = TRUE;
@@ -1319,9 +1120,9 @@ event_click_count_generate (ClutterEvent *event)
       previous_button_number = device->previous_button_number;
 
       CLUTTER_NOTE (EVENT,
-                    "Restoring previous click count:%d (device:%d, time:%u)",
+                    "Restoring previous click count:%d (device:%s, time:%u)",
                     click_count,
-                    clutter_input_device_get_device_id (device),
+                    clutter_input_device_get_device_name (device),
                     previous_time);
     }
   else
@@ -1375,9 +1176,9 @@ event_click_count_generate (ClutterEvent *event)
 
   if (event->type == CLUTTER_BUTTON_PRESS && device != NULL)
     {
-      CLUTTER_NOTE (EVENT, "Storing click count: %d (device:%d, time:%u)",
+      CLUTTER_NOTE (EVENT, "Storing click count: %d (device:%s, time:%u)",
                     click_count,
-                    clutter_input_device_get_device_id (device),
+                    clutter_input_device_get_device_name (device),
                     previous_time);
 
       device->click_count = click_count;
@@ -1391,26 +1192,13 @@ event_click_count_generate (ClutterEvent *event)
 static inline void
 emit_event_chain (ClutterEvent *event)
 {
-  static gboolean lock = FALSE;
-
   if (event->any.source == NULL)
     {
       CLUTTER_NOTE (EVENT, "No source set, discarding event");
       return;
     }
 
-  /* reentrancy check */
-  if (lock != FALSE)
-    {
-      g_warning ("Tried emitting event during event delivery, bailing out.");
-      return;
-    }
-
-  lock = TRUE;
-
   _clutter_actor_handle_event (event->any.source, event);
-
-  lock = FALSE;
 }
 
 /*
@@ -1486,8 +1274,8 @@ emit_touch_event (ClutterEvent       *event,
 }
 
 static inline void
-emit_keyboard_event (ClutterEvent       *event,
-                     ClutterInputDevice *device)
+process_key_event (ClutterEvent       *event,
+                   ClutterInputDevice *device)
 {
   if (_clutter_event_process_filters (event))
     return;
@@ -1496,21 +1284,6 @@ emit_keyboard_event (ClutterEvent       *event,
     clutter_actor_event (device->keyboard_grab_actor, event, FALSE);
   else
     emit_event_chain (event);
-}
-
-static inline void
-process_key_event (ClutterEvent       *event,
-                   ClutterInputDevice *device)
-{
-  ClutterInputDeviceClass *device_class = CLUTTER_INPUT_DEVICE_GET_CLASS (device);
-
-  if (device_class->process_kbd_a11y_event)
-    {
-      device_class->process_kbd_a11y_event (event, device, emit_keyboard_event);
-      return;
-    }
-
-  emit_keyboard_event (event, device);
 }
 
 static gboolean
@@ -1565,6 +1338,168 @@ clutter_do_event (ClutterEvent *event)
    */
   _clutter_stage_queue_event (event->any.stage, event, TRUE);
 }
+
+static void
+create_crossing_event (ClutterStage         *stage,
+                       ClutterInputDevice   *device,
+                       ClutterEventSequence *sequence,
+                       ClutterEventType      event_type,
+                       ClutterActor         *source,
+                       ClutterActor         *related,
+                       graphene_point_t      coords,
+                       uint32_t              time)
+{
+  ClutterEvent *event;
+
+  event = clutter_event_new (event_type);
+  event->crossing.time = time;
+  event->crossing.flags = 0;
+  event->crossing.stage = stage;
+  event->crossing.source = source;
+  event->crossing.x = coords.x;
+  event->crossing.y = coords.y;
+  event->crossing.related = related;
+  event->crossing.sequence = sequence;
+  clutter_event_set_device (event, device);
+
+  /* we need to make sure that this event is processed
+   * before any other event we might have queued up until
+   * now, so we go on, and synthesize the event emission
+   * ourselves
+   */
+  _clutter_process_event (event);
+
+  clutter_event_free (event);
+}
+
+void
+clutter_stage_update_device (ClutterStage         *stage,
+                             ClutterInputDevice   *device,
+                             ClutterEventSequence *sequence,
+                             graphene_point_t      point,
+                             uint32_t              time,
+                             ClutterActor         *new_actor,
+                             gboolean              emit_crossing)
+{
+  ClutterInputDeviceType device_type;
+  ClutterActor *old_actor;
+  gboolean device_actor_changed;
+
+  device_type = clutter_input_device_get_device_type (device);
+
+  g_assert (device_type != CLUTTER_KEYBOARD_DEVICE &&
+            device_type != CLUTTER_PAD_DEVICE);
+
+  old_actor = clutter_stage_get_device_actor (stage, device, sequence);
+  device_actor_changed = new_actor != old_actor;
+
+  clutter_stage_update_device_entry (stage,
+                                     device, sequence,
+                                     point,
+                                     new_actor);
+
+  if (device_actor_changed)
+    {
+      CLUTTER_NOTE (EVENT,
+                    "Updating actor under cursor (device %s, at %.2f, %.2f): %s",
+                    clutter_input_device_get_device_name (device),
+                    point.x,
+                    point.y,
+                    _clutter_actor_get_debug_name (new_actor));
+
+      if (old_actor && emit_crossing)
+        {
+          create_crossing_event (stage,
+                                 device, sequence,
+                                 CLUTTER_LEAVE,
+                                 old_actor, new_actor,
+                                 point, time);
+        }
+
+      if (new_actor && emit_crossing)
+        {
+          create_crossing_event (stage,
+                                 device, sequence,
+                                 CLUTTER_ENTER,
+                                 new_actor, old_actor,
+                                 point, time);
+        }
+    }
+}
+
+void
+clutter_stage_repick_device (ClutterStage       *stage,
+                             ClutterInputDevice *device)
+{
+  graphene_point_t point;
+  ClutterActor *new_actor;
+
+  clutter_stage_get_device_coords (stage, device, NULL, &point);
+  new_actor =
+    clutter_stage_get_actor_at_pos (stage, CLUTTER_PICK_REACTIVE,
+                                    point.x, point.y);
+
+  clutter_stage_update_device (stage,
+                               device, NULL,
+                               point,
+                               CLUTTER_CURRENT_TIME,
+                               new_actor,
+                               TRUE);
+}
+
+static ClutterActor *
+update_device_for_event (ClutterStage *stage,
+                         ClutterEvent *event,
+                         gboolean      emit_crossing)
+{
+  ClutterInputDevice *device = clutter_event_get_device (event);
+  ClutterEventSequence *sequence = clutter_event_get_event_sequence (event);
+  ClutterActor *new_actor;
+  graphene_point_t point;
+  uint32_t time;
+
+  clutter_event_get_coords (event, &point.x, &point.y);
+  time = clutter_event_get_time (event);
+
+  new_actor =
+    _clutter_stage_do_pick (stage, point.x, point.y, CLUTTER_PICK_REACTIVE);
+
+  /* Picking should never fail, but if it does, we bail out here */
+  g_return_val_if_fail (new_actor != NULL, NULL);
+
+  clutter_stage_update_device (stage,
+                               device, sequence,
+                               point,
+                               time,
+                               new_actor,
+                               emit_crossing);
+
+  return new_actor;
+}
+
+static void
+remove_device_for_event (ClutterStage *stage,
+                         ClutterEvent *event,
+                         gboolean      emit_crossing)
+{
+  ClutterInputDevice *device = clutter_event_get_device (event);
+  ClutterEventSequence *sequence = clutter_event_get_event_sequence (event);
+  graphene_point_t point;
+  uint32_t time;
+
+  clutter_event_get_coords (event, &point.x, &point.y);
+  time = clutter_event_get_time (event);
+
+  clutter_stage_update_device (stage,
+                               device, sequence,
+                               point,
+                               time,
+                               NULL,
+                               TRUE);
+
+  clutter_stage_remove_device_entry (stage, device, sequence);
+}
+
 
 static void
 _clutter_process_event_details (ClutterActor        *stage,
@@ -1624,7 +1559,7 @@ _clutter_process_event_details (ClutterActor        *stage,
 
             emit_crossing_event (event, device);
 
-            actor = clutter_input_device_update (device, NULL, FALSE);
+            actor = update_device_for_event (CLUTTER_STAGE (stage), event, FALSE);
             if (actor != stage)
               {
                 ClutterEvent *crossing;
@@ -1650,28 +1585,19 @@ _clutter_process_event_details (ClutterActor        *stage,
          */
         if (event->any.source == stage &&
             event->crossing.related == NULL &&
-            device->cursor_actor != stage)
+            clutter_stage_get_device_actor (CLUTTER_STAGE (stage), device, NULL) != stage)
           {
             ClutterEvent *crossing;
 
             crossing = clutter_event_copy (event);
             crossing->crossing.related = stage;
-            crossing->crossing.source = device->cursor_actor;
+            crossing->crossing.source =
+              clutter_stage_get_device_actor (CLUTTER_STAGE (stage), device, NULL);
 
             emit_crossing_event (crossing, device);
             clutter_event_free (crossing);
           }
         emit_crossing_event (event, device);
-        break;
-
-      case CLUTTER_DESTROY_NOTIFY:
-        event->any.source = stage;
-
-        if (_clutter_event_process_filters (event))
-          break;
-
-        /* the stage did not handle the event, so we just quit */
-        clutter_stage_event (CLUTTER_STAGE (stage), event);
         break;
 
       case CLUTTER_MOTION:
@@ -1729,7 +1655,6 @@ _clutter_process_event_details (ClutterActor        *stage,
       case CLUTTER_TOUCHPAD_PINCH:
       case CLUTTER_TOUCHPAD_SWIPE:
         {
-          ClutterActor *actor;
           gfloat x, y;
 
           clutter_event_get_coords (event, &x, &y);
@@ -1773,36 +1698,32 @@ _clutter_process_event_details (ClutterActor        *stage,
                   break;
                 }
 
-              /* if the backend provides a device then we should
-               * already have everything we need to update it and
-               * get the actor underneath
+              /* We need to repick on both motion and button press events, the
+               * latter is only needed for X11 (there the device actor might be
+               * stale because we don't always receive motion events).
                */
-              if (device != NULL)
-                actor = clutter_input_device_update (device, NULL, TRUE);
+              if (event->type == CLUTTER_BUTTON_PRESS ||
+                  event->type == CLUTTER_MOTION)
+                {
+                  event->any.source =
+                    update_device_for_event (CLUTTER_STAGE (stage), event, TRUE);
+                }
               else
                 {
-                  CLUTTER_NOTE (EVENT, "No device found: picking");
-
-                  actor = _clutter_stage_do_pick (CLUTTER_STAGE (stage),
-                                                  x, y,
-                                                  CLUTTER_PICK_REACTIVE);
+                  event->any.source =
+                    clutter_stage_get_device_actor (CLUTTER_STAGE (stage),
+                                                    device,
+                                                    NULL);
                 }
 
-              if (actor == NULL)
+              if (event->any.source == NULL)
                 break;
-
-              event->any.source = actor;
-            }
-          else
-            {
-              /* use the source already set in the synthetic event */
-              actor = event->any.source;
             }
 
           CLUTTER_NOTE (EVENT,
                         "Reactive event received at %.2f, %.2f - actor: %p",
                         x, y,
-                        actor);
+                        event->any.source);
 
           /* button presses and releases need a click count */
           if (event->type == CLUTTER_BUTTON_PRESS ||
@@ -1856,15 +1777,7 @@ _clutter_process_event_details (ClutterActor        *stage,
       case CLUTTER_TOUCH_CANCEL:
       case CLUTTER_TOUCH_END:
         {
-          ClutterActor *actor;
-          ClutterEventSequence *sequence;
           gfloat x, y;
-
-          sequence =
-            clutter_event_get_event_sequence (event);
-
-          if (event->type == CLUTTER_TOUCH_BEGIN)
-            _clutter_input_device_add_event_sequence (device, event);
 
           clutter_event_get_coords (event, &x, &y);
 
@@ -1890,52 +1803,45 @@ _clutter_process_event_details (ClutterActor        *stage,
 
                   if (event->type == CLUTTER_TOUCH_END ||
                       event->type == CLUTTER_TOUCH_CANCEL)
-                    _clutter_input_device_remove_event_sequence (device, event);
+                    remove_device_for_event (CLUTTER_STAGE (stage), event, TRUE);
 
                   break;
                 }
 
-              if (device != NULL)
-                actor = clutter_input_device_update (device, sequence, TRUE);
+              if (event->type == CLUTTER_TOUCH_BEGIN ||
+                  event->type == CLUTTER_TOUCH_UPDATE)
+                {
+                  event->any.source =
+                    update_device_for_event (CLUTTER_STAGE (stage), event, TRUE);
+                }
               else
                 {
-                  CLUTTER_NOTE (EVENT, "No device found: picking");
-
-                  actor = _clutter_stage_do_pick (CLUTTER_STAGE (stage),
-                                                  x, y,
-                                                  CLUTTER_PICK_REACTIVE);
+                  event->any.source =
+                    clutter_stage_get_device_actor (CLUTTER_STAGE (stage),
+                                                    device,
+                                                    event->touch.sequence);
                 }
 
-              if (actor == NULL)
+              if (event->any.source == NULL)
                 break;
-
-              event->any.source = actor;
-            }
-          else
-            {
-              /* use the source already set in the synthetic event */
-              actor = event->any.source;
             }
 
           CLUTTER_NOTE (EVENT,
                         "Reactive event received at %.2f, %.2f - actor: %p",
                         x, y,
-                        actor);
+                        event->any.source);
 
           emit_touch_event (event, device);
 
           if (event->type == CLUTTER_TOUCH_END ||
               event->type == CLUTTER_TOUCH_CANCEL)
-            _clutter_input_device_remove_event_sequence (device, event);
+            remove_device_for_event (CLUTTER_STAGE (stage), event, TRUE);
 
           break;
         }
 
       case CLUTTER_PROXIMITY_IN:
       case CLUTTER_PROXIMITY_OUT:
-        clutter_input_device_update_from_tool (clutter_event_get_source_device (event),
-                                               clutter_event_get_device_tool (event));
-
         if (_clutter_event_process_filters (event))
           break;
 
@@ -1947,26 +1853,26 @@ _clutter_process_event_details (ClutterActor        *stage,
 
         break;
 
-      case CLUTTER_STAGE_STATE:
-        /* focus - forward to stage */
-        event->any.source = stage;
-        if (!_clutter_event_process_filters (event))
-          clutter_stage_event (CLUTTER_STAGE (stage), event);
-        break;
-
-      case CLUTTER_CLIENT_MESSAGE:
-        break;
-
       case CLUTTER_DEVICE_ADDED:
-      case CLUTTER_DEVICE_REMOVED:
-        if (!_clutter_event_process_filters (event))
-          {
-            ClutterSeat *seat;
-
-            seat = clutter_backend_get_default_seat (context->backend);
-            clutter_seat_handle_device_event (seat, event);
-          }
+        _clutter_event_process_filters (event);
         break;
+
+      case CLUTTER_DEVICE_REMOVED:
+        {
+          ClutterInputDeviceType device_type;
+
+          _clutter_event_process_filters (event);
+
+          device_type = clutter_input_device_get_device_type (device);
+          if (device_type == CLUTTER_POINTER_DEVICE ||
+              device_type == CLUTTER_TABLET_DEVICE ||
+              device_type == CLUTTER_PEN_DEVICE ||
+              device_type == CLUTTER_ERASER_DEVICE ||
+              device_type == CLUTTER_CURSOR_DEVICE)
+            remove_device_for_event (CLUTTER_STAGE (stage), event, TRUE);
+
+          break;
+        }
 
       case CLUTTER_EVENT_LAST:
         break;
@@ -1985,8 +1891,10 @@ _clutter_process_event (ClutterEvent *event)
 {
   ClutterMainContext *context;
   ClutterActor *stage;
+  ClutterSeat *seat;
 
   context = _clutter_context_get_default ();
+  seat = clutter_backend_get_default_seat (context->backend);
 
   stage = CLUTTER_ACTOR (event->any.stage);
   if (stage == NULL)
@@ -2001,6 +1909,7 @@ _clutter_process_event (ClutterEvent *event)
    */
   context->current_event = g_slist_prepend (context->current_event, event);
 
+  clutter_seat_handle_event_post (seat, event);
   _clutter_process_event_details (stage, context, event);
 
   context->current_event = g_slist_delete_link (context->current_event, context->current_event);
@@ -2103,7 +2012,7 @@ clutter_threads_remove_repaint_func (guint handle_id)
           if (repaint_func->notify)
             repaint_func->notify (repaint_func->data);
 
-          g_slice_free (ClutterRepaintFunction, repaint_func);
+          g_free (repaint_func);
 
           break;
         }
@@ -2210,7 +2119,7 @@ clutter_threads_add_repaint_func_full (ClutterRepaintFlags flags,
 
   context = _clutter_context_get_default ();
 
-  repaint_func = g_slice_new (ClutterRepaintFunction);
+  repaint_func = g_new0 (ClutterRepaintFunction, 1);
 
   repaint_func->id = context->last_repaint_id++;
 
@@ -2274,7 +2183,7 @@ _clutter_run_repaint_functions (ClutterRepaintFlags flags)
           if (repaint_func->notify != NULL)
             repaint_func->notify (repaint_func->data);
 
-          g_slice_free (ClutterRepaintFunction, repaint_func);
+          g_free (repaint_func);
         }
     }
 
@@ -2316,23 +2225,22 @@ void
 _clutter_clear_events_queue (void)
 {
   ClutterMainContext *context = _clutter_context_get_default ();
+  ClutterEvent *event;
+  GAsyncQueue *events_queue;
 
-  if (context->events_queue != NULL)
-    {
-      g_queue_foreach (context->events_queue,
-                       (GFunc) clutter_event_free,
-                       NULL);
-      g_queue_free (context->events_queue);
-      context->events_queue = NULL;
-    }
-}
+  if (!context->events_queue)
+    return;
 
-ClutterPickMode
-_clutter_context_get_pick_mode (void)
-{
-  ClutterMainContext *context = _clutter_context_get_default ();
+  g_async_queue_lock (context->events_queue);
 
-  return context->pick_mode;
+  while ((event = g_async_queue_try_pop_unlocked (context->events_queue)))
+    clutter_event_free (event);
+
+  events_queue = context->events_queue;
+  context->events_queue = NULL;
+
+  g_async_queue_unlock (events_queue);
+  g_async_queue_unref (events_queue);
 }
 
 /**

@@ -221,9 +221,9 @@ cogl_context_new (CoglDisplay *display,
 
   context->legacy_backface_culling_enabled = FALSE;
 
-  cogl_matrix_init_identity (&context->identity_matrix);
-  cogl_matrix_init_identity (&context->y_flip_matrix);
-  cogl_matrix_scale (&context->y_flip_matrix, 1, -1, 1);
+  graphene_matrix_init_identity (&context->identity_matrix);
+  graphene_matrix_init_identity (&context->y_flip_matrix);
+  graphene_matrix_scale (&context->y_flip_matrix, 1, -1, 1);
 
   context->opaque_color_pipeline = cogl_pipeline_new (context);
 
@@ -447,17 +447,6 @@ _cogl_context_set_current_modelview_entry (CoglContext *context,
   if (context->current_modelview_entry)
     cogl_matrix_entry_unref (context->current_modelview_entry);
   context->current_modelview_entry = entry;
-}
-
-int64_t
-cogl_get_clock_time (CoglContext *context)
-{
-  const CoglWinsysVtable *winsys = _cogl_context_get_winsys (context);
-
-  if (winsys->context_get_clock_time)
-    return winsys->context_get_clock_time (context);
-  else
-    return 0;
 }
 
 CoglGraphicsResetStatus

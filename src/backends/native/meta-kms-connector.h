@@ -39,8 +39,7 @@ typedef struct _MetaKmsConnectorState
   uint32_t common_possible_clones;
   uint32_t encoder_device_idxs;
 
-  drmModeModeInfo *modes;
-  int n_modes;
+  GList *modes;
 
   uint32_t width_mm;
   uint32_t height_mm;
@@ -62,19 +61,7 @@ typedef struct _MetaKmsConnectorState
 
 MetaKmsDevice * meta_kms_connector_get_device (MetaKmsConnector *connector);
 
-void meta_kms_connector_update_set_dpms_state (MetaKmsConnector *connector,
-                                               MetaKmsUpdate    *update,
-                                               uint64_t          state);
-
-void meta_kms_connector_set_underscanning (MetaKmsConnector *connector,
-                                           MetaKmsUpdate    *update,
-                                           uint64_t          hborder,
-                                           uint64_t          vborder);
-
-void meta_kms_connector_unset_underscanning (MetaKmsConnector *connector,
-                                             MetaKmsUpdate    *update);
-
-MetaConnectorType meta_kms_connector_get_connector_type (MetaKmsConnector *connector);
+uint32_t meta_kms_connector_get_connector_type (MetaKmsConnector *connector);
 
 uint32_t meta_kms_connector_get_id (MetaKmsConnector *connector);
 

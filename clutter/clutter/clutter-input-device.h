@@ -34,18 +34,9 @@
 
 G_BEGIN_DECLS
 
-typedef void (*ClutterEmitInputDeviceEvent) (ClutterEvent       *event,
-                                             ClutterInputDevice *device);
-
 struct _ClutterInputDeviceClass
 {
   GObjectClass parent_class;
-
-  gboolean (* keycode_to_evdev) (ClutterInputDevice *device,
-                                 guint               hardware_keycode,
-                                 guint              *evdev_keycode);
-  void (* update_from_tool) (ClutterInputDevice     *device,
-                             ClutterInputDeviceTool *tool);
 
   gboolean (* is_mode_switch_button) (ClutterInputDevice *device,
                                       guint               group,
@@ -56,10 +47,9 @@ struct _ClutterInputDeviceClass
   gboolean (* is_grouped) (ClutterInputDevice *device,
                            ClutterInputDevice *other_device);
 
-  /* Keyboard accessbility */
-  void (* process_kbd_a11y_event) (ClutterEvent               *event,
-                                   ClutterInputDevice         *device,
-                                   ClutterEmitInputDeviceEvent emit_event_func);
+  int (* get_pad_feature_group) (ClutterInputDevice           *device,
+                                 ClutterInputDevicePadFeature  feature,
+                                 int                           n_feature);
 };
 
 #define CLUTTER_TYPE_INPUT_DEVICE               (clutter_input_device_get_type ())
@@ -82,31 +72,13 @@ GType clutter_input_device_get_type (void) G_GNUC_CONST;
 
 CLUTTER_EXPORT
 ClutterInputDeviceType  clutter_input_device_get_device_type    (ClutterInputDevice  *device);
-CLUTTER_EXPORT
-gint                    clutter_input_device_get_device_id      (ClutterInputDevice  *device);
 
-CLUTTER_EXPORT
-gboolean                clutter_input_device_get_coords        (ClutterInputDevice   *device,
-                                                                ClutterEventSequence *sequence,
-                                                                graphene_point_t     *point);
-CLUTTER_EXPORT
-ClutterModifierType     clutter_input_device_get_modifier_state (ClutterInputDevice  *device);
-CLUTTER_EXPORT
-ClutterActor *          clutter_input_device_get_actor (ClutterInputDevice   *device,
-                                                        ClutterEventSequence *sequence);
-CLUTTER_EXPORT
-ClutterStage *          clutter_input_device_get_pointer_stage  (ClutterInputDevice  *device);
 CLUTTER_EXPORT
 const gchar *           clutter_input_device_get_device_name    (ClutterInputDevice  *device);
 CLUTTER_EXPORT
 ClutterInputMode        clutter_input_device_get_device_mode    (ClutterInputDevice  *device);
 CLUTTER_EXPORT
 gboolean                clutter_input_device_get_has_cursor     (ClutterInputDevice  *device);
-CLUTTER_EXPORT
-void                    clutter_input_device_set_enabled        (ClutterInputDevice  *device,
-                                                                 gboolean             enabled);
-CLUTTER_EXPORT
-gboolean                clutter_input_device_get_enabled        (ClutterInputDevice  *device);
 
 CLUTTER_EXPORT
 guint                   clutter_input_device_get_n_axes         (ClutterInputDevice  *device);
@@ -118,29 +90,6 @@ gboolean                clutter_input_device_get_axis_value     (ClutterInputDev
                                                                  gdouble             *axes,
                                                                  ClutterInputAxis     axis,
                                                                  gdouble             *value);
-
-CLUTTER_EXPORT
-guint                   clutter_input_device_get_n_keys         (ClutterInputDevice  *device);
-CLUTTER_EXPORT
-void                    clutter_input_device_set_key            (ClutterInputDevice  *device,
-                                                                 guint                index_,
-                                                                 guint                keyval,
-                                                                 ClutterModifierType  modifiers);
-CLUTTER_EXPORT
-gboolean                clutter_input_device_get_key            (ClutterInputDevice  *device,
-                                                                 guint                index_,
-                                                                 guint               *keyval,
-                                                                 ClutterModifierType *modifiers);
-
-CLUTTER_EXPORT
-ClutterInputDevice *    clutter_input_device_get_associated_device (ClutterInputDevice *device);
-CLUTTER_EXPORT
-GList *                 clutter_input_device_get_physical_devices  (ClutterInputDevice  *device);
-
-CLUTTER_EXPORT
-void                    clutter_input_device_update_from_event  (ClutterInputDevice  *device,
-                                                                 ClutterEvent        *event,
-                                                                 gboolean             update_stage);
 
 CLUTTER_EXPORT
 void                    clutter_input_device_grab               (ClutterInputDevice  *device,
@@ -162,11 +111,6 @@ ClutterActor *          clutter_input_device_sequence_get_grabbed_actor (Clutter
                                                                          ClutterEventSequence *sequence);
 
 CLUTTER_EXPORT
-gboolean                clutter_input_device_keycode_to_evdev   (ClutterInputDevice *device,
-                                                                 guint               hardware_keycode,
-                                                                 guint              *evdev_keycode);
-
-CLUTTER_EXPORT
 const gchar *           clutter_input_device_get_vendor_id      (ClutterInputDevice *device);
 CLUTTER_EXPORT
 const gchar *           clutter_input_device_get_product_id     (ClutterInputDevice *device);
@@ -177,6 +121,9 @@ CLUTTER_EXPORT
 gint                    clutter_input_device_get_n_strips       (ClutterInputDevice *device);
 CLUTTER_EXPORT
 gint                    clutter_input_device_get_n_mode_groups  (ClutterInputDevice *device);
+CLUTTER_EXPORT
+int                     clutter_input_device_get_n_buttons (ClutterInputDevice *device);
+
 
 CLUTTER_EXPORT
 gint                    clutter_input_device_get_group_n_modes  (ClutterInputDevice *device,
@@ -194,16 +141,15 @@ CLUTTER_EXPORT
 const gchar *           clutter_input_device_get_device_node    (ClutterInputDevice *device);
 
 CLUTTER_EXPORT
-ClutterInputDeviceMapping clutter_input_device_get_mapping_mode (ClutterInputDevice *device);
-
-CLUTTER_EXPORT
-void                      clutter_input_device_set_mapping_mode (ClutterInputDevice        *device,
-                                                                 ClutterInputDeviceMapping  mapping);
-CLUTTER_EXPORT
 gboolean                  clutter_input_device_is_grouped       (ClutterInputDevice *device,
                                                                  ClutterInputDevice *other_device);
 CLUTTER_EXPORT
 ClutterSeat *             clutter_input_device_get_seat         (ClutterInputDevice *device);
+
+CLUTTER_EXPORT
+int clutter_input_device_get_pad_feature_group (ClutterInputDevice           *device,
+                                                ClutterInputDevicePadFeature  feature,
+                                                int                           n_feature);
 
 G_END_DECLS
 

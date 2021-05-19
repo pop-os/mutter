@@ -69,6 +69,12 @@ option('udev',
   description: 'Enable udev support when using the X11 backend'
 )
 
+option('udev_dir',
+  type: 'string',
+  value: '',
+  description: 'Absolute path of the udev base directory'
+)
+
 option('libwacom',
   type: 'boolean',
   value: true,
@@ -117,6 +123,12 @@ option('core_tests',
   description: 'Enable mutter core tests'
 )
 
+option('native_tests',
+  type: 'boolean',
+  value: true,
+  description: 'Enable mutter native backend tests'
+)
+
 option('tests',
   type: 'boolean',
   value: true,
@@ -157,4 +169,10 @@ option('xwayland_initfd',
   type: 'feature',
   value: 'auto',
   description: 'Whether -initfd argument is passed to Xwayland to guarantee services (e.g. gsd-xsettings) startup before applications'
+)
+
+option('xwayland_ignore_executables',
+  type: 'string',
+  value: 'gsd-xsettings,ibus-x11,pulseaudio,Xwayland',
+  description: 'Comma delimited list of executable names to ignore when terminating Xwayland'
 )

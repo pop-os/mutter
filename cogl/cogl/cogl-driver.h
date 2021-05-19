@@ -32,7 +32,7 @@
 #define __COGL_DRIVER_H
 
 #include "cogl-context.h"
-#include "cogl-offscreen.h"
+#include "cogl-offscreen-private.h"
 #include "cogl-framebuffer-private.h"
 #include "cogl-attribute-private.h"
 #include "cogl-sampler-cache-private.h"
@@ -73,68 +73,17 @@ struct _CoglDriverVtable
   (* update_features) (CoglContext *context,
                        GError **error);
 
-  gboolean
-  (* offscreen_allocate) (CoglOffscreen *offscreen,
-                          GError **error);
+  CoglFramebufferDriver *
+  (* create_framebuffer_driver) (CoglContext                        *context,
+                                 CoglFramebuffer                    *framebuffer,
+                                 const CoglFramebufferDriverConfig  *driver_config,
+                                 GError                            **error);
 
   void
-  (* offscreen_free) (CoglOffscreen *offscreen);
-
-  void
-  (* framebuffer_flush_state) (CoglFramebuffer *draw_buffer,
-                               CoglFramebuffer *read_buffer,
-                               CoglFramebufferState state);
-
-  void
-  (* framebuffer_clear) (CoglFramebuffer *framebuffer,
-                         unsigned long buffers,
-                         float red,
-                         float green,
-                         float blue,
-                         float alpha);
-
-  void
-  (* framebuffer_query_bits) (CoglFramebuffer *framebuffer,
-                              CoglFramebufferBits *bits);
-
-  void
-  (* framebuffer_finish) (CoglFramebuffer *framebuffer);
-
-  void
-  (* framebuffer_flush) (CoglFramebuffer *framebuffer);
-
-  void
-  (* framebuffer_discard_buffers) (CoglFramebuffer *framebuffer,
-                                   unsigned long buffers);
-
-  void
-  (* framebuffer_draw_attributes) (CoglFramebuffer *framebuffer,
-                                   CoglPipeline *pipeline,
-                                   CoglVerticesMode mode,
-                                   int first_vertex,
-                                   int n_vertices,
-                                   CoglAttribute **attributes,
-                                   int n_attributes,
-                                   CoglDrawFlags flags);
-
-  void
-  (* framebuffer_draw_indexed_attributes) (CoglFramebuffer *framebuffer,
-                                           CoglPipeline *pipeline,
-                                           CoglVerticesMode mode,
-                                           int first_vertex,
-                                           int n_vertices,
-                                           CoglIndices *indices,
-                                           CoglAttribute **attributes,
-                                           int n_attributes,
-                                           CoglDrawFlags flags);
-
-  gboolean
-  (* framebuffer_read_pixels_into_bitmap) (CoglFramebuffer *framebuffer,
-                                           int x,
-                                           int y,
-                                           CoglReadPixelsFlags source,
-                                           CoglBitmap *bitmap,
-                                           GError **error);
+  (* flush_framebuffer_state) (CoglContext          *context,
+                               CoglFramebuffer      *draw_buffer,
+                               CoglFramebuffer      *read_buffer,
+                               CoglFramebufferState  state);
 
   /* Destroys any driver specific resources associated with the given
    * 2D texture. */

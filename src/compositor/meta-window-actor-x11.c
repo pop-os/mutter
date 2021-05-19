@@ -135,7 +135,7 @@ typedef struct
 static void
 frame_data_free (FrameData *frame)
 {
-  g_slice_free (FrameData, frame);
+  g_free (frame);
 }
 
 static void
@@ -451,7 +451,7 @@ meta_window_actor_x11_queue_frame_drawn (MetaWindowActor *actor,
   if (meta_window_actor_is_destroyed (actor))
     return;
 
-  frame = g_slice_new0 (FrameData);
+  frame = g_new0 (FrameData, 1);
   frame->frame_counter = -1;
   frame->sync_request_serial = window->sync_request_serial;
 
@@ -1011,6 +1011,7 @@ invalidate_shadow (MetaWindowActorX11 *actor_x11)
     return;
 
   clutter_actor_queue_redraw (CLUTTER_ACTOR (actor_x11));
+  clutter_actor_invalidate_paint_volume (CLUTTER_ACTOR (actor_x11));
 }
 
 static void

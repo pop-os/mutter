@@ -384,12 +384,13 @@ clutter_shader_effect_try_static_source (ClutterShaderEffect *self)
 
 static void
 clutter_shader_effect_paint_target (ClutterOffscreenEffect *effect,
+                                    ClutterPaintNode       *node,
                                     ClutterPaintContext    *paint_context)
 {
   ClutterShaderEffect *self = CLUTTER_SHADER_EFFECT (effect);
   ClutterShaderEffectPrivate *priv = self->priv;
   ClutterOffscreenEffectClass *parent;
-  CoglHandle material;
+  CoglPipeline *pipeline;
 
   /* If the source hasn't been set then we'll try to get it from the
      static source instead */
@@ -407,14 +408,14 @@ clutter_shader_effect_paint_target (ClutterOffscreenEffect *effect,
 
   clutter_shader_effect_update_uniforms (CLUTTER_SHADER_EFFECT (effect));
 
-  /* associate the program to the offscreen target material */
-  material = clutter_offscreen_effect_get_target (effect);
-  cogl_pipeline_set_user_program (material, priv->program);
+  /* associate the program to the offscreen target pipeline */
+  pipeline = clutter_offscreen_effect_get_pipeline (effect);
+  cogl_pipeline_set_user_program (pipeline, priv->program);
 
 out:
   /* paint the offscreen buffer */
   parent = CLUTTER_OFFSCREEN_EFFECT_CLASS (clutter_shader_effect_parent_class);
-  parent->paint_target (effect, paint_context);
+  parent->paint_target (effect, node, paint_context);
 
 }
 
@@ -566,7 +567,7 @@ shader_uniform_free (gpointer data)
       g_value_unset (&uniform->value);
       g_free (uniform->name);
 
-      g_slice_free (ShaderUniform, uniform);
+      g_free (uniform);
     }
 }
 
@@ -576,7 +577,7 @@ shader_uniform_new (const gchar  *name,
 {
   ShaderUniform *retval;
 
-  retval = g_slice_new0 (ShaderUniform);
+  retval = g_new0 (ShaderUniform, 1);
   retval->name = g_strdup (name);
   retval->type = G_VALUE_TYPE (value);
   retval->location = -1;
@@ -824,9 +825,12 @@ add_uniform:
  * Finally, a uniform named "map" and containing a matrix can be set using:
  *
  * |[<!-- language="C" -->
+ *   float v[16];
+ *
+ *   cogl_matrix_to_float (&matrix, v);
  *   clutter_shader_effect_set_uniform (effect, "map",
- *                                      CLUTTER_TYPE_SHADER_MATRIX, 1,
- *                                      cogl_matrix_get_array (&matrix));
+ *                                      CLUTTER_TYPE_SHADER_MATRIX,
+ *                                      1, v);
  * ]|
  *
  * Since: 1.4

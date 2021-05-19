@@ -31,7 +31,7 @@
 
 #include "backends/meta-renderer.h"
 #include "backends/native/meta-gpu-kms.h"
-#include "backends/native/meta-monitor-manager-kms.h"
+#include "backends/native/meta-monitor-manager-native.h"
 
 #define META_TYPE_RENDERER_NATIVE (meta_renderer_native_get_type ())
 G_DECLARE_FINAL_TYPE (MetaRendererNative, meta_renderer_native,
@@ -41,6 +41,7 @@ G_DECLARE_FINAL_TYPE (MetaRendererNative, meta_renderer_native,
 typedef enum _MetaRendererNativeMode
 {
   META_RENDERER_NATIVE_MODE_GBM,
+  META_RENDERER_NATIVE_MODE_SURFACELESS,
 #ifdef HAVE_EGL_DEVICE
   META_RENDERER_NATIVE_MODE_EGL_DEVICE
 #endif
@@ -53,15 +54,16 @@ struct gbm_device * meta_gbm_device_from_gpu (MetaGpuKms *gpu_kms);
 
 MetaGpuKms * meta_renderer_native_get_primary_gpu (MetaRendererNative *renderer_native);
 
-void meta_renderer_native_finish_frame (MetaRendererNative *renderer_native);
+void meta_renderer_native_prepare_frame (MetaRendererNative *renderer_native,
+                                         MetaRendererView   *view,
+                                         ClutterFrame       *frame);
+
+void meta_renderer_native_finish_frame (MetaRendererNative *renderer_native,
+                                        MetaRendererView   *view,
+                                        ClutterFrame       *frame);
 
 void meta_renderer_native_reset_modes (MetaRendererNative *renderer_native);
 
 gboolean meta_renderer_native_use_modifiers (MetaRendererNative *renderer_native);
-
-gboolean meta_onscreen_native_is_buffer_scanout_compatible (CoglOnscreen *onscreen,
-                                                            uint32_t      drm_format,
-                                                            uint64_t      drm_modifier,
-                                                            uint32_t      stride);
 
 #endif /* META_RENDERER_NATIVE_H */

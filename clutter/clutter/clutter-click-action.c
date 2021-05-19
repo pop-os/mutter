@@ -114,7 +114,7 @@ struct _ClutterClickActionPrivate
   gint drag_threshold;
 
   guint press_button;
-  gint press_device_id;
+  ClutterInputDevice *press_device;
   ClutterEventSequence *press_sequence;
   ClutterModifierType modifier_state;
   gfloat press_x;
@@ -272,6 +272,23 @@ click_action_cancel_long_press (ClutterClickAction *action)
     }
 }
 
+static inline gboolean
+event_within_drag_threshold (ClutterClickAction *click_action,
+                             ClutterEvent       *event)
+{
+  ClutterClickActionPrivate *priv =
+    clutter_click_action_get_instance_private (click_action);
+  float motion_x, motion_y;
+  float delta_x, delta_y;
+
+  clutter_event_get_coords (event, &motion_x, &motion_y);
+
+  delta_x = ABS (motion_x - priv->press_x);
+  delta_y = ABS (motion_y - priv->press_y);
+
+  return delta_x <= priv->drag_threshold && delta_y <= priv->drag_threshold;
+}
+
 static gboolean
 on_event (ClutterActor       *actor,
           ClutterEvent       *event,
@@ -299,7 +316,7 @@ on_event (ClutterActor       *actor,
         return CLUTTER_EVENT_PROPAGATE;
 
       priv->press_button = has_button ? clutter_event_get_button (event) : 0;
-      priv->press_device_id = clutter_event_get_device_id (event);
+      priv->press_device = clutter_event_get_device (event);
       priv->press_sequence = clutter_event_get_event_sequence (event);
       priv->modifier_state = clutter_event_get_state (event);
       clutter_event_get_coords (event, &priv->press_x, &priv->press_y);
@@ -370,7 +387,7 @@ on_captured_event (ClutterActor       *stage,
 
       if ((has_button && clutter_event_get_button (event) != priv->press_button) ||
           (has_button && clutter_event_get_click_count (event) != 1) ||
-          clutter_event_get_device_id (event) != priv->press_device_id ||
+          clutter_event_get_device (event) != priv->press_device ||
           clutter_event_get_event_sequence (event) != priv->press_sequence)
         return CLUTTER_EVENT_PROPAGATE;
 
@@ -402,30 +419,23 @@ on_captured_event (ClutterActor       *stage,
         priv->modifier_state = 0;
 
       click_action_set_pressed (action, FALSE);
-      g_signal_emit (action, click_signals[CLICKED], 0, actor);
+
+      if (event_within_drag_threshold (action, event))
+        g_signal_emit (action, click_signals[CLICKED], 0, actor);
       break;
 
     case CLUTTER_MOTION:
     case CLUTTER_TOUCH_UPDATE:
       {
-        gfloat motion_x, motion_y;
-        gfloat delta_x, delta_y;
-
-        if (clutter_event_get_device_id (event) != priv->press_device_id ||
+        if (clutter_event_get_device (event) != priv->press_device ||
             clutter_event_get_event_sequence (event) != priv->press_sequence)
           return CLUTTER_EVENT_PROPAGATE;
 
         if (!priv->is_held)
           return CLUTTER_EVENT_PROPAGATE;
 
-        clutter_event_get_coords (event, &motion_x, &motion_y);
-
-        delta_x = ABS (motion_x - priv->press_x);
-        delta_y = ABS (motion_y - priv->press_y);
-
-        if (delta_x > priv->drag_threshold ||
-            delta_y > priv->drag_threshold)
-          click_action_cancel_long_press (action);
+        if (!event_within_drag_threshold (action, event))
+          clutter_click_action_release (action);
       }
       break;
 

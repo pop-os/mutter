@@ -715,8 +715,8 @@ cogl_pipeline_set_uniform_int (CoglPipeline *pipeline,
  *
  * If @transpose is %FALSE then the matrix is expected to be in
  * column-major order or if it is %TRUE then the matrix is in
- * row-major order. You can pass a #CoglMatrix by calling by passing
- * the result of cogl_matrix_get_array() in @value and setting
+ * row-major order. You can pass a #graphene_matrix_t by calling by passing
+ * the result of graphene_matrix_to_float() in @value and setting
  * @transpose to %FALSE.
  *
  * Since: 2.0

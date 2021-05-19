@@ -82,6 +82,7 @@ typedef enum
 {
   PAINT_OP_INVALID = 0,
   PAINT_OP_TEX_RECT,
+  PAINT_OP_TEX_RECTS,
   PAINT_OP_MULTITEX_RECT,
   PAINT_OP_PRIMITIVE
 } PaintOpCode;
@@ -90,7 +91,7 @@ struct _ClutterPaintOperation
 {
   PaintOpCode opcode;
 
-  GArray *multitex_coords;
+  GArray *coords;
 
   union {
     float texrect[8];
@@ -111,7 +112,7 @@ void                    _clutter_paint_operation_paint_primitive        (const C
 void                    _clutter_paint_node_init_types                  (void);
 gpointer                _clutter_paint_node_create                      (GType gtype);
 
-ClutterPaintNode *      _clutter_transform_node_new                     (const CoglMatrix            *matrix);
+ClutterPaintNode *      _clutter_transform_node_new                     (const graphene_matrix_t     *matrix);
 ClutterPaintNode *      _clutter_dummy_node_new                         (ClutterActor                *actor,
                                                                          CoglFramebuffer             *framebuffer);
 
@@ -140,6 +141,26 @@ G_GNUC_INTERNAL
 ClutterPaintNode *      clutter_paint_node_get_last_child               (ClutterPaintNode      *node);
 G_GNUC_INTERNAL
 ClutterPaintNode *      clutter_paint_node_get_parent                   (ClutterPaintNode      *node);
+
+
+#define CLUTTER_TYPE_EFFECT_NODE                (clutter_effect_node_get_type ())
+#define CLUTTER_EFFECT_NODE(obj)                (G_TYPE_CHECK_INSTANCE_CAST ((obj), CLUTTER_TYPE_EFFECT_NODE, ClutterEffectNode))
+#define CLUTTER_IS_EFFECT_NODE(obj)             (G_TYPE_CHECK_INSTANCE_TYPE ((obj), CLUTTER_TYPE_EFFECT_NODE))
+
+/**
+ * ClutterEffectNode:
+ *
+ * The #ClutterEffectNode structure is an opaque
+ * type whose members cannot be directly accessed.
+ */
+typedef struct _ClutterEffectNode ClutterEffectNode;
+typedef struct _ClutterEffectNode ClutterEffectNodeClass;
+
+CLUTTER_EXPORT
+GType clutter_effect_node_get_type (void) G_GNUC_CONST;
+
+CLUTTER_EXPORT
+ClutterPaintNode * clutter_effect_node_new (ClutterEffect *effect);
 
 G_END_DECLS
 

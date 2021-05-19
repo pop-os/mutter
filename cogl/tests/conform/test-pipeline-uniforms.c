@@ -218,33 +218,33 @@ paint_color_pipelines (TestState *state)
 static void
 paint_matrix_pipeline (CoglPipeline *pipeline)
 {
-  CoglMatrix matrices[4];
+  graphene_matrix_t matrices[4];
   float matrix_floats[16 * 4];
   int uniform_location;
   int i;
 
   for (i = 0; i < 4; i++)
-    cogl_matrix_init_identity (matrices + i);
+    graphene_matrix_init_identity (matrices + i);
 
   /* Use the first matrix to make the color red */
-  cogl_matrix_translate (matrices + 0, 1.0f, 0.0f, 0.0f);
+  graphene_matrix_translate (&matrices[0],
+                             &GRAPHENE_POINT3D_INIT (1.0f, 0.0f, 0.0f));
 
   /* Rotate the vertex so that it ends up green */
-  cogl_matrix_rotate (matrices + 1, 90.0f, 0.0f, 0.0f, 1.0f);
+  graphene_matrix_rotate (&matrices[1], 90.0f, graphene_vec3_z_axis ());
 
   /* Scale the vertex so it ends up halved */
-  cogl_matrix_scale (matrices + 2, 0.5f, 0.5f, 0.5f);
+  graphene_matrix_scale (&matrices[2], 0.5f, 0.5f, 0.5f);
 
   /* Add a blue component in the final matrix. The final matrix is
      uploaded as transposed so we need to transpose first to cancel
      that out */
-  cogl_matrix_translate (matrices + 3, 0.0f, 0.0f, 1.0f);
-  cogl_matrix_transpose (matrices + 3);
+  graphene_matrix_translate (&matrices[3],
+                             &GRAPHENE_POINT3D_INIT (0.0f, 0.0f, 1.0f));
+  graphene_matrix_transpose (&matrices[3], &matrices[3]);
 
   for (i = 0; i < 4; i++)
-    memcpy (matrix_floats + i * 16,
-            cogl_matrix_get_array (matrices + i),
-            sizeof (float) * 16);
+    graphene_matrix_to_float (&matrices[i], &matrix_floats[i * 16]);
 
   /* Set the first three matrices as transposed */
   uniform_location =

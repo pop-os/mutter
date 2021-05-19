@@ -5,6 +5,7 @@
  * Copyright (C) 2003 Rob Adams
  * Copyright (C) 2004-2006 Elijah Newren
  * Copyright (C) 2013 Red Hat Inc.
+ * Copyright (C) 2020 NVIDIA CORPORATION
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -31,11 +32,10 @@
 #include "backends/meta-cursor.h"
 #include "backends/meta-display-config-shared.h"
 #include "backends/meta-monitor-transform.h"
+#include "backends/meta-viewport-info.h"
 #include "core/util-private.h"
 #include "meta/display.h"
 #include "meta/meta-monitor-manager.h"
-
-#include "meta-dbus-display-config.h"
 
 #define META_MONITOR_MANAGER_MIN_SCREEN_WIDTH 640
 #define META_MONITOR_MANAGER_MIN_SCREEN_HEIGHT 480
@@ -91,12 +91,25 @@ struct _MetaOutputAssignment
   gboolean     is_underscanning;
 };
 
+/*
+ * MetaOutputCtm:
+ *
+ * A 3x3 color transform matrix in the fixed-point S31.32 sign-magnitude format
+ * used by DRM.
+ */
+typedef struct _MetaOutputCtm
+{
+  uint64_t matrix[9];
+} MetaOutputCtm;
+
 #define META_TYPE_MONITOR_MANAGER            (meta_monitor_manager_get_type ())
 #define META_MONITOR_MANAGER(obj)            (G_TYPE_CHECK_INSTANCE_CAST ((obj), META_TYPE_MONITOR_MANAGER, MetaMonitorManager))
 #define META_MONITOR_MANAGER_CLASS(klass)    (G_TYPE_CHECK_CLASS_CAST ((klass),  META_TYPE_MONITOR_MANAGER, MetaMonitorManagerClass))
 #define META_IS_MONITOR_MANAGER(obj)         (G_TYPE_CHECK_INSTANCE_TYPE ((obj), META_TYPE_MONITOR_MANAGER))
 #define META_IS_MONITOR_MANAGER_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE ((klass),  META_TYPE_MONITOR_MANAGER))
 #define META_MONITOR_MANAGER_GET_CLASS(obj)  (G_TYPE_INSTANCE_GET_CLASS ((obj),  META_TYPE_MONITOR_MANAGER, MetaMonitorManagerClass))
+
+typedef struct _MetaDBusDisplayConfig MetaDBusDisplayConfig;
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (MetaMonitorManager, g_object_unref)
 
@@ -144,8 +157,7 @@ struct _MetaMonitorManager
  * MetaMonitorManagerClass:
  *
  * @read_edid: Returns the raw Extended Display Identification Data (EDID)
- *   for the given #MetaOutput object. Use meta_output_parse_edid() to parse
- *   afterwards.
+ *   for the given #MetaOutput object.
  *
  * @ensure_initial_config: Called on setup. Makes sure an initial config
  *   is loaded.
@@ -179,72 +191,80 @@ struct _MetaMonitorManager
  * @get_capabilities: vfunc for meta_monitor_manager_get_capabilities().
  * @get_max_screen_size: vfunc for meta_monitor_manager_get_max_screen_size().
  * @get_default_layout_mode: vfunc for meta_monitor_manager_get_default_layout_mode().
+ * @set_output_ctm: vfunc for meta_monitor_manager_output_set_ctm()
  *
  * The base class for a #MetaMonitorManager.
  */
 struct _MetaMonitorManagerClass
 {
-  MetaDBusDisplayConfigSkeletonClass parent_class;
+  GObjectClass parent_class;
 
-  GBytes* (*read_edid) (MetaMonitorManager *,
-                        MetaOutput         *);
+  GBytes * (* read_edid) (MetaMonitorManager *manager,
+                          MetaOutput         *output);
 
-  void (*read_current_state) (MetaMonitorManager *);
+  void (* read_current_state) (MetaMonitorManager *manager);
 
-  void (*ensure_initial_config) (MetaMonitorManager *);
+  void (* ensure_initial_config) (MetaMonitorManager *manager);
 
-  gboolean (*apply_monitors_config) (MetaMonitorManager      *,
-                                     MetaMonitorsConfig      *,
-                                     MetaMonitorsConfigMethod ,
-                                     GError                 **);
+  gboolean (* apply_monitors_config) (MetaMonitorManager        *manager,
+                                      MetaMonitorsConfig        *config,
+                                      MetaMonitorsConfigMethod   method,
+                                      GError                   **error);
 
-  void (*set_power_save_mode) (MetaMonitorManager *,
-                               MetaPowerSave);
+  void (* set_power_save_mode) (MetaMonitorManager *manager,
+                                MetaPowerSave       power_save);
 
-  void (*change_backlight) (MetaMonitorManager *,
-                            MetaOutput         *,
-                            int);
+  void (* change_backlight) (MetaMonitorManager *manager,
+                             MetaOutput         *output,
+                             int                 backlight);
 
-  void (*get_crtc_gamma) (MetaMonitorManager  *,
-                          MetaCrtc            *,
-                          gsize               *,
-                          unsigned short     **,
-                          unsigned short     **,
-                          unsigned short     **);
-  void (*set_crtc_gamma) (MetaMonitorManager *,
-                          MetaCrtc           *,
-                          gsize               ,
-                          unsigned short     *,
-                          unsigned short     *,
-                          unsigned short     *);
+  void (* get_crtc_gamma) (MetaMonitorManager  *manager,
+                           MetaCrtc            *crtc,
+                           size_t              *size,
+                           unsigned short     **red,
+                           unsigned short     **green,
+                           unsigned short     **blue);
+  void (* set_crtc_gamma) (MetaMonitorManager *manager,
+                           MetaCrtc           *crtc,
+                           size_t              size,
+                           unsigned short     *red,
+                           unsigned short     *green,
+                           unsigned short     *blue);
 
-  void (*tiled_monitor_added) (MetaMonitorManager *,
-                               MetaMonitor        *);
+  void (* tiled_monitor_added) (MetaMonitorManager *manager,
+                                MetaMonitor        *monitor);
 
-  void (*tiled_monitor_removed) (MetaMonitorManager *,
-                                 MetaMonitor        *);
+  void (* tiled_monitor_removed) (MetaMonitorManager *manager,
+                                  MetaMonitor        *monitor);
 
-  gboolean (*is_transform_handled) (MetaMonitorManager  *,
-                                    MetaCrtc            *,
-                                    MetaMonitorTransform);
+  gboolean (* is_transform_handled) (MetaMonitorManager   *manager,
+                                     MetaCrtc             *crtc,
+                                     MetaMonitorTransform  transform);
 
-  float (*calculate_monitor_mode_scale) (MetaMonitorManager *,
-                                         MetaMonitor        *,
-                                         MetaMonitorMode    *);
+  float (* calculate_monitor_mode_scale) (MetaMonitorManager *manager,
+                                          MetaMonitor        *monitor,
+                                          MetaMonitorMode    *monitor_mode);
 
-  float * (*calculate_supported_scales) (MetaMonitorManager          *,
-                                         MetaLogicalMonitorLayoutMode ,
-                                         MetaMonitor                 *,
-                                         MetaMonitorMode             *,
-                                         int                         *);
+  float * (* calculate_supported_scales) (MetaMonitorManager           *manager,
+                                          MetaLogicalMonitorLayoutMode  layout_mode,
+                                          MetaMonitor                  *monitor,
+                                          MetaMonitorMode              *monitor_mode,
+                                          int                          *n_supported_scales);
 
-  MetaMonitorManagerCapability (*get_capabilities) (MetaMonitorManager *);
+  MetaMonitorManagerCapability (* get_capabilities) (MetaMonitorManager *manager);
 
-  gboolean (*get_max_screen_size) (MetaMonitorManager *,
-                                   int                *,
-                                   int                *);
+  gboolean (* get_max_screen_size) (MetaMonitorManager *manager,
+                                    int                *width,
+                                    int                *height);
 
-  MetaLogicalMonitorLayoutMode (*get_default_layout_mode) (MetaMonitorManager *);
+  MetaLogicalMonitorLayoutMode (* get_default_layout_mode) (MetaMonitorManager *manager);
+
+  void (* set_output_ctm) (MetaOutput          *output,
+                           const MetaOutputCtm *ctm);
+
+  MetaVirtualMonitor * (* create_virtual_monitor) (MetaMonitorManager            *manager,
+                                                   const MetaVirtualMonitorInfo  *info,
+                                                   GError                       **error);
 };
 
 META_EXPORT_TEST
@@ -307,17 +327,14 @@ void                meta_monitor_manager_power_save_mode_changed (MetaMonitorMan
 void                meta_monitor_manager_confirm_configuration (MetaMonitorManager *manager,
                                                                 gboolean            ok);
 
-void               meta_output_parse_edid (MetaOutput *output,
-                                           GBytes     *edid);
-gboolean           meta_output_is_laptop  (MetaOutput *output);
-
 gboolean           meta_monitor_manager_has_hotplug_mode_update (MetaMonitorManager *manager);
 
-META_EXPORT_TEST
 void               meta_monitor_manager_read_current_state (MetaMonitorManager *manager);
 
+void               meta_monitor_manager_reconfigure (MetaMonitorManager *manager);
+
 META_EXPORT_TEST
-void               meta_monitor_manager_on_hotplug (MetaMonitorManager *manager);
+void               meta_monitor_manager_reload (MetaMonitorManager *manager);
 
 gboolean           meta_monitor_manager_get_monitor_matrix (MetaMonitorManager *manager,
                                                             MetaMonitor        *monitor,
@@ -375,6 +392,12 @@ gboolean           meta_monitor_manager_get_max_screen_size (MetaMonitorManager 
 MetaLogicalMonitorLayoutMode
                    meta_monitor_manager_get_default_layout_mode (MetaMonitorManager *manager);
 
+META_EXPORT_TEST
+MetaVirtualMonitor * meta_monitor_manager_create_virtual_monitor (MetaMonitorManager            *manager,
+                                                                  const MetaVirtualMonitorInfo  *info,
+                                                                  GError                       **error);
+
+META_EXPORT_TEST
 MetaMonitorConfigManager *
                    meta_monitor_manager_get_config_manager (MetaMonitorManager *manager);
 
@@ -408,5 +431,9 @@ meta_find_output_assignment (MetaOutputAssignment **outputs,
 }
 
 void meta_monitor_manager_post_init (MetaMonitorManager *manager);
+
+MetaViewportInfo * meta_monitor_manager_get_viewports (MetaMonitorManager *manager);
+
+GList * meta_monitor_manager_get_virtual_monitors (MetaMonitorManager *manager);
 
 #endif /* META_MONITOR_MANAGER_PRIVATE_H */

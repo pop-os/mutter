@@ -22,5 +22,18 @@
 #define META_BACKEND_NATIVE_TYPES_H
 
 typedef struct _MetaBackendNative MetaBackendNative;
+typedef struct _MetaSeatNative MetaSeatNative;
+typedef struct _MetaSeatImpl MetaSeatImpl;
+typedef struct _MetaKeymapNative MetaKeymapNative;
+typedef struct _MetaRendererNative MetaRendererNative;
+typedef struct _MetaGpuKms MetaGpuKms;
+typedef struct _MetaCrtcVirtual MetaCrtcVirtual;
+typedef struct _MetaCrtcModeVirtual MetaCrtcModeVirtual;
+
+typedef enum _MetaSeatNativeFlag
+{
+  META_SEAT_NATIVE_FLAG_NONE = 0,
+  META_SEAT_NATIVE_FLAG_NO_LIBINPUT = 1 << 0,
+} MetaSeatNativeFlag;
 
 #endif /* META_BACKEND_NATIVE_TYPES_H */

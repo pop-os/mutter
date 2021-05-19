@@ -29,6 +29,8 @@ G_DECLARE_FINAL_TYPE (MetaKmsDevice, meta_kms_device,
                       META, KMS_DEVICE,
                       GObject)
 
+MetaKms * meta_kms_device_get_kms (MetaKmsDevice *device);
+
 int meta_kms_device_leak_fd (MetaKmsDevice *device);
 
 const char * meta_kms_device_get_path (MetaKmsDevice *device);
@@ -47,11 +49,15 @@ GList * meta_kms_device_get_connectors (MetaKmsDevice *device);
 
 GList * meta_kms_device_get_crtcs (MetaKmsDevice *device);
 
+GList * meta_kms_device_get_planes (MetaKmsDevice *device);
+
 MetaKmsPlane * meta_kms_device_get_primary_plane_for (MetaKmsDevice *device,
                                                       MetaKmsCrtc   *crtc);
 
 MetaKmsPlane * meta_kms_device_get_cursor_plane_for (MetaKmsDevice *device,
                                                      MetaKmsCrtc   *crtc);
+
+GList * meta_kms_device_get_fallback_modes (MetaKmsDevice *device);
 
 MetaKmsDevice * meta_kms_device_new (MetaKms            *kms,
                                      const char         *path,

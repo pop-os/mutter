@@ -76,6 +76,8 @@ unit_tests = executable('mutter-test-unit-tests',
     'unit-tests.c',
     'boxes-tests.c',
     'boxes-tests.h',
+    'kms-utils-unit-tests.c',
+    'kms-utils-unit-tests.h',
     'meta-backend-test.c',
     'meta-backend-test.h',
     'meta-gpu-test.c',
@@ -144,6 +146,85 @@ stage_view_tests = executable('mutter-stage-view-tests',
   install_dir: mutter_installed_tests_libexecdir,
 )
 
+anonymous_file_test = executable('anonymous-file-tests',
+  sources: [
+    'anonymous-file.c',
+  ],
+  include_directories: tests_includepath,
+  c_args: tests_c_args,
+  dependencies: [tests_deps],
+  install: have_installed_tests,
+  install_dir: mutter_installed_tests_libexecdir,
+)
+
+ref_test_sources = [
+  'meta-ref-test.c',
+  'meta-ref-test.h',
+]
+
+if have_native_tests
+  native_headless_tests = executable('mutter-native-headless-tests',
+    sources: [
+      'native-headless.c',
+      'native-screen-cast.c',
+      'native-screen-cast.h',
+      'native-virtual-monitor.c',
+      'native-virtual-monitor.h',
+      'test-utils.c',
+      'test-utils.h',
+      ref_test_sources,
+    ],
+    include_directories: tests_includepath,
+    c_args: tests_c_args,
+    dependencies: [tests_deps],
+    install: have_installed_tests,
+    install_dir: mutter_installed_tests_libexecdir,
+  )
+
+  ref_test_sanity = executable('mutter-ref-test-sanity',
+    sources: [
+      'ref-test-sanity.c',
+      'test-utils.c',
+      'test-utils.h',
+      ref_test_sources,
+    ],
+    include_directories: tests_includepath,
+    c_args: tests_c_args,
+    dependencies: [tests_deps],
+    install: have_installed_tests,
+    install_dir: mutter_installed_tests_libexecdir,
+  )
+
+  screen_cast_client = executable('mutter-screen-cast-client',
+    sources: [
+      'screen-cast-client.c',
+      dbus_screen_cast_built_sources,
+    ],
+    include_directories: tests_includepath,
+    c_args: tests_c_args,
+    dependencies: [
+      gio_dep,
+      libpipewire_dep,
+    ],
+    install: have_installed_tests,
+    install_dir: mutter_installed_tests_libexecdir,
+  )
+
+  native_persistent_virtual_monitor = executable(
+    'mutter-persistent-virtual-monitor',
+    sources: [
+      'native-persistent-virtual-monitor.c',
+      'test-utils.c',
+      'test-utils.h',
+    ],
+    include_directories: tests_includepath,
+    c_args: tests_c_args,
+    dependencies: [tests_deps],
+    install: have_installed_tests,
+    install_dir: mutter_installed_tests_libexecdir,
+  )
+endif
+
 stacking_tests = [
   'basic-x11',
   'basic-wayland',
@@ -203,3 +284,33 @@ test('stage-view', stage_view_tests,
   is_parallel: false,
   timeout: 60,
 )
+
+test('anonymous-file', anonymous_file_test,
+  suite: ['core', 'mutter/unit'],
+  env: test_env,
+  is_parallel: false,
+  timeout: 60,
+)
+
+if have_native_tests
+  test('native-headless', native_headless_tests,
+    suite: ['core', 'mutter/native/headless'],
+    env: test_env,
+    is_parallel: false,
+    timeout: 60,
+  )
+
+  test('ref-test-sanity', ref_test_sanity,
+    suite: ['core', 'mutter/ref-test/sanity'],
+    env: test_env,
+    is_parallel: false,
+    timeout: 60,
+  )
+
+  test('native-persistent-virtual-monitor', native_persistent_virtual_monitor,
+    suite: ['core', 'mutter/native/persistent-virtual-monitor'],
+    env: test_env,
+    is_parallel: false,
+    timeout: 60,
+  )
+endif

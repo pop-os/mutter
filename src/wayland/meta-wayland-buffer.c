@@ -61,6 +61,8 @@
 
 #ifdef HAVE_NATIVE_BACKEND
 #include "backends/native/meta-drm-buffer-gbm.h"
+#include "backends/native/meta-kms-utils.h"
+#include "backends/native/meta-onscreen-native.h"
 #include "backends/native/meta-renderer-native.h"
 #endif
 
@@ -282,6 +284,28 @@ shm_buffer_get_cogl_pixel_format (struct wl_shm_buffer  *shm_buffer,
   return TRUE;
 }
 
+static const char *
+shm_format_to_string (MetaDrmFormatBuf *format_buf,
+                      uint32_t          shm_format)
+{
+  const char *result;
+
+  switch (shm_format)
+    {
+    case WL_SHM_FORMAT_ARGB8888:
+      result = "ARGB8888";
+      break;
+    case WL_SHM_FORMAT_XRGB8888:
+      result = "XRGB8888";
+      break;
+    default:
+      result = meta_drm_format_to_string (format_buf, shm_format);
+      break;
+    }
+
+  return result;
+}
+
 static gboolean
 shm_buffer_attach (MetaWaylandBuffer  *buffer,
                    CoglTexture       **texture,
@@ -296,6 +320,7 @@ shm_buffer_attach (MetaWaylandBuffer  *buffer,
   CoglTextureComponents components;
   CoglBitmap *bitmap;
   CoglTexture *new_texture;
+  MetaDrmFormatBuf format_buf;
 
   shm_buffer = wl_shm_buffer_get (buffer->resource);
   stride = wl_shm_buffer_get_stride (shm_buffer);
@@ -307,6 +332,13 @@ shm_buffer_attach (MetaWaylandBuffer  *buffer,
                    "Invalid shm pixel format");
       return FALSE;
     }
+
+  meta_topic (META_DEBUG_WAYLAND,
+              "[wl-shm] wl_buffer@%u wl_shm_format %s -> CoglPixelFormat %s",
+              wl_resource_get_id (meta_wayland_buffer_get_resource (buffer)),
+              shm_format_to_string (&format_buf,
+                                    wl_shm_buffer_get_format (shm_buffer)),
+              cogl_pixel_format_to_string (format));
 
   if (*texture &&
       cogl_texture_get_width (*texture) == width &&
@@ -499,6 +531,8 @@ meta_wayland_buffer_attach (MetaWaylandBuffer  *buffer,
 {
   g_return_val_if_fail (buffer->resource, FALSE);
 
+  COGL_TRACE_BEGIN_SCOPED (MetaWaylandBufferAttach, "WaylandBuffer (attach)");
+
   if (!meta_wayland_buffer_is_realized (buffer))
     {
       /* The buffer should have been realized at surface commit time */
@@ -654,6 +688,7 @@ try_acquire_egl_image_scanout (MetaWaylandBuffer *buffer,
   MetaRenderer *renderer = meta_backend_get_renderer (backend);
   MetaRendererNative *renderer_native = META_RENDERER_NATIVE (renderer);
   MetaGpuKms *gpu_kms;
+  MetaKmsDevice *kms_device;
   struct gbm_device *gbm_device;
   struct gbm_bo *gbm_bo;
   uint32_t drm_format;
@@ -663,6 +698,7 @@ try_acquire_egl_image_scanout (MetaWaylandBuffer *buffer,
   g_autoptr (GError) error = NULL;
 
   gpu_kms = meta_renderer_native_get_primary_gpu (renderer_native);
+  kms_device = meta_gpu_kms_get_kms_device (gpu_kms);
   gbm_device = meta_gbm_device_from_gpu (gpu_kms);
 
   gbm_bo = gbm_bo_import (gbm_device,
@@ -683,7 +719,7 @@ try_acquire_egl_image_scanout (MetaWaylandBuffer *buffer,
       return NULL;
     }
 
-  fb = meta_drm_buffer_gbm_new_take (gpu_kms, gbm_bo,
+  fb = meta_drm_buffer_gbm_new_take (kms_device, gbm_bo,
                                      drm_modifier != DRM_FORMAT_MOD_INVALID,
                                      &error);
   if (!fb)

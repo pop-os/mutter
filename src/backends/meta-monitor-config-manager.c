@@ -252,7 +252,7 @@ assign_monitor_crtc (MetaMonitor         *monitor,
                                     width,
                                     height);
 
-  crtc_assignment = g_slice_new0 (MetaCrtcAssignment);
+  crtc_assignment = g_new0 (MetaCrtcAssignment, 1);
   *crtc_assignment = (MetaCrtcAssignment) {
     .crtc = crtc,
     .mode = crtc_mode,
@@ -280,7 +280,7 @@ assign_monitor_crtc (MetaMonitor         *monitor,
   else
     assign_output_as_presentation = FALSE;
 
-  output_assignment = g_slice_new0 (MetaOutputAssignment);
+  output_assignment = g_new0 (MetaOutputAssignment, 1);
   *output_assignment = (MetaOutputAssignment) {
     .output = output,
     .is_primary = assign_output_as_primary,
@@ -641,7 +641,7 @@ create_monitor_config (MetaMonitor     *monitor,
   monitor_config = g_new0 (MetaMonitorConfig, 1);
   *monitor_config = (MetaMonitorConfig) {
     .monitor_spec = meta_monitor_spec_clone (monitor_spec),
-    .mode_spec = g_memdup (mode_spec, sizeof (MetaMonitorModeSpec)),
+    .mode_spec = g_memdup2 (mode_spec, sizeof (MetaMonitorModeSpec)),
     .enable_underscanning = meta_monitor_is_underscanning (monitor)
   };
 
@@ -928,8 +928,8 @@ clone_monitor_config_list (GList *monitor_configs_in)
       monitor_config_out = g_new0 (MetaMonitorConfig, 1);
       *monitor_config_out = (MetaMonitorConfig) {
         .monitor_spec = meta_monitor_spec_clone (monitor_config_in->monitor_spec),
-        .mode_spec = g_memdup (monitor_config_in->mode_spec,
-                               sizeof (MetaMonitorModeSpec)),
+        .mode_spec = g_memdup2 (monitor_config_in->mode_spec,
+                                sizeof (MetaMonitorModeSpec)),
         .enable_underscanning = monitor_config_in->enable_underscanning
       };
       monitor_configs_out =
@@ -952,7 +952,8 @@ clone_logical_monitor_config_list (GList *logical_monitor_configs_in)
       logical_monitor_config_in = l->data;
 
       logical_monitor_config_out =
-        g_memdup (logical_monitor_config_in, sizeof (MetaLogicalMonitorConfig));
+        g_memdup2 (logical_monitor_config_in,
+                   sizeof (MetaLogicalMonitorConfig));
       logical_monitor_config_out->monitor_configs =
         clone_monitor_config_list (logical_monitor_config_in->monitor_configs);
 
@@ -1599,13 +1600,13 @@ static void
 meta_crtc_assignment_free (MetaCrtcAssignment *assignment)
 {
   g_ptr_array_free (assignment->outputs, TRUE);
-  g_slice_free (MetaCrtcAssignment, assignment);
+  g_free (assignment);
 }
 
 static void
 meta_output_assignment_free (MetaOutputAssignment *assignment)
 {
-  g_slice_free (MetaOutputAssignment, assignment);
+  g_free (assignment);
 }
 
 gboolean

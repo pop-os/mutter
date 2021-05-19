@@ -38,6 +38,7 @@
 #include "clutter/clutter.h"
 #include "core/keybindings-private.h"
 #include "core/meta-gesture-tracker-private.h"
+#include "core/meta-pad-action-mapper.h"
 #include "core/stack-tracker.h"
 #include "core/startup-notification-private.h"
 #include "meta/barrier.h"
@@ -192,7 +193,7 @@ struct _MetaDisplay
   gboolean    grab_threshold_movement_reached; /* raise_on_click == FALSE.    */
   int64_t     grab_last_moveresize_time;
   MetaEdgeResistanceData *grab_edge_resistance_data;
-  unsigned int grab_last_user_action_was_snap;
+  unsigned int grab_last_edge_resistance_flags;
 
   int	      grab_resize_timeout_id;
 
@@ -211,6 +212,7 @@ struct _MetaDisplay
   ClutterEventSequence *pointer_emulating_sequence;
 
   ClutterActor *current_pad_osd;
+  MetaPadActionMapper *pad_action_mapper;
 
   MetaStartupNotification *startup_notification;
 

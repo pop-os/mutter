@@ -42,7 +42,7 @@ struct _MetaScreenCastAreaStreamSrc
 
   GList *watches;
 
-  gulong cursor_moved_handler_id;
+  gulong position_invalidated_handler_id;
   gulong cursor_changed_handler_id;
 
   guint maybe_record_idle_id;
@@ -83,20 +83,7 @@ get_backend (MetaScreenCastAreaStreamSrc *area_src)
   return meta_screen_cast_get_backend (screen_cast);
 }
 
-static MetaCursorRenderer *
-get_cursor_renderer (MetaScreenCastAreaStreamSrc *area_src)
-{
-  MetaScreenCastStreamSrc *src = META_SCREEN_CAST_STREAM_SRC (area_src);
-  MetaScreenCastStream *stream = meta_screen_cast_stream_src_get_stream (src);
-  MetaScreenCastSession *session = meta_screen_cast_stream_get_session (stream);
-  MetaScreenCast *screen_cast =
-    meta_screen_cast_session_get_screen_cast (session);
-  MetaBackend *backend = meta_screen_cast_get_backend (screen_cast);
-
-  return meta_backend_get_cursor_renderer (backend);
-}
-
-static void
+static gboolean
 meta_screen_cast_area_stream_src_get_specs (MetaScreenCastStreamSrc *src,
                                             int                     *width,
                                             int                     *height,
@@ -113,6 +100,8 @@ meta_screen_cast_area_stream_src_get_specs (MetaScreenCastStreamSrc *src,
   *width = (int) roundf (area->width * scale);
   *height = (int) roundf (area->height * scale);
   *frame_rate = 60.0;
+
+  return TRUE;
 }
 
 static gboolean
@@ -142,9 +131,11 @@ is_cursor_in_stream (MetaScreenCastAreaStreamSrc *area_src)
     }
   else
     {
+      MetaCursorTracker *cursor_tracker =
+        meta_backend_get_cursor_tracker (backend);
       graphene_point_t cursor_position;
 
-      cursor_position = meta_cursor_renderer_get_position (cursor_renderer);
+      meta_cursor_tracker_get_pointer (cursor_tracker, &cursor_position, NULL);
       return graphene_rect_contains_point (&area_rect, &cursor_position);
     }
 }
@@ -180,10 +171,8 @@ sync_cursor_state (MetaScreenCastAreaStreamSrc *area_src)
 }
 
 static void
-cursor_moved (MetaCursorTracker           *cursor_tracker,
-              float                        x,
-              float                        y,
-              MetaScreenCastAreaStreamSrc *area_src)
+pointer_position_invalidated (MetaCursorTracker           *cursor_tracker,
+                              MetaScreenCastAreaStreamSrc *area_src)
 {
   sync_cursor_state (area_src);
 }
@@ -199,14 +188,14 @@ cursor_changed (MetaCursorTracker           *cursor_tracker,
 static void
 inhibit_hw_cursor (MetaScreenCastAreaStreamSrc *area_src)
 {
-  MetaCursorRenderer *cursor_renderer;
   MetaHwCursorInhibitor *inhibitor;
+  MetaBackend *backend;
 
   g_return_if_fail (!area_src->hw_cursor_inhibited);
 
-  cursor_renderer = get_cursor_renderer (area_src);
+  backend = get_backend (area_src);
   inhibitor = META_HW_CURSOR_INHIBITOR (area_src);
-  meta_cursor_renderer_add_hw_cursor_inhibitor (cursor_renderer, inhibitor);
+  meta_backend_add_hw_cursor_inhibitor (backend, inhibitor);
 
   area_src->hw_cursor_inhibited = TRUE;
 }
@@ -214,14 +203,14 @@ inhibit_hw_cursor (MetaScreenCastAreaStreamSrc *area_src)
 static void
 uninhibit_hw_cursor (MetaScreenCastAreaStreamSrc *area_src)
 {
-  MetaCursorRenderer *cursor_renderer;
   MetaHwCursorInhibitor *inhibitor;
+  MetaBackend *backend;
 
   g_return_if_fail (area_src->hw_cursor_inhibited);
 
-  cursor_renderer = get_cursor_renderer (area_src);
+  backend = get_backend (area_src);
   inhibitor = META_HW_CURSOR_INHIBITOR (area_src);
-  meta_cursor_renderer_remove_hw_cursor_inhibitor (cursor_renderer, inhibitor);
+  meta_backend_remove_hw_cursor_inhibitor (backend, inhibitor);
 
   area_src->hw_cursor_inhibited = FALSE;
 }
@@ -349,9 +338,9 @@ meta_screen_cast_area_stream_src_enable (MetaScreenCastStreamSrc *src)
   switch (meta_screen_cast_stream_get_cursor_mode (stream))
     {
     case META_SCREEN_CAST_CURSOR_MODE_METADATA:
-      area_src->cursor_moved_handler_id =
-        g_signal_connect_after (cursor_tracker, "cursor-moved",
-                                G_CALLBACK (cursor_moved),
+      area_src->position_invalidated_handler_id =
+        g_signal_connect_after (cursor_tracker, "position-invalidated",
+                                G_CALLBACK (pointer_position_invalidated),
                                 area_src);
       area_src->cursor_changed_handler_id =
         g_signal_connect_after (cursor_tracker, "cursor-changed",
@@ -404,7 +393,7 @@ meta_screen_cast_area_stream_src_disable (MetaScreenCastStreamSrc *src)
   if (area_src->hw_cursor_inhibited)
     uninhibit_hw_cursor (area_src);
 
-  g_clear_signal_handler (&area_src->cursor_moved_handler_id,
+  g_clear_signal_handler (&area_src->position_invalidated_handler_id,
                           cursor_tracker);
   g_clear_signal_handler (&area_src->cursor_changed_handler_id,
                           cursor_tracker);
@@ -424,6 +413,9 @@ meta_screen_cast_area_stream_src_disable (MetaScreenCastStreamSrc *src)
 
 static gboolean
 meta_screen_cast_area_stream_src_record_to_buffer (MetaScreenCastStreamSrc  *src,
+                                                   int                       width,
+                                                   int                       height,
+                                                   int                       stride,
                                                    uint8_t                  *data,
                                                    GError                  **error)
 {
@@ -434,13 +426,11 @@ meta_screen_cast_area_stream_src_record_to_buffer (MetaScreenCastStreamSrc  *src
   ClutterStage *stage;
   MetaRectangle *area;
   float scale;
-  int stride;
   ClutterPaintFlag paint_flags = CLUTTER_PAINT_FLAG_CLEAR;
 
   stage = get_stage (area_src);
   area = meta_screen_cast_area_stream_get_area (area_stream);
   scale = meta_screen_cast_area_stream_get_scale (area_stream);
-  stride = meta_screen_cast_stream_src_get_stride (src);
 
   switch (meta_screen_cast_stream_get_cursor_mode (stream))
     {
@@ -497,7 +487,7 @@ meta_screen_cast_area_stream_src_record_to_framebuffer (MetaScreenCastStreamSrc 
                                       area, scale,
                                       paint_flags);
 
-  cogl_framebuffer_finish (framebuffer);
+  cogl_framebuffer_flush (framebuffer);
 
   return TRUE;
 }
@@ -547,7 +537,7 @@ meta_screen_cast_area_stream_src_set_cursor_metadata (MetaScreenCastStreamSrc *s
   area = meta_screen_cast_area_stream_get_area (area_stream);
   scale = meta_screen_cast_area_stream_get_scale (area_stream);
 
-  cursor_position = meta_cursor_renderer_get_position (cursor_renderer);
+  meta_cursor_tracker_get_pointer (cursor_tracker, &cursor_position, NULL);
   cursor_position.x -= area->x;
   cursor_position.y -= area->y;
   cursor_position.x *= scale;
@@ -589,8 +579,7 @@ meta_screen_cast_area_stream_src_set_cursor_metadata (MetaScreenCastStreamSrc *s
 }
 
 static gboolean
-meta_screen_cast_area_stream_src_is_cursor_sprite_inhibited (MetaHwCursorInhibitor *inhibitor,
-                                                             MetaCursorSprite      *cursor_sprite)
+meta_screen_cast_area_stream_src_is_cursor_inhibited (MetaHwCursorInhibitor *inhibitor)
 {
   MetaScreenCastAreaStreamSrc *area_src =
     META_SCREEN_CAST_AREA_STREAM_SRC (inhibitor);
@@ -601,8 +590,8 @@ meta_screen_cast_area_stream_src_is_cursor_sprite_inhibited (MetaHwCursorInhibit
 static void
 hw_cursor_inhibitor_iface_init (MetaHwCursorInhibitorInterface *iface)
 {
-  iface->is_cursor_sprite_inhibited =
-    meta_screen_cast_area_stream_src_is_cursor_sprite_inhibited;
+  iface->is_cursor_inhibited =
+    meta_screen_cast_area_stream_src_is_cursor_inhibited;
 }
 
 MetaScreenCastAreaStreamSrc *

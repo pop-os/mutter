@@ -73,7 +73,7 @@ struct _TestCoglboxPrivate
 {
   CoglHandle texhand_id;
   CoglHandle texture_id;
-  CoglHandle offscreen_id;
+  CoglFramebuffer *framebuffer;
 };
 
 G_DEFINE_TYPE_WITH_PRIVATE (TestCoglbox, test_coglbox, CLUTTER_TYPE_ACTOR);
@@ -111,11 +111,11 @@ test_coglbox_paint (ClutterActor        *self,
 
   pipeline = cogl_pipeline_new (ctx);
   cogl_pipeline_set_color4ub (pipeline, 0xff, 0, 0, 0xff);
-  cogl_framebuffer_draw_rectangle (priv->offscreen_id, pipeline,
+  cogl_framebuffer_draw_rectangle (priv->framebuffer, pipeline,
                                    20, 20, 20 + 100, 20 + 100);
 
   cogl_pipeline_set_color4ub (pipeline, 0, 0xff, 0, 0xff);
-  cogl_framebuffer_draw_rectangle (priv->offscreen_id, pipeline,
+  cogl_framebuffer_draw_rectangle (priv->framebuffer, pipeline,
                                    80, 80, 80 + 100, 80 + 100);
   cogl_object_unref (pipeline);
 
@@ -146,7 +146,7 @@ test_coglbox_dispose (GObject *object)
   priv = TEST_COGLBOX_GET_PRIVATE (object);
 
   cogl_object_unref (priv->texture_id);
-  cogl_object_unref (priv->offscreen_id);
+  g_object_unref (priv->framebuffer);
 
   G_OBJECT_CLASS (test_coglbox_parent_class)->dispose (object);
 }
@@ -181,8 +181,8 @@ setup_viewport (CoglFramebuffer *framebuffer,
                 float            z_far)
 {
   float z_camera;
-  CoglMatrix projection_matrix;
-  CoglMatrix mv_matrix;
+  graphene_matrix_t projection_matrix;
+  graphene_matrix_t mv_matrix;
 
   cogl_framebuffer_set_viewport (framebuffer, 0, 0, width, height);
 
@@ -232,12 +232,15 @@ setup_viewport (CoglFramebuffer *framebuffer,
    */
 
   cogl_framebuffer_get_projection_matrix (framebuffer, &projection_matrix);
-  z_camera = 0.5 * projection_matrix.xx;
+  z_camera = 0.5 * graphene_matrix_get_value (&projection_matrix, 0, 0);
 
-  cogl_matrix_init_identity (&mv_matrix);
-  cogl_matrix_translate (&mv_matrix, -0.5f, -0.5f, -z_camera);
-  cogl_matrix_scale (&mv_matrix, 1.0f / width, -1.0f / height, 1.0f / width);
-  cogl_matrix_translate (&mv_matrix, 0.0f, -1.0 * height, 0.0f);
+  graphene_matrix_init_translate (&mv_matrix,
+                                  &GRAPHENE_POINT3D_INIT (0.0f,
+                                                          -1.0 * height,
+                                                          0.0f));
+  graphene_matrix_scale (&mv_matrix, 1.0f / width, -1.0f / height, 1.0f / width);
+  graphene_matrix_translate (&mv_matrix,
+                             &GRAPHENE_POINT3D_INIT (-0.5f, -0.5f, -z_camera));
   cogl_framebuffer_set_modelview_matrix (framebuffer, &mv_matrix);
 }
 
@@ -249,24 +252,28 @@ test_coglbox_map (ClutterActor *actor)
   ClutterPerspective perspective;
   float stage_width;
   float stage_height;
+  GError *error = NULL;
 
   CLUTTER_ACTOR_CLASS (test_coglbox_parent_class)->map (actor);
 
   printf ("Creating offscreen\n");
-  priv->offscreen_id = cogl_offscreen_new_to_texture (priv->texture_id);
+  priv->framebuffer =
+    COGL_FRAMEBUFFER (cogl_offscreen_new_with_texture (priv->texture_id));
+  if (!cogl_framebuffer_allocate (priv->framebuffer, &error))
+    g_error ("Failed to allocate framebuffer: %s", error->message);
 
   stage = clutter_actor_get_stage (actor);
   clutter_stage_get_perspective (CLUTTER_STAGE (stage), &perspective);
   clutter_actor_get_size (stage, &stage_width, &stage_height);
 
-  setup_viewport (priv->offscreen_id,
+  setup_viewport (priv->framebuffer,
                   stage_width, stage_height,
                   perspective.fovy,
                   perspective.aspect,
                   perspective.z_near,
                   perspective.z_far);
 
-  if (priv->offscreen_id == NULL)
+  if (!priv->framebuffer)
     printf ("Failed creating offscreen to texture!\n");
 }
 
