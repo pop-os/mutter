@@ -6,8 +6,8 @@ export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 export DEB_LDFLAGS_MAINT_APPEND = -Wl,-O1
 
 # Following upstream method to compute the API version
-MUTTER_MINOR_VERSION = $(shell echo $(DEB_VERSION_UPSTREAM) | cut -d. -f2)
-MUTTER_API_VERSION = $(shell echo $$(( ($(MUTTER_MINOR_VERSION) - 23)/2 )) )
+MUTTER_MINOR_VERSION = $(shell echo $(DEB_VERSION_UPSTREAM) | cut -d. -f1)
+MUTTER_API_VERSION = $(shell echo $$(( $(MUTTER_MINOR_VERSION) - 32 )) )
 MUTTER_SONAME = 0
 
 export MUTTER_API_VERSION
