@@ -90,8 +90,16 @@ mutter (40.1-1) UNRELEASED; urgency=medium
     - Fix monitor screencasting with fractional scaling
     - Plugged memory leaks
     - Fixed crashes
+  * debian: Update library name to follow soname (mutter-8)
+  * debian/control: Bump dependencies to match upstream requirements
+  * debian/patches:
+    - Refresh
+    - Do not run screencast tests.
+      They require to have a full running pipewire (that requires a system
+      dbus daemon) so, we can't easily get one up and running while building.
+  * debian/libmutter-8-0.symbols: Sync with new library symbols
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 19 May 2021 20:23:25 +0200
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 25 May 2021 23:03:27 +0200
 
 mutter (3.38.4-1) unstable; urgency=medium
 
