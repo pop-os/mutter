@@ -1,0 +1,32 @@
+From: =?utf-8?b?Ik1hcmNvIFRyZXZpc2FuIChUcmV2acOxbyki?= <mail@3v1n0.net>
+Date: Wed, 26 May 2021 21:07:41 +0200
+Subject: mutter-all.test: Run tests in a environment with display and bus set
+
+The mutter tests require to run in a valid environment where a display
+is available and a session bus, however currently we rely on the current
+environment, and this may lead to unexpected behaviors.
+
+So let's just ensure that a display is running through xvfb-run and
+that a session bus is running in a temporary directory.
+
+We also ensure to use the gsettings memory backend, even because by
+setting TestEnvironment we ensure that no other env variable is leaked
+to the test.
+
+Origin: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1876
+---
+ src/tests/mutter-all.test.in | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/tests/mutter-all.test.in b/src/tests/mutter-all.test.in
+index 3078ff6..6e103c5 100644
+--- a/src/tests/mutter-all.test.in
++++ b/src/tests/mutter-all.test.in
+@@ -1,5 +1,6 @@
+ [Test]
+ Description=All Mutter tests
+-Exec=@libexecdir@/installed-tests/mutter-@apiversion@/mutter-test-runner --all
++TestEnvironment=GSETTINGS_BACKEND=memory;
++Exec=sh -c 'env XDG_RUNTIME_DIR="$(mktemp -d -t mutter-@apiversion@-all-tests-XXXXXX)" dbus-run-session -- xvfb-run -a -s "+iglx -noreset" -- @libexecdir@/installed-tests/mutter-@apiversion@/mutter-test-runner --all'
+ Type=session
+ Output=TAP

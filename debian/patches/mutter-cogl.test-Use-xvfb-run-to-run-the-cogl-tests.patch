@@ -1,0 +1,28 @@
+From: =?utf-8?b?Ik1hcmNvIFRyZXZpc2FuIChUcmV2acOxbyki?= <mail@3v1n0.net>
+Date: Wed, 26 May 2021 21:03:45 +0200
+Subject: mutter-cogl.test: Use xvfb-run to run the cogl tests
+
+The cogl tests need to run with a display server set, however since we
+use TestEnvironment, only the listed env variables will be exposed to
+the test and so no DISPLAY will be set when launching it with
+gnome-desktop-testing-runner.
+
+As per this, just run the tests using xvfb-run so that we match what's
+happening in CI and we ensure that the tests are run in a safe
+environment.
+
+Origin: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1876
+---
+ cogl/tests/conform/mutter-cogl.test.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/cogl/tests/conform/mutter-cogl.test.in b/cogl/tests/conform/mutter-cogl.test.in
+index d7c85ed..fae4f5c 100644
+--- a/cogl/tests/conform/mutter-cogl.test.in
++++ b/cogl/tests/conform/mutter-cogl.test.in
+@@ -1,4 +1,4 @@
+ [Test]
+ Type=session
+ TestEnvironment=COGL_TEST_VERBOSE=1
+-Exec=sh -c "cd @libexecdir@/installed-tests/mutter-@apiversion@/cogl/conform; ./run-tests.sh ./config.env ./test-conformance ./unit-tests"
++Exec=sh -c "cd @libexecdir@/installed-tests/mutter-@apiversion@/cogl/conform; xvfb-run -a -s '+iglx -noreset' ./run-tests.sh ./config.env ./test-conformance ./unit-tests"
