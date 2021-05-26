@@ -23,12 +23,13 @@ CONFFLAGS = \
 	-Dremote_desktop=true \
 	-Dwayland_eglstream=true
 else
-CONFFLAGS += \
+CONFFLAGS = \
 	-Dudev=false \
 	-Dlibwacom=false \
 	-Dwayland=false \
 	-Dcore_tests=false \
 	-Dnative_backend=false \
+	-Dnative_tests=false \
 	-Dprofiler=false \
 	-Dremote_desktop=false
 endif
