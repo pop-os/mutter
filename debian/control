@@ -117,6 +117,7 @@ Depends: at-spi2-core,
          mutter (= ${source:Version}),
          xauth,
          xvfb,
+         xwayland [linux-any],
          ${misc:Depends},
          ${shlibs:Depends}
 Description: Tests for GNOME's window manager library
