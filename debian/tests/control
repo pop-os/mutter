@@ -1,7 +1,6 @@
-Tests: libmutter-8-dev
+Tests: libmutter-8-dev, installed-tests
 Depends: build-essential,
-         dbus,
+         gnome-desktop-testing,
          libmutter-8-dev,
-         xauth,
-         xvfb
+         mutter-8-tests
 Restrictions: allow-stderr superficial
