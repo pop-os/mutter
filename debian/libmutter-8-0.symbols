@@ -2573,6 +2573,10 @@ libmutter-cogl-8.so.0 libmutter-8-0 #MINVER#
  cogl_texture_set_premultiplied@Base 3.29.4
  cogl_texture_set_region@Base 3.29.4
  cogl_texture_set_region_from_bitmap@Base 3.29.4
+ (arch=linux-any)cogl_trace_context@Base 40.1
+ (arch=linux-any)cogl_trace_end@Base 40.1
+ (arch=linux-any)cogl_trace_mutex@Base 40.1
+ (arch=linux-any)cogl_trace_thread_data@Base 40.1
  (arch=linux-any)cogl_wayland_display_set_compositor_display@Base 3.29.4
  cogl_x11_onscreen_get_type@Base 40.0
  cogl_x11_onscreen_get_x11_window@Base 40.0
