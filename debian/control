@@ -108,6 +108,30 @@ Description: Example window manager using GNOME's window manager library
  This package contains the mutter executable. It can be used as a
  standalone window manager, but is primarily intended for debugging.
 
+Package: mutter-8-tests
+Architecture: any
+Depends: at-spi2-core,
+         dbus,
+         dmz-cursor-theme,
+         libmutter-8-0 (= ${binary:Version}),
+         mutter (= ${source:Version}),
+         xauth,
+         xvfb,
+         ${misc:Depends},
+         ${shlibs:Depends}
+Description: Tests for GNOME's window manager library
+ Mutter is a Wayland display server and X11 window manager and
+ compositor library. It contains functionality related to, among other
+ things, window management, window compositing, focus tracking, workspace
+ management, keybindings and monitor configuration.
+ .
+ Internally it uses a fork of Cogl, a hardware acceleration abstraction
+ library used to simplify usage of OpenGL pipelines, as well as a fork
+ of Clutter, a scene graph and user interface toolkit.
+ .
+ This package contains test programs, designed to be run as part of a
+ regression testsuite.
+
 Package: gir1.2-mutter-8
 Section: introspection
 Architecture: any
