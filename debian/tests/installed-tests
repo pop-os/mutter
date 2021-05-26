@@ -1,8 +1,0 @@
-#!/bin/sh
-# autopkgtest check: Run the mutter installed tests
-# (C) 2021 Canonical Ltd.
-# Authors: Marco Trevisan
-
-set -eux
-
-gnome-desktop-testing-runner mutter-8
