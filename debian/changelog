@@ -1,4 +1,4 @@
-mutter (40.1-1ubuntu1) UNRELEASED; urgency=medium
+mutter (40.1-1ubuntu1) impish; urgency=medium
 
   * Merge with debian, containing new upstream version:
     - Wayland input thread support (LP: #1690719)
@@ -8,7 +8,7 @@ mutter (40.1-1ubuntu1) UNRELEASED; urgency=medium
     - debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
       + X11: Add support for fractional scaling using Randr
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 02 Jun 2021 20:19:26 +0200
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 02 Jun 2021 21:07:08 +0200
 
 mutter (40.1-1) experimental; urgency=medium
 
