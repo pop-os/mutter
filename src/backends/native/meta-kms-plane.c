@@ -30,6 +30,11 @@
 #include "backends/native/meta-kms-impl-device.h"
 #include "backends/native/meta-kms-update-private.h"
 
+typedef struct _MetaKmsPlanePropTable
+{
+  MetaKmsProp props[META_KMS_PLANE_N_PROPS];
+} MetaKmsPlanePropTable;
+
 struct _MetaKmsPlane
 {
   GObject parent;
@@ -41,7 +46,6 @@ struct _MetaKmsPlane
 
   uint32_t possible_crtcs;
 
-  uint32_t rotation_prop_id;
   uint32_t rotation_map[META_MONITOR_N_TRANSFORMS];
   uint32_t all_hw_transforms;
 
@@ -51,6 +55,8 @@ struct _MetaKmsPlane
    * value: owned GArray* (uint64_t modifier), or NULL
    */
   GHashTable *formats_modifiers;
+
+  MetaKmsPlanePropTable prop_table;
 
   MetaKmsDevice *device;
 };
@@ -77,6 +83,20 @@ meta_kms_plane_get_plane_type (MetaKmsPlane *plane)
   return plane->type;
 }
 
+uint32_t
+meta_kms_plane_get_prop_id (MetaKmsPlane     *plane,
+                            MetaKmsPlaneProp  prop)
+{
+  return plane->prop_table.props[prop].prop_id;
+}
+
+const char *
+meta_kms_plane_get_prop_name (MetaKmsPlane     *plane,
+                              MetaKmsPlaneProp  prop)
+{
+  return plane->prop_table.props[prop].name;
+}
+
 void
 meta_kms_plane_update_set_rotation (MetaKmsPlane           *plane,
                                     MetaKmsPlaneAssignment *plane_assignment,
@@ -84,9 +104,8 @@ meta_kms_plane_update_set_rotation (MetaKmsPlane           *plane,
 {
   g_return_if_fail (meta_kms_plane_is_transform_handled (plane, transform));
 
-  meta_kms_plane_assignment_set_plane_property (plane_assignment,
-                                                plane->rotation_prop_id,
-                                                plane->rotation_map[transform]);
+  meta_kms_plane_assignment_set_rotation (plane_assignment,
+                                          plane->rotation_map[transform]);
 }
 
 gboolean
@@ -163,48 +182,33 @@ meta_kms_plane_is_usable_with (MetaKmsPlane *plane,
 }
 
 static void
-parse_rotations (MetaKmsPlane       *plane,
-                 MetaKmsImplDevice  *impl_device,
-                 drmModePropertyPtr  prop)
+parse_rotations (MetaKmsImplDevice  *impl_device,
+                 MetaKmsProp        *prop,
+                 drmModePropertyPtr  drm_prop,
+                 uint64_t            drm_prop_value,
+                 gpointer            user_data)
 {
+  MetaKmsPlane *plane = user_data;
   int i;
 
-  for (i = 0; i < prop->count_enums; i++)
+  for (i = 0; i < drm_prop->count_enums; i++)
     {
       MetaMonitorTransform transform = -1;
 
-      if (strcmp (prop->enums[i].name, "rotate-0") == 0)
+      if (strcmp (drm_prop->enums[i].name, "rotate-0") == 0)
         transform = META_MONITOR_TRANSFORM_NORMAL;
-      else if (strcmp (prop->enums[i].name, "rotate-90") == 0)
+      else if (strcmp (drm_prop->enums[i].name, "rotate-90") == 0)
         transform = META_MONITOR_TRANSFORM_90;
-      else if (strcmp (prop->enums[i].name, "rotate-180") == 0)
+      else if (strcmp (drm_prop->enums[i].name, "rotate-180") == 0)
         transform = META_MONITOR_TRANSFORM_180;
-      else if (strcmp (prop->enums[i].name, "rotate-270") == 0)
+      else if (strcmp (drm_prop->enums[i].name, "rotate-270") == 0)
         transform = META_MONITOR_TRANSFORM_270;
 
       if (transform != -1)
         {
           plane->all_hw_transforms |= 1 << transform;
-          plane->rotation_map[transform] = 1 << prop->enums[i].value;
+          plane->rotation_map[transform] = 1 << drm_prop->enums[i].value;
         }
-    }
-}
-
-static void
-init_rotations (MetaKmsPlane            *plane,
-                MetaKmsImplDevice       *impl_device,
-                drmModeObjectProperties *drm_plane_props)
-{
-  drmModePropertyPtr prop;
-  int idx;
-
-  prop = meta_kms_impl_device_find_property (impl_device, drm_plane_props,
-                                             "rotation", &idx);
-  if (prop)
-    {
-      plane->rotation_prop_id = drm_plane_props->props[idx];
-      parse_rotations (plane, impl_device, prop);
-      drmModeFreeProperty (prop);
     }
 }
 
@@ -231,10 +235,14 @@ free_modifier_array (GArray *array)
 }
 
 static void
-parse_formats (MetaKmsPlane      *plane,
-               MetaKmsImplDevice *impl_device,
-               uint32_t           blob_id)
+parse_formats (MetaKmsImplDevice  *impl_device,
+               MetaKmsProp        *prop,
+               drmModePropertyPtr  drm_prop,
+               uint64_t            drm_prop_value,
+               gpointer            user_data)
 {
+  MetaKmsPlane *plane = user_data;
+  uint64_t blob_id;
   int fd;
   drmModePropertyBlobPtr blob;
   struct drm_format_modifier_blob *blob_fmt;
@@ -244,6 +252,7 @@ parse_formats (MetaKmsPlane      *plane,
 
   g_return_if_fail (g_hash_table_size (plane->formats_modifiers) == 0);
 
+  blob_id = drm_prop_value;
   if (blob_id == 0)
     return;
 
@@ -328,25 +337,11 @@ static const uint32_t drm_default_formats[] =
   };
 
 static void
-init_formats (MetaKmsPlane            *plane,
-              MetaKmsImplDevice       *impl_device,
-              drmModePlane            *drm_plane,
-              drmModeObjectProperties *drm_plane_props)
+init_legacy_formats (MetaKmsPlane            *plane,
+                     MetaKmsImplDevice       *impl_device,
+                     drmModePlane            *drm_plane,
+                     drmModeObjectProperties *drm_plane_props)
 {
-  drmModePropertyPtr prop;
-  int idx;
-
-  prop = meta_kms_impl_device_find_property (impl_device, drm_plane_props,
-                                             "IN_FORMATS", &idx);
-  if (prop)
-    {
-      uint32_t blob_id;
-
-      blob_id = drm_plane_props->prop_values[idx];
-      parse_formats (plane, impl_device, blob_id);
-      drmModeFreeProperty (prop);
-    }
-
   if (g_hash_table_size (plane->formats_modifiers) == 0)
     {
       set_formats_from_array (plane,
@@ -363,6 +358,95 @@ init_formats (MetaKmsPlane            *plane,
     }
 }
 
+static void
+init_properties (MetaKmsPlane            *plane,
+                 MetaKmsImplDevice       *impl_device,
+                 drmModePlane            *drm_plane,
+                 drmModeObjectProperties *drm_plane_props)
+{
+  MetaKmsPlanePropTable *prop_table = &plane->prop_table;
+
+  *prop_table = (MetaKmsPlanePropTable) {
+    .props = {
+      [META_KMS_PLANE_PROP_TYPE] =
+        {
+          .name = "type",
+          .type = DRM_MODE_PROP_ENUM,
+        },
+      [META_KMS_PLANE_PROP_ROTATION] =
+        {
+          .name = "rotation",
+          .type = DRM_MODE_PROP_BITMASK,
+          .parse = parse_rotations,
+        },
+      [META_KMS_PLANE_PROP_IN_FORMATS] =
+        {
+          .name = "IN_FORMATS",
+          .type = DRM_MODE_PROP_BLOB,
+          .parse = parse_formats,
+        },
+      [META_KMS_PLANE_PROP_SRC_X] =
+        {
+          .name = "SRC_X",
+          .type = DRM_MODE_PROP_RANGE,
+        },
+      [META_KMS_PLANE_PROP_SRC_Y] =
+        {
+          .name = "SRC_Y",
+          .type = DRM_MODE_PROP_RANGE,
+        },
+      [META_KMS_PLANE_PROP_SRC_W] =
+        {
+          .name = "SRC_W",
+          .type = DRM_MODE_PROP_RANGE,
+        },
+      [META_KMS_PLANE_PROP_SRC_H] =
+        {
+          .name = "SRC_H",
+          .type = DRM_MODE_PROP_RANGE,
+        },
+      [META_KMS_PLANE_PROP_CRTC_X] =
+        {
+          .name = "CRTC_X",
+          .type = DRM_MODE_PROP_SIGNED_RANGE,
+        },
+      [META_KMS_PLANE_PROP_CRTC_Y] =
+        {
+          .name = "CRTC_Y",
+          .type = DRM_MODE_PROP_SIGNED_RANGE,
+        },
+      [META_KMS_PLANE_PROP_CRTC_W] =
+        {
+          .name = "CRTC_W",
+          .type = DRM_MODE_PROP_RANGE,
+        },
+      [META_KMS_PLANE_PROP_CRTC_H] =
+        {
+          .name = "CRTC_H",
+          .type = DRM_MODE_PROP_RANGE,
+        },
+      [META_KMS_PLANE_PROP_FB_ID] =
+        {
+          .name = "FB_ID",
+          .type = DRM_MODE_PROP_OBJECT,
+        },
+      [META_KMS_PLANE_PROP_CRTC_ID] =
+        {
+          .name = "CRTC_ID",
+          .type = DRM_MODE_PROP_OBJECT,
+        },
+    }
+  };
+
+  meta_kms_impl_device_init_prop_table (impl_device,
+                                        drm_plane_props->props,
+                                        drm_plane_props->prop_values,
+                                        drm_plane_props->count_props,
+                                        plane->prop_table.props,
+                                        META_KMS_PLANE_N_PROPS,
+                                        plane);
+}
+
 MetaKmsPlane *
 meta_kms_plane_new (MetaKmsPlaneType         type,
                     MetaKmsImplDevice       *impl_device,
@@ -377,8 +461,8 @@ meta_kms_plane_new (MetaKmsPlaneType         type,
   plane->possible_crtcs = drm_plane->possible_crtcs;
   plane->device = meta_kms_impl_device_get_device (impl_device);
 
-  init_rotations (plane, impl_device, drm_plane_props);
-  init_formats (plane, impl_device, drm_plane, drm_plane_props);
+  init_properties (plane, impl_device, drm_plane, drm_plane_props);
+  init_legacy_formats (plane, impl_device, drm_plane, drm_plane_props);
 
   return plane;
 }

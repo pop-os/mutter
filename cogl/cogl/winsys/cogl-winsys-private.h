@@ -32,7 +32,6 @@
 #define __COGL_WINSYS_PRIVATE_H
 
 #include "cogl-renderer.h"
-#include "cogl-onscreen.h"
 #include "cogl-scanout.h"
 
 #ifdef COGL_HAS_XLIB_SUPPORT
@@ -104,50 +103,7 @@ typedef struct _CoglWinsysVtable
   void
   (*context_deinit) (CoglContext *context);
 
-  gboolean
-  (*onscreen_init) (CoglOnscreen *onscreen, GError **error);
-
-  void
-  (*onscreen_deinit) (CoglOnscreen *onscreen);
-
-  void
-  (*onscreen_bind) (CoglOnscreen *onscreen);
-
-  void
-  (*onscreen_swap_buffers_with_damage) (CoglOnscreen *onscreen,
-                                        const int *rectangles,
-                                        int n_rectangles,
-                                        CoglFrameInfo *info);
-
-  gboolean
-  (*onscreen_direct_scanout) (CoglOnscreen   *onscreen,
-                              CoglScanout    *scanout,
-                              CoglFrameInfo  *info,
-                              GError        **error);
-
-  void
-  (*onscreen_set_visibility) (CoglOnscreen *onscreen,
-                              gboolean visibility);
-
   /* Optional functions */
-
-  int64_t
-  (*context_get_clock_time) (CoglContext *context);
-
-  void
-  (*onscreen_swap_region) (CoglOnscreen *onscreen,
-                           const int *rectangles,
-                           int n_rectangles,
-                           CoglFrameInfo *info);
-
-  void
-  (*onscreen_set_resizable) (CoglOnscreen *onscreen, gboolean resizable);
-
-  int
-  (*onscreen_get_buffer_age) (CoglOnscreen *onscreen);
-
-  uint32_t
-  (*onscreen_x11_get_window_xid) (CoglOnscreen *onscreen);
 
 #ifdef COGL_HAS_XLIB_SUPPORT
   gboolean

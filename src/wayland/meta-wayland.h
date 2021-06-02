@@ -55,8 +55,6 @@ void                    meta_wayland_compositor_update_key_state (MetaWaylandCom
                                                                   int                    key_vector_len,
                                                                   int                    offset);
 
-void                    meta_wayland_compositor_repick          (MetaWaylandCompositor *compositor);
-
 void                    meta_wayland_compositor_set_input_focus (MetaWaylandCompositor *compositor,
                                                                  MetaWindow            *window);
 
@@ -68,11 +66,19 @@ void                    meta_wayland_compositor_add_frame_callback_surface (Meta
 void                    meta_wayland_compositor_remove_frame_callback_surface (MetaWaylandCompositor *compositor,
                                                                                MetaWaylandSurface    *surface);
 
+void                    meta_wayland_compositor_add_presentation_feedback_surface (MetaWaylandCompositor *compositor,
+                                                                                   MetaWaylandSurface    *surface);
+
+void                    meta_wayland_compositor_remove_presentation_feedback_surface (MetaWaylandCompositor *compositor,
+                                                                                      MetaWaylandSurface    *surface);
+
 META_EXPORT_TEST
 const char             *meta_wayland_get_wayland_display_name   (MetaWaylandCompositor *compositor);
 
 META_EXPORT_TEST
-const char             *meta_wayland_get_xwayland_display_name  (MetaWaylandCompositor *compositor);
+const char             *meta_wayland_get_public_xwayland_display_name  (MetaWaylandCompositor *compositor);
+
+const char             *meta_wayland_get_private_xwayland_display_name (MetaWaylandCompositor *compositor);
 
 void                    meta_wayland_compositor_restore_shortcuts      (MetaWaylandCompositor *compositor,
                                                                         ClutterInputDevice    *source);

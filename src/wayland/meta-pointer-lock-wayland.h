@@ -27,15 +27,15 @@
 
 #include <glib-object.h>
 
-#include "backends/meta-pointer-constraint.h"
+#include "wayland/meta-pointer-confinement-wayland.h"
 
 G_BEGIN_DECLS
 
 #define META_TYPE_POINTER_LOCK_WAYLAND (meta_pointer_lock_wayland_get_type ())
 G_DECLARE_FINAL_TYPE (MetaPointerLockWayland, meta_pointer_lock_wayland,
-                      META, POINTER_LOCK_WAYLAND, MetaPointerConstraint);
+                      META, POINTER_LOCK_WAYLAND, MetaPointerConfinementWayland)
 
-MetaPointerConstraint *meta_pointer_lock_wayland_new (void);
+MetaPointerConfinementWayland *meta_pointer_lock_wayland_new (MetaWaylandPointerConstraint *constraint);
 
 G_END_DECLS
 

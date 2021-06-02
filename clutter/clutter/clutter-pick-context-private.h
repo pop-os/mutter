@@ -19,7 +19,19 @@
 #define CLUTTER_PICK_CONTEXT_PRIVATE_H
 
 #include "clutter-pick-context.h"
+#include "clutter-pick-stack-private.h"
 
-ClutterPickContext * clutter_pick_context_new_for_view (ClutterStageView *view);
+ClutterPickContext *
+clutter_pick_context_new_for_view (ClutterStageView         *view,
+                                   ClutterPickMode           mode,
+                                   const graphene_point3d_t *point,
+                                   const graphene_ray_t     *ray);
+
+ClutterPickStack *
+clutter_pick_context_steal_stack (ClutterPickContext *pick_context);
+
+gboolean
+clutter_pick_context_intersects_box (ClutterPickContext   *pick_context,
+                                     const graphene_box_t *box);
 
 #endif /* CLUTTER_PICK_CONTEXT_PRIVATE_H */

@@ -38,24 +38,6 @@ G_DECLARE_DERIVABLE_TYPE (ClutterSeat, clutter_seat,
 			  CLUTTER, SEAT, GObject)
 
 /**
- * ClutterKbdA11ySettings:
- *
- * The #ClutterKbdA11ySettings structure contains keyboard accessibility
- * settings
- *
- */
-typedef struct _ClutterKbdA11ySettings
-{
-  ClutterKeyboardA11yFlags controls;
-  gint slowkeys_delay;
-  gint debounce_delay;
-  gint timeout_delay;
-  gint mousekeys_init_delay;
-  gint mousekeys_max_speed;
-  gint mousekeys_accel_time;
-} ClutterKbdA11ySettings;
-
-/**
  * ClutterPointerA11ySettings:
  *
  * The #ClutterPointerA11ySettings structure contains pointer accessibility
@@ -102,27 +84,18 @@ struct _ClutterSeatClass
 
   ClutterKeymap * (* get_keymap) (ClutterSeat *seat);
 
-  void (* compress_motion) (ClutterSeat        *seat,
-                            ClutterEvent       *event,
-                            const ClutterEvent *to_discard);
-
-  gboolean (* handle_device_event) (ClutterSeat  *seat,
-                                    ClutterEvent *event);
+  gboolean (* handle_event_post) (ClutterSeat        *seat,
+                                  const ClutterEvent *event);
 
   void (* warp_pointer) (ClutterSeat *seat,
                          int          x,
                          int          y);
 
-  /* Event platform data */
-  void (* copy_event_data) (ClutterSeat        *seat,
-                            const ClutterEvent *src,
-                            ClutterEvent       *dest);
-  void (* free_event_data) (ClutterSeat        *seat,
-                            ClutterEvent       *event);
-
-  /* Keyboard accessibility */
-  void (* apply_kbd_a11y_settings) (ClutterSeat            *seat,
-                                    ClutterKbdA11ySettings *settings);
+  gboolean (* query_state) (ClutterSeat          *seat,
+                            ClutterInputDevice   *device,
+                            ClutterEventSequence *sequence,
+                            graphene_point_t     *coords,
+                            ClutterModifierType  *modifiers);
 
   /* Virtual devices */
   ClutterVirtualInputDevice * (* create_virtual_device) (ClutterSeat            *seat,
@@ -143,12 +116,6 @@ void clutter_seat_bell_notify (ClutterSeat *seat);
 CLUTTER_EXPORT
 ClutterKeymap * clutter_seat_get_keymap (ClutterSeat *seat);
 
-CLUTTER_EXPORT
-void clutter_seat_set_kbd_a11y_settings (ClutterSeat            *seat,
-                                         ClutterKbdA11ySettings *settings);
-CLUTTER_EXPORT
-void clutter_seat_get_kbd_a11y_settings (ClutterSeat            *seat,
-                                         ClutterKbdA11ySettings *settings);
 CLUTTER_EXPORT
 void clutter_seat_ensure_a11y_state     (ClutterSeat            *seat);
 
@@ -180,18 +147,21 @@ ClutterVirtualInputDevice *clutter_seat_create_virtual_device (ClutterSeat      
 CLUTTER_EXPORT
 ClutterVirtualDeviceType clutter_seat_get_supported_virtual_device_types (ClutterSeat *seat);
 
-void clutter_seat_compress_motion (ClutterSeat        *seat,
-                                   ClutterEvent       *event,
-                                   const ClutterEvent *to_discard);
-
-gboolean clutter_seat_handle_device_event (ClutterSeat  *seat,
-                                           ClutterEvent *event);
-
 CLUTTER_EXPORT
 void clutter_seat_warp_pointer (ClutterSeat *seat,
                                 int          x,
                                 int          y);
 CLUTTER_EXPORT
 gboolean clutter_seat_get_touch_mode (ClutterSeat *seat);
+
+CLUTTER_EXPORT
+gboolean clutter_seat_has_touchscreen (ClutterSeat *seat);
+
+CLUTTER_EXPORT
+gboolean clutter_seat_query_state (ClutterSeat          *seat,
+                                   ClutterInputDevice   *device,
+                                   ClutterEventSequence *sequence,
+                                   graphene_point_t     *coords,
+                                   ClutterModifierType  *modifiers);
 
 #endif /* CLUTTER_SEAT_H */

@@ -17,7 +17,7 @@ Last-Update: 2018-03-16
  2 files changed, 151 insertions(+), 16 deletions(-)
 
 diff --git a/src/backends/x11/meta-input-settings-x11.c b/src/backends/x11/meta-input-settings-x11.c
-index 5c22dff..a7a77d6 100644
+index 9639028..915da8f 100644
 --- a/src/backends/x11/meta-input-settings-x11.c
 +++ b/src/backends/x11/meta-input-settings-x11.c
 @@ -175,8 +175,6 @@ meta_input_settings_x11_set_send_events (MetaInputSettings        *settings,
@@ -39,7 +39,7 @@ index 5c22dff..a7a77d6 100644
 +    return;
 +
    if ((values[0] && !available[0]) || (values[1] && !available[1]))
-     g_warning ("Device '%s' does not support sendevents mode %d\n",
+     g_warning ("Device '%s' does not support sendevents mode %d",
                 clutter_input_device_get_device_name (device), mode);
 @@ -223,11 +226,23 @@ meta_input_settings_x11_set_speed (MetaInputSettings  *settings,
  {
@@ -185,8 +185,8 @@ index 5c22dff..a7a77d6 100644
  
    meta_XFree (available);
    return has_two_finger;
-@@ -382,6 +453,58 @@ meta_input_settings_x11_set_scroll_button (MetaInputSettings  *settings,
-                    XA_CARDINAL, 32, &button, 1);
+@@ -387,6 +458,58 @@ meta_input_settings_x11_set_scroll_button (MetaInputSettings  *settings,
+                    XA_INTEGER, 8, &lock, 1);
  }
  
 +static void
@@ -244,7 +244,7 @@ index 5c22dff..a7a77d6 100644
  static void
  meta_input_settings_x11_set_click_method (MetaInputSettings           *settings,
                                            ClutterInputDevice          *device,
-@@ -393,7 +516,11 @@ meta_input_settings_x11_set_click_method (MetaInputSettings           *settings,
+@@ -398,7 +521,11 @@ meta_input_settings_x11_set_click_method (MetaInputSettings           *settings,
    available = get_property (device, "libinput Click Methods Available",
                              XA_INTEGER, 8, 2);
    if (!available)
@@ -258,10 +258,10 @@ index 5c22dff..a7a77d6 100644
    switch (mode)
      {
 diff --git a/src/backends/x11/meta-seat-x11.c b/src/backends/x11/meta-seat-x11.c
-index cfea494..aea439d 100644
+index d43834b..e758786 100644
 --- a/src/backends/x11/meta-seat-x11.c
 +++ b/src/backends/x11/meta-seat-x11.c
-@@ -248,7 +248,8 @@ is_touch_device (XIAnyClassInfo         **classes,
+@@ -246,7 +246,8 @@ is_touch_device (XIAnyClassInfo         **classes,
  }
  
  static gboolean
@@ -271,7 +271,7 @@ index cfea494..aea439d 100644
  {
    gulong nitems, bytes_after;
    uint32_t *data = NULL;
-@@ -256,7 +257,7 @@ is_touchpad_device (XIDeviceInfo *info)
+@@ -254,7 +255,7 @@ is_touchpad_device (XIDeviceInfo *info)
    Atom type;
    Atom prop;
  
@@ -280,7 +280,7 @@ index cfea494..aea439d 100644
    if (prop == None)
      return FALSE;
  
-@@ -277,6 +278,13 @@ is_touchpad_device (XIDeviceInfo *info)
+@@ -275,6 +276,13 @@ is_touchpad_device (XIDeviceInfo *info)
    return TRUE;
  }
  

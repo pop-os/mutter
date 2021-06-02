@@ -35,8 +35,8 @@
 #include <gudev/gudev.h>
 #endif
 
-#include "backends/meta-logical-monitor.h"
 #include "backends/x11/meta-backend-x11.h"
+#include "backends/x11/meta-input-device-x11.h"
 #include "core/display-private.h"
 #include "meta/meta-x11-errors.h"
 
@@ -77,7 +77,7 @@ device_ensure_xdevice (ClutterInputDevice *device)
   MetaDisplay *display = meta_get_display ();
   MetaBackend *backend = meta_get_backend ();
   Display *xdisplay = meta_backend_x11_get_xdisplay (META_BACKEND_X11 (backend));
-  int device_id = clutter_input_device_get_device_id (device);
+  int device_id = meta_input_device_x11_get_device_id (device);
   XDevice *xdev = NULL;
 
   xdev = g_object_get_data (G_OBJECT (device), "meta-input-settings-xdevice");
@@ -116,7 +116,7 @@ get_property (ClutterInputDevice *device,
   if (!property_atom)
     return NULL;
 
-  device_id = clutter_input_device_get_device_id (device);
+  device_id = meta_input_device_x11_get_device_id (device);
 
   clutter_x11_trap_x_errors ();
   rc = XIGetProperty (xdisplay, device_id, property_atom,
@@ -154,7 +154,7 @@ change_property (ClutterInputDevice *device,
   if (!property_atom)
     return;
 
-  device_id = clutter_input_device_get_device_id (device);
+  device_id = meta_input_device_x11_get_device_id (device);
 
   data_ret = get_property (device, property, type, format, nitems);
   if (!data_ret)
@@ -191,7 +191,7 @@ meta_input_settings_x11_set_send_events (MetaInputSettings        *settings,
     }
 
   if ((values[0] && !available[0]) || (values[1] && !available[1]))
-    g_warning ("Device '%s' does not support sendevents mode %d\n",
+    g_warning ("Device '%s' does not support sendevents mode %d",
                clutter_input_device_get_device_name (device), mode);
   else
     change_property (device, "libinput Send Events Mode Enabled",
@@ -203,7 +203,7 @@ meta_input_settings_x11_set_send_events (MetaInputSettings        *settings,
 static void
 meta_input_settings_x11_set_matrix (MetaInputSettings  *settings,
                                     ClutterInputDevice *device,
-                                    gfloat              matrix[6])
+                                    const float         matrix[6])
 {
   MetaBackend *backend = meta_get_backend ();
   Display *xdisplay = meta_backend_x11_get_xdisplay (META_BACKEND_X11 (backend));
@@ -375,11 +375,16 @@ meta_input_settings_x11_has_two_finger_scroll (MetaInputSettings  *settings,
 static void
 meta_input_settings_x11_set_scroll_button (MetaInputSettings  *settings,
                                            ClutterInputDevice *device,
-                                           guint               button)
+                                           guint               button,
+                                           gboolean            button_lock)
 {
+  gchar lock = button_lock;
+
   change_scroll_method (device, SCROLL_METHOD_FIELD_BUTTON, button != 0);
   change_property (device, "libinput Button Scrolling Button",
                    XA_CARDINAL, 32, &button, 1);
+  change_property (device, "libinput Button Scrolling Button Lock Enabled",
+                   XA_INTEGER, 8, &lock, 1);
 }
 
 static void
@@ -419,7 +424,7 @@ meta_input_settings_x11_set_click_method (MetaInputSettings           *settings,
   }
 
   if ((values[0] && !available[0]) || (values[1] && !available[1]))
-    g_warning ("Device '%s' does not support click method %d\n",
+    g_warning ("Device '%s' does not support click method %d",
                clutter_input_device_get_device_name (device), mode);
   else
     change_property (device, "libinput Click Method Enabled",
@@ -653,15 +658,6 @@ meta_input_settings_x11_set_tablet_mapping (MetaInputSettings     *settings,
       g_warning ("Could not set tablet mapping for %s",
                  clutter_input_device_get_device_name (device));
     }
-  else
-    {
-      ClutterInputDeviceMapping dev_mapping;
-
-      dev_mapping = (mapping == G_DESKTOP_TABLET_MAPPING_ABSOLUTE) ?
-        CLUTTER_INPUT_DEVICE_MAPPING_ABSOLUTE :
-        CLUTTER_INPUT_DEVICE_MAPPING_RELATIVE;
-      clutter_input_device_set_mapping_mode (device, dev_mapping);
-    }
 }
 
 static gboolean
@@ -678,7 +674,7 @@ device_query_area (ClutterInputDevice *device,
   Atom abs_x, abs_y;
 
   *width = *height = 0;
-  device_id = clutter_input_device_get_device_id (device);
+  device_id = meta_input_device_x11_get_device_id (device);
   info = XIQueryDevice (xdisplay, device_id, &n_devices);
   if (n_devices <= 0 || !info)
     return FALSE;
@@ -738,37 +734,19 @@ meta_input_settings_x11_set_tablet_area (MetaInputSettings  *settings,
 }
 
 static void
-meta_input_settings_x11_set_tablet_keep_aspect (MetaInputSettings  *settings,
-                                                ClutterInputDevice *device,
-                                                MetaLogicalMonitor *logical_monitor,
-                                                gboolean            keep_aspect)
+meta_input_settings_x11_set_tablet_aspect_ratio (MetaInputSettings  *settings,
+                                                 ClutterInputDevice *device,
+                                                 gdouble             aspect_ratio)
 {
-  gint32 width, height, dev_x, dev_y, dev_width, dev_height, area[4] = { 0 };
+  int32_t dev_x, dev_y, dev_width, dev_height, area[4] = { 0 };
 
   if (!device_query_area (device, &dev_x, &dev_y, &dev_width, &dev_height))
     return;
 
-  if (keep_aspect)
+  if (aspect_ratio > 0)
     {
-      double aspect_ratio, dev_aspect;
+      double dev_aspect;
 
-      if (logical_monitor)
-        {
-          width = logical_monitor->rect.width;
-          height = logical_monitor->rect.height;
-        }
-      else
-        {
-          MetaMonitorManager *monitor_manager;
-          MetaBackend *backend;
-
-          backend = meta_get_backend ();
-          monitor_manager = meta_backend_get_monitor_manager (backend);
-          meta_monitor_manager_get_screen_size (monitor_manager,
-                                                &width, &height);
-        }
-
-      aspect_ratio = (double) width / height;
       dev_aspect = (double) dev_width / dev_height;
 
       if (dev_aspect > aspect_ratio)
@@ -940,7 +918,7 @@ meta_input_settings_x11_class_init (MetaInputSettingsX11Class *klass)
   input_settings_class->set_keyboard_repeat = meta_input_settings_x11_set_keyboard_repeat;
 
   input_settings_class->set_tablet_mapping = meta_input_settings_x11_set_tablet_mapping;
-  input_settings_class->set_tablet_keep_aspect = meta_input_settings_x11_set_tablet_keep_aspect;
+  input_settings_class->set_tablet_aspect_ratio = meta_input_settings_x11_set_tablet_aspect_ratio;
   input_settings_class->set_tablet_area = meta_input_settings_x11_set_tablet_area;
 
   input_settings_class->set_mouse_accel_profile = meta_input_settings_x11_set_mouse_accel_profile;

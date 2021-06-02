@@ -44,7 +44,6 @@
 G_BEGIN_DECLS
 
 typedef struct _ClutterMainContext      ClutterMainContext;
-typedef struct _ClutterVertex4          ClutterVertex4;
 
 #define CLUTTER_REGISTER_VALUE_TRANSFORM_TO(TYPE_TO,func)             { \
   g_value_register_transform_func (g_define_type_id, TYPE_TO, func);    \
@@ -122,13 +121,11 @@ struct _ClutterMainContext
   ClutterStageManager *stage_manager;
 
   /* the main event queue */
-  GQueue *events_queue;
+  GAsyncQueue *events_queue;
 
   /* the event filters added via clutter_event_add_filter. these are
    * ordered from least recently added to most recently added */
   GList *event_filters;
-
-  ClutterPickMode  pick_mode;
 
   /* default FPS; this is only used if we cannot sync to vblank */
   guint frame_rate;
@@ -177,7 +174,6 @@ ClutterMainContext *    _clutter_context_get_default                    (void);
 void                    _clutter_context_lock                           (void);
 void                    _clutter_context_unlock                         (void);
 gboolean                _clutter_context_is_initialized                 (void);
-ClutterPickMode         _clutter_context_get_pick_mode                  (void);
 gboolean                _clutter_context_get_show_fps                   (void);
 
 gboolean      _clutter_feature_init (GError **error);
@@ -211,8 +207,8 @@ void _clutter_run_repaint_functions (ClutterRepaintFlags flags);
 
 GType _clutter_layout_manager_get_child_meta_type (ClutterLayoutManager *manager);
 
-void  _clutter_util_fully_transform_vertices (const CoglMatrix         *modelview,
-                                              const CoglMatrix         *projection,
+void  _clutter_util_fully_transform_vertices (const graphene_matrix_t  *modelview,
+                                              const graphene_matrix_t  *projection,
                                               const float              *viewport,
                                               const graphene_point3d_t *vertices_in,
                                               graphene_point3d_t       *vertices_out,
@@ -240,62 +236,17 @@ gboolean _clutter_util_rectangle_intersection (const cairo_rectangle_int_t *src1
 gboolean clutter_util_rectangle_equal (const cairo_rectangle_int_t *src1,
                                        const cairo_rectangle_int_t *src2);
 
-
-struct _ClutterVertex4
-{
-  float x;
-  float y;
-  float z;
-  float w;
-};
-
-void
-_clutter_util_vertex4_interpolate (const ClutterVertex4 *a,
-                                   const ClutterVertex4 *b,
-                                   double                progress,
-                                   ClutterVertex4       *res);
-
-#define CLUTTER_MATRIX_INIT_IDENTITY { \
-  1.0f, 0.0f, 0.0f, 0.0f, \
-  0.0f, 1.0f, 0.0f, 0.0f, \
-  0.0f, 0.0f, 1.0f, 0.0f, \
-  0.0f, 0.0f, 0.0f, 1.0f, \
-}
-
-float   _clutter_util_matrix_determinant        (const ClutterMatrix *matrix);
-
-void    _clutter_util_matrix_skew_xy            (ClutterMatrix *matrix,
-                                                 float          factor);
-void    _clutter_util_matrix_skew_xz            (ClutterMatrix *matrix,
-                                                 float          factor);
-void    _clutter_util_matrix_skew_yz            (ClutterMatrix *matrix,
-                                                 float          factor);
-
-gboolean        _clutter_util_matrix_decompose  (const ClutterMatrix *src,
-                                                 graphene_point3d_t  *scale_p,
-                                                 float                shear_p[3],
-                                                 graphene_point3d_t  *rotate_p,
-                                                 graphene_point3d_t  *translate_p,
-                                                 ClutterVertex4      *perspective_p);
-
 CLUTTER_EXPORT
 PangoDirection _clutter_pango_unichar_direction (gunichar ch);
 
 PangoDirection _clutter_pango_find_base_dir     (const gchar *text,
                                                  gint         length);
 
-typedef struct _ClutterPlane
-{
-  graphene_vec3_t v0;
-  graphene_vec3_t n;
-} ClutterPlane;
-
 typedef enum _ClutterCullResult
 {
   CLUTTER_CULL_RESULT_UNKNOWN,
   CLUTTER_CULL_RESULT_IN,
   CLUTTER_CULL_RESULT_OUT,
-  CLUTTER_CULL_RESULT_PARTIAL
 } ClutterCullResult;
 
 gboolean        _clutter_has_progress_function  (GType gtype);
@@ -307,32 +258,50 @@ gboolean        _clutter_run_progress_function  (GType gtype,
 
 void            clutter_timeline_cancel_delay (ClutterTimeline *timeline);
 
+static inline void
+clutter_round_to_256ths (float *f)
+{
+  *f = roundf ((*f) * 256) / 256;
+}
+
 static inline uint64_t
-us (uint64_t us)
+ns (uint64_t ns)
+{
+  return ns;
+}
+
+static inline int64_t
+us (int64_t us)
 {
   return us;
 }
 
-static inline uint32_t
-ms (uint32_t ms)
+static inline int64_t
+ms (int64_t ms)
 {
   return ms;
 }
 
-static inline uint64_t
-ms2us (uint64_t ms)
+static inline int64_t
+ms2us (int64_t ms)
 {
   return us (ms * 1000);
 }
 
-static inline uint32_t
-us2ms (uint64_t us)
+static inline int64_t
+us2ns (int64_t us)
 {
-  return (uint32_t) (us / 1000);
+  return ns (us * 1000);
 }
 
-static inline uint64_t
-ns2us (uint64_t ns)
+static inline int64_t
+us2ms (int64_t us)
+{
+  return (int64_t) (us / 1000);
+}
+
+static inline int64_t
+ns2us (int64_t ns)
 {
   return us (ns / 1000);
 }
@@ -340,7 +309,25 @@ ns2us (uint64_t ns)
 static inline int64_t
 s2us (int64_t s)
 {
-  return ms2us (s * 1000);
+  return s * G_USEC_PER_SEC;
+}
+
+static inline int64_t
+us2s (int64_t us)
+{
+  return us / G_USEC_PER_SEC;
+}
+
+static inline int64_t
+s2ns (int64_t s)
+{
+  return us2ns (s2us (s));
+}
+
+static inline int64_t
+s2ms (int64_t s)
+{
+  return (int64_t) ms (s * 1000);
 }
 
 G_END_DECLS

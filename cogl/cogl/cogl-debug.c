@@ -57,12 +57,14 @@ static const GDebugKey cogl_log_debug_keys[] = {
   { "opengl", COGL_DEBUG_OPENGL },
   { "pango", COGL_DEBUG_PANGO },
   { "show-source", COGL_DEBUG_SHOW_SOURCE},
+  { "framebuffer", COGL_DEBUG_FRAMEBUFFER },
   { "offscreen", COGL_DEBUG_OFFSCREEN },
   { "texture-pixmap", COGL_DEBUG_TEXTURE_PIXMAP },
   { "bitmap", COGL_DEBUG_BITMAP },
   { "clipping", COGL_DEBUG_CLIPPING },
   { "winsys", COGL_DEBUG_WINSYS },
-  { "performance", COGL_DEBUG_PERFORMANCE }
+  { "performance", COGL_DEBUG_PERFORMANCE },
+  { "textures", COGL_DEBUG_TEXTURES },
 };
 static const int n_cogl_log_debug_keys =
   G_N_ELEMENTS (cogl_log_debug_keys);
@@ -80,7 +82,9 @@ static const GDebugKey cogl_behavioural_debug_keys[] = {
   { "wireframe", COGL_DEBUG_WIREFRAME},
   { "disable-software-clip", COGL_DEBUG_DISABLE_SOFTWARE_CLIP},
   { "disable-program-caches", COGL_DEBUG_DISABLE_PROGRAM_CACHES},
-  { "disable-fast-read-pixel", COGL_DEBUG_DISABLE_FAST_READ_PIXEL}
+  { "disable-fast-read-pixel", COGL_DEBUG_DISABLE_FAST_READ_PIXEL},
+  { "sync-primitive", COGL_DEBUG_SYNC_PRIMITIVE },
+  { "sync-frame", COGL_DEBUG_SYNC_FRAME},
 };
 static const int n_cogl_behavioural_debug_keys =
   G_N_ELEMENTS (cogl_behavioural_debug_keys);

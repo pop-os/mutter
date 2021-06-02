@@ -44,6 +44,29 @@ CLUTTER_EXPORT
 void clutter_pick_context_destroy (ClutterPickContext *pick_context);
 
 CLUTTER_EXPORT
-CoglFramebuffer * clutter_pick_context_get_framebuffer (ClutterPickContext *pick_context);
+ClutterPickMode clutter_pick_context_get_mode (ClutterPickContext *pick_context);
+
+CLUTTER_EXPORT
+void clutter_pick_context_log_pick (ClutterPickContext    *pick_context,
+                                    const ClutterActorBox *box,
+                                    ClutterActor          *actor);
+
+CLUTTER_EXPORT
+void clutter_pick_context_push_clip (ClutterPickContext    *pick_context,
+                                     const ClutterActorBox *box);
+
+CLUTTER_EXPORT
+void clutter_pick_context_pop_clip (ClutterPickContext *pick_context);
+
+CLUTTER_EXPORT
+void clutter_pick_context_push_transform (ClutterPickContext      *pick_context,
+                                          const graphene_matrix_t *transform);
+
+CLUTTER_EXPORT
+void clutter_pick_context_get_transform (ClutterPickContext *pick_context,
+                                         graphene_matrix_t  *out_matrix);
+
+CLUTTER_EXPORT
+void clutter_pick_context_pop_transform (ClutterPickContext *pick_context);
 
 #endif /* CLUTTER_PICK_CONTEXT_H */

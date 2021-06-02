@@ -143,8 +143,7 @@ meta_renderer_real_rebuild_views (MetaRenderer *renderer)
     meta_backend_get_monitor_manager (backend);
   GList *logical_monitors, *l;
 
-  g_list_free_full (priv->views, (GDestroyNotify) clutter_stage_view_destroy);
-  priv->views = NULL;
+  g_clear_list (&priv->views, (GDestroyNotify) clutter_stage_view_destroy);
 
   logical_monitors =
     meta_monitor_manager_get_logical_monitors (monitor_manager);
@@ -172,7 +171,7 @@ meta_renderer_real_rebuild_views (MetaRenderer *renderer)
     }
 }
 
-static MetaRendererView *
+MetaRendererView *
 meta_renderer_get_view_for_crtc (MetaRenderer *renderer,
                                  MetaCrtc     *crtc)
 {
@@ -367,15 +366,14 @@ meta_renderer_set_property (GObject      *object,
 }
 
 static void
-meta_renderer_finalize (GObject *object)
+meta_renderer_dispose (GObject *object)
 {
   MetaRenderer *renderer = META_RENDERER (object);
   MetaRendererPrivate *priv = meta_renderer_get_instance_private (renderer);
 
-  g_list_free_full (priv->views, g_object_unref);
-  priv->views = NULL;
+  g_clear_list (&priv->views, g_object_unref);
 
-  G_OBJECT_CLASS (meta_renderer_parent_class)->finalize (object);
+  G_OBJECT_CLASS (meta_renderer_parent_class)->dispose (object);
 }
 
 static void
@@ -390,7 +388,7 @@ meta_renderer_class_init (MetaRendererClass *klass)
 
   object_class->get_property = meta_renderer_get_property;
   object_class->set_property = meta_renderer_set_property;
-  object_class->finalize = meta_renderer_finalize;
+  object_class->dispose = meta_renderer_dispose;
 
   klass->rebuild_views = meta_renderer_real_rebuild_views;
   klass->get_views_for_monitor = meta_renderer_real_get_views_for_monitor;

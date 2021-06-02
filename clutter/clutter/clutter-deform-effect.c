@@ -53,14 +53,16 @@
 
 #include "clutter-build-config.h"
 
-#define CLUTTER_ENABLE_EXPERIMENTAL_API
 #include "clutter-deform-effect.h"
 
 #include <cogl/cogl.h>
 
+#include "clutter-color.h"
 #include "clutter-debug.h"
 #include "clutter-enum-types.h"
 #include "clutter-offscreen-effect-private.h"
+#include "clutter-paint-node.h"
+#include "clutter-paint-nodes.h"
 #include "clutter-private.h"
 
 #define DEFAULT_N_TILES         32
@@ -166,19 +168,16 @@ clutter_deform_effect_set_actor (ClutterActorMeta *meta,
 
 static void
 clutter_deform_effect_paint_target (ClutterOffscreenEffect *effect,
+                                    ClutterPaintNode       *node,
                                     ClutterPaintContext    *paint_context)
 {
   ClutterDeformEffect *self= CLUTTER_DEFORM_EFFECT (effect);
   ClutterDeformEffectPrivate *priv = self->priv;
-  CoglHandle material;
   CoglPipeline *pipeline;
   CoglDepthState depth_state;
-  CoglFramebuffer *fb =
-    clutter_paint_context_get_framebuffer (paint_context);
 
   if (priv->is_dirty)
     {
-      graphene_rect_t rect;
       gboolean mapped_buffer;
       CoglVertexP3T2C4 *verts;
       ClutterActor *actor;
@@ -192,12 +191,7 @@ clutter_deform_effect_paint_target (ClutterOffscreenEffect *effect,
       /* if we don't have a target size, fall back to the actor's
        * allocation, though wrong it might be
        */
-      if (clutter_offscreen_effect_get_target_rect (effect, &rect))
-        {
-          width = graphene_rect_get_width (&rect);
-          height = graphene_rect_get_height (&rect);
-        }
-      else
+      if (!clutter_offscreen_effect_get_target_size (effect, &width, &height))
         clutter_actor_get_size (actor, &width, &height);
 
       /* XXX ideally, the sub-classes should tell us what they
@@ -277,8 +271,7 @@ clutter_deform_effect_paint_target (ClutterOffscreenEffect *effect,
       priv->is_dirty = FALSE;
     }
 
-  material = clutter_offscreen_effect_get_target (effect);
-  pipeline = COGL_PIPELINE (material);
+  pipeline = clutter_offscreen_effect_get_pipeline (effect);
 
   /* enable depth testing */
   cogl_depth_state_init (&depth_state);
@@ -292,12 +285,22 @@ clutter_deform_effect_paint_target (ClutterOffscreenEffect *effect,
                                       COGL_PIPELINE_CULL_FACE_MODE_BACK);
 
   /* draw the front */
-  if (material != NULL)
-    cogl_framebuffer_draw_primitive (fb, pipeline, priv->primitive);
+  if (pipeline != NULL)
+    {
+      ClutterPaintNode *front_node;
+
+      front_node = clutter_pipeline_node_new (pipeline);
+      clutter_paint_node_set_static_name (front_node,
+                                          "ClutterDeformEffect (front)");
+      clutter_paint_node_add_child (node, front_node);
+      clutter_paint_node_add_primitive (front_node, priv->primitive);
+      clutter_paint_node_unref (front_node);
+    }
 
   /* draw the back */
   if (priv->back_pipeline != NULL)
     {
+      ClutterPaintNode *back_node;
       CoglPipeline *back_pipeline;
 
       /* We probably shouldn't be modifying the user's material so
@@ -307,20 +310,30 @@ clutter_deform_effect_paint_target (ClutterOffscreenEffect *effect,
       cogl_pipeline_set_cull_face_mode (back_pipeline,
                                         COGL_PIPELINE_CULL_FACE_MODE_FRONT);
 
-      cogl_framebuffer_draw_primitive (fb, back_pipeline, priv->primitive);
 
+      back_node = clutter_pipeline_node_new (back_pipeline);
+      clutter_paint_node_set_static_name (back_node,
+                                          "ClutterDeformEffect (back)");
+      clutter_paint_node_add_child (node, back_node);
+      clutter_paint_node_add_primitive (back_node, priv->primitive);
+
+      clutter_paint_node_unref (back_node);
       cogl_object_unref (back_pipeline);
     }
 
   if (G_UNLIKELY (priv->lines_primitive != NULL))
     {
-      CoglContext *ctx =
-        clutter_backend_get_cogl_context (clutter_get_default_backend ());
-      CoglPipeline *lines_pipeline = cogl_pipeline_new (ctx);
-      cogl_pipeline_set_color4f (lines_pipeline, 1.0, 0, 0, 1.0);
-      cogl_framebuffer_draw_primitive (fb, lines_pipeline,
-                                       priv->lines_primitive);
-      cogl_object_unref (lines_pipeline);
+      const ClutterColor *red;
+      ClutterPaintNode *lines_node;
+
+      red = clutter_color_get_static (CLUTTER_COLOR_RED);
+
+      lines_node = clutter_color_node_new (red);
+      clutter_paint_node_set_static_name (lines_node,
+                                          "ClutterDeformEffect (lines)");
+      clutter_paint_node_add_child (node, lines_node);
+      clutter_paint_node_add_primitive (lines_node, priv->lines_primitive);
+      clutter_paint_node_unref (lines_node);
     }
 }
 

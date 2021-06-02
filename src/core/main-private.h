@@ -47,14 +47,14 @@ typedef enum _MetaDisplayPolicy
 
 META_EXPORT_TEST
 void meta_override_compositor_configuration (MetaCompositorType compositor_type,
-                                             GType              backend_gtype);
+                                             GType              backend_gtype,
+                                             const char        *first_property_name,
+                                             ...);
 
+META_EXPORT_TEST
 MetaDisplayPolicy meta_get_x11_display_policy (void);
 
 META_EXPORT_TEST
-void meta_start (void);
-
-META_EXPORT_TEST
-void meta_run_main_loop (void);
+void meta_override_x11_display_policy (MetaDisplayPolicy x11_display_policy);
 
 #endif /* META_MAIN_PRIVATE_H */

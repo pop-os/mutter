@@ -28,16 +28,22 @@ typedef struct _MetaKmsPageFlipData MetaKmsPageFlipData;
 
 typedef void (* MetaPageFlipDataFeedbackFunc) (MetaKmsPageFlipData *page_flip_data);
 
-MetaKmsPageFlipData * meta_kms_page_flip_data_new (MetaKmsImpl                   *impl,
-                                                   MetaKmsCrtc                   *crtc,
-                                                   const MetaKmsPageFlipFeedback *feedback,
-                                                   gpointer                       user_data);
+MetaKmsPageFlipData * meta_kms_page_flip_data_new (MetaKmsImplDevice *impl_device,
+                                                   MetaKmsCrtc       *crtc);
 
 MetaKmsPageFlipData * meta_kms_page_flip_data_ref (MetaKmsPageFlipData *page_flip_data);
 
 void meta_kms_page_flip_data_unref (MetaKmsPageFlipData *page_flip_data);
 
-MetaKmsImpl * meta_kms_page_flip_data_get_kms_impl (MetaKmsPageFlipData *page_flip_data);
+void meta_kms_page_flip_data_add_listener (MetaKmsPageFlipData                 *page_flip_data,
+                                           const MetaKmsPageFlipListenerVtable *vtable,
+                                           MetaKmsPageFlipListenerFlag          flags,
+                                           gpointer                             user_data,
+                                           GDestroyNotify                       destroy_notify);
+
+MetaKmsImplDevice * meta_kms_page_flip_data_get_impl_device (MetaKmsPageFlipData *page_flip_data);
+
+MetaKmsCrtc * meta_kms_page_flip_data_get_crtc (MetaKmsPageFlipData *page_flip_data);
 
 void meta_kms_page_flip_data_set_timings_in_impl (MetaKmsPageFlipData *page_flip_data,
                                                   unsigned int         sequence,
@@ -53,5 +59,7 @@ void meta_kms_page_flip_data_discard_in_impl (MetaKmsPageFlipData *page_flip_dat
 
 void meta_kms_page_flip_data_take_error (MetaKmsPageFlipData *page_flip_data,
                                          GError              *error);
+
+void meta_kms_page_flip_data_make_symbolic (MetaKmsPageFlipData *page_flip_data);
 
 #endif /* META_KMS_PAGE_FLIP_H */

@@ -27,8 +27,6 @@
 
 #include "clutter-build-config.h"
 
-#define CLUTTER_ENABLE_EXPERIMENTAL_API
-
 #include "clutter-config.h"
 
 #include "clutter-stage-cogl.h"
@@ -43,6 +41,7 @@
 #include "clutter-event.h"
 #include "clutter-enum-types.h"
 #include "clutter-feature.h"
+#include "clutter-frame.h"
 #include "clutter-main.h"
 #include "clutter-private.h"
 #include "clutter-stage-private.h"
@@ -165,7 +164,7 @@ paint_damage_region (ClutterStageWindow *stage_window,
   static CoglPipeline *overlay_blue = NULL;
   ClutterStageCogl *stage_cogl = CLUTTER_STAGE_COGL (stage_window);
   ClutterActor *actor = CLUTTER_ACTOR (stage_cogl->wrapper);
-  CoglMatrix transform;
+  graphene_matrix_t transform;
   int n_rects, i;
 
   cogl_framebuffer_push_matrix (framebuffer);
@@ -248,7 +247,8 @@ static void
 swap_framebuffer (ClutterStageWindow *stage_window,
                   ClutterStageView   *view,
                   cairo_region_t     *swap_region,
-                  gboolean            swap_with_damage)
+                  gboolean            swap_with_damage,
+                  ClutterFrame       *frame)
 {
   ClutterStageCogl *stage_cogl = CLUTTER_STAGE_COGL (stage_window);
   ClutterStageCoglPrivate *priv =
@@ -257,7 +257,7 @@ swap_framebuffer (ClutterStageWindow *stage_window,
 
   clutter_stage_view_before_swap_buffer (view, swap_region);
 
-  if (cogl_is_onscreen (framebuffer))
+  if (COGL_IS_ONSCREEN (framebuffer))
     {
       CoglOnscreen *onscreen = COGL_ONSCREEN (framebuffer);
       int *damage, n_rects, i;
@@ -288,7 +288,8 @@ swap_framebuffer (ClutterStageWindow *stage_window,
 
           cogl_onscreen_swap_region (onscreen,
                                      damage, n_rects,
-                                     frame_info);
+                                     frame_info,
+                                     frame);
         }
       else
         {
@@ -297,7 +298,8 @@ swap_framebuffer (ClutterStageWindow *stage_window,
 
           cogl_onscreen_swap_buffers_with_damage (onscreen,
                                                   damage, n_rects,
-                                                  frame_info);
+                                                  frame_info,
+                                                  frame);
         }
     }
   else
@@ -307,9 +309,8 @@ swap_framebuffer (ClutterStageWindow *stage_window,
         clutter_stage_view_cogl_get_instance_private (view_cogl);
       NotifyPresentedClosure *closure;
 
-      CLUTTER_NOTE (BACKEND, "cogl_framebuffer_finish (framebuffer: %p)",
+      CLUTTER_NOTE (BACKEND, "fake offscreen swap (framebuffer: %p)",
                     framebuffer);
-      cogl_framebuffer_finish (framebuffer);
 
       closure = g_new0 (NotifyPresentedClosure, 1);
       closure->view = view;
@@ -317,6 +318,8 @@ swap_framebuffer (ClutterStageWindow *stage_window,
         .frame_counter = priv->global_frame_counter,
         .refresh_rate = clutter_stage_view_get_refresh_rate (view),
         .presentation_time = g_get_monotonic_time (),
+        .flags = CLUTTER_FRAME_INFO_FLAG_NONE,
+        .sequence = 0,
       };
       priv->global_frame_counter++;
 
@@ -442,18 +445,10 @@ transform_swap_region_to_onscreen (ClutterStageView *view,
   return transformed_region;
 }
 
-static inline gboolean
-is_buffer_age_enabled (void)
-{
-  /* Buffer age is disabled when running with CLUTTER_PAINT=damage-region,
-   * to ensure the red damage represents the currently damaged area */
-  return !(clutter_paint_debug_flags & CLUTTER_DEBUG_PAINT_DAMAGE_REGION) &&
-         cogl_clutter_winsys_has_feature (COGL_WINSYS_FEATURE_BUFFER_AGE);
-}
-
 static void
 clutter_stage_cogl_redraw_view_primary (ClutterStageCogl *stage_cogl,
-                                        ClutterStageView *view)
+                                        ClutterStageView *view,
+                                        ClutterFrame     *frame)
 {
   ClutterStageWindow *stage_window = CLUTTER_STAGE_WINDOW (stage_cogl);
   ClutterStageViewCogl *view_cogl = CLUTTER_STAGE_VIEW_COGL (view);
@@ -481,14 +476,14 @@ clutter_stage_cogl_redraw_view_primary (ClutterStageCogl *stage_cogl,
   fb_height = cogl_framebuffer_get_height (fb);
 
   can_blit_sub_buffer =
-    cogl_is_onscreen (onscreen) &&
+    COGL_IS_ONSCREEN (onscreen) &&
     cogl_clutter_winsys_has_feature (COGL_WINSYS_FEATURE_SWAP_REGION);
 
-  has_buffer_age = cogl_is_onscreen (onscreen) && is_buffer_age_enabled ();
+  has_buffer_age =
+    COGL_IS_ONSCREEN (onscreen) &&
+    cogl_clutter_winsys_has_feature (COGL_WINSYS_FEATURE_BUFFER_AGE);
 
   redraw_clip = clutter_stage_view_take_redraw_clip (view);
-  if (G_UNLIKELY (clutter_paint_debug_flags & CLUTTER_DEBUG_PAINT_DAMAGE_REGION))
-    queued_redraw_clip = cairo_region_copy (redraw_clip);
 
   /* NB: a NULL redraw clip == full stage redraw */
   if (!redraw_clip)
@@ -525,6 +520,16 @@ clutter_stage_cogl_redraw_view_primary (ClutterStageCogl *stage_cogl,
                                                       -view_rect.x,
                                                       -view_rect.y,
                                                       fb_scale);
+
+      if (G_UNLIKELY (clutter_paint_debug_flags &
+                      CLUTTER_DEBUG_PAINT_DAMAGE_REGION))
+        {
+          queued_redraw_clip =
+            scale_offset_and_clamp_region (fb_clip_region,
+                                           1.0 / fb_scale,
+                                           view_rect.x,
+                                           view_rect.y);
+        }
     }
   else
     {
@@ -535,6 +540,10 @@ clutter_stage_cogl_redraw_view_primary (ClutterStageCogl *stage_cogl,
         .height = fb_height,
       };
       fb_clip_region = cairo_region_create_rectangle (&fb_rect);
+
+      if (G_UNLIKELY (clutter_paint_debug_flags &
+                      CLUTTER_DEBUG_PAINT_DAMAGE_REGION))
+        queued_redraw_clip = cairo_region_reference (redraw_clip);
 
       g_clear_pointer (&redraw_clip, cairo_region_destroy);
       redraw_clip = cairo_region_create_rectangle (&view_rect);
@@ -550,11 +559,7 @@ clutter_stage_cogl_redraw_view_primary (ClutterStageCogl *stage_cogl,
 
       if (use_clipped_redraw)
         {
-          cairo_region_t *fb_damage;
-          cairo_region_t *view_damage;
           int age;
-
-          fb_damage = cairo_region_create ();
 
           for (age = 1; age <= buffer_age; age++)
             {
@@ -562,22 +567,8 @@ clutter_stage_cogl_redraw_view_primary (ClutterStageCogl *stage_cogl,
 
               old_damage =
                 clutter_damage_history_lookup (view_priv->damage_history, age);
-              cairo_region_union (fb_damage, old_damage);
+              cairo_region_union (fb_clip_region, old_damage);
             }
-
-          /* Update the fb clip region with the extra damage. */
-          cairo_region_union (fb_clip_region, fb_damage);
-
-          /* Update the redraw clip with the extra damage done to the view */
-          view_damage = scale_offset_and_clamp_region (fb_damage,
-                                                       1.0f / fb_scale,
-                                                       view_rect.x,
-                                                       view_rect.y);
-
-          cairo_region_union (redraw_clip, view_damage);
-
-          cairo_region_destroy (view_damage);
-          cairo_region_destroy (fb_damage);
 
           CLUTTER_NOTE (CLIPPING, "Reusing back buffer(age=%d) - repairing region: num rects: %d\n",
                         buffer_age,
@@ -590,6 +581,31 @@ clutter_stage_cogl_redraw_view_primary (ClutterStageCogl *stage_cogl,
     }
 
   if (use_clipped_redraw)
+    {
+      /* Regenerate redraw_clip because:
+       *  1. It's missing the regions added from damage_history above; and
+       *  2. If using fractional scaling then it might be a fraction of a
+       *     logical pixel (or one physical pixel) smaller than
+       *     fb_clip_region, due to the clamping from
+       *     offset_scale_and_clamp_region. So we need to ensure redraw_clip
+       *     is a superset of fb_clip_region to avoid such gaps.
+       */
+      cairo_region_destroy (redraw_clip);
+      redraw_clip = scale_offset_and_clamp_region (fb_clip_region,
+                                                   1.0 / fb_scale,
+                                                   view_rect.x,
+                                                   view_rect.y);
+    }
+
+  if (clutter_paint_debug_flags & CLUTTER_DEBUG_PAINT_DAMAGE_REGION)
+    {
+      cairo_region_t *debug_redraw_clip;
+
+      debug_redraw_clip = cairo_region_create_rectangle (&view_rect);
+      paint_stage (stage_cogl, view, debug_redraw_clip);
+      cairo_region_destroy (debug_redraw_clip);
+    }
+  else if (use_clipped_redraw)
     {
       cogl_framebuffer_push_region_clip (fb, fb_clip_region);
 
@@ -636,15 +652,28 @@ clutter_stage_cogl_redraw_view_primary (ClutterStageCogl *stage_cogl,
 
   if (queued_redraw_clip)
     {
+      cairo_region_t *swap_region_in_stage_space;
+
+      swap_region_in_stage_space =
+        scale_offset_and_clamp_region (swap_region,
+                                       1.0f / fb_scale,
+                                       view_rect.x,
+                                       view_rect.y);
+
+      cairo_region_subtract (swap_region_in_stage_space, queued_redraw_clip);
+
       paint_damage_region (stage_window, view,
-                           swap_region, queued_redraw_clip);
+                           swap_region_in_stage_space, queued_redraw_clip);
+
       cairo_region_destroy (queued_redraw_clip);
+      cairo_region_destroy (swap_region_in_stage_space);
     }
 
   swap_framebuffer (stage_window,
                     view,
                     swap_region,
-                    swap_with_damage);
+                    swap_with_damage,
+                    frame);
 
   cairo_region_destroy (swap_region);
 }
@@ -653,6 +682,7 @@ static gboolean
 clutter_stage_cogl_scanout_view (ClutterStageCogl  *stage_cogl,
                                  ClutterStageView  *view,
                                  CoglScanout       *scanout,
+                                 ClutterFrame      *frame,
                                  GError           **error)
 {
   ClutterStageCoglPrivate *priv =
@@ -661,13 +691,17 @@ clutter_stage_cogl_scanout_view (ClutterStageCogl  *stage_cogl,
   CoglOnscreen *onscreen;
   CoglFrameInfo *frame_info;
 
-  g_assert (cogl_is_onscreen (framebuffer));
+  g_assert (COGL_IS_ONSCREEN (framebuffer));
 
   onscreen = COGL_ONSCREEN (framebuffer);
 
   frame_info = cogl_frame_info_new (priv->global_frame_counter);
 
-  if (!cogl_onscreen_direct_scanout (onscreen, scanout, frame_info, error))
+  if (!cogl_onscreen_direct_scanout (onscreen,
+                                     scanout,
+                                     frame_info,
+                                     frame,
+                                     error))
     {
       cogl_object_unref (frame_info);
       return FALSE;
@@ -680,7 +714,8 @@ clutter_stage_cogl_scanout_view (ClutterStageCogl  *stage_cogl,
 
 static void
 clutter_stage_cogl_redraw_view (ClutterStageWindow *stage_window,
-                                ClutterStageView   *view)
+                                ClutterStageView   *view,
+                                ClutterFrame       *frame)
 {
   ClutterStageCogl *stage_cogl = CLUTTER_STAGE_COGL (stage_window);
   g_autoptr (CoglScanout) scanout = NULL;
@@ -690,13 +725,35 @@ clutter_stage_cogl_redraw_view (ClutterStageWindow *stage_window,
     {
       g_autoptr (GError) error = NULL;
 
-      if (clutter_stage_cogl_scanout_view (stage_cogl, view, scanout, &error))
+      if (clutter_stage_cogl_scanout_view (stage_cogl,
+                                           view,
+                                           scanout,
+                                           frame,
+                                           &error))
         return;
 
-      g_warning ("Failed to scan out client buffer: %s", error->message);
+      if (!g_error_matches (error,
+                            COGL_SCANOUT_ERROR,
+                            COGL_SCANOUT_ERROR_INHIBITED))
+        g_warning ("Failed to scan out client buffer: %s", error->message);
     }
 
-  clutter_stage_cogl_redraw_view_primary (stage_cogl, view);
+  clutter_stage_cogl_redraw_view_primary (stage_cogl, view, frame);
+}
+
+void
+clutter_stage_cogl_add_onscreen_frame_info (ClutterStageCogl *stage_cogl,
+                                            ClutterStageView *view)
+{
+  ClutterStageCoglPrivate *priv =
+    _clutter_stage_cogl_get_instance_private (stage_cogl);
+  CoglFramebuffer *framebuffer = clutter_stage_view_get_onscreen (view);
+  CoglFrameInfo *frame_info;
+
+  frame_info = cogl_frame_info_new (priv->global_frame_counter);
+  priv->global_frame_counter++;
+
+  cogl_onscreen_add_frame_info (COGL_ONSCREEN (framebuffer), frame_info);
 }
 
 static void
@@ -759,18 +816,38 @@ frame_cb (CoglOnscreen  *onscreen,
           void          *user_data)
 {
   ClutterStageView *view = user_data;
-  ClutterFrameInfo clutter_frame_info;
 
   if (frame_event == COGL_FRAME_EVENT_SYNC)
     return;
 
-  clutter_frame_info = (ClutterFrameInfo) {
-    .frame_counter = cogl_frame_info_get_global_frame_counter (frame_info),
-    .refresh_rate = cogl_frame_info_get_refresh_rate (frame_info),
-    .presentation_time = ns2us (cogl_frame_info_get_presentation_time (frame_info)),
-  };
+  if (cogl_frame_info_get_is_symbolic (frame_info))
+    {
+      clutter_stage_view_notify_ready (view);
+    }
+  else
+    {
+      ClutterFrameInfo clutter_frame_info;
+      ClutterFrameInfoFlag flags = CLUTTER_FRAME_INFO_FLAG_NONE;
 
-  clutter_stage_view_notify_presented (view, &clutter_frame_info);
+      if (cogl_frame_info_is_hw_clock (frame_info))
+        flags |= CLUTTER_FRAME_INFO_FLAG_HW_CLOCK;
+
+      if (cogl_frame_info_is_zero_copy (frame_info))
+        flags |= CLUTTER_FRAME_INFO_FLAG_ZERO_COPY;
+
+      if (cogl_frame_info_is_vsync (frame_info))
+        flags |= CLUTTER_FRAME_INFO_FLAG_VSYNC;
+
+      clutter_frame_info = (ClutterFrameInfo) {
+        .frame_counter = cogl_frame_info_get_global_frame_counter (frame_info),
+        .refresh_rate = cogl_frame_info_get_refresh_rate (frame_info),
+        .presentation_time =
+          cogl_frame_info_get_presentation_time_us (frame_info),
+        .flags = flags,
+        .sequence = cogl_frame_info_get_sequence (frame_info),
+      };
+      clutter_stage_view_notify_presented (view, &clutter_frame_info);
+    }
 }
 
 static void
@@ -807,7 +884,7 @@ clutter_stage_view_cogl_constructed (GObject *object)
   CoglFramebuffer *framebuffer;
 
   framebuffer = clutter_stage_view_get_onscreen (view);
-  if (framebuffer && cogl_is_onscreen (framebuffer))
+  if (framebuffer && COGL_IS_ONSCREEN (framebuffer))
     {
       view_priv->frame_cb_closure =
         cogl_onscreen_add_frame_callback (COGL_ONSCREEN (framebuffer),

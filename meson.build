@@ -1,30 +1,28 @@
 project('mutter', 'c',
-  version: '3.38.4',
+  version: '40.1',
   meson_version: '>= 0.51.0',
   license: 'GPLv2+'
 )
-
-mutter_plugin_api_version = '3'
 
 split_version = meson.project_version().split('.')
 
 # Automatically increase API version each development cycle,
 # starting with 0 in 3.23.x
-api_version = (split_version[1].to_int() - 23) / 2
+api_version = split_version[0].to_int() - 32
 libmutter_api_version = '@0@'.format(api_version)
 
 # generic version requirements
 fribidi_req = '>= 1.0.0'
-glib_req = '>= 2.61.1'
+glib_req = '>= 2.67.3'
 gi_req = '>= 0.9.5'
-graphene_req = '>= 1.9.3'
+graphene_req = '>= 1.10.2'
 gtk3_req = '>= 3.19.8'
 gdk_pixbuf_req = '>= 2.0'
 uprof_req = '>= 0.3'
-pango_req = '>= 1.2.0'
+pango_req = '>= 1.46.0'
 cairo_req = '>= 1.10.0'
 pangocairo_req = '>= 1.20'
-gsettings_desktop_schemas_req = '>= 3.37.2'
+gsettings_desktop_schemas_req = '>= 40.alpha'
 json_glib_req = '>= 0.12.0'
 upower_glib_req = '>= 0.99.0'
 xcomposite_req = '>= 0.4'
@@ -46,11 +44,11 @@ wayland_server_req = '>= 1.18'
 wayland_protocols_req = '>= 1.19'
 
 # native backend version requirements
-libinput_req = '>= 1.7'
+libinput_req = '>= 1.15.0'
 gbm_req = '>= 17.3'
 
 # screen cast version requirements
-libpipewire_req = '>= 0.3.0'
+libpipewire_req = '>= 0.3.21'
 
 # profiler requirements
 sysprof_req = '>= 3.37.2'
@@ -183,7 +181,11 @@ if have_libgudev
   libudev_dep = dependency('libudev', version: udev_req)
   gudev_dep = dependency('gudev-1.0', version: gudev_req)
   udev_dep = dependency('udev')
-  udevdir = udev_dep.get_pkgconfig_variable('udevdir')
+
+  udev_dir = get_option('udev_dir')
+  if udev_dir == ''
+    udev_dir = udev_dep.get_pkgconfig_variable('udevdir')
+  endif
 endif
 
 have_native_backend = get_option('native_backend')
@@ -264,6 +266,7 @@ have_tests = get_option('tests')
 have_core_tests = false
 have_cogl_tests = false
 have_clutter_tests = false
+have_native_tests = false
 have_installed_tests = false
 
 if have_tests
@@ -271,6 +274,15 @@ if have_tests
   if have_core_tests
     if not have_wayland
       error('Tests require Wayland to be enabled')
+    endif
+  endif
+  have_native_tests = get_option('native_tests')
+  if have_native_tests
+    if not have_native_backend
+      error('Native tests require the native backend')
+    endif
+    if not have_remote_desktop
+      error('Native tests require remote desktop')
     endif
   endif
 
@@ -393,10 +405,17 @@ if cc.has_header_symbol('sys/prctl.h', 'prctl')
 endif
 
 have_xwayland_initfd = false
+have_xwayland_listenfd = false
 if have_wayland
+  xwayland_dep = dependency('xwayland', required: false)
+
   xwayland_path = get_option('xwayland_path')
   if xwayland_path == ''
-    xwayland_path = find_program('Xwayland').path()
+    if xwayland_dep.found()
+      xwayland_path = xwayland_dep.get_pkgconfig_variable('xwayland')
+    else
+      xwayland_path = find_program('Xwayland').path()
+    endif
   endif
   cdata.set_quoted('XWAYLAND_PATH', xwayland_path)
 
@@ -411,12 +430,18 @@ if have_wayland
 
   # For Xwayland -initfd usage
   use_initfd = get_option('xwayland_initfd')
-  xwayland_options = run_command(xwayland_path, '-help')
+  if xwayland_dep.found()
+    xwayland_supports_initfd = xwayland_dep.get_pkgconfig_variable('have_initfd') == 'true'
+  else
+    xwayland_options = run_command(xwayland_path, '-help')
+    xwayland_supports_initfd = xwayland_options.stderr().contains('-initfd')
+  endif
+
   if use_initfd.auto()
-    have_xwayland_initfd = xwayland_options.stderr().contains('-initfd')
+    have_xwayland_initfd = xwayland_supports_initfd
   else
     have_xwayland_initfd = use_initfd.enabled()
-    if have_xwayland_initfd and not xwayland_options.stderr().contains('-initfd')
+    if have_xwayland_initfd and not xwayland_supports_initfd
       error('XWayland -initfd support requested but not available')
     endif
   endif
@@ -424,6 +449,22 @@ if have_wayland
   if (have_xwayland_initfd)
     cdata.set('HAVE_XWAYLAND_INITFD', 1)
   endif
+
+  # For Xwayland -listenfd usage
+  if xwayland_dep.found()
+    have_xwayland_listenfd = xwayland_dep.get_pkgconfig_variable('have_listenfd') == 'true'
+  endif
+
+  if (have_xwayland_listenfd)
+    cdata.set('HAVE_XWAYLAND_LISTENFD', 1)
+  endif
+endif
+
+have_xsetioerrorexithandler = false
+if cc.has_function('XSetIOErrorExitHandler', dependencies: x11_dep,
+                   prefix: '''#include <X11/Xlib.h>''')
+  have_xsetioerrorexithandler = true
+  cdata.set('HAVE_XSETIOERROREXITHANDLER', 1)
 endif
 
 optional_functions = [
@@ -443,6 +484,10 @@ endforeach
 xwayland_grab_default_access_rules = get_option('xwayland_grab_default_access_rules')
 cdata.set_quoted('XWAYLAND_GRAB_DEFAULT_ACCESS_RULES',
                  xwayland_grab_default_access_rules)
+
+xwayland_ignore_executables = get_option('xwayland_ignore_executables')
+cdata.set_quoted('XWAYLAND_IGNORE_EXECUTABLES',
+                 xwayland_ignore_executables)
 
 cdata.set_quoted('MUTTER_PLUGIN_DIR', join_paths(pkglibdir, 'plugins'))
 cdata.set_quoted('MUTTER_LOCALEDIR', localedir)
@@ -497,6 +542,8 @@ output = [
   '        Introspection............ ' + have_introspection.to_string(),
   '        Profiler................. ' + have_profiler.to_string(),
   '        Xwayland initfd.......... ' + have_xwayland_initfd.to_string(),
+  '        Xwayland listenfd........ ' + have_xwayland_listenfd.to_string(),
+  '        Safe X11 I/O errors...... ' + have_xsetioerrorexithandler.to_string(),
   '',
   '    Tests:',
   '',

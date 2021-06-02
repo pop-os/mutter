@@ -1,20 +1,20 @@
 # Polish translation for mutter.
-# Copyright © 2002-2020 the mutter authors.
+# Copyright © 2002-2021 the mutter authors.
 # This file is distributed under the same license as the mutter package.
 # Zbigniew Chyla <chyla@alice.ci.pwr.wroc.pl>, 2002-2003.
 # Artur Flinta <aflinta@at.kernel.pl>, 2003-2005.
 # Marek Stępień <marcoos@aviary.pl>, 2007.
 # Wadim Dziedzic <wdziedzic@aviary.pl>, 2007.
 # Tomasz Dominikowski <dominikowski@gmail.com>, 2008-2009.
-# Piotr Drąg <piotrdrag@gmail.com>, 2010-2020.
-# Aviary.pl <community-poland@mozilla.org>, 2007-2020.
+# Piotr Drąg <piotrdrag@gmail.com>, 2010-2021.
+# Aviary.pl <community-poland@mozilla.org>, 2007-2021.
 #
 msgid ""
 msgstr ""
 "Project-Id-Version: mutter\n"
 "Report-Msgid-Bugs-To: https://gitlab.gnome.org/GNOME/mutter/issues\n"
-"POT-Creation-Date: 2020-08-29 10:31+0000\n"
-"PO-Revision-Date: 2020-08-30 12:55+0200\n"
+"POT-Creation-Date: 2021-04-15 15:51+0000\n"
+"PO-Revision-Date: 2021-04-17 14:52+0200\n"
 "Last-Translator: Piotr Drąg <piotrdrag@gmail.com>\n"
 "Language-Team: Polish <community-poland@mozilla.org>\n"
 "Language: pl\n"
@@ -49,114 +49,130 @@ msgid "Move window to last workspace"
 msgstr "Przeniesienie okna na ostatni obszar roboczy"
 
 #: data/50-mutter-navigation.xml:24
+msgid "Move window one workspace to the left"
+msgstr "Przeniesienie okna na obszar roboczy po lewej"
+
+#: data/50-mutter-navigation.xml:27
+msgid "Move window one workspace to the right"
+msgstr "Przeniesienie okna na obszar roboczy po prawej"
+
+#: data/50-mutter-navigation.xml:31
 msgid "Move window one workspace up"
 msgstr "Przeniesienie okna o obszar roboczy w górę"
 
-#: data/50-mutter-navigation.xml:27
+#: data/50-mutter-navigation.xml:35
 msgid "Move window one workspace down"
 msgstr "Przeniesienie okna o obszar roboczy w dół"
 
-#: data/50-mutter-navigation.xml:30
+#: data/50-mutter-navigation.xml:38
 msgid "Move window one monitor to the left"
 msgstr "Przeniesienie okna na monitor po lewej"
 
-#: data/50-mutter-navigation.xml:33
+#: data/50-mutter-navigation.xml:41
 msgid "Move window one monitor to the right"
 msgstr "Przeniesienie okna na monitor po prawej"
 
-#: data/50-mutter-navigation.xml:36
+#: data/50-mutter-navigation.xml:44
 msgid "Move window one monitor up"
 msgstr "Przeniesienie okna na monitor na górze"
 
-#: data/50-mutter-navigation.xml:39
+#: data/50-mutter-navigation.xml:47
 msgid "Move window one monitor down"
 msgstr "Przeniesienie okna na monitor na dole"
 
-#: data/50-mutter-navigation.xml:43
+#: data/50-mutter-navigation.xml:51
 msgid "Switch applications"
 msgstr "Przełączenie programów"
 
-#: data/50-mutter-navigation.xml:48
+#: data/50-mutter-navigation.xml:56
 msgid "Switch to previous application"
 msgstr "Przełączenie na poprzedni program"
 
-#: data/50-mutter-navigation.xml:52
+#: data/50-mutter-navigation.xml:60
 msgid "Switch windows"
 msgstr "Przełączenie okien"
 
-#: data/50-mutter-navigation.xml:57
+#: data/50-mutter-navigation.xml:65
 msgid "Switch to previous window"
 msgstr "Przełączenie na poprzednie okno"
 
-#: data/50-mutter-navigation.xml:61
+#: data/50-mutter-navigation.xml:69
 msgid "Switch windows of an application"
 msgstr "Przełączenie między oknami programu"
 
-#: data/50-mutter-navigation.xml:66
+#: data/50-mutter-navigation.xml:74
 msgid "Switch to previous window of an application"
 msgstr "Przełączenie na poprzednie okno programu"
 
-#: data/50-mutter-navigation.xml:70
+#: data/50-mutter-navigation.xml:78
 msgid "Switch system controls"
 msgstr "Przełączenie kontroli systemowej"
 
-#: data/50-mutter-navigation.xml:75
+#: data/50-mutter-navigation.xml:83
 msgid "Switch to previous system control"
 msgstr "Przełączenie na poprzednią kontrolę systemową"
 
-#: data/50-mutter-navigation.xml:79
+#: data/50-mutter-navigation.xml:87
 msgid "Switch windows directly"
 msgstr "Bezpośrednie przełączenie między oknami"
 
-#: data/50-mutter-navigation.xml:84
+#: data/50-mutter-navigation.xml:92
 msgid "Switch directly to previous window"
 msgstr "Bezpośrednie przełączenie na poprzednie okno"
 
-#: data/50-mutter-navigation.xml:88
+#: data/50-mutter-navigation.xml:96
 msgid "Switch windows of an app directly"
 msgstr "Bezpośrednie przełączenie między oknami programu"
 
-#: data/50-mutter-navigation.xml:93
+#: data/50-mutter-navigation.xml:101
 msgid "Switch directly to previous window of an app"
 msgstr "Bezpośrednie przełączenie na poprzednie okno programu"
 
-#: data/50-mutter-navigation.xml:97
+#: data/50-mutter-navigation.xml:105
 msgid "Switch system controls directly"
 msgstr "Bezpośrednie przełączenie kontroli systemowej"
 
-#: data/50-mutter-navigation.xml:102
+#: data/50-mutter-navigation.xml:110
 msgid "Switch directly to previous system control"
 msgstr "Bezpośrednie przełączenie na poprzednią kontrolę systemową"
 
-#: data/50-mutter-navigation.xml:105
+#: data/50-mutter-navigation.xml:113
 msgid "Hide all normal windows"
 msgstr "Ukrycie wszystkich zwykłych okien"
 
-#: data/50-mutter-navigation.xml:108
+#: data/50-mutter-navigation.xml:116
 msgid "Switch to workspace 1"
 msgstr "Przełączenie na 1. obszar roboczy"
 
-#: data/50-mutter-navigation.xml:111
+#: data/50-mutter-navigation.xml:119
 msgid "Switch to workspace 2"
 msgstr "Przełączenie na 2. obszar roboczy"
 
-#: data/50-mutter-navigation.xml:114
+#: data/50-mutter-navigation.xml:122
 msgid "Switch to workspace 3"
 msgstr "Przełączenie na 3. obszar roboczy"
 
-#: data/50-mutter-navigation.xml:117
+#: data/50-mutter-navigation.xml:125
 msgid "Switch to workspace 4"
 msgstr "Przełączenie na 4. obszar roboczy"
 
-#: data/50-mutter-navigation.xml:120
+#: data/50-mutter-navigation.xml:128
 msgid "Switch to last workspace"
 msgstr "Przełączenie na ostatni obszar roboczy"
 
-#: data/50-mutter-navigation.xml:123
+#: data/50-mutter-navigation.xml:131
+msgid "Move to workspace on the left"
+msgstr "Przeniesienie na obszar roboczy po lewej"
+
+#: data/50-mutter-navigation.xml:134
+msgid "Move to workspace on the right"
+msgstr "Przeniesienie na obszar roboczy po prawej"
+
+#: data/50-mutter-navigation.xml:138
 msgid "Move to workspace above"
 msgstr "Przeniesienie na górny obszar roboczy"
 
-#: data/50-mutter-navigation.xml:126
+#: data/50-mutter-navigation.xml:142
 msgid "Move to workspace below"
 msgstr "Przeniesienie na dolny obszar roboczy"
 
@@ -242,11 +258,11 @@ msgstr "Pionowa maksymalizacja okna"
 msgid "Maximize window horizontally"
 msgstr "Pozioma maksymalizacja okna"
 
-#: data/50-mutter-windows.xml:41
+#: data/50-mutter-windows.xml:41 data/org.gnome.mutter.gschema.xml.in:166
 msgid "View split on left"
 msgstr "Podział widoku po lewej"
 
-#: data/50-mutter-windows.xml:45
+#: data/50-mutter-windows.xml:45 data/org.gnome.mutter.gschema.xml.in:171
 msgid "View split on right"
 msgstr "Podział widoku po prawej"
 
@@ -407,8 +423,11 @@ msgid ""
 "space, while scaling monitor framebuffers instead of window content, to "
 "manage HiDPI monitors. Does not require a restart. • “rt-scheduler” — makes "
 "mutter request a low priority real-time scheduling. The executable or user "
-"must have CAP_SYS_NICE. Requires a restart. • “autostart-xwayland” — "
-"initializes Xwayland lazily if there are X11 clients. Requires restart."
+"must have CAP_SYS_NICE. Requires a restart. • “dma-buf-screen-sharing\" — "
+"enables DMA buffered screen sharing. This is already enabled by default when "
+"using the i915 driver, but disabled for everything else. Requires a restart. "
+"• “autoclose-xwayland” — automatically terminates Xwayland if all relevant "
+"X11 clients are gone. Does not require a restart."
 msgstr ""
 "Aby włączyć eksperymentalne funkcje, należy dodać słowo kluczowe funkcji do "
 "tej listy. Niektóre funkcje wymagają ponownego uruchomienia menedżera okien. "
@@ -420,23 +439,26 @@ msgstr ""
 "ramki monitorów zamiast zawartości okien. Nie wymaga ponownego uruchomienia. "
 "• „rt-scheduler” — sprawia, że Mutter żąda planowania w czasie rzeczywistym "
 "o niskim priorytecie. Plik wykonywalny lub użytkownik musi mieć "
-"CAP_SYS_NICE. Wymaga ponownego uruchomienia. • „autostart-xwayland” — "
-"inicjuje Xwayland na żądanie, jeśli są klienci X11. Wymaga ponownego "
-"uruchomienia."
+"CAP_SYS_NICE. Wymaga ponownego uruchomienia. • „dma-buf-screen-sharing” — "
+"włącza udostępnianie ekranu buforowane przez DMA. Domyślnie włączone podczas "
+"używania sterownika i915, ale wyłączone w przypadku pozostałych sterowników. "
+"Wymaga ponownego uruchomienia. • „autoclose-xwayland” — automatycznie kończy "
+"działanie Xwayland po zamknięciu wszystkich klientów X11. Nie wymaga "
+"ponownego uruchomienia."
 
-#: data/org.gnome.mutter.gschema.xml.in:134
+#: data/org.gnome.mutter.gschema.xml.in:143
 msgid "Modifier to use to locate the pointer"
 msgstr "Modyfikator używany do znalezienia kursora"
 
-#: data/org.gnome.mutter.gschema.xml.in:135
+#: data/org.gnome.mutter.gschema.xml.in:144
 msgid "This key will initiate the “locate pointer” action."
 msgstr "Ten klawisz inicjuje działanie „znajdź kursor”."
 
-#: data/org.gnome.mutter.gschema.xml.in:142
+#: data/org.gnome.mutter.gschema.xml.in:151
 msgid "Timeout for check-alive ping"
 msgstr "Czas oczekiwania na odpowiedź żądania sprawdzenia aktywności"
 
-#: data/org.gnome.mutter.gschema.xml.in:143
+#: data/org.gnome.mutter.gschema.xml.in:152
 msgid ""
 "Number of milliseconds a client has to respond to a ping request in order to "
 "not be detected as frozen. Using 0 will disable the alive check completely."
@@ -445,19 +467,19 @@ msgstr ""
 "nie został wykryty jako zawieszony. Wartość 0 całkowicie wyłączy sprawdzanie "
 "aktywności."
 
-#: data/org.gnome.mutter.gschema.xml.in:165
+#: data/org.gnome.mutter.gschema.xml.in:176
 msgid "Select window from tab popup"
 msgstr "Wybór okna z wyskakującego okna dla tabulacji"
 
-#: data/org.gnome.mutter.gschema.xml.in:170
+#: data/org.gnome.mutter.gschema.xml.in:181
 msgid "Cancel tab popup"
 msgstr "Anulowanie wyskakującego okna dla tabulacji"
 
-#: data/org.gnome.mutter.gschema.xml.in:175
+#: data/org.gnome.mutter.gschema.xml.in:186
 msgid "Switch monitor configurations"
 msgstr "Przełączenie konfiguracji monitorów"
 
-#: data/org.gnome.mutter.gschema.xml.in:180
+#: data/org.gnome.mutter.gschema.xml.in:191
 msgid "Rotates the built-in monitor configuration"
 msgstr "Obrócenie wbudowanego monitora"
 
@@ -587,25 +609,6 @@ msgstr ""
 "został zbudowany bez obsługi wybranych rozszerzeń. Xwayland musi zostać "
 "ponownie uruchomiony, aby to ustawienie zostało uwzględnione."
 
-#. TRANSLATORS: This string refers to a button that switches between
-#. * different modes.
-#.
-#: src/backends/meta-input-settings.c:2698
-#, c-format
-msgid "Mode Switch (Group %d)"
-msgstr "Przełącznik trybu (%d. grupa)"
-
-#. TRANSLATORS: This string refers to an action, cycles drawing tablets'
-#. * mapping through the available outputs.
-#.
-#: src/backends/meta-input-settings.c:2721
-msgid "Switch monitor"
-msgstr "Przełączenie monitora"
-
-#: src/backends/meta-input-settings.c:2723
-msgid "Show on-screen help"
-msgstr "Ekran pomocy"
-
 #: src/backends/meta-monitor.c:235
 msgid "Built-in display"
 msgstr "Wbudowany ekran"
@@ -640,7 +643,7 @@ msgstr "Menedżer składania"
 
 #. This probably means that a non-WM compositor like xcompmgr is running;
 #. * we have no way to get it to exit
-#: src/compositor/compositor.c:516
+#: src/compositor/compositor.c:510
 #, c-format
 msgid ""
 "Another compositing manager is already running on screen %i on display “%s”."
@@ -651,47 +654,59 @@ msgstr ""
 msgid "Bell event"
 msgstr "Zdarzenie sygnału dźwiękowego"
 
-#: src/core/main.c:190
+#: src/core/main.c:233
 msgid "Disable connection to session manager"
 msgstr "Rozłącza połączenie z menedżerem sesji"
 
-#: src/core/main.c:196
+#: src/core/main.c:239
 msgid "Replace the running window manager"
 msgstr "Zastępuje uruchomionego menedżera okien"
 
-#: src/core/main.c:202
+#: src/core/main.c:245
 msgid "Specify session management ID"
 msgstr "Podaje identyfikator zarządzania sesją"
 
-#: src/core/main.c:207
+#: src/core/main.c:250
 msgid "X Display to use"
 msgstr "Używany ekran X"
 
-#: src/core/main.c:213
+#: src/core/main.c:256
 msgid "Initialize session from savefile"
 msgstr "Inicjuje sesję z zapisanego pliku"
 
-#: src/core/main.c:219
+#: src/core/main.c:262
 msgid "Make X calls synchronous"
 msgstr "Synchroniczne wywołania X"
 
-#: src/core/main.c:226
+#: src/core/main.c:269
 msgid "Run as a wayland compositor"
 msgstr "Uruchamia jako menedżer składania Wayland"
 
-#: src/core/main.c:232
+#: src/core/main.c:275
 msgid "Run as a nested compositor"
 msgstr "Uruchamia jako osadzony menedżer składania"
 
-#: src/core/main.c:238
+#: src/core/main.c:281
 msgid "Run wayland compositor without starting Xwayland"
 msgstr "Uruchamia menedżer składania Wayland bez uruchamiania Xwayland"
 
-#: src/core/main.c:246
+#: src/core/main.c:287
+msgid "Specify Wayland display name to use"
+msgstr "Podaje używaną nazwę ekranu Wayland"
+
+#: src/core/main.c:295
 msgid "Run as a full display server, rather than nested"
 msgstr "Uruchamia jako pełny serwer wyświetlania zamiast osadzonego"
 
-#: src/core/main.c:252
+#: src/core/main.c:300
+msgid "Run as a headless display server"
+msgstr "Uruchamia jako serwer wyświetlania bez monitora"
+
+#: src/core/main.c:305
+msgid "Add persistent virtual monitor (WxH or WxH@R)"
+msgstr "Dodaje trwały wirtualny monitor (SzxW lub SzxW@O)"
+
+#: src/core/main.c:311
 msgid "Run with X11 backend"
 msgstr "Uruchamia za pomocą mechanizmu X11"
 
@@ -719,41 +734,44 @@ msgstr "_Zakończ"
 msgid "_Wait"
 msgstr "_Czekaj"
 
-#: src/core/mutter.c:38
+#. TRANSLATORS: This string refers to a button that switches between
+#. * different modes.
+#.
+#: src/core/meta-pad-action-mapper.c:780
 #, c-format
-msgid ""
-"mutter %s\n"
-"Copyright © 2001-%d Havoc Pennington, Red Hat, Inc., and others\n"
-"This is free software; see the source for copying conditions.\n"
-"There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A "
-"PARTICULAR PURPOSE.\n"
-msgstr ""
-"mutter %s\n"
-"Copyright © 2001-%d Havoc Pennington, Red Hat, Inc., oraz inni\n"
-"Niniejszy program jest wolnym oprogramowaniem, aby poznać warunki, pod\n"
-"jakimi dopuszczalne jest kopiowanie programu, zajrzyj do jego źródeł.\n"
-"Na program nie udziela się ŻADNYCH GWARANCJI, nawet domyślnej gwarancji\n"
-"PRZYDATNOŚCI HANDLOWEJ albo PRZYDATNOŚCI DO OKREŚLONYCH ZASTOSOWAŃ.\n"
+msgid "Mode Switch (Group %d)"
+msgstr "Przełącznik trybu (%d. grupa)"
 
-#: src/core/mutter.c:52
+#. TRANSLATORS: This string refers to an action, cycles drawing tablets'
+#. * mapping through the available outputs.
+#.
+#: src/core/meta-pad-action-mapper.c:803
+msgid "Switch monitor"
+msgstr "Przełączenie monitora"
+
+#: src/core/meta-pad-action-mapper.c:805
+msgid "Show on-screen help"
+msgstr "Ekran pomocy"
+
+#: src/core/mutter.c:46
 msgid "Print version"
 msgstr "Wyświetla wersję"
 
-#: src/core/mutter.c:58
+#: src/core/mutter.c:52
 msgid "Mutter plugin to use"
 msgstr "Używana wtyczka menedżera Mutter"
 
-#: src/core/prefs.c:1911
+#: src/core/prefs.c:1912
 #, c-format
 msgid "Workspace %d"
 msgstr "%d. obszar roboczy"
 
-#: src/core/util.c:119
-msgid "Mutter was compiled without support for verbose mode\n"
+#: src/core/util.c:117
+msgid "Mutter was compiled without support for verbose mode"
 msgstr ""
-"Menedżer Mutter został skompilowany bez obsługi trybu z obszerną informacją\n"
+"Menedżer Mutter został skompilowany bez obsługi trybu z obszerną informacją"
 
-#: src/wayland/meta-wayland-tablet-pad.c:568
+#: src/wayland/meta-wayland-tablet-pad.c:519
 #, c-format
 msgid "Mode Switch: Mode %d"
 msgstr "Przełącznik trybu: %d. tryb"
@@ -767,26 +785,26 @@ msgstr ""
 "Na ekranie „%s” działa już menedżer okien. Aby zastąpić działającego "
 "menedżera okien, należy użyć opcji „--replace”."
 
-#: src/x11/meta-x11-display.c:1089
-msgid "Failed to initialize GDK\n"
-msgstr "Zainicjowanie biblioteki GDK się nie powiodło\n"
+#: src/x11/meta-x11-display.c:1097
+msgid "Failed to initialize GDK"
+msgstr "Zainicjowanie biblioteki GDK się nie powiodło"
 
-#: src/x11/meta-x11-display.c:1113
+#: src/x11/meta-x11-display.c:1121
 #, c-format
-msgid "Failed to open X Window System display “%s”\n"
-msgstr "Otwarcie połączenia z ekranem „%s” systemu X Window się nie powiodło\n"
+msgid "Failed to open X Window System display “%s”"
+msgstr "Otwarcie ekranu „%s” systemu X Window się nie powiodło"
 
-#: src/x11/meta-x11-display.c:1196
+#: src/x11/meta-x11-display.c:1204
 #, c-format
-msgid "Screen %d on display “%s” is invalid\n"
-msgstr "Podekran %d ekranu „%s” jest nieprawidłowy\n"
+msgid "Screen %d on display “%s” is invalid"
+msgstr "Podekran %d ekranu „%s” jest nieprawidłowy"
 
 #: src/x11/meta-x11-selection-input-stream.c:460
 #, c-format
 msgid "Format %s not supported"
 msgstr "Format %s jest nieobsługiwany"
 
-#: src/x11/session.c:1821
+#: src/x11/session.c:1822
 msgid ""
 "These windows do not support “save current setup” and will have to be "
 "restarted manually next time you log in."

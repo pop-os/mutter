@@ -25,7 +25,6 @@
 #include "backends/native/meta-backend-native.h"
 #include "backends/native/meta-kms-device-private.h"
 #include "backends/native/meta-kms-impl.h"
-#include "backends/native/meta-kms-impl-simple.h"
 #include "backends/native/meta-kms-update-private.h"
 #include "backends/native/meta-udev.h"
 #include "cogl/cogl.h"
@@ -83,34 +82,36 @@
  * should be presented on a CRTC. Planes can either be primary planes, used as
  * a backdrop for CRTCs, overlay planes, and cursor planes.
  *
+ * #MetaKmsMode:
+ *
+ * Represents a mode a CRTC and connector can be configured with.
+ * Represents both modes directly derived from the devices, as well as
+ * fall back modes when the CRTC supports scaling.
+ *
  * #MetaKmsUpdate:
  *
  * A KMS transaction object, meant to be processed potentially atomically when
  * posted. An update consists of plane assignments, mode sets and KMS object
  * property entries. The user adds updates to the object, and then posts it via
  * MetaKms. It will then be processed by the MetaKms backend (See
- * #MetaKmsImpl), potentially atomically.
+ * #MetaKmsImpl), potentially atomically. Each #MetaKmsUpdate deals with
+ * updating a single device.
  *
  *
  * There are also these private objects, without public facing API:
  *
  * #MetaKmsImpl:
  *
- * The KMS backend implementation, running in the impl context. #MetaKmsImpl
- * itself is an abstract object, with potentially multiple implementations.
- * Currently only #MetaKmsImplSimple exists.
- *
- * #MetaKmsImplSimple:
- *
- * A KMS backend implementation using the non-atomic drmMode* API. While it's
- * interacted with using the transactional API, the #MetaKmsUpdate is processed
- * non-atomically.
+ * The KMS impl context object, managing things in the impl context.
  *
  * #MetaKmsImplDevice:
  *
  * An object linked to a #MetaKmsDevice, but where it is executed in the impl
  * context. It takes care of the updating of the various KMS object (CRTC,
  * connector, ..) states.
+ *
+ * This is an abstract type, with currently #MetaKmsImplDeviceSimple,
+ * implementing mode setting and page flipping using legacy DRM API.
  *
  * #MetaKmsPageFlip:
  *
@@ -157,6 +158,8 @@ struct _MetaKms
 {
   GObject parent;
 
+  MetaKmsFlags flags;
+
   MetaBackend *backend;
 
   gulong hotplug_handler_id;
@@ -168,7 +171,7 @@ struct _MetaKms
 
   GList *devices;
 
-  MetaKmsUpdate *pending_update;
+  GList *pending_updates;
 
   GList *pending_callbacks;
   guint callback_source_id;
@@ -176,30 +179,64 @@ struct _MetaKms
 
 G_DEFINE_TYPE (MetaKms, meta_kms, G_TYPE_OBJECT)
 
-MetaKmsUpdate *
-meta_kms_ensure_pending_update (MetaKms *kms)
-{
-  if (!kms->pending_update)
-    kms->pending_update = meta_kms_update_new ();
-
-  return meta_kms_get_pending_update (kms);
-}
-
-MetaKmsUpdate *
-meta_kms_get_pending_update (MetaKms *kms)
-{
-  return kms->pending_update;
-}
-
 static void
-meta_kms_predict_states_in_impl (MetaKms       *kms,
-                                 MetaKmsUpdate *update)
+meta_kms_add_pending_update (MetaKms       *kms,
+                             MetaKmsUpdate *update)
 {
-  meta_assert_in_kms_impl (kms);
+  kms->pending_updates = g_list_prepend (kms->pending_updates, update);
+}
 
-  g_list_foreach (kms->devices,
-                  (GFunc) meta_kms_device_predict_states_in_impl,
-                  update);
+MetaKmsUpdate *
+meta_kms_ensure_pending_update (MetaKms       *kms,
+                                MetaKmsDevice *device)
+{
+  MetaKmsUpdate *update;
+
+  update = meta_kms_get_pending_update (kms, device);
+  if (update)
+    return update;
+
+  update = meta_kms_update_new (device);
+  meta_kms_add_pending_update (kms, update);
+
+  return update;
+}
+
+MetaKmsUpdate *
+meta_kms_get_pending_update (MetaKms       *kms,
+                             MetaKmsDevice *device)
+{
+  GList *l;
+
+  for (l = kms->pending_updates; l; l = l->next)
+    {
+      MetaKmsUpdate *update = l->data;
+
+      if (meta_kms_update_get_device (update) == device)
+        return update;
+    }
+
+  return NULL;
+}
+
+static MetaKmsUpdate *
+meta_kms_take_pending_update (MetaKms       *kms,
+                              MetaKmsDevice *device)
+{
+  GList *l;
+
+  for (l = kms->pending_updates; l; l = l->next)
+    {
+      MetaKmsUpdate *update = l->data;
+
+      if (meta_kms_update_get_device (update) == device)
+        {
+          kms->pending_updates = g_list_delete_link (kms->pending_updates, l);
+          return update;
+        }
+    }
+
+  return NULL;
 }
 
 static gpointer
@@ -207,35 +244,73 @@ meta_kms_process_update_in_impl (MetaKmsImpl  *impl,
                                  gpointer      user_data,
                                  GError      **error)
 {
-  g_autoptr (MetaKmsUpdate) update = user_data;
   MetaKmsFeedback *feedback;
+  MetaKmsUpdate *update = user_data;
 
   feedback = meta_kms_impl_process_update (impl, update);
-  meta_kms_predict_states_in_impl (meta_kms_impl_get_kms (impl), update);
+  meta_kms_device_predict_states_in_impl (meta_kms_update_get_device (update),
+                                          update);
 
   return feedback;
 }
 
-static MetaKmsFeedback *
-meta_kms_post_update_sync (MetaKms       *kms,
-                           MetaKmsUpdate *update)
+MetaKmsFeedback *
+meta_kms_post_pending_update_sync (MetaKms           *kms,
+                                   MetaKmsDevice     *device,
+                                   MetaKmsUpdateFlag  flags)
 {
-  meta_kms_update_seal (update);
+  MetaKmsUpdate *update;
+  MetaKmsFeedback *feedback;
+  GList *result_listeners;
+  GList *l;
 
   COGL_TRACE_BEGIN_SCOPED (MetaKmsPostUpdateSync,
                            "KMS (post update)");
 
-  return meta_kms_run_impl_task_sync (kms,
-                                      meta_kms_process_update_in_impl,
-                                      update,
-                                      NULL);
-}
+  update = meta_kms_take_pending_update (kms, device);
+  if (!update)
+    return NULL;
 
-MetaKmsFeedback *
-meta_kms_post_pending_update_sync (MetaKms *kms)
-{
-  return meta_kms_post_update_sync (kms,
-                                    g_steal_pointer (&kms->pending_update));
+  meta_kms_update_lock (update);
+
+  feedback = meta_kms_run_impl_task_sync (kms,
+                                          meta_kms_process_update_in_impl,
+                                          update,
+                                          NULL);
+
+  result_listeners = meta_kms_update_take_result_listeners (update);
+
+  if (feedback->error &&
+      flags & META_KMS_UPDATE_FLAG_PRESERVE_ON_ERROR)
+    {
+      GList *l;
+
+      meta_kms_update_unlock (update);
+
+      for (l = feedback->failed_planes; l; l = l->next)
+        {
+          MetaKmsPlane *plane = l->data;
+
+          meta_kms_update_drop_plane_assignment (update, plane);
+        }
+
+      meta_kms_add_pending_update (kms, update);
+    }
+  else
+    {
+      meta_kms_update_free (update);
+    }
+
+  for (l = result_listeners; l; l = l->next)
+    {
+      MetaKmsResultListener *listener = l->data;
+
+      meta_kms_result_listener_notify (listener, feedback);
+      meta_kms_result_listener_free (listener);
+    }
+  g_list_free (result_listeners);
+
+  return feedback;
 }
 
 static gpointer
@@ -261,7 +336,7 @@ meta_kms_callback_data_free (MetaKmsCallbackData *callback_data)
 {
   if (callback_data->user_data_destroy)
     callback_data->user_data_destroy (callback_data->user_data);
-  g_slice_free (MetaKmsCallbackData, callback_data);
+  g_free (callback_data);
 }
 
 static int
@@ -271,6 +346,8 @@ flush_callbacks (MetaKms *kms)
   int callback_count = 0;
 
   meta_assert_not_in_kms_impl (kms);
+
+  g_clear_handle_id (&kms->callback_source_id, g_source_remove);
 
   for (l = kms->pending_callbacks; l; l = l->next)
     {
@@ -306,7 +383,7 @@ meta_kms_queue_callback (MetaKms         *kms,
 {
   MetaKmsCallbackData *callback_data;
 
-  callback_data = g_slice_new0 (MetaKmsCallbackData);
+  callback_data = g_new0 (MetaKmsCallbackData, 1);
   *callback_data = (MetaKmsCallbackData) {
     .callback = callback,
     .user_data = user_data,
@@ -500,6 +577,12 @@ handle_hotplug_event (MetaKms *kms)
   g_signal_emit (kms, signals[RESOURCES_CHANGED], 0);
 }
 
+void
+meta_kms_resume (MetaKms *kms)
+{
+  handle_hotplug_event (kms);
+}
+
 static void
 on_udev_hotplug (MetaUdev *udev,
                  MetaKms  *kms)
@@ -521,16 +604,10 @@ meta_kms_get_backend (MetaKms *kms)
   return kms->backend;
 }
 
-static gpointer
-notify_device_created_in_impl (MetaKmsImpl  *impl,
-                               gpointer      user_data,
-                               GError      **error)
+GList *
+meta_kms_get_devices (MetaKms *kms)
 {
-  MetaKmsDevice *device = user_data;
-
-  meta_kms_impl_notify_device_created (impl, device);
-
-  return GINT_TO_POINTER (TRUE);
+  return kms->devices;
 }
 
 MetaKmsDevice *
@@ -541,12 +618,12 @@ meta_kms_create_device (MetaKms            *kms,
 {
   MetaKmsDevice *device;
 
+  if (kms->flags & META_KMS_FLAG_NO_MODE_SETTING)
+    flags |= META_KMS_DEVICE_FLAG_NO_MODE_SETTING;
+
   device = meta_kms_device_new (kms, path, flags, error);
   if (!device)
     return NULL;
-
-  meta_kms_run_impl_task_sync (kms, notify_device_created_in_impl,
-                               device, NULL);
 
   kms->devices = g_list_append (kms->devices, device);
 
@@ -554,29 +631,51 @@ meta_kms_create_device (MetaKms            *kms,
 }
 
 MetaKms *
-meta_kms_new (MetaBackend  *backend,
-              GError      **error)
+meta_kms_new (MetaBackend   *backend,
+              MetaKmsFlags   flags,
+              GError       **error)
 {
   MetaBackendNative *backend_native = META_BACKEND_NATIVE (backend);
   MetaUdev *udev = meta_backend_native_get_udev (backend_native);
   MetaKms *kms;
 
   kms = g_object_new (META_TYPE_KMS, NULL);
+  kms->flags = flags;
   kms->backend = backend;
-  kms->impl = META_KMS_IMPL (meta_kms_impl_simple_new (kms, error));
+  kms->impl = meta_kms_impl_new (kms);
   if (!kms->impl)
     {
       g_object_unref (kms);
       return NULL;
     }
 
-  kms->hotplug_handler_id =
-    g_signal_connect (udev, "hotplug", G_CALLBACK (on_udev_hotplug), kms);
+  if (!(flags & META_KMS_FLAG_NO_MODE_SETTING))
+    {
+      kms->hotplug_handler_id =
+        g_signal_connect (udev, "hotplug", G_CALLBACK (on_udev_hotplug), kms);
+    }
+
   kms->removed_handler_id =
     g_signal_connect (udev, "device-removed",
                       G_CALLBACK (on_udev_device_removed), kms);
 
   return kms;
+}
+
+static gpointer
+prepare_shutdown_in_impl (MetaKmsImpl  *impl,
+                          gpointer      user_data,
+                          GError      **error)
+{
+  meta_kms_impl_prepare_shutdown (impl);
+  return GINT_TO_POINTER (TRUE);
+}
+
+void
+meta_kms_prepare_shutdown (MetaKms *kms)
+{
+  meta_kms_run_impl_task_sync (kms, prepare_shutdown_in_impl, NULL, NULL);
+  flush_callbacks (kms);
 }
 
 static void

@@ -1,3 +1,38 @@
+mutter (40.1-1) experimental; urgency=medium
+
+  [ Marco Trevisan (Treviño) ]
+  * New upstream release:
+    - Only snap to window edges when CTRL is pressed (LP: #1727225)
+    - Fix viewport of offscreen effects (LP: #1825126)
+  * debian: Update library name to follow soname (mutter-8)
+  * debian/control: Bump dependencies to match upstream requirements
+  * debian/patches:
+    - Refresh
+    - Do not run screencast tests.
+      They require to have a full running pipewire (that requires a system
+      dbus daemon) so, we can't easily get one up and running while building.
+  * debian/libmutter-8-0.symbols: Sync with new library symbols
+  * debian/control: Do not break on old gnome-shell versions
+  * debian: Enable sysprof profiler on linux
+  * debian/libmutter-8-0.symbols: Add new cogl trace symbols
+  * debian/rules: Enforce symbols checking via higher gen symbols check level
+  * debian/patches: Fix failing installed tests and ensure they work with runner
+  * debian: Enable installed tests and package them in mutter-8-tests
+  * debian/tests: Run installed tests as part of the autopkg tests
+  * debian/control: Add dependency on xwayland to mutter-tests
+  * debian/tests: Use multiple stanzas to run the autopkg tests
+  * debian/rules: disable native tests on non-linux
+  * debian/control: Depend on binary version for mutter package
+  * debian: Use dh-exec to install linux-only files
+  * debian/libmutter-8-0.symbols: Mark more symbols as linux-only
+  * debian/mutter-8-tests.lintian-override: Use versioned package name
+
+  [ Laurent Bigonville ]
+  * debian/watch: Updated to follow the new versioning scheme
+  * Remove Conflicts for old libmutter-*-dev packages
+
+ -- Laurent Bigonville <bigon@debian.org>  Thu, 27 May 2021 21:31:05 +0200
+
 mutter (3.38.4-1ubuntu2) hirsute; urgency=medium
 
   [ Daniel van Vugt ]

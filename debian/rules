@@ -4,10 +4,11 @@ include /usr/share/dpkg/default.mk
 
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 export DEB_LDFLAGS_MAINT_APPEND = -Wl,-O1
+export DPKG_GENSYMBOLS_CHECK_LEVEL = 4
 
 # Following upstream method to compute the API version
-MUTTER_MINOR_VERSION = $(shell echo $(DEB_VERSION_UPSTREAM) | cut -d. -f2)
-MUTTER_API_VERSION = $(shell echo $$(( ($(MUTTER_MINOR_VERSION) - 23)/2 )) )
+MUTTER_MINOR_VERSION = $(shell echo $(DEB_VERSION_UPSTREAM) | cut -d. -f1)
+MUTTER_API_VERSION = $(shell echo $$(( $(MUTTER_MINOR_VERSION) - 32 )) )
 MUTTER_SONAME = 0
 
 export MUTTER_API_VERSION
@@ -22,12 +23,14 @@ CONFFLAGS = \
 	-Dremote_desktop=true \
 	-Dwayland_eglstream=true
 else
-CONFFLAGS += \
+CONFFLAGS = \
 	-Dudev=false \
 	-Dlibwacom=false \
 	-Dwayland=false \
 	-Dcore_tests=false \
 	-Dnative_backend=false \
+	-Dnative_tests=false \
+	-Dprofiler=false \
 	-Dremote_desktop=false
 endif
 
@@ -41,8 +44,6 @@ endif
 
 override_dh_auto_configure:
 	dh_auto_configure -- \
-		-Dinstalled_tests=false \
-		-Dprofiler=false \
 		$(CONFFLAGS)
 
 # Use meson test directly as it allows us to use the timeout multiplier

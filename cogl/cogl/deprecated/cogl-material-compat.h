@@ -36,7 +36,6 @@
 #define __COGL_MATERIAL_H__
 
 #include <cogl/cogl-types.h>
-#include <cogl/cogl-matrix.h>
 #include <cogl/cogl-depth-state.h>
 #include <cogl/cogl-macros.h>
 #include <cogl/cogl-object.h>
@@ -590,9 +589,9 @@ cogl_material_set_layer_combine_constant (CoglMaterial    *material,
  */
 COGL_DEPRECATED_FOR (cogl_pipeline_set_layer_matrix)
 COGL_EXPORT void
-cogl_material_set_layer_matrix (CoglMaterial     *material,
-				int               layer_index,
-				const CoglMatrix *matrix);
+cogl_material_set_layer_matrix (CoglMaterial            *material,
+                                int                      layer_index,
+                                const graphene_matrix_t *matrix);
 
 /**
  * cogl_material_set_layer_filters:

@@ -269,13 +269,15 @@ static void
 meta_window_actor_set_frozen (MetaWindowActor *self,
                               gboolean         frozen)
 {
-  MetaWindowActorPrivate *priv =
-    meta_window_actor_get_instance_private (self);
+  ClutterActor *child;
+  ClutterActorIter iter;
 
-  if (meta_surface_actor_is_frozen (priv->surface) == frozen)
-    return;
-
-  meta_surface_actor_set_frozen (priv->surface, frozen);
+  clutter_actor_iter_init (&iter, CLUTTER_ACTOR (self));
+  while (clutter_actor_iter_next (&iter, &child))
+    {
+      if (META_IS_SURFACE_ACTOR (child))
+        meta_surface_actor_set_frozen (META_SURFACE_ACTOR (child), frozen);
+    }
 
   META_WINDOW_ACTOR_GET_CLASS (self)->set_frozen (self, frozen);
 }
@@ -665,16 +667,24 @@ meta_window_actor_after_effects (MetaWindowActor *self)
 {
   MetaWindowActorPrivate *priv =
     meta_window_actor_get_instance_private (self);
+  ClutterStage *stage;
+  ClutterSeat *seat;
+
+  stage = CLUTTER_STAGE (clutter_actor_get_stage (CLUTTER_ACTOR (self)));
+  seat = clutter_backend_get_default_seat (clutter_get_default_backend ());
 
   if (priv->needs_destroy)
     {
       clutter_actor_destroy (CLUTTER_ACTOR (self));
-      return;
+    }
+  else
+    {
+      g_signal_emit (self, signals[EFFECTS_COMPLETED], 0);
+      meta_window_actor_sync_visibility (self);
+      meta_window_actor_sync_actor_geometry (self, FALSE);
     }
 
-  g_signal_emit (self, signals[EFFECTS_COMPLETED], 0);
-  meta_window_actor_sync_visibility (self);
-  meta_window_actor_sync_actor_geometry (self, FALSE);
+  clutter_stage_repick_device (stage, clutter_seat_get_pointer (seat));
 }
 
 void
@@ -1119,15 +1129,17 @@ meta_window_actor_set_geometry_scale (MetaWindowActor *window_actor,
 {
   MetaWindowActorPrivate *priv =
     meta_window_actor_get_instance_private (window_actor);
-  CoglMatrix child_transform;
+  graphene_matrix_t child_transform;
 
   if (priv->geometry_scale == geometry_scale)
     return;
 
   priv->geometry_scale = geometry_scale;
 
-  cogl_matrix_init_identity (&child_transform);
-  cogl_matrix_scale (&child_transform, geometry_scale, geometry_scale, 1);
+  graphene_matrix_init_scale (&child_transform,
+                              geometry_scale,
+                              geometry_scale,
+                              1);
   clutter_actor_set_child_transform (CLUTTER_ACTOR (window_actor),
                                      &child_transform);
 }
@@ -1490,7 +1502,7 @@ meta_window_actor_get_image (MetaWindowActor *self,
     {
       g_warning ("Failed to allocate framebuffer for screenshot: %s",
                  error->message);
-      cogl_object_unref (framebuffer);
+      g_object_unref (framebuffer);
       cogl_object_unref (texture);
       goto out;
     }
@@ -1537,7 +1549,7 @@ meta_window_actor_get_image (MetaWindowActor *self,
                                 CLUTTER_CAIRO_FORMAT_ARGB32,
                                 cairo_image_surface_get_data (surface));
 
-  cogl_object_unref (framebuffer);
+  g_object_unref (framebuffer);
 
   cairo_surface_mark_dirty (surface);
 

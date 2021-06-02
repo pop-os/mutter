@@ -273,9 +273,13 @@ meta_wayland_seat_free (MetaWaylandSeat *seat)
   g_signal_handlers_disconnect_by_data (clutter_seat, seat);
   meta_wayland_seat_set_capabilities (seat, 0);
 
+  meta_wayland_pointer_disable (seat->pointer);
   g_object_unref (seat->pointer);
+  meta_wayland_keyboard_disable (seat->keyboard);
   g_object_unref (seat->keyboard);
+  meta_wayland_touch_disable (seat->touch);
   g_object_unref (seat->touch);
+
   meta_wayland_gtk_text_input_destroy (seat->gtk_text_input);
   meta_wayland_text_input_destroy (seat->text_input);
 
@@ -430,15 +434,6 @@ meta_wayland_seat_handle_event (MetaWaylandSeat *seat,
     }
 
   return FALSE;
-}
-
-void
-meta_wayland_seat_repick (MetaWaylandSeat *seat)
-{
-  if (!meta_wayland_seat_has_pointer (seat))
-    return;
-
-  meta_wayland_pointer_repick (seat->pointer);
 }
 
 void

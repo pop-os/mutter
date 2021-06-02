@@ -27,6 +27,7 @@
 #include "backends/meta-cursor-tracker-private.h"
 #include "backends/meta-idle-monitor-private.h"
 #include "backends/x11/meta-backend-x11.h"
+#include "backends/x11/meta-input-device-x11.h"
 #include "compositor/meta-window-actor-private.h"
 #include "core/display-private.h"
 #include "core/window-private.h"
@@ -108,10 +109,7 @@ handle_idletime_for_event (const ClutterEvent *event)
 
   if (event->any.flags & CLUTTER_EVENT_FLAG_SYNTHETIC ||
       event->type == CLUTTER_ENTER ||
-      event->type == CLUTTER_LEAVE ||
-      event->type == CLUTTER_STAGE_STATE ||
-      event->type == CLUTTER_DESTROY_NOTIFY ||
-      event->type == CLUTTER_CLIENT_MESSAGE)
+      event->type == CLUTTER_LEAVE)
     return;
 
   core_monitor = meta_idle_monitor_get_core ();
@@ -163,6 +161,7 @@ maybe_unfreeze_pointer_events (MetaBackend          *backend,
                                const ClutterEvent   *event,
                                EventsUnfreezeMethod  unfreeze_method)
 {
+  ClutterInputDevice *device;
   Display *xdisplay;
   int event_mode;
   int device_id;
@@ -173,17 +172,18 @@ maybe_unfreeze_pointer_events (MetaBackend          *backend,
   if (!META_IS_BACKEND_X11 (backend))
     return;
 
-  device_id = clutter_event_get_device_id (event);
+  device = clutter_event_get_device (event);
+  device_id = meta_input_device_x11_get_device_id (device);
   switch (unfreeze_method)
     {
     case EVENTS_UNFREEZE_SYNC:
       event_mode = XISyncDevice;
-      meta_verbose ("Syncing events time %u device %i\n",
+      meta_verbose ("Syncing events time %u device %i",
                     (unsigned int) event->button.time, device_id);
       break;
     case EVENTS_UNFREEZE_REPLAY:
       event_mode = XIReplayDevice;
-      meta_verbose ("Replaying events time %u device %i\n",
+      meta_verbose ("Replaying events time %u device %i",
                     (unsigned int) event->button.time, device_id);
       break;
     default:
@@ -262,8 +262,7 @@ meta_display_handle_event (MetaDisplay        *display,
       handle_pad_event = !display->current_pad_osd || is_mode_switch;
 
       if (handle_pad_event &&
-          meta_input_settings_handle_pad_event (meta_backend_get_input_settings (backend),
-                                                event))
+          meta_pad_action_mapper_handle_event (display->pad_action_mapper, event))
         {
           bypass_wayland = bypass_clutter = TRUE;
           goto out;
@@ -285,22 +284,21 @@ meta_display_handle_event (MetaDisplay        *display,
 #ifdef HAVE_WAYLAND
   if (meta_is_wayland_compositor () && event->type == CLUTTER_MOTION)
     {
-      MetaWaylandCompositor *compositor;
+      MetaCursorRenderer *cursor_renderer;
+      ClutterInputDevice *device;
 
-      compositor = meta_wayland_compositor_get_default ();
+      device = clutter_event_get_device (event);
+      cursor_renderer = meta_backend_get_cursor_renderer_for_device (backend,
+                                                                     device);
+      if (cursor_renderer)
+        meta_cursor_renderer_update_position (cursor_renderer);
 
-      if (meta_wayland_tablet_manager_consumes_event (compositor->tablet_manager, event))
-        {
-          meta_wayland_tablet_manager_update_cursor_position (compositor->tablet_manager, event);
-        }
-      else
+      if (device == clutter_seat_get_pointer (clutter_input_device_get_seat (device)))
         {
           MetaCursorTracker *cursor_tracker =
             meta_backend_get_cursor_tracker (backend);
 
-          meta_cursor_tracker_update_position (cursor_tracker,
-                                               event->motion.x,
-                                               event->motion.y);
+          meta_cursor_tracker_invalidate_position (cursor_tracker);
         }
     }
 #endif
@@ -322,7 +320,7 @@ meta_display_handle_event (MetaDisplay        *display,
            */
           meta_warning ("Event has no timestamp! You may be using a broken "
                         "program such as xse.  Please ask the authors of that "
-                        "program to fix it.\n");
+                        "program to fix it.");
         }
       else
         {
@@ -368,6 +366,18 @@ meta_display_handle_event (MetaDisplay        *display,
   if (display->event_route == META_EVENT_ROUTE_NORMAL)
     {
       if (IS_KEY_EVENT (event) && !stage_has_key_focus ())
+        {
+          bypass_wayland = TRUE;
+          goto out;
+        }
+    }
+
+  if (event->type == CLUTTER_SCROLL && meta_prefs_get_mouse_button_mods () > 0)
+    {
+      ClutterModifierType grab_mods;
+
+      grab_mods = meta_display_get_compositor_modifiers (display);
+      if ((clutter_event_get_state (event) & grab_mods) != 0)
         {
           bypass_wayland = TRUE;
           goto out;

@@ -33,14 +33,13 @@
 
 #include "clutter-build-config.h"
 
-#define CLUTTER_ENABLE_EXPERIMENTAL_API
-
 #include "clutter-paint-node-private.h"
 
 #include <pango/pango.h>
 #include <cogl/cogl.h>
 
 #include "clutter-actor-private.h"
+#include "clutter-blur-private.h"
 #include "clutter-color.h"
 #include "clutter-debug.h"
 #include "clutter-private.h"
@@ -130,7 +129,7 @@ clutter_root_node_finalize (ClutterPaintNode *node)
 {
   ClutterRootNode *rnode = (ClutterRootNode *) node;
 
-  cogl_object_unref (rnode->framebuffer);
+  g_object_unref (rnode->framebuffer);
 
   CLUTTER_PAINT_NODE_CLASS (clutter_root_node_parent_class)->finalize (node);
 }
@@ -177,7 +176,7 @@ clutter_root_node_new (CoglFramebuffer    *framebuffer,
                             clear_color->alpha);
   cogl_color_premultiply (&res->clear_color);
 
-  res->framebuffer = cogl_object_ref (framebuffer);
+  res->framebuffer = g_object_ref (framebuffer);
   res->clear_flags = clear_flags;
 
   return (ClutterPaintNode *) res;
@@ -191,7 +190,7 @@ struct _ClutterTransformNode
 {
   ClutterPaintNode parent_instance;
 
-  CoglMatrix transform;
+  graphene_matrix_t transform;
 };
 
 struct _ClutterTransformNodeClass
@@ -238,7 +237,7 @@ clutter_transform_node_class_init (ClutterTransformNodeClass *klass)
 static void
 clutter_transform_node_init (ClutterTransformNode *self)
 {
-  cogl_matrix_init_identity (&self->transform);
+  graphene_matrix_init_identity (&self->transform);
 }
 
 /*
@@ -249,13 +248,13 @@ clutter_transform_node_init (ClutterTransformNode *self)
  *   Use clutter_paint_node_unref() when done.
  */
 ClutterPaintNode *
-clutter_transform_node_new (const CoglMatrix *transform)
+clutter_transform_node_new (const graphene_matrix_t *transform)
 {
   ClutterTransformNode *res;
 
   res = _clutter_paint_node_create (CLUTTER_TYPE_TRANSFORM_NODE);
   if (transform)
-    res->transform = *transform;
+    graphene_matrix_init_from_matrix (&res->transform, transform);
 
   return (ClutterPaintNode *) res;
 }
@@ -326,7 +325,7 @@ clutter_dummy_node_finalize (ClutterPaintNode *node)
 {
   ClutterDummyNode *dnode = (ClutterDummyNode *) node;
 
-  cogl_clear_object (&dnode->framebuffer);
+  g_clear_object (&dnode->framebuffer);
 
   CLUTTER_PAINT_NODE_CLASS (clutter_dummy_node_parent_class)->finalize (node);
 }
@@ -358,7 +357,7 @@ _clutter_dummy_node_new (ClutterActor    *actor,
 
   dnode = (ClutterDummyNode *) res;
   dnode->actor = actor;
-  dnode->framebuffer = cogl_object_ref (framebuffer);
+  dnode->framebuffer = g_object_ref (framebuffer);
 
   return res;
 }
@@ -466,6 +465,13 @@ clutter_pipeline_node_draw (ClutterPaintNode    *node,
                                                     op->op.texrect[7]);
           break;
 
+        case PAINT_OP_TEX_RECTS:
+          cogl_framebuffer_draw_textured_rectangles (fb,
+                                                     pnode->pipeline,
+                                                     (float *) op->coords->data,
+                                                     op->coords->len / 8);
+          break;
+
         case PAINT_OP_MULTITEX_RECT:
           cogl_framebuffer_draw_multitextured_rectangle (fb,
                                                          pnode->pipeline,
@@ -473,8 +479,8 @@ clutter_pipeline_node_draw (ClutterPaintNode    *node,
                                                          op->op.texrect[1],
                                                          op->op.texrect[2],
                                                          op->op.texrect[3],
-                                                         (float*) op->multitex_coords->data,
-                                                         op->multitex_coords->len);
+                                                         (float *) op->coords->data,
+                                                         op->coords->len);
           break;
 
         case PAINT_OP_PRIMITIVE:
@@ -551,7 +557,7 @@ clutter_pipeline_node_init (ClutterPipelineNode *self)
 }
 
 /**
- * clutter_pipeline_node_new: (skip)
+ * clutter_pipeline_node_new:
  * @pipeline: (allow-none): a Cogl pipeline state object, or %NULL
  *
  * Creates a new #ClutterPaintNode that will use the @pipeline to
@@ -871,6 +877,7 @@ clutter_text_node_draw (ClutterPaintNode    *node,
             cogl_framebuffer_pop_clip (fb);
           break;
 
+        case PAINT_OP_TEX_RECTS:
         case PAINT_OP_MULTITEX_RECT:
         case PAINT_OP_PRIMITIVE:
         case PAINT_OP_INVALID:
@@ -1032,6 +1039,7 @@ clutter_clip_node_pre_draw (ClutterPaintNode    *node,
           retval = TRUE;
           break;
 
+        case PAINT_OP_TEX_RECTS:
         case PAINT_OP_MULTITEX_RECT:
         case PAINT_OP_PRIMITIVE:
         case PAINT_OP_INVALID:
@@ -1066,6 +1074,7 @@ clutter_clip_node_post_draw (ClutterPaintNode    *node,
           cogl_framebuffer_pop_clip (fb);
           break;
 
+        case PAINT_OP_TEX_RECTS:
         case PAINT_OP_MULTITEX_RECT:
         case PAINT_OP_PRIMITIVE:
         case PAINT_OP_INVALID:
@@ -1115,6 +1124,8 @@ struct _ClutterActorNode
   ClutterPaintNode parent_instance;
 
   ClutterActor *actor;
+  int opacity_override;
+  int saved_opacity_override;
 };
 
 struct _ClutterActorNodeClass
@@ -1129,6 +1140,14 @@ clutter_actor_node_pre_draw (ClutterPaintNode    *node,
                              ClutterPaintContext *paint_context)
 {
   ClutterActorNode *actor_node = CLUTTER_ACTOR_NODE (node);
+
+  if (actor_node->opacity_override != -1)
+    {
+      actor_node->saved_opacity_override =
+        clutter_actor_get_opacity_override (actor_node->actor);
+      clutter_actor_set_opacity_override (actor_node->actor,
+                                          actor_node->opacity_override);
+    }
 
   CLUTTER_SET_PRIVATE_FLAGS (actor_node->actor, CLUTTER_IN_PAINT);
 
@@ -1151,6 +1170,12 @@ clutter_actor_node_post_draw (ClutterPaintNode    *node,
   ClutterActorNode *actor_node = CLUTTER_ACTOR_NODE (node);
 
   CLUTTER_UNSET_PRIVATE_FLAGS (actor_node->actor, CLUTTER_IN_PAINT);
+
+ if (actor_node->opacity_override != -1)
+    {
+      clutter_actor_set_opacity_override (actor_node->actor,
+                                          actor_node->saved_opacity_override);
+    }
 }
 
 static JsonNode *
@@ -1192,6 +1217,7 @@ clutter_actor_node_init (ClutterActorNode *self)
 /*
  * clutter_actor_node_new:
  * @actor: the actor to paint
+ * @opacity: opacity to draw the actor with, or -1 to use the actor's opacity
  *
  * Creates a new #ClutterActorNode.
  *
@@ -1203,7 +1229,8 @@ clutter_actor_node_init (ClutterActorNode *self)
  *   Use clutter_paint_node_unref() when done.
  */
 ClutterPaintNode *
-clutter_actor_node_new (ClutterActor *actor)
+clutter_actor_node_new (ClutterActor *actor,
+                        int           opacity)
 {
   ClutterActorNode *res;
 
@@ -1211,10 +1238,95 @@ clutter_actor_node_new (ClutterActor *actor)
 
   res = _clutter_paint_node_create (CLUTTER_TYPE_ACTOR_NODE);
   res->actor = actor;
+  res->opacity_override = CLAMP (opacity, -1, 255);
 
   return (ClutterPaintNode *) res;
 }
 
+
+/*
+ * ClutterEffectNode
+ */
+
+struct _ClutterEffectNode
+{
+  ClutterPaintNode parent_instance;
+
+  ClutterEffect *effect;
+};
+
+struct _ClutterEffectNodeClass
+{
+  ClutterPaintNodeClass parent_class;
+};
+
+G_DEFINE_TYPE (ClutterEffectNode, clutter_effect_node, CLUTTER_TYPE_PAINT_NODE)
+
+static JsonNode *
+clutter_effect_node_serialize (ClutterPaintNode *node)
+{
+  ClutterEffectNode *effect_node = CLUTTER_EFFECT_NODE (node);
+  ClutterActorMeta *effect_meta = CLUTTER_ACTOR_META (effect_node->effect);
+  g_autoptr (JsonBuilder) builder = NULL;
+  g_autoptr (GString) string = NULL;
+  const char *meta_name;
+
+  meta_name = clutter_actor_meta_get_name (effect_meta);
+
+  string = g_string_new (NULL);
+  g_string_append (string, G_OBJECT_TYPE_NAME (effect_node->effect));
+  g_string_append (string, " (");
+  if (meta_name)
+    g_string_append_printf (string, "\"%s\"", meta_name);
+  else
+    g_string_append (string, "unnamed");
+  g_string_append (string, ")");
+
+  builder = json_builder_new ();
+
+  json_builder_begin_object (builder);
+  json_builder_set_member_name (builder, "effect");
+  json_builder_add_string_value (builder, string->str);
+  json_builder_end_object (builder);
+
+  return json_builder_get_root (builder);
+}
+
+static void
+clutter_effect_node_class_init (ClutterEffectNodeClass *klass)
+{
+  ClutterPaintNodeClass *node_class;
+
+  node_class = CLUTTER_PAINT_NODE_CLASS (klass);
+  node_class->serialize = clutter_effect_node_serialize;
+}
+
+static void
+clutter_effect_node_init (ClutterEffectNode *self)
+{
+}
+
+/**
+ * clutter_effect_node_new:
+ * @effect: the actor to paint
+ *
+ * Creates a new #ClutterEffectNode.
+ *
+ * Return value: (transfer full): the newly created #ClutterEffectNode.
+ *   Use clutter_paint_node_unref() when done.
+ */
+ClutterPaintNode *
+clutter_effect_node_new (ClutterEffect *effect)
+{
+  ClutterEffectNode *res;
+
+  g_assert (CLUTTER_IS_EFFECT (effect));
+
+  res = _clutter_paint_node_create (CLUTTER_TYPE_EFFECT_NODE);
+  res->effect = effect;
+
+  return (ClutterPaintNode *) res;
+}
 
 /*
  * ClutterLayerNode
@@ -1226,7 +1338,7 @@ struct _ClutterLayerNode
 
   cairo_rectangle_t viewport;
 
-  CoglMatrix projection;
+  graphene_matrix_t projection;
 
   float fbo_width;
   float fbo_height;
@@ -1235,6 +1347,8 @@ struct _ClutterLayerNode
   CoglFramebuffer *offscreen;
 
   guint8 opacity;
+
+  gboolean needs_fbo_setup : 1;
 };
 
 struct _ClutterLayerNodeClass
@@ -1250,7 +1364,7 @@ clutter_layer_node_pre_draw (ClutterPaintNode *node,
 {
   ClutterLayerNode *lnode = (ClutterLayerNode *) node;
   CoglFramebuffer *framebuffer;
-  CoglMatrix matrix;
+  graphene_matrix_t matrix;
 
   /* if we were unable to create an offscreen buffer for this node, then
    * we simply ignore it
@@ -1258,28 +1372,26 @@ clutter_layer_node_pre_draw (ClutterPaintNode *node,
   if (lnode->offscreen == NULL)
     return FALSE;
 
-  /* if no geometry was submitted for this node then we simply ignore it */
-  if (node->operations == NULL)
-    return FALSE;
+  if (lnode->needs_fbo_setup)
+    {
+      /* copy the same modelview from the current framebuffer to the one we
+       * are going to use
+       */
+      framebuffer = clutter_paint_context_get_framebuffer (paint_context);
+      cogl_framebuffer_get_modelview_matrix (framebuffer, &matrix);
+      cogl_framebuffer_set_modelview_matrix (lnode->offscreen, &matrix);
 
-  /* copy the same modelview from the current framebuffer to the one we
-   * are going to use
-   */
-  framebuffer = clutter_paint_context_get_framebuffer (paint_context);
-  cogl_framebuffer_get_modelview_matrix (framebuffer, &matrix);
+      cogl_framebuffer_set_viewport (lnode->offscreen,
+                                     lnode->viewport.x,
+                                     lnode->viewport.y,
+                                     lnode->viewport.width,
+                                     lnode->viewport.height);
+
+      cogl_framebuffer_set_projection_matrix (lnode->offscreen,
+                                              &lnode->projection);
+    }
 
   clutter_paint_context_push_framebuffer (paint_context, lnode->offscreen);
-
-  cogl_framebuffer_set_modelview_matrix (lnode->offscreen, &matrix);
-
-  cogl_framebuffer_set_viewport (lnode->offscreen,
-                                 lnode->viewport.x,
-                                 lnode->viewport.y,
-                                 lnode->viewport.width,
-                                 lnode->viewport.height);
-
-  cogl_framebuffer_set_projection_matrix (lnode->offscreen,
-                                          &lnode->projection);
 
   /* clear out the target framebuffer */
   cogl_framebuffer_clear4f (lnode->offscreen,
@@ -1307,6 +1419,9 @@ clutter_layer_node_post_draw (ClutterPaintNode    *node,
   cogl_framebuffer_pop_matrix (lnode->offscreen);
   clutter_paint_context_pop_framebuffer (paint_context);
 
+  if (!node->operations)
+    return;
+
   fb = clutter_paint_context_get_framebuffer (paint_context);
 
   for (i = 0; i < node->operations->len; i++)
@@ -1333,6 +1448,13 @@ clutter_layer_node_post_draw (ClutterPaintNode    *node,
                                                     op->op.texrect[7]);
           break;
 
+        case PAINT_OP_TEX_RECTS:
+          cogl_framebuffer_draw_textured_rectangles (fb,
+                                                     lnode->pipeline,
+                                                     (float *) op->coords->data,
+                                                     op->coords->len / 8);
+          break;
+
         case PAINT_OP_MULTITEX_RECT:
           cogl_framebuffer_draw_multitextured_rectangle (fb,
                                                          lnode->pipeline,
@@ -1340,8 +1462,8 @@ clutter_layer_node_post_draw (ClutterPaintNode    *node,
                                                          op->op.texrect[1],
                                                          op->op.texrect[2],
                                                          op->op.texrect[3],
-                                                         (float*) op->multitex_coords->data,
-                                                         op->multitex_coords->len);
+                                                         (float *) op->coords->data,
+                                                         op->coords->len);
           break;
 
         case PAINT_OP_PRIMITIVE:
@@ -1361,10 +1483,28 @@ clutter_layer_node_finalize (ClutterPaintNode *node)
   if (lnode->pipeline != NULL)
     cogl_object_unref (lnode->pipeline);
 
-  if (lnode->offscreen != NULL)
-    cogl_object_unref (lnode->offscreen);
+  g_clear_object (&lnode->offscreen);
 
   CLUTTER_PAINT_NODE_CLASS (clutter_layer_node_parent_class)->finalize (node);
+}
+
+static JsonNode *
+clutter_layer_node_serialize (ClutterPaintNode *node)
+{
+  ClutterLayerNode *layer_node = CLUTTER_LAYER_NODE (node);
+  g_autoptr (JsonBuilder) builder = NULL;
+  g_autofree char *framebuffer_ptr = NULL;
+
+  builder = json_builder_new ();
+
+  framebuffer_ptr = g_strdup_printf ("%p", layer_node->offscreen);
+
+  json_builder_begin_object (builder);
+  json_builder_set_member_name (builder, "framebuffer");
+  json_builder_add_string_value (builder, framebuffer_ptr);
+  json_builder_end_object (builder);
+
+  return json_builder_get_root (builder);
 }
 
 static void
@@ -1376,12 +1516,13 @@ clutter_layer_node_class_init (ClutterLayerNodeClass *klass)
   node_class->pre_draw = clutter_layer_node_pre_draw;
   node_class->post_draw = clutter_layer_node_post_draw;
   node_class->finalize = clutter_layer_node_finalize;
+  node_class->serialize = clutter_layer_node_serialize;
 }
 
 static void
 clutter_layer_node_init (ClutterLayerNode *self)
 {
-  cogl_matrix_init_identity (&self->projection);
+  graphene_matrix_init_identity (&self->projection);
 }
 
 /*
@@ -1404,7 +1545,7 @@ clutter_layer_node_init (ClutterLayerNode *self)
  * Since: 1.10
  */
 ClutterPaintNode *
-clutter_layer_node_new (const CoglMatrix        *projection,
+clutter_layer_node_new (const graphene_matrix_t *projection,
                         const cairo_rectangle_t *viewport,
                         float                    width,
                         float                    height,
@@ -1415,9 +1556,12 @@ clutter_layer_node_new (const CoglMatrix        *projection,
   CoglTexture2D *tex_2d;
   CoglTexture *texture;
   CoglColor color;
+  CoglOffscreen *offscreen;
+  g_autoptr (GError) error = NULL;
 
   res = _clutter_paint_node_create (CLUTTER_TYPE_LAYER_NODE);
 
+  res->needs_fbo_setup = TRUE;
   res->projection = *projection;
   res->viewport = *viewport;
   res->fbo_width = width;
@@ -1433,12 +1577,16 @@ clutter_layer_node_new (const CoglMatrix        *projection,
   texture = COGL_TEXTURE (tex_2d);
   cogl_texture_set_premultiplied (texture, TRUE);
 
-  res->offscreen = COGL_FRAMEBUFFER (cogl_offscreen_new_to_texture (texture));
-  if (res->offscreen == NULL)
+  offscreen = cogl_offscreen_new_with_texture (texture);
+  if (!cogl_framebuffer_allocate (COGL_FRAMEBUFFER (offscreen), &error))
     {
-      g_critical ("%s: Unable to create an offscreen buffer", G_STRLOC);
+      g_warning ("Unable to create an allocate paint node offscreen: %s",
+                 error->message);
+      g_object_unref (offscreen);
       goto out;
     }
+
+  res->offscreen = COGL_FRAMEBUFFER (offscreen);
 
   cogl_color_init_from_4ub (&color, opacity, opacity, opacity, opacity);
 
@@ -1457,4 +1605,368 @@ out:
   cogl_object_unref (texture);
 
   return (ClutterPaintNode *) res;
+}
+
+/**
+ * clutter_layer_node_new_to_framebuffer:
+ * @framebuffer: a #CoglFramebuffer
+ * @pipeline: a #CoglPipeline
+ *
+ * Creates a new #ClutterLayerNode that will redirect drawing at
+ * @framebuffer. It will then use @pipeline to paint the stored
+ * operations.
+ *
+ * When using this constructor, the caller is reponsible for setting
+ * up @framebuffer, including its modelview and projection matrices,
+ * and the viewport, and the @pipeline as well.
+ *
+ * Return value: (transfer full): the newly created #ClutterLayerNode.
+ *   Use clutter_paint_node_unref() when done.
+ */
+ClutterPaintNode *
+clutter_layer_node_new_to_framebuffer (CoglFramebuffer *framebuffer,
+                                       CoglPipeline    *pipeline)
+{
+  ClutterLayerNode *res;
+
+  g_return_val_if_fail (COGL_IS_FRAMEBUFFER (framebuffer), NULL);
+  g_return_val_if_fail (cogl_is_pipeline (pipeline), NULL);
+
+  res = _clutter_paint_node_create (CLUTTER_TYPE_LAYER_NODE);
+
+  res->needs_fbo_setup = FALSE;
+  res->fbo_width = cogl_framebuffer_get_width (framebuffer);
+  res->fbo_height = cogl_framebuffer_get_height (framebuffer);
+  res->offscreen = g_object_ref (framebuffer);
+  res->pipeline = cogl_pipeline_copy (pipeline);
+
+  return (ClutterPaintNode *) res;
+}
+
+/*
+ * ClutterBlitNode
+ */
+
+struct _ClutterBlitNode
+{
+  ClutterPaintNode parent_instance;
+
+  CoglFramebuffer *src;
+};
+
+G_DEFINE_TYPE (ClutterBlitNode, clutter_blit_node, CLUTTER_TYPE_PAINT_NODE)
+
+static gboolean
+clutter_blit_node_pre_draw (ClutterPaintNode    *node,
+                            ClutterPaintContext *paint_context)
+{
+  return TRUE;
+}
+
+static void
+clutter_blit_node_draw (ClutterPaintNode    *node,
+                        ClutterPaintContext *paint_context)
+{
+  ClutterBlitNode *blit_node = CLUTTER_BLIT_NODE (node);
+  g_autoptr (GError) error = NULL;
+  CoglFramebuffer *framebuffer;
+  unsigned int i;
+
+  if (node->operations == NULL)
+    return;
+
+  framebuffer = get_target_framebuffer (node, paint_context);
+
+  for (i = 0; i < node->operations->len; i++)
+    {
+      const ClutterPaintOperation *op;
+      float op_width, op_height;
+
+      op = &g_array_index (node->operations, ClutterPaintOperation, i);
+
+      switch (op->opcode)
+        {
+        case PAINT_OP_INVALID:
+          break;
+
+        case PAINT_OP_TEX_RECT:
+          op_width = op->op.texrect[6] - op->op.texrect[4];
+          op_height = op->op.texrect[7] - op->op.texrect[5];
+
+          cogl_blit_framebuffer (blit_node->src,
+                                 framebuffer,
+                                 op->op.texrect[0],
+                                 op->op.texrect[1],
+                                 op->op.texrect[4],
+                                 op->op.texrect[5],
+                                 op_width,
+                                 op_height,
+                                 &error);
+
+          if (error)
+            {
+              g_warning ("Error blitting framebuffers: %s", error->message);
+              return;
+            }
+          break;
+
+        case PAINT_OP_TEX_RECTS:
+        case PAINT_OP_MULTITEX_RECT:
+        case PAINT_OP_PRIMITIVE:
+          break;
+        }
+    }
+}
+
+static void
+clutter_blit_node_finalize (ClutterPaintNode *node)
+{
+  ClutterBlitNode *blit_node = CLUTTER_BLIT_NODE (node);
+
+  g_clear_object (&blit_node->src);
+
+  CLUTTER_PAINT_NODE_CLASS (clutter_blit_node_parent_class)->finalize (node);
+}
+
+static JsonNode *
+clutter_blit_node_serialize (ClutterPaintNode *node)
+{
+  ClutterBlitNode *blit_node = CLUTTER_BLIT_NODE (node);
+  g_autoptr (JsonBuilder) builder = NULL;
+  g_autofree char *src_ptr = NULL;
+
+  src_ptr = g_strdup_printf ("%p", blit_node->src);
+
+  builder = json_builder_new ();
+  json_builder_begin_object (builder);
+  json_builder_set_member_name (builder, "source");
+  json_builder_add_string_value (builder, src_ptr);
+  json_builder_end_object (builder);
+
+  return json_builder_get_root (builder);
+}
+
+static void
+clutter_blit_node_class_init (ClutterBlitNodeClass *klass)
+{
+  ClutterPaintNodeClass *node_class;
+
+  node_class = CLUTTER_PAINT_NODE_CLASS (klass);
+  node_class->pre_draw = clutter_blit_node_pre_draw;
+  node_class->draw = clutter_blit_node_draw;
+  node_class->finalize = clutter_blit_node_finalize;
+  node_class->serialize = clutter_blit_node_serialize;
+}
+
+static void
+clutter_blit_node_init (ClutterBlitNode *self)
+{
+}
+
+/**
+ * clutter_blit_node_new:
+ * @src: the source #CoglFramebuffer
+ *
+ * Creates a new #ClutterBlitNode that blits @src into the current
+ * draw framebuffer.
+ *
+ * You must only add rectangles using clutter_blit_node_add_blit_rectangle().
+ *
+ * Return value: (transfer full): the newly created #ClutterBlitNode.
+ *   Use clutter_paint_node_unref() when done.
+ */
+ClutterPaintNode *
+clutter_blit_node_new (CoglFramebuffer *src)
+{
+  ClutterBlitNode *res;
+
+  g_return_val_if_fail (COGL_IS_FRAMEBUFFER (src), NULL);
+
+  res = _clutter_paint_node_create (CLUTTER_TYPE_BLIT_NODE);
+  res->src = g_object_ref (src);
+
+  return (ClutterPaintNode *) res;
+}
+
+/**
+ * clutter_blit_node_add_blit_rectangle:
+ * @blit_node: a #ClutterBlitNode
+ * @src_x: Source x position
+ * @src_y: Source y position
+ * @dst_x: Destination x position
+ * @dst_y: Destination y position
+ * @width: Width of region to copy
+ * @height: Height of region to copy
+ *
+ * Adds a new blit rectangle to the stack of rectangles. All the
+ * constraints of cogl_blit_framebuffer() apply here.
+ */
+void
+clutter_blit_node_add_blit_rectangle (ClutterBlitNode *blit_node,
+                                      int              src_x,
+                                      int              src_y,
+                                      int              dst_x,
+                                      int              dst_y,
+                                      int              width,
+                                      int              height)
+{
+  g_return_if_fail (CLUTTER_IS_BLIT_NODE (blit_node));
+
+  clutter_paint_node_add_texture_rectangle (CLUTTER_PAINT_NODE (blit_node),
+                                            &(ClutterActorBox) {
+                                              .x1 = src_x,
+                                              .y1 = src_y,
+                                              .x2 = src_x + width,
+                                              .y2 = src_y + height,
+                                            },
+                                            dst_x,
+                                            dst_y,
+                                            dst_x + width,
+                                            dst_y + height);
+}
+
+/*
+ * ClutterBlurNode
+ */
+
+struct _ClutterBlurNode
+{
+  ClutterLayerNode parent_instance;
+
+  ClutterBlur *blur;
+  unsigned int sigma;
+};
+
+G_DEFINE_TYPE (ClutterBlurNode, clutter_blur_node, CLUTTER_TYPE_LAYER_NODE)
+
+static void
+clutter_blur_node_post_draw (ClutterPaintNode    *node,
+                             ClutterPaintContext *paint_context)
+{
+  ClutterPaintNodeClass *parent_class =
+    CLUTTER_PAINT_NODE_CLASS (clutter_blur_node_parent_class);
+  ClutterBlurNode *blur_node = CLUTTER_BLUR_NODE (node);
+
+  clutter_blur_apply (blur_node->blur);
+
+  parent_class->post_draw (node, paint_context);
+}
+
+static void
+clutter_blur_node_finalize (ClutterPaintNode *node)
+{
+  ClutterBlurNode *blur_node = CLUTTER_BLUR_NODE (node);
+
+  g_clear_pointer (&blur_node->blur, clutter_blur_free);
+
+  CLUTTER_PAINT_NODE_CLASS (clutter_blur_node_parent_class)->finalize (node);
+}
+
+static JsonNode *
+clutter_blur_node_serialize (ClutterPaintNode *node)
+{
+  ClutterBlurNode *blur_node = CLUTTER_BLUR_NODE (node);
+  g_autoptr (JsonBuilder) builder = NULL;
+  g_autofree char *src_ptr = NULL;
+
+  src_ptr = g_strdup_printf ("%d", blur_node->sigma);
+
+  builder = json_builder_new ();
+  json_builder_begin_object (builder);
+  json_builder_set_member_name (builder, "sigma");
+  json_builder_add_string_value (builder, src_ptr);
+  json_builder_end_object (builder);
+
+  return json_builder_get_root (builder);
+}
+
+static void
+clutter_blur_node_class_init (ClutterBlurNodeClass *klass)
+{
+  ClutterPaintNodeClass *node_class;
+
+  node_class = CLUTTER_PAINT_NODE_CLASS (klass);
+  node_class->post_draw = clutter_blur_node_post_draw;
+  node_class->finalize = clutter_blur_node_finalize;
+  node_class->serialize = clutter_blur_node_serialize;
+}
+
+static void
+clutter_blur_node_init (ClutterBlurNode *blur_node)
+{
+}
+
+/**
+ * clutter_blur_node_new:
+ * @width width of the blur layer
+ * @height: height of the blur layer
+ * @sigma: sigma value of the blur
+ *
+ * Creates a new #ClutterBlurNode.
+ *
+ * Children of this node will be painted inside a separate framebuffer,
+ * which will be blurred and painted on the current draw framebuffer.
+ *
+ * Return value: (transfer full): the newly created #ClutterBlurNode.
+ *   Use clutter_paint_node_unref() when done.
+ */
+ClutterPaintNode *
+clutter_blur_node_new (unsigned int width,
+                       unsigned int height,
+                       float        sigma)
+{
+  g_autoptr (CoglOffscreen) offscreen = NULL;
+  g_autoptr (GError) error = NULL;
+  ClutterLayerNode *layer_node;
+  ClutterBlurNode *blur_node;
+  CoglTexture2D *tex_2d;
+  CoglContext *context;
+  CoglTexture *texture;
+  ClutterBlur *blur;
+
+  g_return_val_if_fail (sigma >= 0.0, NULL);
+
+  blur_node = _clutter_paint_node_create (CLUTTER_TYPE_BLUR_NODE);
+  blur_node->sigma = sigma;
+  context = clutter_backend_get_cogl_context (clutter_get_default_backend ());
+  tex_2d = cogl_texture_2d_new_with_size (context, width, height);
+
+  texture = COGL_TEXTURE (tex_2d);
+  cogl_texture_set_premultiplied (texture, TRUE);
+
+  offscreen = cogl_offscreen_new_with_texture (texture);
+  cogl_object_unref (tex_2d);
+  if (!cogl_framebuffer_allocate (COGL_FRAMEBUFFER (offscreen), &error))
+    {
+      g_warning ("Unable to allocate paint node offscreen: %s",
+                 error->message);
+      goto out;
+    }
+
+  blur = clutter_blur_new (texture, sigma);
+  blur_node->blur = blur;
+
+  if (!blur)
+    {
+      g_warning ("Failed to create blur pipeline");
+      goto out;
+    }
+
+  layer_node = CLUTTER_LAYER_NODE (blur_node);
+  layer_node->offscreen = COGL_FRAMEBUFFER (g_steal_pointer (&offscreen));
+  layer_node->pipeline = cogl_pipeline_copy (default_texture_pipeline);
+  cogl_pipeline_set_layer_filters (layer_node->pipeline, 0,
+                                   COGL_PIPELINE_FILTER_LINEAR,
+                                   COGL_PIPELINE_FILTER_LINEAR);
+  cogl_pipeline_set_layer_texture (layer_node->pipeline,
+                                   0,
+                                   clutter_blur_get_texture (blur));
+
+  cogl_framebuffer_orthographic (layer_node->offscreen,
+                                 0.0, 0.0,
+                                 width, height,
+                                 0.0, 1.0);
+
+out:
+  return (ClutterPaintNode *) blur_node;
 }

@@ -37,10 +37,36 @@ struct _MetaInputDeviceX11
   float current_x;
   float current_y;
 
+  GArray *axes;
+  GArray *scroll_info;
+
 #ifdef HAVE_LIBWACOM
   GArray *group_modes;
 #endif
 };
+
+typedef struct _MetaX11AxisInfo
+{
+  ClutterInputAxis axis;
+
+  double min_axis;
+  double max_axis;
+
+  double min_value;
+  double max_value;
+
+  double resolution;
+} MetaX11AxisInfo;
+
+typedef struct _MetaX11ScrollInfo
+{
+  guint axis_id;
+  ClutterScrollDirection direction;
+  double increment;
+
+  double last_value;
+  guint last_value_valid : 1;
+} MetaX11ScrollInfo;
 
 struct _MetaInputDeviceX11Class
 {
@@ -48,6 +74,15 @@ struct _MetaInputDeviceX11Class
 };
 
 #define N_BUTTONS       5
+
+enum
+{
+  PROP_0,
+  PROP_ID,
+  N_PROPS
+};
+
+static GParamSpec *props[N_PROPS] = { 0 };
 
 G_DEFINE_TYPE (MetaInputDeviceX11,
                meta_input_device_x11,
@@ -57,8 +92,6 @@ static void
 meta_input_device_x11_constructed (GObject *object)
 {
   MetaInputDeviceX11 *device_xi2 = META_INPUT_DEVICE_X11 (object);
-
-  g_object_get (object, "id", &device_xi2->device_id, NULL);
 
   if (G_OBJECT_CLASS (meta_input_device_x11_parent_class)->constructed)
     G_OBJECT_CLASS (meta_input_device_x11_parent_class)->constructed (object);
@@ -71,20 +104,6 @@ meta_input_device_x11_constructed (GObject *object)
                         clutter_input_device_get_n_mode_groups (CLUTTER_INPUT_DEVICE (object)));
     }
 #endif
-}
-
-static gboolean
-meta_input_device_x11_keycode_to_evdev (ClutterInputDevice *device,
-                                        uint32_t            hardware_keycode,
-                                        uint32_t           *evdev_keycode)
-{
-  /* When using evdev under X11 the hardware keycodes are the evdev
-     keycodes plus 8. I haven't been able to find any documentation to
-     know what the +8 is for. FIXME: This should probably verify that
-     X server is using evdev. */
-  *evdev_keycode = hardware_keycode - 8;
-
-  return TRUE;
 }
 
 static gboolean
@@ -126,6 +145,9 @@ meta_input_device_x11_finalize (GObject *object)
 {
   MetaInputDeviceX11 *device_xi2 = META_INPUT_DEVICE_X11 (object);
 
+  g_clear_pointer (&device_xi2->axes, g_array_unref);
+  g_clear_pointer (&device_xi2->scroll_info, g_array_unref);
+
 #ifdef HAVE_LIBWACOM
   if (device_xi2->group_modes)
     g_array_unref (device_xi2->group_modes);
@@ -134,6 +156,42 @@ meta_input_device_x11_finalize (GObject *object)
   g_clear_handle_id (&device_xi2->inhibit_pointer_query_timer, g_source_remove);
 
   G_OBJECT_CLASS (meta_input_device_x11_parent_class)->finalize (object);
+}
+
+static void
+meta_input_device_x11_set_property (GObject      *object,
+                                    guint         prop_id,
+                                    const GValue *value,
+                                    GParamSpec   *pspec)
+{
+  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (object);
+
+  switch (prop_id)
+    {
+    case PROP_ID:
+      device_x11->device_id = g_value_get_int (value);
+      break;
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+    }
+}
+
+static void
+meta_input_device_x11_get_property (GObject    *object,
+                                    guint       prop_id,
+                                    GValue     *value,
+                                    GParamSpec *pspec)
+{
+  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (object);
+
+  switch (prop_id)
+    {
+    case PROP_ID:
+      g_value_set_int (value, device_x11->device_id);
+      break;
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+    }
 }
 
 static int
@@ -221,11 +279,23 @@ meta_input_device_x11_class_init (MetaInputDeviceX11Class *klass)
 
   gobject_class->constructed = meta_input_device_x11_constructed;
   gobject_class->finalize = meta_input_device_x11_finalize;
+  gobject_class->set_property = meta_input_device_x11_set_property;
+  gobject_class->get_property = meta_input_device_x11_get_property;
 
-  device_class->keycode_to_evdev = meta_input_device_x11_keycode_to_evdev;
   device_class->is_grouped = meta_input_device_x11_is_grouped;
   device_class->get_group_n_modes = meta_input_device_x11_get_group_n_modes;
   device_class->is_mode_switch_button = meta_input_device_x11_is_mode_switch_button;
+
+  props[PROP_ID] =
+    g_param_spec_int ("id",
+                      "Id",
+                      "Unique identifier of the device",
+                      -1, G_MAXINT,
+                      0,
+                      CLUTTER_PARAM_READWRITE |
+                      G_PARAM_CONSTRUCT_ONLY);
+
+  g_object_class_install_properties (gobject_class, N_PROPS, props);
 }
 
 static void
@@ -331,7 +401,7 @@ meta_input_device_x11_query_pointer_location (MetaInputDeviceX11 *device_xi2)
 {
   Window xroot_window, xchild_window;
   double xroot_x, xroot_y, xwin_x, xwin_y;
-  XIButtonState button_state;
+  XIButtonState button_state = { 0 };
   XIModifierState mod_state;
   XIGroupState group_state;
   int result;
@@ -348,6 +418,8 @@ meta_input_device_x11_query_pointer_location (MetaInputDeviceX11 *device_xi2)
                            &mod_state,
                            &group_state);
   clutter_x11_untrap_x_errors ();
+
+  g_free (button_state.mask);
 
   if (!result)
     return FALSE;
@@ -377,7 +449,8 @@ meta_input_device_x11_get_pointer_location (ClutterInputDevice *device,
   MetaInputDeviceX11 *device_xi2 = META_INPUT_DEVICE_X11 (device);
 
   g_return_val_if_fail (META_IS_INPUT_DEVICE_X11 (device), FALSE);
-  g_return_val_if_fail (device->device_type == CLUTTER_POINTER_DEVICE, FALSE);
+  g_return_val_if_fail (clutter_input_device_get_device_type (device) ==
+                        CLUTTER_POINTER_DEVICE, FALSE);
 
   /* Throttle XServer queries and roundtrips using an idle timeout */
   if (device_xi2->inhibit_pointer_query_timer == 0)
@@ -392,6 +465,228 @@ meta_input_device_x11_get_pointer_location (ClutterInputDevice *device,
   *y = device_xi2->current_y;
 
   return device_xi2->query_status;
+}
+
+int
+meta_input_device_x11_get_device_id (ClutterInputDevice *device)
+{
+  MetaInputDeviceX11 *device_xi2 = META_INPUT_DEVICE_X11 (device);
+
+  g_return_val_if_fail (META_IS_INPUT_DEVICE_X11 (device), 0);
+
+  return device_xi2->device_id;
+}
+
+void
+meta_input_device_x11_reset_axes (ClutterInputDevice *device)
+{
+  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (device);
+
+  g_clear_pointer (&device_x11->axes, g_array_unref);
+}
+
+int
+meta_input_device_x11_add_axis (ClutterInputDevice *device,
+                                ClutterInputAxis    axis,
+                                double              minimum,
+                                double              maximum,
+                                double              resolution)
+{
+  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (device);
+  MetaX11AxisInfo info;
+  guint pos;
+
+  if (device_x11->axes == NULL)
+    device_x11->axes = g_array_new (FALSE, TRUE, sizeof (MetaX11AxisInfo));
+
+  info.axis = axis;
+  info.min_value = minimum;
+  info.max_value = maximum;
+  info.resolution = resolution;
+
+  switch (axis)
+    {
+    case CLUTTER_INPUT_AXIS_X:
+    case CLUTTER_INPUT_AXIS_Y:
+      info.min_axis = 0;
+      info.max_axis = 0;
+      break;
+
+    case CLUTTER_INPUT_AXIS_XTILT:
+    case CLUTTER_INPUT_AXIS_YTILT:
+      info.min_axis = -1;
+      info.max_axis = 1;
+      break;
+
+    default:
+      info.min_axis = 0;
+      info.max_axis = 1;
+      break;
+    }
+
+  g_array_append_val (device_x11->axes, info);
+  pos = device_x11->axes->len - 1;
+
+  return pos;
+}
+
+gboolean
+meta_input_device_x11_get_axis (ClutterInputDevice *device,
+                                int                 idx,
+                                ClutterInputAxis   *use)
+{
+  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (device);
+  MetaX11AxisInfo *info;
+
+  if (device_x11->axes == NULL)
+    return FALSE;
+
+  if (idx < 0 || idx >= device_x11->axes->len)
+    return FALSE;
+
+  info = &g_array_index (device_x11->axes, MetaX11AxisInfo, idx);
+
+  if (use)
+    *use = info->axis;
+
+  return TRUE;
+}
+
+gboolean
+meta_input_device_x11_translate_axis (ClutterInputDevice *device,
+                                      int                 idx,
+                                      double              value,
+                                      double             *axis_value)
+{
+  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (device);
+  MetaX11AxisInfo *info;
+  double width;
+  double real_value;
+
+  if (device_x11->axes == NULL || idx < 0 || idx >= device_x11->axes->len)
+    return FALSE;
+
+  info = &g_array_index (device_x11->axes, MetaX11AxisInfo, idx);
+
+  if (info->axis == CLUTTER_INPUT_AXIS_X ||
+      info->axis == CLUTTER_INPUT_AXIS_Y)
+    return FALSE;
+
+  if (fabs (info->max_value - info->min_value) < 0.0000001)
+    return FALSE;
+
+  width = info->max_value - info->min_value;
+  real_value = (info->max_axis * (value - info->min_value)
+             + info->min_axis * (info->max_value - value))
+             / width;
+
+  if (axis_value)
+    *axis_value = real_value;
+
+  return TRUE;
+}
+
+int
+meta_input_device_x11_get_n_axes (ClutterInputDevice *device)
+{
+  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (device);
+
+  return device_x11->axes->len;
+}
+
+void
+meta_input_device_x11_add_scroll_info (ClutterInputDevice     *device,
+                                       int                     idx,
+                                       ClutterScrollDirection  direction,
+                                       double                  increment)
+{
+  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (device);
+  MetaX11ScrollInfo info;
+
+  g_return_if_fail (CLUTTER_IS_INPUT_DEVICE (device));
+
+  info.axis_id = idx;
+  info.direction = direction;
+  info.increment = increment;
+  info.last_value_valid = FALSE;
+
+  if (device_x11->scroll_info == NULL)
+    {
+      device_x11->scroll_info = g_array_new (FALSE,
+                                             FALSE,
+                                             sizeof (MetaX11ScrollInfo));
+    }
+
+  g_array_append_val (device_x11->scroll_info, info);
+}
+
+gboolean
+meta_input_device_x11_get_scroll_delta (ClutterInputDevice     *device,
+                                        int                     idx,
+                                        double                  value,
+                                        ClutterScrollDirection *direction_p,
+                                        double                 *delta_p)
+{
+  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (device);
+  int i;
+
+  if (device_x11->scroll_info == NULL)
+    return FALSE;
+
+  for (i = 0; i < device_x11->scroll_info->len; i++)
+    {
+      MetaX11ScrollInfo *info = &g_array_index (device_x11->scroll_info,
+                                                MetaX11ScrollInfo,
+                                                i);
+
+      if (info->axis_id == idx)
+        {
+          if (direction_p != NULL)
+            *direction_p = info->direction;
+
+          if (delta_p != NULL)
+            *delta_p = 0.0;
+
+          if (info->last_value_valid)
+            {
+              if (delta_p != NULL)
+                {
+                  *delta_p = (value - info->last_value)
+                           / info->increment;
+                }
+
+              info->last_value = value;
+            }
+          else
+            {
+              info->last_value = value;
+              info->last_value_valid = TRUE;
+            }
+
+          return TRUE;
+        }
+    }
+
+  return FALSE;
+}
+
+void
+meta_input_device_x11_reset_scroll_info (ClutterInputDevice *device)
+{
+  MetaInputDeviceX11 *device_x11 = META_INPUT_DEVICE_X11 (device);
+  int i;
+
+  if (device_x11->scroll_info == NULL)
+    return;
+
+  for (i = 0; i < device_x11->scroll_info->len; i++)
+    {
+      MetaX11ScrollInfo *info = &g_array_index (device_x11->scroll_info,
+                                                MetaX11ScrollInfo,
+                                                i);
+
+      info->last_value_valid = FALSE;
+    }
 }
 
 #ifdef HAVE_LIBWACOM

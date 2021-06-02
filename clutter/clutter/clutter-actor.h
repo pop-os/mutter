@@ -187,7 +187,6 @@ struct _ClutterActor
  *   chain up to the parent's implementation
  * @pick: virtual function, used to draw an outline of the actor with
  *   the given color
- * @queue_redraw: class handler for #ClutterActor::queue-redraw
  * @event: class handler for #ClutterActor::event
  * @button_press_event: class handler for #ClutterActor::button-press-event
  * @button_release_event: class handler for
@@ -239,10 +238,6 @@ struct _ClutterActorClass
   void (* pick)                 (ClutterActor          *actor,
                                  ClutterPickContext    *pick_context);
 
-  gboolean (* queue_redraw)     (ClutterActor          *actor,
-                                 ClutterActor          *leaf_that_queued,
-                                 ClutterPaintVolume    *paint_volume);
-
   /* size negotiation */
   void (* get_preferred_width)  (ClutterActor           *self,
                                  gfloat                  for_height,
@@ -257,7 +252,7 @@ struct _ClutterActorClass
 
   /* transformations */
   void (* apply_transform)      (ClutterActor           *actor,
-                                 ClutterMatrix          *matrix);
+                                 graphene_matrix_t      *matrix);
 
   /* event signals */
   gboolean (* event)                (ClutterActor         *actor,
@@ -591,7 +586,8 @@ void                            clutter_actor_set_offscreen_redirect            
 CLUTTER_EXPORT
 ClutterOffscreenRedirect        clutter_actor_get_offscreen_redirect            (ClutterActor               *self);
 CLUTTER_EXPORT
-gboolean                        clutter_actor_should_pick_paint                 (ClutterActor               *self);
+gboolean                        clutter_actor_should_pick                       (ClutterActor               *self,
+                                                                                 ClutterPickContext         *pick_context);
 CLUTTER_EXPORT
 gboolean                        clutter_actor_is_in_clone_paint                 (ClutterActor               *self);
 CLUTTER_EXPORT
@@ -803,16 +799,16 @@ void                            clutter_actor_get_translation                   
                                                                                  gfloat                     *translate_z);
 CLUTTER_EXPORT
 void                            clutter_actor_set_transform                     (ClutterActor               *self,
-                                                                                 const ClutterMatrix        *transform);
+                                                                                 const graphene_matrix_t    *transform);
 CLUTTER_EXPORT
 void                            clutter_actor_get_transform                     (ClutterActor               *self,
-                                                                                 ClutterMatrix              *transform);
+                                                                                 graphene_matrix_t          *transform);
 CLUTTER_EXPORT
 void                            clutter_actor_set_child_transform               (ClutterActor               *self,
-                                                                                 const ClutterMatrix        *transform);
+                                                                                 const graphene_matrix_t    *transform);
 CLUTTER_EXPORT
 void                            clutter_actor_get_child_transform               (ClutterActor               *self,
-                                                                                 ClutterMatrix              *transform);
+                                                                                 graphene_matrix_t          *transform);
 
 CLUTTER_EXPORT
 void                            clutter_actor_get_transformed_extents          (ClutterActor               *self,
@@ -934,6 +930,9 @@ GList * clutter_actor_peek_stage_views (ClutterActor *self);
 
 CLUTTER_EXPORT
 void clutter_actor_invalidate_transform (ClutterActor *self);
+
+CLUTTER_EXPORT
+void clutter_actor_invalidate_paint_volume (ClutterActor *self);
 
 G_END_DECLS
 

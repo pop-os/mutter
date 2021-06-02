@@ -79,23 +79,18 @@ typedef struct _CoglWinsysEGLVtable
   void
   (* context_deinit) (CoglContext *context);
 
-  gboolean
-  (* onscreen_init) (CoglOnscreen *onscreen,
-                     EGLConfig config,
-                     GError **error);
-  void
-  (* onscreen_deinit) (CoglOnscreen *onscreen);
-
   int
-  (* add_config_attributes) (CoglDisplay *display,
-                             CoglFramebufferConfig *config,
-                             EGLint *attributes);
+  (* add_config_attributes) (CoglDisplay                 *display,
+                             const CoglFramebufferConfig *config,
+                             EGLint                      *attributes);
   gboolean
   (* choose_config) (CoglDisplay *display,
                      EGLint *attributes,
                      EGLConfig *out_config,
                      GError **error);
 } CoglWinsysEGLVtable;
+
+#define MAX_EGL_CONFIG_ATTRIBS 30
 
 typedef enum _CoglEGLWinsysFeature
 {
@@ -163,16 +158,6 @@ typedef struct _CoglContextEGL
   EGLSurface saved_read_surface;
 } CoglContextEGL;
 
-typedef struct _CoglOnscreenEGL
-{
-  EGLSurface egl_surface;
-
-  gboolean pending_resize_notify;
-
-  /* Platform specific data */
-  void *platform;
-} CoglOnscreenEGL;
-
 COGL_EXPORT const CoglWinsysVtable *
 _cogl_winsys_egl_get_vtable (void);
 
@@ -208,5 +193,10 @@ _cogl_egl_query_wayland_buffer (CoglContext *ctx,
 COGL_EXPORT gboolean
 _cogl_winsys_egl_renderer_connect_common (CoglRenderer *renderer,
                                           GError **error);
+
+void
+cogl_display_egl_determine_attributes (CoglDisplay                 *display,
+                                       const CoglFramebufferConfig *config,
+                                       EGLint                      *attributes);
 
 #endif /* __COGL_WINSYS_EGL_PRIVATE_H */

@@ -23,7 +23,15 @@
 #include "backends/native/meta-kms-device-private.h"
 #include "backends/native/meta-kms-device.h"
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <xf86drm.h>
+
 #include "backends/native/meta-backend-native.h"
+#include "backends/native/meta-kms-impl-device-atomic.h"
+#include "backends/native/meta-kms-impl-device-dummy.h"
+#include "backends/native/meta-kms-impl-device-simple.h"
 #include "backends/native/meta-kms-impl-device.h"
 #include "backends/native/meta-kms-impl.h"
 #include "backends/native/meta-kms-plane.h"
@@ -47,9 +55,17 @@ struct _MetaKmsDevice
   GList *planes;
 
   MetaKmsDeviceCaps caps;
+
+  GList *fallback_modes;
 };
 
 G_DEFINE_TYPE (MetaKmsDevice, meta_kms_device, G_TYPE_OBJECT);
+
+MetaKms *
+meta_kms_device_get_kms (MetaKmsDevice *device)
+{
+  return device->kms;
+}
 
 MetaKmsImplDevice *
 meta_kms_device_get_impl_device (MetaKmsDevice *device)
@@ -116,7 +132,7 @@ meta_kms_device_get_crtcs (MetaKmsDevice *device)
   return device->crtcs;
 }
 
-static GList *
+GList *
 meta_kms_device_get_planes (MetaKmsDevice *device)
 {
   return device->planes;
@@ -155,6 +171,12 @@ meta_kms_device_get_cursor_plane_for (MetaKmsDevice *device,
                                       MetaKmsCrtc   *crtc)
 {
   return get_plane_with_type_for (device, crtc, META_KMS_PLANE_TYPE_CURSOR);
+}
+
+GList *
+meta_kms_device_get_fallback_modes (MetaKmsDevice *device)
+{
+  return device->fallback_modes;
 }
 
 void
@@ -208,15 +230,194 @@ typedef struct _CreateImplDeviceData
 {
   MetaKmsDevice *device;
   int fd;
+  const char *path;
+  MetaKmsDeviceFlag flags;
 
   MetaKmsImplDevice *out_impl_device;
   GList *out_crtcs;
   GList *out_connectors;
   GList *out_planes;
   MetaKmsDeviceCaps out_caps;
+  GList *out_fallback_modes;
   char *out_driver_name;
   char *out_driver_description;
+  char *out_path;
 } CreateImplDeviceData;
+
+static gboolean
+is_atomic_allowed (const char *driver_name)
+{
+  const char *atomic_driver_deny_list[] = {
+    "qxl",
+    "vmwgfx",
+    "vboxvideo",
+    "nvidia-drm",
+    NULL,
+  };
+
+  return !g_strv_contains (atomic_driver_deny_list, driver_name);
+}
+
+static gboolean
+get_driver_info (int    fd,
+                 char **name,
+                 char **description)
+{
+  drmVersion *drm_version;
+
+  drm_version = drmGetVersion (fd);
+  if (!drm_version)
+    return FALSE;
+
+  *name = g_strndup (drm_version->name,
+                     drm_version->name_len);
+  *description = g_strndup (drm_version->desc,
+                            drm_version->desc_len);
+  drmFreeVersion (drm_version);
+
+  return TRUE;
+}
+
+static MetaKmsImplDevice *
+meta_create_kms_impl_device (MetaKmsDevice      *device,
+                             MetaKmsImpl        *impl,
+                             int                 fd,
+                             const char         *path,
+                             MetaKmsDeviceFlag   flags,
+                             GError            **error)
+{
+  GType impl_device_type;
+  gboolean supports_atomic_mode_setting;
+  g_autofree char *driver_name = NULL;
+  g_autofree char *driver_description = NULL;
+  const char *atomic_kms_enable_env;
+  int impl_fd;
+  g_autofree char *impl_path = NULL;
+  MetaKmsImplDevice *impl_device;
+
+  meta_assert_in_kms_impl (meta_kms_impl_get_kms (impl));
+
+  if (!get_driver_info (fd, &driver_name, &driver_description))
+    {
+      driver_name = g_strdup ("unknown");
+      driver_description = g_strdup ("Unknown");
+    }
+
+  atomic_kms_enable_env = getenv ("MUTTER_DEBUG_ENABLE_ATOMIC_KMS");
+
+  if (flags & META_KMS_DEVICE_FLAG_NO_MODE_SETTING)
+    {
+      g_autofree char *render_node_path = NULL;
+
+      render_node_path = drmGetRenderDeviceNameFromFd (fd);
+      if (!render_node_path)
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                       "Couldn't find render node device for '%s' (%s)",
+                       path, driver_name);
+          return NULL;
+        }
+
+      impl_fd = open (render_node_path, O_RDWR | O_CLOEXEC, 0);
+      if (impl_fd == -1)
+        {
+          g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                       "Failed to open render node '%s': %s",
+                       render_node_path, g_strerror (errno));
+          return NULL;
+        }
+
+      g_message ("Adding device '%s' (from '%s', %s) using no mode setting.",
+                 render_node_path, path, driver_name);
+
+      impl_path = g_steal_pointer (&render_node_path);
+      impl_device_type = META_TYPE_KMS_IMPL_DEVICE_DUMMY;
+    }
+  else if (atomic_kms_enable_env)
+    {
+      if (g_strcmp0 (atomic_kms_enable_env, "1") == 0)
+        {
+          impl_device_type = META_TYPE_KMS_IMPL_DEVICE_ATOMIC;
+          if (drmSetClientCap (fd, DRM_CLIENT_CAP_ATOMIC, 1) != 0)
+            {
+              g_error ("Failed to force atomic mode setting on '%s' (%s).",
+                       path, driver_name);
+            }
+        }
+      else if (g_strcmp0 (atomic_kms_enable_env, "0") == 0)
+        {
+          impl_device_type = META_TYPE_KMS_IMPL_DEVICE_SIMPLE;
+        }
+      else
+        {
+          g_error ("Invalid value '%s' for MUTTER_DEBUG_ENABLE_ATOMIC_KMS, "
+                   "bailing.",
+                   atomic_kms_enable_env);
+        }
+
+      impl_fd = dup (fd);
+      impl_path = g_strdup (path);
+
+      g_message ("Mode setting implementation for '%s' (%s) forced (%s).",
+                 path, driver_name,
+                 impl_device_type == META_TYPE_KMS_IMPL_DEVICE_ATOMIC ?
+                   "atomic" : "non-atomic");
+    }
+  else if (!is_atomic_allowed (driver_name))
+    {
+      g_message ("Adding device '%s' (%s) using non-atomic mode setting"
+                 " (using atomic mode setting not allowed).",
+                 path, driver_name);
+      impl_fd = dup (fd);
+      impl_path = g_strdup (path);
+      impl_device_type = META_TYPE_KMS_IMPL_DEVICE_SIMPLE;
+    }
+  else
+    {
+      int ret;
+
+      ret = drmSetClientCap (fd, DRM_CLIENT_CAP_ATOMIC, 1);
+      if (ret == 0)
+        supports_atomic_mode_setting = TRUE;
+      else
+        supports_atomic_mode_setting = FALSE;
+
+      if (supports_atomic_mode_setting)
+        {
+          g_message ("Adding device '%s' (%s) using atomic mode setting.",
+                     path, driver_name);
+          impl_device_type = META_TYPE_KMS_IMPL_DEVICE_ATOMIC;
+        }
+      else
+        {
+          g_message ("Adding device '%s' (%s) using non-atomic mode setting.",
+                     path, driver_name);
+          impl_device_type = META_TYPE_KMS_IMPL_DEVICE_SIMPLE;
+        }
+
+      impl_fd = dup (fd);
+      impl_path = g_strdup (path);
+    }
+
+  impl_device = g_initable_new (impl_device_type, NULL, error,
+                                "device", device,
+                                "impl", impl,
+                                "fd", impl_fd,
+                                "path", impl_path,
+                                "flags", flags,
+                                "driver-name", driver_name,
+                                "driver-description", driver_description,
+                                NULL);
+  if (!impl_device)
+    {
+      close (impl_fd);
+      return NULL;
+    }
+
+  close (fd);
+
+  return impl_device;
+}
 
 static gpointer
 create_impl_device_in_impl (MetaKmsImpl  *impl,
@@ -226,19 +427,29 @@ create_impl_device_in_impl (MetaKmsImpl  *impl,
   CreateImplDeviceData *data = user_data;
   MetaKmsImplDevice *impl_device;
 
-  impl_device = meta_kms_impl_device_new (data->device, impl, data->fd, error);
+  impl_device = meta_create_kms_impl_device (data->device,
+                                             impl,
+                                             data->fd,
+                                             data->path,
+                                             data->flags,
+                                             error);
   if (!impl_device)
     return FALSE;
+
+  meta_kms_impl_add_impl_device (impl, impl_device);
 
   data->out_impl_device = impl_device;
   data->out_crtcs = meta_kms_impl_device_copy_crtcs (impl_device);
   data->out_connectors = meta_kms_impl_device_copy_connectors (impl_device);
   data->out_planes = meta_kms_impl_device_copy_planes (impl_device);
   data->out_caps = *meta_kms_impl_device_get_caps (impl_device);
+  data->out_fallback_modes =
+    meta_kms_impl_device_copy_fallback_modes (impl_device);
   data->out_driver_name =
     g_strdup (meta_kms_impl_device_get_driver_name (impl_device));
   data->out_driver_description =
     g_strdup (meta_kms_impl_device_get_driver_description (impl_device));
+  data->out_path = g_strdup (meta_kms_impl_device_get_path (impl_device));
 
   return GINT_TO_POINTER (TRUE);
 }
@@ -256,9 +467,22 @@ meta_kms_device_new (MetaKms            *kms,
   CreateImplDeviceData data;
   int fd;
 
-  fd = meta_launcher_open_restricted (launcher, path, error);
-  if (fd == -1)
-    return NULL;
+  if (flags & META_KMS_DEVICE_FLAG_NO_MODE_SETTING)
+    {
+      fd = open (path, O_RDWR | O_CLOEXEC, 0);
+      if (fd == -1)
+        {
+          g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                       "Failed to open DRM device: %s", g_strerror (errno));
+          return NULL;
+        }
+    }
+  else
+    {
+      fd = meta_launcher_open_restricted (launcher, path, error);
+      if (fd == -1)
+        return NULL;
+    }
 
   device = g_object_new (META_TYPE_KMS_DEVICE, NULL);
   device->kms = kms;
@@ -266,11 +490,16 @@ meta_kms_device_new (MetaKms            *kms,
   data = (CreateImplDeviceData) {
     .device = device,
     .fd = fd,
+    .path = path,
+    .flags = flags,
   };
   if (!meta_kms_run_impl_task_sync (kms, create_impl_device_in_impl, &data,
                                     error))
     {
-      meta_launcher_close_restricted (launcher, fd);
+      if (flags & META_KMS_DEVICE_FLAG_NO_MODE_SETTING)
+        close (fd);
+      else
+        meta_launcher_close_restricted (launcher, fd);
       g_object_unref (device);
       return NULL;
     }
@@ -282,8 +511,11 @@ meta_kms_device_new (MetaKms            *kms,
   device->connectors = data.out_connectors;
   device->planes = data.out_planes;
   device->caps = data.out_caps;
+  device->fallback_modes = data.out_fallback_modes;
   device->driver_name = data.out_driver_name;
   device->driver_description = data.out_driver_description;
+  free (device->path);
+  device->path = data.out_path;
 
   return device;
 }
@@ -341,7 +573,10 @@ meta_kms_device_finalize (GObject *object)
         }
       else
         {
-          meta_launcher_close_restricted (launcher, data.out_fd);
+          if (device->flags & META_KMS_DEVICE_FLAG_NO_MODE_SETTING)
+            close (data.out_fd);
+          else
+            meta_launcher_close_restricted (launcher, data.out_fd);
         }
     }
   G_OBJECT_CLASS (meta_kms_device_parent_class)->finalize (object);

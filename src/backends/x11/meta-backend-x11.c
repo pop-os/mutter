@@ -50,6 +50,7 @@
 #include "backends/x11/meta-seat-x11.h"
 #include "backends/x11/meta-stage-x11.h"
 #include "backends/x11/meta-renderer-x11.h"
+#include "backends/x11/meta-xkb-a11y-x11.h"
 #include "clutter/clutter.h"
 #include "clutter/x11/clutter-x11.h"
 #include "compositor/compositor-private.h"
@@ -80,6 +81,8 @@ struct _MetaBackendX11Private
 
   uint8_t xkb_event_base;
   uint8_t xkb_error_base;
+
+  gulong keymap_state_changed_id;
 
   struct xkb_keymap *keymap;
   xkb_layout_index_t keymap_layout_group;
@@ -520,6 +523,17 @@ on_monitors_changed (MetaMonitorManager *manager,
 }
 
 static void
+on_kbd_a11y_changed (MetaInputSettings   *input_settings,
+                     MetaKbdA11ySettings *a11y_settings,
+                     MetaBackend         *backend)
+{
+  ClutterBackend *clutter_backend = meta_backend_get_clutter_backend (backend);
+  ClutterSeat *seat = clutter_backend_get_default_seat (clutter_backend);
+
+  meta_seat_x11_apply_kbd_a11y_settings (seat, a11y_settings);
+}
+
+static void
 meta_backend_x11_post_init (MetaBackend *backend)
 {
   MetaBackendX11 *x11 = META_BACKEND_X11 (backend);
@@ -527,6 +541,7 @@ meta_backend_x11_post_init (MetaBackend *backend)
   MetaMonitorManager *monitor_manager;
   ClutterBackend *clutter_backend;
   ClutterSeat *seat;
+  MetaInputSettings *input_settings;
   int major, minor;
   gboolean has_xi = FALSE;
 
@@ -558,7 +573,7 @@ meta_backend_x11_post_init (MetaBackend *backend)
     }
 
   if (!has_xi)
-    meta_fatal ("X server doesn't have the XInput extension, version 2.2 or newer\n");
+    meta_fatal ("X server doesn't have the XInput extension, version 2.2 or newer");
 
   if (!xkb_x11_setup_xkb_extension (priv->xcb,
                                     XKB_X11_MIN_MAJOR_XKB_VERSION,
@@ -567,7 +582,7 @@ meta_backend_x11_post_init (MetaBackend *backend)
                                     NULL, NULL,
                                     &priv->xkb_event_base,
                                     &priv->xkb_error_base))
-    meta_fatal ("X server doesn't have the XKB extension, version %d.%d or newer\n",
+    meta_fatal ("X server doesn't have the XKB extension, version %d.%d or newer",
                 XKB_X11_MIN_MAJOR_XKB_VERSION, XKB_X11_MIN_MINOR_XKB_VERSION);
 
   META_BACKEND_CLASS (meta_backend_x11_parent_class)->post_init (backend);
@@ -584,12 +599,65 @@ meta_backend_x11_post_init (MetaBackend *backend)
   seat = clutter_backend_get_default_seat (clutter_backend);
   meta_seat_x11_notify_devices (META_SEAT_X11 (seat),
                                 CLUTTER_STAGE (meta_backend_get_stage (backend)));
+
+  input_settings = meta_backend_get_input_settings (backend);
+
+  if (input_settings)
+    {
+      g_signal_connect_object (meta_backend_get_input_settings (backend),
+                               "kbd-a11y-changed",
+                               G_CALLBACK (on_kbd_a11y_changed), backend, 0);
+
+      if (meta_input_settings_maybe_restore_numlock_state (input_settings))
+        {
+          unsigned int num_mask;
+
+          num_mask = XkbKeysymToModifiers (priv->xdisplay, XK_Num_Lock);
+          XkbLockModifiers (priv->xdisplay, XkbUseCoreKbd, num_mask, num_mask);
+        }
+    }
 }
 
 static ClutterBackend *
 meta_backend_x11_create_clutter_backend (MetaBackend *backend)
 {
   return g_object_new (META_TYPE_CLUTTER_BACKEND_X11, NULL);
+}
+
+static ClutterSeat *
+meta_backend_x11_create_default_seat (MetaBackend  *backend,
+                                      GError      **error)
+{
+  MetaBackendX11 *x11 = META_BACKEND_X11 (backend);
+  MetaBackendX11Private *priv = meta_backend_x11_get_instance_private (x11);
+  int event_base, first_event, first_error;
+  int major, minor;
+  MetaSeatX11 *seat_x11;
+
+  if (!XQueryExtension (priv->xdisplay,
+                        "XInputExtension",
+                        &event_base,
+                        &first_event,
+                        &first_error))
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Failed to query XInputExtension");
+      return NULL;
+    }
+
+  major = 2;
+  minor = 3;
+  if (XIQueryVersion (priv->xdisplay, &major, &minor) == BadRequest)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Incompatible XInputExtension version");
+      return NULL;
+    }
+
+  seat_x11 = meta_seat_x11_new (event_base,
+                                META_VIRTUAL_CORE_POINTER_ID,
+                                META_VIRTUAL_CORE_KEYBOARD_ID);
+  return CLUTTER_SEAT (seat_x11);
 }
 
 static gboolean
@@ -659,7 +727,7 @@ meta_backend_x11_finish_touch_sequence (MetaBackend          *backend,
 
   XIAllowTouchEvents (priv->xdisplay,
                       META_VIRTUAL_CORE_POINTER_ID,
-                      meta_x11_event_sequence_get_touch_detail (sequence),
+                      clutter_event_sequence_get_slot (sequence),
                       DefaultRootWindow (priv->xdisplay), event_mode);
 
   if (state == META_SEQUENCE_REJECTED)
@@ -684,7 +752,7 @@ meta_backend_x11_get_current_logical_monitor (MetaBackend *backend)
   MetaBackendX11 *x11 = META_BACKEND_X11 (backend);
   MetaBackendX11Private *priv = meta_backend_x11_get_instance_private (x11);
   MetaCursorTracker *cursor_tracker;
-  int x, y;
+  graphene_point_t point;
   MetaMonitorManager *monitor_manager;
   MetaLogicalMonitor *logical_monitor;
 
@@ -692,10 +760,11 @@ meta_backend_x11_get_current_logical_monitor (MetaBackend *backend)
     return priv->cached_current_logical_monitor;
 
   cursor_tracker = meta_backend_get_cursor_tracker (backend);
-  meta_cursor_tracker_get_pointer (cursor_tracker, &x, &y, NULL);
+  meta_cursor_tracker_get_pointer (cursor_tracker, &point, NULL);
   monitor_manager = meta_backend_get_monitor_manager (backend);
   logical_monitor =
-    meta_monitor_manager_get_logical_monitor_at (monitor_manager, x, y);
+    meta_monitor_manager_get_logical_monitor_at (monitor_manager,
+                                                 point.x, point.y);
 
   if (!logical_monitor && monitor_manager->logical_monitors)
     logical_monitor = monitor_manager->logical_monitors->data;
@@ -733,19 +802,6 @@ meta_backend_x11_get_keymap_layout_group (MetaBackend *backend)
   MetaBackendX11Private *priv = meta_backend_x11_get_instance_private (x11);
 
   return priv->keymap_layout_group;
-}
-
-static void
-meta_backend_x11_set_numlock (MetaBackend *backend,
-                              gboolean     numlock_state)
-{
-  MetaBackendX11 *x11 = META_BACKEND_X11 (backend);
-  MetaBackendX11Private *priv = meta_backend_x11_get_instance_private (x11);
-  unsigned int num_mask;
-
-  num_mask = XkbKeysymToModifiers (priv->xdisplay, XK_Num_Lock);
-  XkbLockModifiers (priv->xdisplay, XkbUseCoreKbd, num_mask,
-                    numlock_state ? num_mask : 0);
 }
 
 void
@@ -828,16 +884,39 @@ initable_iface_init (GInitableIface *initable_iface)
 }
 
 static void
-meta_backend_x11_finalize (GObject *object)
+meta_backend_x11_dispose (GObject *object)
 {
+  MetaBackend *backend = META_BACKEND (object);
   MetaBackendX11 *x11 = META_BACKEND_X11 (object);
   MetaBackendX11Private *priv = meta_backend_x11_get_instance_private (x11);
+
+  if (priv->keymap_state_changed_id)
+    {
+      ClutterBackend *clutter_backend = meta_backend_get_clutter_backend (backend);
+      ClutterSeat *seat = clutter_backend_get_default_seat (clutter_backend);
+      ClutterKeymap *keymap;
+
+      seat = clutter_backend_get_default_seat (clutter_backend);
+      keymap = clutter_seat_get_keymap (seat);
+      g_clear_signal_handler (&priv->keymap_state_changed_id, keymap);
+    }
 
   if (priv->user_active_alarm != None)
     {
       XSyncDestroyAlarm (priv->xdisplay, priv->user_active_alarm);
       priv->user_active_alarm = None;
     }
+
+  G_OBJECT_CLASS (meta_backend_x11_parent_class)->dispose (object);
+}
+
+static void
+meta_backend_x11_finalize (GObject *object)
+{
+  MetaBackendX11 *x11 = META_BACKEND_X11 (object);
+  MetaBackendX11Private *priv = meta_backend_x11_get_instance_private (x11);
+
+  g_clear_pointer (&priv->keymap, xkb_keymap_unref);
 
   G_OBJECT_CLASS (meta_backend_x11_parent_class)->finalize (object);
 }
@@ -848,8 +927,10 @@ meta_backend_x11_class_init (MetaBackendX11Class *klass)
   MetaBackendClass *backend_class = META_BACKEND_CLASS (klass);
   GObjectClass *object_class = G_OBJECT_CLASS (klass);
 
+  object_class->dispose = meta_backend_x11_dispose;
   object_class->finalize = meta_backend_x11_finalize;
   backend_class->create_clutter_backend = meta_backend_x11_create_clutter_backend;
+  backend_class->create_default_seat = meta_backend_x11_create_default_seat;
   backend_class->post_init = meta_backend_x11_post_init;
   backend_class->grab_device = meta_backend_x11_grab_device;
   backend_class->ungrab_device = meta_backend_x11_ungrab_device;
@@ -857,7 +938,6 @@ meta_backend_x11_class_init (MetaBackendX11Class *klass)
   backend_class->get_current_logical_monitor = meta_backend_x11_get_current_logical_monitor;
   backend_class->get_keymap = meta_backend_x11_get_keymap;
   backend_class->get_keymap_layout_group = meta_backend_x11_get_keymap_layout_group;
-  backend_class->set_numlock = meta_backend_x11_set_numlock;
 }
 
 static void
@@ -889,4 +969,29 @@ meta_backend_x11_reload_cursor (MetaBackendX11 *x11)
     meta_backend_get_cursor_renderer (backend);
 
   meta_cursor_renderer_force_update (cursor_renderer);
+}
+
+void
+meta_backend_x11_sync_pointer (MetaBackendX11 *backend_x11)
+{
+  MetaBackend *backend = META_BACKEND (backend_x11);
+  ClutterBackend *clutter_backend = meta_backend_get_clutter_backend (backend);
+  ClutterSeat *seat = clutter_backend_get_default_seat (clutter_backend);
+  ClutterInputDevice *pointer = clutter_seat_get_pointer (seat);
+  ClutterStage *stage = CLUTTER_STAGE (meta_backend_get_stage (backend));
+  ClutterModifierType modifiers;
+  ClutterEvent *event;
+  graphene_point_t pos;
+
+  event = clutter_event_new (CLUTTER_MOTION);
+  clutter_seat_query_state (seat, pointer, NULL, &pos, &modifiers);
+  clutter_event_set_flags (event, CLUTTER_EVENT_FLAG_SYNTHETIC);
+  clutter_event_set_coords (event, pos.x, pos.y);
+  clutter_event_set_device (event, pointer);
+  clutter_event_set_state (event, modifiers);
+  clutter_event_set_source_device (event, NULL);
+  clutter_event_set_stage (event, stage);
+
+  clutter_event_put (event);
+  clutter_event_free (event);
 }

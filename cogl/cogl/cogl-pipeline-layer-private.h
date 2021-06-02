@@ -38,7 +38,6 @@
 #include "cogl-pipeline.h"
 #include "cogl-node-private.h"
 #include "cogl-texture.h"
-#include "cogl-matrix.h"
 #include "cogl-pipeline-layer-state.h"
 #include "cogl-pipeline-snippet-private.h"
 #include "cogl-sampler-cache-private.h"
@@ -180,7 +179,7 @@ typedef struct
   float texture_combine_constant[4];
 
   /* The texture matrix dscribes how to transform texture coordinates */
-  CoglMatrix matrix;
+  graphene_matrix_t matrix;
 
   CoglPipelineSnippetList vertex_snippets;
   CoglPipelineSnippetList fragment_snippets;

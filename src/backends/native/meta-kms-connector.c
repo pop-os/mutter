@@ -27,7 +27,13 @@
 #include "backends/native/meta-kms-crtc.h"
 #include "backends/native/meta-kms-device-private.h"
 #include "backends/native/meta-kms-impl-device.h"
+#include "backends/native/meta-kms-mode-private.h"
 #include "backends/native/meta-kms-update-private.h"
+
+typedef struct _MetaKmsConnectorPropTable
+{
+  MetaKmsProp props[META_KMS_CONNECTOR_N_PROPS];
+} MetaKmsConnectorPropTable;
 
 struct _MetaKmsConnector
 {
@@ -36,16 +42,14 @@ struct _MetaKmsConnector
   MetaKmsDevice *device;
 
   uint32_t id;
-  MetaConnectorType type;
+  uint32_t type;
   uint32_t type_id;
   char *name;
 
   MetaKmsConnectorState *current_state;
 
-  uint32_t dpms_prop_id;
-  uint32_t underscan_prop_id;
-  uint32_t underscan_hborder_prop_id;
-  uint32_t underscan_vborder_prop_id;
+  MetaKmsConnectorPropTable prop_table;
+
   uint32_t edid_blob_id;
   uint32_t tile_blob_id;
 };
@@ -58,48 +62,21 @@ meta_kms_connector_get_device (MetaKmsConnector *connector)
   return connector->device;
 }
 
-void
-meta_kms_connector_update_set_dpms_state (MetaKmsConnector *connector,
-                                          MetaKmsUpdate    *update,
-                                          uint64_t          state)
+uint32_t
+meta_kms_connector_get_prop_id (MetaKmsConnector     *connector,
+                                MetaKmsConnectorProp  prop)
 {
-  meta_kms_update_set_connector_property (update,
-                                          connector,
-                                          connector->dpms_prop_id,
-                                          state);
+  return connector->prop_table.props[prop].prop_id;
 }
 
-void
-meta_kms_connector_set_underscanning (MetaKmsConnector *connector,
-                                      MetaKmsUpdate    *update,
-                                      uint64_t          hborder,
-                                      uint64_t          vborder)
+const char *
+meta_kms_connector_get_prop_name (MetaKmsConnector     *connector,
+                                  MetaKmsConnectorProp  prop)
 {
-  meta_kms_update_set_connector_property (update,
-                                          connector,
-                                          connector->underscan_prop_id,
-                                          1);
-  meta_kms_update_set_connector_property (update,
-                                          connector,
-                                          connector->underscan_hborder_prop_id,
-                                          hborder);
-  meta_kms_update_set_connector_property (update,
-                                          connector,
-                                          connector->underscan_vborder_prop_id,
-                                          vborder);
+  return connector->prop_table.props[prop].name;
 }
 
-void
-meta_kms_connector_unset_underscanning (MetaKmsConnector *connector,
-                                        MetaKmsUpdate    *update)
-{
-  meta_kms_update_set_connector_property (update,
-                                          connector,
-                                          connector->underscan_prop_id,
-                                          0);
-}
-
-MetaConnectorType
+uint32_t
 meta_kms_connector_get_connector_type (MetaKmsConnector *connector)
 {
   return connector->type;
@@ -143,7 +120,12 @@ meta_kms_connector_get_current_state (MetaKmsConnector *connector)
 gboolean
 meta_kms_connector_is_underscanning_supported (MetaKmsConnector *connector)
 {
-  return connector->underscan_prop_id != 0;
+  uint32_t underscan_prop_id;
+
+  underscan_prop_id =
+    connector->prop_table.props[META_KMS_CONNECTOR_PROP_UNDERSCAN].prop_id;
+
+  return underscan_prop_id != 0;
 }
 
 static void
@@ -206,8 +188,8 @@ state_set_properties (MetaKmsConnectorState *state,
       else if ((prop->flags & DRM_MODE_PROP_ENUM) &&
                strcmp (prop->name, "panel orientation") == 0)
         set_panel_orientation (state, prop, drm_connector->prop_values[i]);
-      if ((prop->flags & DRM_MODE_PROP_RANGE) &&
-          strcmp (prop->name, "non-desktop") == 0)
+      else if ((prop->flags & DRM_MODE_PROP_RANGE) &&
+               strcmp (prop->name, "non-desktop") == 0)
         state->non_desktop = drm_connector->prop_values[i];
 
       drmModeFreeProperty (prop);
@@ -354,12 +336,20 @@ state_set_physical_dimensions (MetaKmsConnectorState *state,
 
 static void
 state_set_modes (MetaKmsConnectorState *state,
+                 MetaKmsImplDevice     *impl_device,
                  drmModeConnector      *drm_connector)
 {
-  state->modes =
-    g_memdup (drm_connector->modes,
-              drm_connector->count_modes * sizeof (drmModeModeInfo));
-  state->n_modes = drm_connector->count_modes;
+  int i;
+
+  for (i = 0; i < drm_connector->count_modes; i++)
+    {
+      MetaKmsMode *mode;
+
+      mode = meta_kms_mode_new (impl_device, &drm_connector->modes[i],
+                                META_KMS_MODE_FLAG_NONE);
+      state->modes = g_list_prepend (state->modes, mode);
+    }
+  state->modes = g_list_reverse (state->modes);
 }
 
 static void
@@ -452,7 +442,7 @@ static void
 meta_kms_connector_state_free (MetaKmsConnectorState *state)
 {
   g_clear_pointer (&state->edid_data, g_bytes_unref);
-  g_free (state->modes);
+  g_list_free_full (state->modes, (GDestroyNotify) meta_kms_mode_free);
   g_free (state);
 }
 
@@ -480,7 +470,7 @@ meta_kms_connector_read_state (MetaKmsConnector  *connector,
 
   state_set_physical_dimensions (state, drm_connector);
 
-  state_set_modes (state, drm_connector);
+  state_set_modes (state, impl_device, drm_connector);
 
   state_set_crtc_state (state, drm_connector, impl_device, drm_resources);
 
@@ -508,64 +498,81 @@ void
 meta_kms_connector_predict_state (MetaKmsConnector *connector,
                                   MetaKmsUpdate    *update)
 {
+  MetaKmsConnectorState *current_state;
   GList *mode_sets;
   GList *l;
-
-  if (!connector->current_state)
+  current_state = connector->current_state;
+  if (!current_state)
     return;
 
   mode_sets = meta_kms_update_get_mode_sets (update);
   for (l = mode_sets; l; l = l->next)
     {
       MetaKmsModeSet *mode_set = l->data;
-      MetaKmsCrtc *crtc;
+      MetaKmsCrtc *crtc = mode_set->crtc;
 
-      if (!g_list_find (mode_set->connectors, connector))
-        continue;
-
-      crtc = mode_set->crtc;
-      if (crtc)
-        connector->current_state->current_crtc_id = meta_kms_crtc_get_id (crtc);
+      if (current_state->current_crtc_id == meta_kms_crtc_get_id (crtc))
+        {
+          if (g_list_find (mode_set->connectors, connector))
+            break;
+          else
+            current_state->current_crtc_id = 0;
+        }
       else
-        connector->current_state->current_crtc_id = 0;
-
-      break;
+        {
+          if (g_list_find (mode_set->connectors, connector))
+            {
+              current_state->current_crtc_id = meta_kms_crtc_get_id (crtc);
+              break;
+            }
+        }
     }
 }
 
 static void
-find_property_ids (MetaKmsConnector  *connector,
-                   MetaKmsImplDevice *impl_device,
-                   drmModeConnector  *drm_connector)
+init_properties (MetaKmsConnector  *connector,
+                 MetaKmsImplDevice *impl_device,
+                 drmModeConnector  *drm_connector)
 {
-  int fd;
-  int i;
+  MetaKmsConnectorPropTable *prop_table = &connector->prop_table;
 
-  fd = meta_kms_impl_device_get_fd (impl_device);
-
-  for (i = 0; i < drm_connector->count_props; i++)
-    {
-      drmModePropertyPtr prop;
-
-      prop = drmModeGetProperty (fd, drm_connector->props[i]);
-      if (!prop)
-        continue;
-
-      if ((prop->flags & DRM_MODE_PROP_ENUM) &&
-          strcmp (prop->name, "DPMS") == 0)
-        connector->dpms_prop_id = prop->prop_id;
-      else if ((prop->flags & DRM_MODE_PROP_ENUM) &&
-               strcmp (prop->name, "underscan") == 0)
-        connector->underscan_prop_id = prop->prop_id;
-      else if ((prop->flags & DRM_MODE_PROP_RANGE) &&
-               strcmp (prop->name, "underscan hborder") == 0)
-        connector->underscan_hborder_prop_id = prop->prop_id;
-      else if ((prop->flags & DRM_MODE_PROP_RANGE) &&
-               strcmp (prop->name, "underscan vborder") == 0)
-        connector->underscan_vborder_prop_id = prop->prop_id;
-
-      drmModeFreeProperty (prop);
+  *prop_table = (MetaKmsConnectorPropTable) {
+    .props = {
+      [META_KMS_CONNECTOR_PROP_CRTC_ID] =
+        {
+          .name = "CRTC_ID",
+          .type = DRM_MODE_PROP_OBJECT,
+        },
+      [META_KMS_CONNECTOR_PROP_DPMS] =
+        {
+          .name = "DPMS",
+          .type = DRM_MODE_PROP_ENUM,
+        },
+      [META_KMS_CONNECTOR_PROP_UNDERSCAN] =
+        {
+          .name = "underscan",
+          .type = DRM_MODE_PROP_ENUM,
+        },
+      [META_KMS_CONNECTOR_PROP_UNDERSCAN_HBORDER] =
+        {
+          .name = "underscan hborder",
+          .type = DRM_MODE_PROP_RANGE,
+        },
+      [META_KMS_CONNECTOR_PROP_UNDERSCAN_VBORDER] =
+        {
+          .name = "underscan vborder",
+          .type = DRM_MODE_PROP_RANGE,
+        },
     }
+  };
+
+  meta_kms_impl_device_init_prop_table (impl_device,
+                                        drm_connector->props,
+                                        drm_connector->prop_values,
+                                        drm_connector->count_props,
+                                        connector->prop_table.props,
+                                        META_KMS_CONNECTOR_N_PROPS,
+                                        NULL);
 }
 
 static char *
@@ -620,11 +627,11 @@ meta_kms_connector_new (MetaKmsImplDevice *impl_device,
   connector = g_object_new (META_TYPE_KMS_CONNECTOR, NULL);
   connector->device = meta_kms_impl_device_get_device (impl_device);
   connector->id = drm_connector->connector_id;
-  connector->type = (MetaConnectorType) drm_connector->connector_type;
+  connector->type = drm_connector->connector_type;
   connector->type_id = drm_connector->connector_type_id;
   connector->name = make_connector_name (drm_connector);
 
-  find_property_ids (connector, impl_device, drm_connector);
+  init_properties (connector, impl_device, drm_connector);
 
   meta_kms_connector_read_state (connector, impl_device,
                                  drm_connector,

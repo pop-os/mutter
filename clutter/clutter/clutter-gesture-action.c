@@ -416,12 +416,10 @@ stage_captured_event_cb (ClutterActor         *stage,
               return CLUTTER_EVENT_PROPAGATE;
             }
 
+          gesture_update_motion_point (point, event);
+
           if (!begin_gesture (action, actor))
-            {
-              if ((point = gesture_find_point (action, event, &position)) != NULL)
-                gesture_update_motion_point (point, event);
-              return CLUTTER_EVENT_PROPAGATE;
-            }
+            return CLUTTER_EVENT_PROPAGATE;
 
           if ((point = gesture_find_point (action, event, &position)) == NULL)
             return CLUTTER_EVENT_PROPAGATE;
@@ -574,8 +572,13 @@ clutter_gesture_action_set_enabled (ClutterActorMeta *meta,
   ClutterGestureActionPrivate *priv =
     clutter_gesture_action_get_instance_private (gesture_action);
 
-  if (!is_enabled && priv->in_gesture)
-    cancel_gesture (gesture_action);
+  if (!is_enabled)
+    {
+      if (priv->in_gesture)
+        cancel_gesture (gesture_action);
+      else
+        g_array_set_size (priv->points, 0);
+    }
 
   meta_class->set_enabled (meta, is_enabled);
 }

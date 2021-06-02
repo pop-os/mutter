@@ -51,6 +51,7 @@
 #include <fcntl.h>
 #include <glib-object.h>
 #include <glib-unix.h>
+#include <gobject/gvaluecollector.h>
 #include <locale.h>
 #include <signal.h>
 #include <stdio.h>
@@ -75,6 +76,8 @@
 #endif
 
 #include "backends/meta-backend-private.h"
+#include "backends/meta-monitor-manager-private.h"
+#include "backends/meta-virtual-monitor.h"
 #include "backends/x11/cm/meta-backend-x11-cm.h"
 #include "backends/x11/meta-backend-x11.h"
 #include "clutter/clutter.h"
@@ -98,6 +101,33 @@
 #include "backends/native/meta-backend-native.h"
 #endif
 
+static const GDebugKey meta_debug_keys[] = {
+  { "focus", META_DEBUG_FOCUS },
+  { "workarea", META_DEBUG_WORKAREA },
+  { "stack", META_DEBUG_STACK },
+  { "sm", META_DEBUG_SM },
+  { "events", META_DEBUG_EVENTS },
+  { "window-state", META_DEBUG_WINDOW_STATE },
+  { "window-ops", META_DEBUG_WINDOW_OPS },
+  { "geometry", META_DEBUG_GEOMETRY },
+  { "placement", META_DEBUG_PLACEMENT },
+  { "ping", META_DEBUG_PING },
+  { "keybindings", META_DEBUG_KEYBINDINGS },
+  { "sync", META_DEBUG_SYNC },
+  { "startup", META_DEBUG_STARTUP },
+  { "prefs", META_DEBUG_PREFS },
+  { "groups", META_DEBUG_GROUPS },
+  { "resizing", META_DEBUG_RESIZING },
+  { "shapes", META_DEBUG_SHAPES },
+  { "edge-resistance", META_DEBUG_EDGE_RESISTANCE },
+  { "dbus", META_DEBUG_DBUS },
+  { "input", META_DEBUG_INPUT },
+  { "wayland", META_DEBUG_WAYLAND },
+  { "kms", META_DEBUG_KMS },
+  { "screen-cast", META_DEBUG_SCREEN_CAST },
+  { "remote-desktop", META_DEBUG_REMOTE_DESKTOP },
+};
+
 /*
  * The exit code we'll return to our parent process when we eventually die.
  */
@@ -112,6 +142,10 @@ static GMainLoop *meta_main_loop = NULL;
 static void prefs_changed_callback (MetaPreference pref,
                                     gpointer       data);
 
+#ifdef HAVE_NATIVE_BACKEND
+static void release_virtual_monitors (void);
+#endif
+
 /**
  * meta_print_compilation_info:
  *
@@ -124,9 +158,9 @@ static void
 meta_print_compilation_info (void)
 {
 #ifdef HAVE_STARTUP_NOTIFICATION
-  meta_verbose ("Compiled with startup notification\n");
+  meta_verbose ("Compiled with startup notification");
 #else
-  meta_verbose ("Compiled without startup notification\n");
+  meta_verbose ("Compiled without startup notification");
 #endif
 }
 
@@ -151,12 +185,12 @@ meta_print_self_identity (void)
   g_date_clear (&d, 1);
   g_date_set_time_t (&d, time (NULL));
   g_date_strftime (buf, sizeof (buf), "%x", &d);
-  meta_verbose ("Mutter version %s running on %s\n",
+  meta_verbose ("Mutter version %s running on %s",
     VERSION, buf);
 
   /* Locale and encoding. */
   g_get_charset (&charset);
-  meta_verbose ("Running in locale \"%s\" with encoding \"%s\"\n",
+  meta_verbose ("Running in locale \"%s\" with encoding \"%s\"",
     setlocale (LC_ALL, NULL), charset);
 
   /* Compilation settings. */
@@ -177,11 +211,20 @@ static gboolean  opt_sync;
 static gboolean  opt_wayland;
 static gboolean  opt_nested;
 static gboolean  opt_no_x11;
+static char     *opt_wayland_display;
 #endif
 #ifdef HAVE_NATIVE_BACKEND
 static gboolean  opt_display_server;
+static gboolean  opt_headless;
 #endif
 static gboolean  opt_x11;
+
+#ifdef HAVE_NATIVE_BACKEND
+static gboolean opt_virtual_monitor_cb (const char  *option_name,
+                                        const char  *value,
+                                        gpointer     data,
+                                        GError     **error);
+#endif
 
 static GOptionEntry meta_options[] = {
   {
@@ -238,12 +281,28 @@ static GOptionEntry meta_options[] = {
     N_("Run wayland compositor without starting Xwayland"),
     NULL
   },
+  {
+    "wayland-display", 0, 0, G_OPTION_ARG_STRING,
+    &opt_wayland_display,
+    N_("Specify Wayland display name to use"),
+    NULL
+  },
 #endif
 #ifdef HAVE_NATIVE_BACKEND
   {
     "display-server", 0, 0, G_OPTION_ARG_NONE,
     &opt_display_server,
     N_("Run as a full display server, rather than nested")
+  },
+  {
+    "headless", 0, 0, G_OPTION_ARG_NONE,
+    &opt_headless,
+    N_("Run as a headless display server")
+  },
+  {
+    "virtual-monitor", 0, 0, G_OPTION_ARG_CALLBACK,
+    &opt_virtual_monitor_cb,
+    N_("Add persistent virtual monitor (WxH or WxH@R)")
   },
 #endif
   {
@@ -268,7 +327,7 @@ meta_get_option_context (void)
   GOptionContext *ctx;
 
   if (setlocale (LC_ALL, "") == NULL)
-    meta_warning ("Locale not understood by C library, internationalization will not work\n");
+    meta_warning ("Locale not understood by C library, internationalization will not work");
   bindtextdomain (GETTEXT_PACKAGE, MUTTER_LOCALEDIR);
   bind_textdomain_codeset (GETTEXT_PACKAGE, "UTF-8");
 
@@ -299,19 +358,29 @@ meta_select_display (char *display_arg)
     g_setenv ("DISPLAY", display_name, TRUE);
 }
 
-static void
+void
 meta_finalize (void)
 {
   MetaDisplay *display = meta_get_display ();
+  MetaBackend *backend = meta_get_backend ();
 
-  if (display)
-    meta_display_close (display,
-                        META_CURRENT_TIME); /* I doubt correct timestamps matter here */
+  if (backend)
+    meta_backend_prepare_shutdown (backend);
 
 #ifdef HAVE_WAYLAND
   if (meta_is_wayland_compositor ())
     meta_wayland_finalize ();
 #endif
+
+  if (display)
+    meta_display_close (display,
+                        META_CURRENT_TIME); /* I doubt correct timestamps matter here */
+
+#ifdef HAVE_NATIVE_BACKEND
+  release_virtual_monitors ();
+#endif
+
+  meta_release_backend ();
 }
 
 static gboolean
@@ -390,7 +459,7 @@ find_session_type (void)
       goto out;
     }
 
-  meta_warning ("Unsupported session type\n");
+  meta_warning ("Unsupported session type");
   meta_exit (META_EXIT_ERROR);
 
 out:
@@ -408,6 +477,92 @@ check_for_wayland_session_type (void)
   free (session_type);
 
   return is_wayland;
+}
+#endif
+
+#ifdef HAVE_NATIVE_BACKEND
+static GList *opt_virtual_monitor_infos = NULL;
+
+static GList *persistent_virtual_monitors = NULL;
+
+static gboolean
+opt_virtual_monitor_cb (const char  *option_name,
+                        const char  *value,
+                        gpointer     data,
+                        GError     **error)
+{
+  int width, height;
+  float refresh_rate = 60.0;
+
+  if (sscanf (value, "%dx%d@%f",
+              &width, &height, &refresh_rate) == 3 ||
+      sscanf (value, "%dx%d",
+              &width, &height) == 2)
+    {
+      g_autofree char *serial = NULL;
+      MetaVirtualMonitorInfo *virtual_monitor;
+
+      serial = g_strdup_printf ("0x%.2x",
+                                g_list_length (opt_virtual_monitor_infos));
+      virtual_monitor = meta_virtual_monitor_info_new (width,
+                                                       height,
+                                                       refresh_rate,
+                                                       "MetaVendor",
+                                                       "MetaVirtualMonitor",
+                                                       serial);
+      opt_virtual_monitor_infos = g_list_append (opt_virtual_monitor_infos,
+                                                 virtual_monitor);
+      return TRUE;
+    }
+  else
+    {
+      return FALSE;
+    }
+}
+
+static void
+release_virtual_monitors (void)
+{
+  g_list_free_full (persistent_virtual_monitors, g_object_unref);
+  persistent_virtual_monitors = NULL;
+}
+
+static void
+add_persistent_virtual_monitors (void)
+{
+  MetaBackend *backend = meta_get_backend ();
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
+  GList *l;
+
+  for (l = opt_virtual_monitor_infos; l; l = l->next)
+    {
+      MetaVirtualMonitorInfo *info = l->data;
+      g_autoptr (GError) error = NULL;
+      MetaVirtualMonitor *virtual_monitor;
+
+      virtual_monitor =
+        meta_monitor_manager_create_virtual_monitor (monitor_manager,
+                                                     info,
+                                                     &error);
+      if (!virtual_monitor)
+        {
+          g_warning ("Failed to add virtual monitor: %s", error->message);
+          meta_exit (META_EXIT_ERROR);
+        }
+
+      persistent_virtual_monitors = g_list_append (persistent_virtual_monitors,
+                                                   virtual_monitor);
+    }
+
+  if (opt_virtual_monitor_infos)
+    {
+      g_list_free_full (opt_virtual_monitor_infos,
+                        (GDestroyNotify) meta_virtual_monitor_info_free);
+      opt_virtual_monitor_infos = NULL;
+
+      meta_monitor_manager_reload (monitor_manager);
+    }
 }
 #endif
 
@@ -432,26 +587,33 @@ check_for_wayland_session_type (void)
  * Wayland compositor, then the X11 Compositing Manager backend is used.
  */
 static void
-calculate_compositor_configuration (MetaCompositorType *compositor_type,
-                                    GType              *backend_gtype)
+calculate_compositor_configuration (MetaCompositorType  *compositor_type,
+                                    GType               *backend_gtype,
+                                    unsigned int        *n_properties,
+                                    const char         **prop_names[],
+                                    GValue              *prop_values[])
 {
 #ifdef HAVE_WAYLAND
-  gboolean run_as_wayland_compositor = opt_wayland && !opt_x11;
+  gboolean run_as_wayland_compositor = ((opt_wayland ||
+                                         opt_display_server ||
+                                         opt_headless) &&
+                                        !opt_x11);
 
 #ifdef HAVE_NATIVE_BACKEND
-  if ((opt_wayland || opt_nested || opt_display_server) && opt_x11)
+  if ((opt_wayland || opt_nested || opt_display_server || opt_headless) &&
+      opt_x11)
 #else
   if ((opt_wayland || opt_nested) && opt_x11)
 #endif
     {
-      meta_warning ("Can't run both as Wayland compositor and X11 compositing manager\n");
+      meta_warning ("Can't run both as Wayland compositor and X11 compositing manager");
       meta_exit (META_EXIT_ERROR);
     }
 
 #ifdef HAVE_NATIVE_BACKEND
-  if (opt_nested && opt_display_server)
+  if (opt_nested && (opt_display_server || opt_headless))
     {
-      meta_warning ("Can't run both as nested and as a display server\n");
+      meta_warning ("Can't run both as nested and as a display server");
       meta_exit (META_EXIT_ERROR);
     }
 
@@ -461,7 +623,7 @@ calculate_compositor_configuration (MetaCompositorType *compositor_type,
 
   if (!run_as_wayland_compositor && opt_no_x11)
     {
-      meta_warning ("Can't disable X11 support on X11 compositor\n");
+      meta_warning ("Can't disable X11 support on X11 compositor");
       meta_exit (META_EXIT_ERROR);
     }
 
@@ -470,6 +632,10 @@ calculate_compositor_configuration (MetaCompositorType *compositor_type,
   else
 #endif /* HAVE_WAYLAND */
     *compositor_type = META_COMPOSITOR_TYPE_X11;
+
+  *n_properties = 0;
+  *prop_names = NULL;
+  *prop_values = NULL;
 
 #ifdef HAVE_WAYLAND
   if (opt_nested)
@@ -480,9 +646,25 @@ calculate_compositor_configuration (MetaCompositorType *compositor_type,
 #endif /* HAVE_WAYLAND */
 
 #ifdef HAVE_NATIVE_BACKEND
-  if (opt_display_server)
+  if (opt_display_server || opt_headless)
     {
       *backend_gtype = META_TYPE_BACKEND_NATIVE;
+      if (opt_headless)
+        {
+          static const char *headless_prop_names[] = {
+            "headless",
+          };
+          static GValue headless_prop_values[] = {
+            G_VALUE_INIT,
+          };
+
+          g_value_init (&headless_prop_values[0], G_TYPE_BOOLEAN);
+          g_value_set_boolean (&headless_prop_values[0], TRUE);
+
+          *n_properties = G_N_ELEMENTS (headless_prop_values);
+          *prop_names = headless_prop_names;
+          *prop_values = headless_prop_values;
+        }
       return;
     }
 
@@ -512,14 +694,61 @@ calculate_compositor_configuration (MetaCompositorType *compositor_type,
 static gboolean _compositor_configuration_overridden = FALSE;
 static MetaCompositorType _compositor_type_override;
 static GType _backend_gtype_override;
+static GArray *_backend_property_names;
+static GArray *_backend_property_values;
 
 void
 meta_override_compositor_configuration (MetaCompositorType compositor_type,
-                                        GType              backend_gtype)
+                                        GType              backend_gtype,
+                                        const char        *first_property_name,
+                                        ...)
 {
+  va_list var_args;
+  GArray *names;
+  GArray *values;
+  GObjectClass *object_class;
+  const char *property_name;
+
+  names = g_array_new (FALSE, FALSE, sizeof (const char *));
+  values = g_array_new (FALSE, FALSE, sizeof (GValue));
+  g_array_set_clear_func (values, (GDestroyNotify) g_value_unset);
+
+  object_class = g_type_class_ref (backend_gtype);
+
+  property_name = first_property_name;
+
+  va_start (var_args, first_property_name);
+
+  while (property_name)
+    {
+      GValue value = G_VALUE_INIT;
+      GParamSpec *pspec;
+      GType ptype;
+      char *error = NULL;
+
+      pspec = g_object_class_find_property (object_class,
+                                            property_name);
+      g_assert (pspec);
+
+      ptype = G_PARAM_SPEC_VALUE_TYPE (pspec);
+      G_VALUE_COLLECT_INIT (&value, ptype, var_args, 0, &error);
+      g_assert (!error);
+
+      g_array_append_val (names, property_name);
+      g_array_append_val (values, value);
+
+      property_name = va_arg (var_args, const char *);
+    }
+
+  va_end (var_args);
+
+  g_type_class_unref (object_class);
+
   _compositor_configuration_overridden = TRUE;
   _compositor_type_override = compositor_type;
   _backend_gtype_override = backend_gtype;
+  _backend_property_names = names;
+  _backend_property_values = values;
 }
 
 /**
@@ -533,8 +762,13 @@ meta_init (void)
 {
   struct sigaction act;
   sigset_t empty_mask;
+  const char *debug_env;
   MetaCompositorType compositor_type;
   GType backend_gtype;
+  unsigned int n_properties;
+  const char **prop_names;
+  GValue *prop_values;
+  int i;
 
 #ifdef HAVE_SYS_PRCTL
   prctl (PR_SET_DUMPABLE, 1);
@@ -557,27 +791,50 @@ meta_init (void)
 
   if (g_getenv ("MUTTER_VERBOSE"))
     meta_set_verbose (TRUE);
-  if (g_getenv ("MUTTER_DEBUG"))
-    meta_set_debugging (TRUE);
+
+  debug_env = g_getenv ("MUTTER_DEBUG");
+  if (debug_env)
+    {
+      MetaDebugTopic topics;
+
+      topics = g_parse_debug_string (debug_env,
+                                     meta_debug_keys,
+                                     G_N_ELEMENTS (meta_debug_keys));
+      meta_add_verbose_topic (topics);
+    }
 
   if (_compositor_configuration_overridden)
     {
       compositor_type = _compositor_type_override;
       backend_gtype = _backend_gtype_override;
+      n_properties = _backend_property_names->len;
+      prop_names = (const char **) _backend_property_names->data;
+      prop_values = (GValue *) _backend_property_values->data;
     }
   else
     {
-      calculate_compositor_configuration (&compositor_type, &backend_gtype);
+      calculate_compositor_configuration (&compositor_type,
+                                          &backend_gtype,
+                                          &n_properties,
+                                          &prop_names,
+                                          &prop_values);
     }
 
 #ifdef HAVE_WAYLAND
   if (compositor_type == META_COMPOSITOR_TYPE_WAYLAND)
-    meta_set_is_wayland_compositor (TRUE);
+    {
+      meta_set_is_wayland_compositor (TRUE);
+      if (opt_wayland_display)
+        {
+          meta_wayland_override_display_name (opt_wayland_display);
+          g_free (opt_wayland_display);
+        }
+    }
 #endif
 
   if (g_get_home_dir ())
     if (chdir (g_get_home_dir ()) < 0)
-      meta_warning ("Could not change to home directory %s.\n",
+      meta_warning ("Could not change to home directory %s.",
                     g_get_home_dir ());
 
   meta_print_self_identity ();
@@ -591,7 +848,20 @@ meta_init (void)
   if (!meta_is_wayland_compositor ())
     meta_select_display (opt_display_name);
 
-  meta_init_backend (backend_gtype);
+  meta_init_backend (backend_gtype, n_properties, prop_names, prop_values);
+
+  for (i = 0; i < n_properties; i++)
+    g_value_reset (&prop_values[i]);
+
+  if (_backend_property_names)
+    {
+      g_array_free (_backend_property_names, TRUE);
+      g_array_free (_backend_property_values, TRUE);
+    }
+
+#ifdef HAVE_NATIVE_BACKEND
+  add_persistent_virtual_monitors ();
+#endif
 
   meta_set_syncing (opt_sync || (g_getenv ("MUTTER_SYNC") != NULL));
 
@@ -599,7 +869,7 @@ meta_init (void)
     meta_set_replace_current_wm (TRUE);
 
   if (opt_save_file && opt_client_id)
-    meta_fatal ("Can't specify both SM save file and SM client id\n");
+    meta_fatal ("Can't specify both SM save file and SM client id");
 
   meta_main_loop = g_main_loop_new (NULL, FALSE);
 }
@@ -696,6 +966,12 @@ meta_quit (MetaExitCode code)
     }
 }
 
+MetaExitCode
+meta_get_exit_code (void)
+{
+  return meta_exit_code;
+}
+
 /**
  * prefs_changed_callback:
  * @pref:  Which preference has changed
@@ -722,6 +998,14 @@ prefs_changed_callback (MetaPreference pref,
     }
 }
 
+static MetaDisplayPolicy x11_display_policy_override = -1;
+
+void
+meta_override_x11_display_policy (MetaDisplayPolicy x11_display_policy)
+{
+  x11_display_policy_override = x11_display_policy;
+}
+
 MetaDisplayPolicy
 meta_get_x11_display_policy (void)
 {
@@ -730,17 +1014,25 @@ meta_get_x11_display_policy (void)
   if (META_IS_BACKEND_X11_CM (backend))
     return META_DISPLAY_POLICY_MANDATORY;
 
+  if (x11_display_policy_override != -1)
+    return x11_display_policy_override;
+
 #ifdef HAVE_WAYLAND
   if (meta_is_wayland_compositor ())
     {
-      MetaSettings *settings = meta_backend_get_settings (backend);
+#ifdef HAVE_XWAYLAND_INITFD
+      g_autofree char *unit = NULL;
+#endif
 
       if (opt_no_x11)
         return META_DISPLAY_POLICY_DISABLED;
 
-      if (meta_settings_is_experimental_feature_enabled (settings,
-                                                         META_EXPERIMENTAL_FEATURE_AUTOSTART_XWAYLAND))
+#ifdef HAVE_XWAYLAND_INITFD
+      if (sd_pid_get_user_unit (0, &unit) < 0)
+        return META_DISPLAY_POLICY_MANDATORY;
+      else
         return META_DISPLAY_POLICY_ON_DEMAND;
+#endif
     }
 #endif
 
@@ -755,7 +1047,8 @@ meta_test_init (void)
   int fd = g_mkstemp (display_name);
 
   meta_override_compositor_configuration (META_COMPOSITOR_TYPE_WAYLAND,
-                                          META_TYPE_BACKEND_X11_NESTED);
+                                          META_TYPE_BACKEND_X11_NESTED,
+                                          NULL);
   meta_wayland_override_display_name (display_name);
   meta_xwayland_override_display_number (512 + rand() % 512);
   meta_init ();

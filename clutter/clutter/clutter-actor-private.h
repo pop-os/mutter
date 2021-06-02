@@ -27,23 +27,6 @@
 G_BEGIN_DECLS
 
 /*< private >
- * ClutterRedrawFlags:
- * @CLUTTER_REDRAW_CLIPPED_TO_ALLOCATION: Tells clutter the maximum
- *   extents of what needs to be redrawn lies within the actors
- *   current allocation. (Only use this for 2D actors though because
- *   any actor with depth may be projected outside of its allocation)
- *
- * Flags passed to the clutter_actor_queue_redraw_with_clip ()
- * function
- *
- * Since: 1.6
- */
-typedef enum
-{
-  CLUTTER_REDRAW_CLIPPED_TO_ALLOCATION  = 1 << 0
-} ClutterRedrawFlags;
-
-/*< private >
  * ClutterActorTraverseFlags:
  * CLUTTER_ACTOR_TRAVERSE_DEPTH_FIRST: Traverse the graph in
  *   a depth first order.
@@ -180,10 +163,10 @@ struct _ClutterTransformInfo
   graphene_point_t pivot;
   gfloat pivot_z;
 
-  CoglMatrix transform;
+  graphene_matrix_t transform;
   guint transform_set : 1;
 
-  CoglMatrix child_transform;
+  graphene_matrix_t child_transform;
   guint child_transform_set : 1;
 };
 
@@ -220,11 +203,11 @@ void                            _clutter_actor_traverse                         
                                                                                          gpointer user_data);
 ClutterActor *                  _clutter_actor_get_stage_internal                       (ClutterActor *actor);
 
-void                            _clutter_actor_apply_modelview_transform                (ClutterActor *self,
-                                                                                         CoglMatrix   *matrix);
-void                            _clutter_actor_apply_relative_transformation_matrix     (ClutterActor *self,
-                                                                                         ClutterActor *ancestor,
-                                                                                         CoglMatrix   *matrix);
+void                            _clutter_actor_apply_modelview_transform                (ClutterActor      *self,
+                                                                                         graphene_matrix_t *matrix);
+void                            _clutter_actor_apply_relative_transformation_matrix     (ClutterActor      *self,
+                                                                                         ClutterActor      *ancestor,
+                                                                                         graphene_matrix_t *matrix);
 
 void                            _clutter_actor_rerealize                                (ClutterActor    *self,
                                                                                          ClutterCallback  callback,
@@ -245,16 +228,11 @@ void                            _clutter_actor_set_has_pointer                  
 void                            _clutter_actor_set_has_key_focus                        (ClutterActor *self,
                                                                                          gboolean      has_key_focus);
 
-void                            _clutter_actor_queue_redraw_with_clip                   (ClutterActor             *self,
-                                                                                         ClutterRedrawFlags        flags,
-                                                                                         const ClutterPaintVolume *clip_volume);
 void                            _clutter_actor_queue_redraw_full                        (ClutterActor             *self,
-                                                                                         ClutterRedrawFlags        flags,
                                                                                          const ClutterPaintVolume *volume,
                                                                                          ClutterEffect            *effect);
 
-void                            _clutter_actor_finish_queue_redraw                      (ClutterActor       *self,
-                                                                                         ClutterPaintVolume *clip);
+void                            _clutter_actor_finish_queue_redraw                      (ClutterActor *self);
 
 gboolean                        _clutter_actor_set_default_paint_volume                 (ClutterActor       *self,
                                                                                          GType               check_gtype,
@@ -265,10 +243,6 @@ const gchar *                   _clutter_actor_get_debug_name                   
 void                            _clutter_actor_push_clone_paint                         (void);
 void                            _clutter_actor_pop_clone_paint                          (void);
 
-void                            _clutter_actor_shader_pre_paint                         (ClutterActor *actor,
-                                                                                         gboolean      repeat);
-void                            _clutter_actor_shader_post_paint                        (ClutterActor *actor);
-
 ClutterActorAlign               _clutter_actor_get_effective_x_align                    (ClutterActor *self);
 
 void                            _clutter_actor_handle_event                             (ClutterActor       *actor,
@@ -278,8 +252,6 @@ void                            _clutter_actor_attach_clone                     
                                                                                          ClutterActor *clone);
 void                            _clutter_actor_detach_clone                             (ClutterActor *actor,
                                                                                          ClutterActor *clone);
-void                            _clutter_actor_queue_redraw_on_clones                   (ClutterActor *actor);
-void                            _clutter_actor_queue_relayout_on_clones                 (ClutterActor *actor);
 void                            _clutter_actor_queue_only_relayout                      (ClutterActor *actor);
 void                            clutter_actor_clear_stage_views_recursive               (ClutterActor *actor);
 
@@ -288,12 +260,16 @@ float                           clutter_actor_get_real_resource_scale           
 ClutterPaintNode *              clutter_actor_create_texture_paint_node                 (ClutterActor *self,
                                                                                          CoglTexture  *texture);
 
-void clutter_actor_update_stage_views (ClutterActor *self,
-                                       int           phase);
+void clutter_actor_finish_layout (ClutterActor *self,
+                                  int           phase);
 
 void clutter_actor_queue_immediate_relayout (ClutterActor *self);
 
 gboolean clutter_actor_is_painting_unmapped (ClutterActor *self);
+
+gboolean clutter_actor_get_redraw_clip (ClutterActor       *self,
+                                        ClutterPaintVolume *dst_old_pv,
+                                        ClutterPaintVolume *dst_new_pv);
 
 G_END_DECLS
 

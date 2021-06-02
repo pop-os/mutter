@@ -37,7 +37,6 @@
 #include "cogl-pipeline-private.h"
 #include "cogl-blend-string.h"
 #include "cogl-util.h"
-#include "cogl-matrix.h"
 #include "cogl-snippet-private.h"
 #include "cogl-texture-private.h"
 #include "cogl-pipeline-layer-state-private.h"
@@ -789,7 +788,7 @@ _cogl_pipeline_layer_user_matrix_equal (CoglPipelineLayer *authority0,
   CoglPipelineLayerBigState *big_state0 = authority0->big_state;
   CoglPipelineLayerBigState *big_state1 = authority1->big_state;
 
-  if (!cogl_matrix_equal (&big_state0->matrix, &big_state1->matrix))
+  if (!graphene_matrix_equal (&big_state0->matrix, &big_state1->matrix))
     return FALSE;
 
   return TRUE;
@@ -1124,7 +1123,7 @@ _cogl_pipeline_get_layer_combine_constant (CoglPipeline *pipeline,
 /* We should probably make a public API version of this that has a
    matrix out-param. For an internal API it's good to be able to avoid
    copying the matrix */
-const CoglMatrix *
+const graphene_matrix_t *
 _cogl_pipeline_get_layer_matrix (CoglPipeline *pipeline, int layer_index)
 {
   CoglPipelineLayerState       change =
@@ -1143,7 +1142,7 @@ _cogl_pipeline_get_layer_matrix (CoglPipeline *pipeline, int layer_index)
 void
 cogl_pipeline_set_layer_matrix (CoglPipeline *pipeline,
 				int layer_index,
-                                const CoglMatrix *matrix)
+                                const graphene_matrix_t *matrix)
 {
   CoglPipelineLayerState state = COGL_PIPELINE_LAYER_STATE_USER_MATRIX;
   CoglPipelineLayer     *layer;
@@ -1164,7 +1163,7 @@ cogl_pipeline_set_layer_matrix (CoglPipeline *pipeline,
    * state we want to change */
   authority = _cogl_pipeline_layer_get_authority (layer, state);
 
-  if (cogl_matrix_equal (matrix, &authority->big_state->matrix))
+  if (graphene_matrix_equal (matrix, &authority->big_state->matrix))
     return;
 
   new = _cogl_pipeline_layer_pre_change_notify (pipeline, layer, state);
@@ -1183,7 +1182,7 @@ cogl_pipeline_set_layer_matrix (CoglPipeline *pipeline,
           CoglPipelineLayer *old_authority =
             _cogl_pipeline_layer_get_authority (parent, state);
 
-          if (cogl_matrix_equal (matrix, &old_authority->big_state->matrix))
+          if (graphene_matrix_equal (matrix, &old_authority->big_state->matrix))
             {
               layer->differences &= ~state;
 

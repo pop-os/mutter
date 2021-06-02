@@ -97,19 +97,19 @@ generate_round_texture (void)
 }
 
 static void
-paint_cb (ClutterActor        *stage,
-          ClutterPaintContext *paint_context,
-          Data                *data)
+on_after_paint (ClutterActor        *stage,
+                ClutterPaintContext *paint_context,
+                Data                *data)
 {
   CoglFramebuffer *framebuffer =
     clutter_paint_context_get_framebuffer (paint_context);
-  CoglMatrix old_matrix, new_matrix;
+  graphene_matrix_t old_matrix, new_matrix;
   int i;
   float diff_time;
 
   cogl_framebuffer_get_projection_matrix (framebuffer, &old_matrix);
   /* Use an orthogonal projection from -1 -> 1 in both axes */
-  cogl_matrix_init_identity (&new_matrix);
+  graphene_matrix_init_identity (&new_matrix);
   cogl_framebuffer_set_projection_matrix (framebuffer, &new_matrix);
 
   cogl_framebuffer_push_matrix (framebuffer);
@@ -258,7 +258,7 @@ test_cogl_point_sprites_main (int argc, char *argv[])
   clutter_actor_set_background_color (CLUTTER_ACTOR (stage), CLUTTER_COLOR_Black);
   clutter_stage_set_title (CLUTTER_STAGE (stage), "Cogl Point Sprites");
   g_signal_connect (stage, "destroy", G_CALLBACK (clutter_test_quit), NULL);
-  g_signal_connect_after (stage, "paint", G_CALLBACK (paint_cb), &data);
+  g_signal_connect (CLUTTER_STAGE (stage), "after-paint", G_CALLBACK (on_after_paint), &data);
 
   clutter_actor_show (stage);
 

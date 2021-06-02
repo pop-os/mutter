@@ -52,6 +52,7 @@
 #include "cogl-context-private.h"
 #include "cogl-object-private.h"
 #include "cogl-object-private.h"
+#include "cogl-offscreen-private.h"
 #include "cogl-framebuffer-private.h"
 #include "cogl1-context.h"
 #include "cogl-sub-texture.h"
@@ -154,7 +155,7 @@ _cogl_texture_free_loader (CoglTexture *texture)
           cogl_object_unref (loader->src.bitmap.bitmap);
           break;
         }
-      g_slice_free (CoglTextureLoader, loader);
+      g_free (loader);
       texture->loader = NULL;
     }
 }
@@ -162,7 +163,7 @@ _cogl_texture_free_loader (CoglTexture *texture)
 CoglTextureLoader *
 _cogl_texture_create_loader (void)
 {
-  return g_slice_new0 (CoglTextureLoader);
+  return g_new0 (CoglTextureLoader, 1);
 }
 
 void
@@ -579,7 +580,7 @@ get_texture_bits_via_offscreen (CoglTexture *meta_texture,
 
   cogl_object_unref (bitmap);
 
-  cogl_object_unref (framebuffer);
+  g_object_unref (framebuffer);
 
   return ret;
 }
@@ -892,31 +893,23 @@ cogl_texture_get_data (CoglTexture *texture,
 }
 
 static void
-_cogl_texture_framebuffer_destroy_cb (void *user_data,
-                                      void *instance)
+on_framebuffer_destroy (CoglFramebuffer *framebuffer,
+                        CoglTexture     *texture)
 {
-  CoglTexture *tex = user_data;
-  CoglFramebuffer *framebuffer = instance;
-
-  tex->framebuffers = g_list_remove (tex->framebuffers, framebuffer);
+  texture->framebuffers = g_list_remove (texture->framebuffers, framebuffer);
 }
 
 void
 _cogl_texture_associate_framebuffer (CoglTexture *texture,
                                      CoglFramebuffer *framebuffer)
 {
-  static CoglUserDataKey framebuffer_destroy_notify_key;
-
   /* Note: we don't take a reference on the framebuffer here because
    * that would introduce a circular reference. */
   texture->framebuffers = g_list_prepend (texture->framebuffers, framebuffer);
 
-  /* Since we haven't taken a reference on the framebuffer we setup
-    * some private data so we will be notified if it is destroyed... */
-  _cogl_object_set_user_data (COGL_OBJECT (framebuffer),
-                              &framebuffer_destroy_notify_key,
-                              texture,
-                              _cogl_texture_framebuffer_destroy_cb);
+  g_signal_connect (framebuffer, "destroy",
+                    G_CALLBACK (on_framebuffer_destroy),
+                    texture);
 }
 
 const GList *

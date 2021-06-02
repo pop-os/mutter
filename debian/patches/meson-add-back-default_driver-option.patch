@@ -44,10 +44,10 @@ index a3c61cf..c45614c 100644
    input: 'cogl-config.h.meson',
    output: 'cogl-config.h',
 diff --git a/meson.build b/meson.build
-index 2604ec9..4d8bdaf 100644
+index 28b7645..4be52bc 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -224,6 +224,8 @@ if have_wayland_eglstream
+@@ -226,6 +226,8 @@ if have_wayland_eglstream
    endif
  endif
  
@@ -56,7 +56,7 @@ index 2604ec9..4d8bdaf 100644
  have_sm = get_option('sm')
  if have_sm
    sm_dep = dependency('sm')
-@@ -489,6 +491,7 @@ output = [
+@@ -534,6 +536,7 @@ output = [
    '        Wayland EGLStream........ ' + have_wayland_eglstream.to_string(),
    '        Native Backend........... ' + have_native_backend.to_string(),
    '        EGL Device............... ' + have_egl_device.to_string(),
@@ -65,12 +65,12 @@ index 2604ec9..4d8bdaf 100644
    '        gudev.................... ' + have_libgudev.to_string(),
    '        Wacom.................... ' + have_libwacom.to_string(),
 diff --git a/meson_options.txt b/meson_options.txt
-index 601f0a7..7824c2d 100644
+index 61d9cb4..0548dd5 100644
 --- a/meson_options.txt
 +++ b/meson_options.txt
-@@ -158,3 +158,9 @@ option('xwayland_initfd',
-   value: 'auto',
-   description: 'Whether -initfd argument is passed to Xwayland to guarantee services (e.g. gsd-xsettings) startup before applications'
+@@ -176,3 +176,9 @@ option('xwayland_ignore_executables',
+   value: 'gsd-xsettings,ibus-x11,pulseaudio,Xwayland',
+   description: 'Comma delimited list of executable names to ignore when terminating Xwayland'
  )
 +
 +option('default_driver',

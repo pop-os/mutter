@@ -62,7 +62,6 @@
 #include <cogl/cogl-bitmap.h>
 #include <cogl/cogl-color.h>
 #include <cogl/cogl-dma-buf-handle.h>
-#include <cogl/cogl-matrix.h>
 #include <cogl/cogl-matrix-stack.h>
 #include <cogl/cogl-offscreen.h>
 #include <cogl/cogl-pixel-format.h>
@@ -123,6 +122,7 @@
 #include <cogl/cogl-glib-source.h>
 #include <cogl/cogl-trace.h>
 #include <cogl/cogl-scanout.h>
+#include <cogl/cogl-graphene.h>
 /* XXX: This will definitely go away once all the Clutter winsys
  * code has been migrated down into Cogl! */
 #include <cogl/deprecated/cogl-clutter.h>

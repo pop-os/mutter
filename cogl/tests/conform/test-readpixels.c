@@ -15,14 +15,14 @@ static const ClutterColor stage_color = { 0x0, 0x0, 0x0, 0xff };
 
 
 static void
-on_paint (ClutterActor        *actor,
-          ClutterPaintContext *paint_context,
-          void                *state)
+on_after_paint (ClutterActor        *actor,
+                ClutterPaintContext *paint_context,
+                void                *state)
 {
   float saved_viewport[4];
-  CoglMatrix saved_projection;
-  CoglMatrix projection;
-  CoglMatrix modelview;
+  graphene_matrix_t saved_projection;
+  graphene_matrix_t projection;
+  graphene_matrix_t modelview;
   guchar *data;
   CoglHandle tex;
   CoglHandle offscreen;
@@ -35,8 +35,8 @@ on_paint (ClutterActor        *actor,
   cogl_get_projection_matrix (&saved_projection);
   cogl_push_matrix ();
 
-  cogl_matrix_init_identity (&projection);
-  cogl_matrix_init_identity (&modelview);
+  graphene_matrix_init_identity (&projection);
+  graphene_matrix_init_identity (&modelview);
 
   cogl_set_projection_matrix (&projection);
   cogl_set_modelview_matrix (&modelview);
@@ -83,7 +83,7 @@ on_paint (ClutterActor        *actor,
   g_free (pixels);
 
   cogl_pop_framebuffer ();
-  cogl_object_unref (offscreen);
+  g_object_unref (offscreen);
 
   /* Now verify reading back from an onscreen framebuffer...
    */
@@ -162,7 +162,7 @@ test_readpixels (TestUtilsGTestFixture *fixture,
    * the first few frames, and we won't be doing anything else that
    * will trigger redrawing. */
   idle_source = g_idle_add (queue_redraw, stage);
-  g_signal_connect_after (stage, "paint", G_CALLBACK (on_paint), NULL);
+  g_signal_connect (CLUTTER_STAGE (stage), "after-paint", G_CALLBACK (on_after_paint), NULL);
 
   clutter_actor_show (stage);
   clutter_test_main ();

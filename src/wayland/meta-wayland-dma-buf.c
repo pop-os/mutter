@@ -53,6 +53,8 @@
 
 #ifdef HAVE_NATIVE_BACKEND
 #include "backends/native/meta-drm-buffer-gbm.h"
+#include "backends/native/meta-kms-utils.h"
+#include "backends/native/meta-onscreen-native.h"
 #include "backends/native/meta-renderer-native.h"
 #endif
 
@@ -96,6 +98,7 @@ meta_wayland_dma_buf_realize_texture (MetaWaylandBuffer  *buffer,
   EGLImageKHR egl_image;
   CoglEglImageFlags flags;
   CoglTexture2D *texture;
+  MetaDrmFormatBuf format_buf;
 
   if (buffer->dma_buf.texture)
     return TRUE;
@@ -121,6 +124,9 @@ meta_wayland_dma_buf_realize_texture (MetaWaylandBuffer  *buffer,
     case DRM_FORMAT_ARGB2101010:
       cogl_format = COGL_PIXEL_FORMAT_ARGB_2101010_PRE;
       break;
+    case DRM_FORMAT_ABGR2101010:
+      cogl_format = COGL_PIXEL_FORMAT_ABGR_2101010_PRE;
+      break;
     case DRM_FORMAT_RGB565:
       cogl_format = COGL_PIXEL_FORMAT_RGB_565;
       break;
@@ -138,6 +144,12 @@ meta_wayland_dma_buf_realize_texture (MetaWaylandBuffer  *buffer,
                    "Unsupported buffer format %d", dma_buf->drm_format);
       return FALSE;
     }
+
+  meta_topic (META_DEBUG_WAYLAND,
+              "[dma-buf] wl_buffer@%u DRM format %s -> CoglPixelFormat %s",
+              wl_resource_get_id (meta_wayland_buffer_get_resource (buffer)),
+              meta_drm_format_to_string (&format_buf, dma_buf->drm_format),
+              cogl_pixel_format_to_string (cogl_format));
 
   for (n_planes = 0; n_planes < META_WAYLAND_DMA_BUF_MAX_FDS; n_planes++)
     {
@@ -262,6 +274,7 @@ meta_wayland_dma_buf_try_acquire_scanout (MetaWaylandDmaBufBuffer *dma_buf,
   MetaRenderer *renderer = meta_backend_get_renderer (backend);
   MetaRendererNative *renderer_native = META_RENDERER_NATIVE (renderer);
   MetaGpuKms *gpu_kms;
+  MetaKmsDevice *kms_device;
   int n_planes;
   uint32_t drm_format;
   uint64_t drm_modifier;
@@ -287,6 +300,7 @@ meta_wayland_dma_buf_try_acquire_scanout (MetaWaylandDmaBufBuffer *dma_buf,
     return NULL;
 
   gpu_kms = meta_renderer_native_get_primary_gpu (renderer_native);
+  kms_device = meta_gpu_kms_get_kms_device (gpu_kms);
   gbm_bo = import_scanout_gbm_bo (dma_buf, gpu_kms, n_planes, &use_modifier);
   if (!gbm_bo)
     {
@@ -294,7 +308,7 @@ meta_wayland_dma_buf_try_acquire_scanout (MetaWaylandDmaBufBuffer *dma_buf,
       return NULL;
     }
 
-  fb = meta_drm_buffer_gbm_new_take (gpu_kms, gbm_bo,
+  fb = meta_drm_buffer_gbm_new_take (kms_device, gbm_bo,
                                      use_modifier,
                                      &error);
   if (!fb)
@@ -690,6 +704,7 @@ dma_buf_bind (struct wl_client *client,
   send_modifiers (resource, DRM_FORMAT_ARGB8888);
   send_modifiers (resource, DRM_FORMAT_XRGB8888);
   send_modifiers (resource, DRM_FORMAT_ARGB2101010);
+  send_modifiers (resource, DRM_FORMAT_ABGR2101010);
   send_modifiers (resource, DRM_FORMAT_XRGB2101010);
   send_modifiers (resource, DRM_FORMAT_RGB565);
   send_modifiers (resource, DRM_FORMAT_ABGR16161616F);

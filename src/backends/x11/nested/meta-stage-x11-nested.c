@@ -110,8 +110,8 @@ draw_view (MetaStageX11Nested *stage_nested,
   ClutterStageView *stage_view = CLUTTER_STAGE_VIEW (renderer_view);
   MetaCrtc *crtc;
   const MetaCrtcConfig *crtc_config;
-  CoglMatrix projection_matrix;
-  CoglMatrix transform;
+  graphene_matrix_t projection_matrix;
+  graphene_matrix_t transform;
   float texture_width, texture_height;
   float sample_x, sample_y, sample_width, sample_height;
   float s_1, t_1, s_2, t_2;
@@ -131,11 +131,10 @@ draw_view (MetaStageX11Nested *stage_nested,
                                                           &transform);
 
   cogl_framebuffer_push_matrix (onscreen);
-  cogl_matrix_init_identity (&projection_matrix);
-  cogl_matrix_translate (&projection_matrix, -1, 1, 0);
-  cogl_matrix_scale (&projection_matrix, 2, -2, 0);
-
-  cogl_matrix_multiply (&projection_matrix, &projection_matrix, &transform);
+  graphene_matrix_init_scale (&projection_matrix, 2, -2, 0);
+  graphene_matrix_translate (&projection_matrix,
+                             &GRAPHENE_POINT3D_INIT (-1, 1, 0));
+  graphene_matrix_multiply (&transform, &projection_matrix, &projection_matrix);
   cogl_framebuffer_set_projection_matrix (onscreen, &projection_matrix);
 
   s_1 = sample_x / texture_width;
@@ -159,7 +158,9 @@ draw_view (MetaStageX11Nested *stage_nested,
 }
 
 static void
-meta_stage_x11_nested_finish_frame (ClutterStageWindow *stage_window)
+meta_stage_x11_nested_finish_frame (ClutterStageWindow *stage_window,
+                                    ClutterStageView   *stage_view,
+                                    ClutterFrame       *frame)
 {
   MetaStageX11Nested *stage_nested = META_STAGE_X11_NESTED (stage_window);
   MetaStageX11 *stage_x11 = META_STAGE_X11 (stage_window);
@@ -195,7 +196,10 @@ meta_stage_x11_nested_finish_frame (ClutterStageWindow *stage_window)
     }
 
   frame_info = cogl_frame_info_new (0);
-  cogl_onscreen_swap_buffers (stage_x11->onscreen, frame_info);
+  cogl_onscreen_swap_buffers (stage_x11->onscreen, frame_info, frame);
+
+  if (!clutter_frame_has_result (frame))
+    clutter_frame_set_result (frame, CLUTTER_FRAME_RESULT_IDLE);
 }
 
 static void

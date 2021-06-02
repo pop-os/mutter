@@ -70,6 +70,7 @@ struct _ClutterFrameClock
   int64_t frame_count;
 
   ClutterFrameClockState state;
+  int64_t last_dispatch_time_us;
   int64_t last_presentation_time_us;
 
   gboolean is_next_presentation_time_valid;
@@ -181,25 +182,29 @@ void
 clutter_frame_clock_notify_presented (ClutterFrameClock *frame_clock,
                                       ClutterFrameInfo  *frame_info)
 {
-  int64_t presentation_time_us = frame_info->presentation_time;
-
-  if (presentation_time_us > frame_clock->last_presentation_time_us ||
-      ((presentation_time_us - frame_clock->last_presentation_time_us) >
-       INT64_MAX / 2))
-    {
-      frame_clock->last_presentation_time_us = presentation_time_us;
-    }
-  else
-    {
-      g_warning_once ("Bogus presentation time %" G_GINT64_FORMAT
-                      " travelled back in time, using current time.",
-                      presentation_time_us);
-      frame_clock->last_presentation_time_us = g_get_monotonic_time ();
-    }
+  frame_clock->last_presentation_time_us = frame_info->presentation_time;
 
   if (frame_info->refresh_rate > 1)
     frame_clock->refresh_rate = frame_info->refresh_rate;
 
+  switch (frame_clock->state)
+    {
+    case CLUTTER_FRAME_CLOCK_STATE_INIT:
+    case CLUTTER_FRAME_CLOCK_STATE_IDLE:
+    case CLUTTER_FRAME_CLOCK_STATE_SCHEDULED:
+      g_warn_if_reached ();
+      break;
+    case CLUTTER_FRAME_CLOCK_STATE_DISPATCHING:
+    case CLUTTER_FRAME_CLOCK_STATE_PENDING_PRESENTED:
+      frame_clock->state = CLUTTER_FRAME_CLOCK_STATE_IDLE;
+      maybe_reschedule_update (frame_clock);
+      break;
+    }
+}
+
+void
+clutter_frame_clock_notify_ready (ClutterFrameClock *frame_clock)
+{
   switch (frame_clock->state)
     {
     case CLUTTER_FRAME_CLOCK_STATE_INIT:
@@ -236,30 +241,112 @@ calculate_next_update_time_us (ClutterFrameClock *frame_clock,
   refresh_rate = frame_clock->refresh_rate;
   refresh_interval_us = (int64_t) (0.5 + G_USEC_PER_SEC / refresh_rate);
 
+  if (frame_clock->last_presentation_time_us == 0)
+    {
+      *out_next_update_time_us =
+        frame_clock->last_dispatch_time_us ?
+        frame_clock->last_dispatch_time_us + refresh_interval_us :
+        now_us;
+
+      *out_next_presentation_time_us = 0;
+      return;
+    }
+
   min_render_time_allowed_us = refresh_interval_us / 2;
   max_render_time_allowed_us = refresh_interval_us - SYNC_DELAY_US;
 
   if (min_render_time_allowed_us > max_render_time_allowed_us)
     min_render_time_allowed_us = max_render_time_allowed_us;
 
+  /*
+   * The common case is that the next presentation happens 1 refresh interval
+   * after the last presentation:
+   *
+   *        last_presentation_time_us
+   *       /       next_presentation_time_us
+   *      /       /
+   *     /       /
+   * |--|--o----|-------|--> presentation times
+   * |  |  \    |
+   * |  |   now_us
+   * |  \______/
+   * | refresh_interval_us
+   * |
+   * 0
+   *
+   */
   last_presentation_time_us = frame_clock->last_presentation_time_us;
   next_presentation_time_us = last_presentation_time_us + refresh_interval_us;
 
-  /* Skip ahead to get close to the actual next presentation time. */
+  /*
+   * However, the last presentation could have happened more than a frame ago.
+   * For example, due to idling (nothing on screen changed, so no need to
+   * redraw) or due to frames missing deadlines (GPU busy with heavy rendering).
+   * The following code adjusts next_presentation_time_us to be in the future,
+   * but still aligned to display presentation times. Instead of
+   * next presentation = last presentation + 1 * refresh interval, it will be
+   * next presentation = last presentation + N * refresh interval.
+   */
   if (next_presentation_time_us < now_us)
     {
-      int64_t logical_clock_offset_us;
-      int64_t logical_clock_phase_us;
-      int64_t hw_clock_offset_us;
+      int64_t presentation_phase_us;
+      int64_t current_phase_us;
+      int64_t current_refresh_interval_start_us;
 
-      logical_clock_offset_us = now_us % refresh_interval_us;
-      logical_clock_phase_us = now_us - logical_clock_offset_us;
-      hw_clock_offset_us = last_presentation_time_us % refresh_interval_us;
+      /*
+       * Let's say we're just past next_presentation_time_us.
+       *
+       * First, we compute presentation_phase_us. Real presentation times don't
+       * have to be exact multiples of refresh_interval_us and
+       * presentation_phase_us represents this difference. Next, we compute
+       * current phase and the refresh interval start corresponding to now_us.
+       * Finally, add presentation_phase_us and a refresh interval to get the
+       * next presentation after now_us.
+       *
+       *        last_presentation_time_us
+       *       /       next_presentation_time_us
+       *      /       /   now_us
+       *     /       /   /   new next_presentation_time_us
+       * |--|-------|---o---|-------|--> presentation times
+       * |        __|
+       * |       |presentation_phase_us
+       * |       |
+       * |       |     now_us - presentation_phase_us
+       * |       |    /
+       * |-------|---o---|-------|-----> integer multiples of refresh_interval_us
+       * |       \__/
+       * |       |current_phase_us
+       * |       \
+       * |        current_refresh_interval_start_us
+       * 0
+       *
+       */
 
-      next_presentation_time_us = logical_clock_phase_us + hw_clock_offset_us;
+      presentation_phase_us = last_presentation_time_us % refresh_interval_us;
+      current_phase_us = (now_us - presentation_phase_us) % refresh_interval_us;
+      current_refresh_interval_start_us =
+        now_us - presentation_phase_us - current_phase_us;
+
+      next_presentation_time_us =
+        current_refresh_interval_start_us +
+        presentation_phase_us +
+        refresh_interval_us;
     }
 
-  /* Skip one interval if we got an early presented event. */
+  /*
+   * Skip one interval if we got an early presented event.
+   *
+   *        last frame this was last_presentation_time
+   *       /       frame_clock->next_presentation_time_us
+   *      /       /
+   * |---|-o-----|-x----->
+   *       |       \
+   *       \        next_presentation_time_us is thus right after the last one
+   *        but got an unexpected early presentation
+   *             \_/
+   *             time_since_last_next_presentation_time_us
+   *
+   */
   last_next_presentation_time_us = frame_clock->next_presentation_time_us;
   time_since_last_next_presentation_time_us =
       next_presentation_time_us - last_next_presentation_time_us;
@@ -369,7 +456,8 @@ clutter_frame_clock_schedule_update (ClutterFrameClock *frame_clock)
       calculate_next_update_time_us (frame_clock,
                                      &next_update_time_us,
                                      &frame_clock->next_presentation_time_us);
-      frame_clock->is_next_presentation_time_valid = TRUE;
+      frame_clock->is_next_presentation_time_valid =
+        (frame_clock->next_presentation_time_us != 0);
       break;
     case CLUTTER_FRAME_CLOCK_STATE_SCHEDULED:
       return;
@@ -392,8 +480,9 @@ clutter_frame_clock_dispatch (ClutterFrameClock *frame_clock,
   int64_t frame_count;
   ClutterFrameResult result;
 
-  COGL_TRACE_BEGIN_SCOPED (ClutterFrameCLockDispatch, "Frame Clock (dispatch)");
+  COGL_TRACE_BEGIN_SCOPED (ClutterFrameClockDispatch, "Frame Clock (dispatch)");
 
+  frame_clock->last_dispatch_time_us = time_us;
   g_source_set_ready_time (frame_clock->source, -1);
 
   frame_clock->state = CLUTTER_FRAME_CLOCK_STATE_DISPATCHING;

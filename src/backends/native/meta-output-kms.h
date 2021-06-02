@@ -26,11 +26,12 @@
 #include "backends/meta-output.h"
 #include "backends/native/meta-gpu-kms.h"
 #include "backends/native/meta-kms-types.h"
+#include "backends/native/meta-output-native.h"
 
 #define META_TYPE_OUTPUT_KMS (meta_output_kms_get_type ())
 G_DECLARE_FINAL_TYPE (MetaOutputKms, meta_output_kms,
                       META, OUTPUT_KMS,
-                      MetaOutput)
+                      MetaOutputNative)
 
 void meta_output_kms_set_power_save_mode (MetaOutputKms *output_kms,
                                           uint64_t       dpms_state,
@@ -45,8 +46,6 @@ gboolean meta_output_kms_can_clone (MetaOutputKms *output_kms,
 MetaKmsConnector * meta_output_kms_get_kms_connector (MetaOutputKms *output_kms);
 
 uint32_t meta_output_kms_get_connector_id (MetaOutputKms *output_kms);
-
-GBytes * meta_output_kms_read_edid (MetaOutputKms *output_kms);
 
 MetaOutputKms * meta_output_kms_new (MetaGpuKms        *gpu_kms,
                                      MetaKmsConnector  *kms_connector,

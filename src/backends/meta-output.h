@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2017 Red Hat
+ * Copyright (C) 2020 NVIDIA CORPORATION
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -28,17 +29,18 @@
 
 struct _MetaTileInfo
 {
-  guint32 group_id;
-  guint32 flags;
-  guint32 max_h_tiles;
-  guint32 max_v_tiles;
-  guint32 loc_h_tile;
-  guint32 loc_v_tile;
-  guint32 tile_w;
-  guint32 tile_h;
+  uint32_t group_id;
+  uint32_t flags;
+  uint32_t max_h_tiles;
+  uint32_t max_v_tiles;
+  uint32_t loc_h_tile;
+  uint32_t loc_v_tile;
+  uint32_t tile_w;
+  uint32_t tile_h;
 };
 
-/* This matches the values in drm_mode.h */
+/* The first 17 matches the values in drm_mode.h, the ones starting with
+ * 1000 do not. */
 typedef enum
 {
   META_CONNECTOR_TYPE_Unknown = 0,
@@ -58,6 +60,8 @@ typedef enum
   META_CONNECTOR_TYPE_eDP = 14,
   META_CONNECTOR_TYPE_VIRTUAL = 15,
   META_CONNECTOR_TYPE_DSI = 16,
+
+  META_CONNECTOR_TYPE_META = 1000,
 } MetaConnectorType;
 
 typedef struct _MetaOutputInfo
@@ -89,6 +93,7 @@ typedef struct _MetaOutputInfo
   int backlight_max;
 
   gboolean supports_underscanning;
+  gboolean supports_color_transform;
 
   /*
    * Get a new preferred mode on hotplug events, to handle dynamic guest
@@ -118,6 +123,8 @@ META_EXPORT_TEST
 void meta_output_info_parse_edid (MetaOutputInfo *output_info,
                                   GBytes         *edid);
 
+gboolean meta_output_is_laptop  (MetaOutput *output);
+
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (MetaOutputInfo, meta_output_info_unref)
 
 #define META_TYPE_OUTPUT (meta_output_get_type ())
@@ -134,6 +141,14 @@ uint64_t meta_output_get_id (MetaOutput *output);
 
 META_EXPORT_TEST
 MetaGpu * meta_output_get_gpu (MetaOutput *output);
+
+META_EXPORT_TEST
+MetaMonitor * meta_output_get_monitor (MetaOutput *output);
+
+void meta_output_set_monitor (MetaOutput  *output,
+                              MetaMonitor *monitor);
+
+void meta_output_unset_monitor (MetaOutput *output);
 
 const char * meta_output_get_name (MetaOutput *output);
 
@@ -154,6 +169,7 @@ int meta_output_get_backlight (MetaOutput *output);
 void meta_output_add_possible_clone (MetaOutput *output,
                                      MetaOutput *possible_clone);
 
+META_EXPORT_TEST
 const MetaOutputInfo * meta_output_get_info (MetaOutput *output);
 
 META_EXPORT_TEST

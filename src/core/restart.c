@@ -59,7 +59,12 @@ static void
 restart_check_ready (void)
 {
   if (restart_helper_started && restart_message_shown)
-    meta_display_request_restart (meta_get_display ());
+    {
+      MetaDisplay *display = meta_get_display ();
+
+      if (!meta_display_request_restart (display))
+        meta_display_show_restart_message (display, NULL);
+    }
 }
 
 static void
@@ -74,7 +79,7 @@ restart_helper_read_line_callback (GObject      *source_object,
                                                           &length, &error);
   if (line == NULL)
     {
-      meta_warning ("Failed to read output from restart helper%s%s\n",
+      meta_warning ("Failed to read output from restart helper%s%s",
                     error ? ": " : NULL,
                     error ? error->message : NULL);
     }
@@ -150,7 +155,7 @@ meta_restart (const char *message)
                                  NULL, /* standard_error */
                                  &error))
     {
-      meta_warning ("Failed to start restart helper: %s\n", error->message);
+      meta_warning ("Failed to start restart helper: %s", error->message);
       goto error;
     }
 
@@ -163,7 +168,7 @@ meta_restart (const char *message)
                                        &error);
   if (error != NULL)
     {
-      meta_warning ("Failed to read from restart helper: %s\n", error->message);
+      meta_warning ("Failed to read from restart helper: %s", error->message);
       g_object_unref (data_stream);
       goto error;
     }

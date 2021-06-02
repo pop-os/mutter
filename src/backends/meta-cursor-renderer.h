@@ -38,9 +38,10 @@ struct _MetaHwCursorInhibitorInterface
 {
   GTypeInterface parent_iface;
 
-  gboolean (* is_cursor_sprite_inhibited) (MetaHwCursorInhibitor *inhibitor,
-                                           MetaCursorSprite      *cursor_sprite);
+  gboolean (* is_cursor_inhibited) (MetaHwCursorInhibitor *inhibitor);
 };
+
+gboolean meta_hw_cursor_inhibitor_is_cursor_inhibited (MetaHwCursorInhibitor *inhibitor);
 
 #define META_TYPE_CURSOR_RENDERER (meta_cursor_renderer_get_type ())
 G_DECLARE_DERIVABLE_TYPE (MetaCursorRenderer, meta_cursor_renderer,
@@ -54,35 +55,26 @@ struct _MetaCursorRendererClass
                               MetaCursorSprite   *cursor_sprite);
 };
 
-MetaCursorRenderer * meta_cursor_renderer_new (MetaBackend *backend);
+MetaCursorRenderer * meta_cursor_renderer_new (MetaBackend        *backend,
+                                               ClutterInputDevice *device);
 
 void meta_cursor_renderer_set_cursor (MetaCursorRenderer *renderer,
                                       MetaCursorSprite   *cursor_sprite);
 
-void meta_cursor_renderer_set_position (MetaCursorRenderer *renderer,
-                                        float               x,
-                                        float               y);
-graphene_point_t meta_cursor_renderer_get_position (MetaCursorRenderer *renderer);
+void meta_cursor_renderer_update_position (MetaCursorRenderer *renderer);
 void meta_cursor_renderer_force_update (MetaCursorRenderer *renderer);
 
 MetaCursorSprite * meta_cursor_renderer_get_cursor (MetaCursorRenderer *renderer);
 
 gboolean meta_cursor_renderer_is_overlay_visible (MetaCursorRenderer *renderer);
 
-void meta_cursor_renderer_add_hw_cursor_inhibitor (MetaCursorRenderer    *renderer,
-                                                   MetaHwCursorInhibitor *inhibitor);
-
-void meta_cursor_renderer_remove_hw_cursor_inhibitor (MetaCursorRenderer    *renderer,
-                                                      MetaHwCursorInhibitor *inhibitor);
-
-gboolean meta_cursor_renderer_is_hw_cursors_inhibited (MetaCursorRenderer *renderer,
-                                                       MetaCursorSprite   *cursor_sprite);
-
 graphene_rect_t meta_cursor_renderer_calculate_rect (MetaCursorRenderer *renderer,
                                                      MetaCursorSprite   *cursor_sprite);
 
 void meta_cursor_renderer_emit_painted (MetaCursorRenderer *renderer,
-                                        MetaCursorSprite   *cursor_sprite);
+                                        MetaCursorSprite   *cursor_sprite,
+                                        ClutterStageView   *stage_view);
+ClutterInputDevice * meta_cursor_renderer_get_input_device (MetaCursorRenderer *renderer);
 
 void meta_cursor_renderer_update_stage_overlay (MetaCursorRenderer *renderer,
                                                 MetaCursorSprite   *cursor_sprite);

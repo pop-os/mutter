@@ -19,7 +19,10 @@
 
 #include "config.h"
 
+#include "backends/edid.h"
 #include "backends/meta-output.h"
+
+#include "backends/meta-crtc.h"
 
 enum
 {
@@ -41,6 +44,8 @@ typedef struct _MetaOutputPrivate
   MetaGpu *gpu;
 
   MetaOutputInfo *info;
+
+  MetaMonitor *monitor;
 
   /* The CRTC driving this output, NULL if the output is not enabled */
   MetaCrtc *crtc;
@@ -107,6 +112,37 @@ meta_output_get_gpu (MetaOutput *output)
   MetaOutputPrivate *priv = meta_output_get_instance_private (output);
 
   return priv->gpu;
+}
+
+MetaMonitor *
+meta_output_get_monitor (MetaOutput *output)
+{
+  MetaOutputPrivate *priv = meta_output_get_instance_private (output);
+
+  g_warn_if_fail (priv->monitor);
+
+  return priv->monitor;
+}
+
+void
+meta_output_set_monitor (MetaOutput  *output,
+                         MetaMonitor *monitor)
+{
+  MetaOutputPrivate *priv = meta_output_get_instance_private (output);
+
+  g_warn_if_fail (!priv->monitor);
+
+  priv->monitor = monitor;
+}
+
+void
+meta_output_unset_monitor (MetaOutput *output)
+{
+  MetaOutputPrivate *priv = meta_output_get_instance_private (output);
+
+  g_warn_if_fail (priv->monitor);
+
+  priv->monitor = NULL;
 }
 
 const char *
@@ -190,7 +226,11 @@ meta_output_assign_crtc (MetaOutput                 *output,
 
   g_assert (crtc);
 
+  meta_output_unassign_crtc (output);
+
   g_set_object (&priv->crtc, crtc);
+
+  meta_crtc_assign_output (crtc, output);
 
   priv->is_primary = output_assignment->is_primary;
   priv->is_presentation = output_assignment->is_presentation;
@@ -202,7 +242,11 @@ meta_output_unassign_crtc (MetaOutput *output)
 {
   MetaOutputPrivate *priv = meta_output_get_instance_private (output);
 
-  g_clear_object (&priv->crtc);
+  if (priv->crtc)
+    {
+      meta_crtc_unassign_output (priv->crtc, output);
+      g_clear_object (&priv->crtc);
+    }
 
   priv->is_primary = FALSE;
   priv->is_presentation = FALSE;
@@ -239,6 +283,68 @@ meta_output_crtc_to_logical_transform (MetaOutput           *output,
     meta_monitor_transform_invert (priv->info->panel_orientation_transform);
   return meta_monitor_transform_transform (transform,
                                            inverted_panel_orientation_transform);
+}
+
+void
+meta_output_info_parse_edid (MetaOutputInfo *output_info,
+                             GBytes         *edid)
+{
+  MonitorInfo *parsed_edid;
+  size_t len;
+
+  if (!edid)
+    goto out;
+
+  parsed_edid = decode_edid (g_bytes_get_data (edid, &len));
+
+  if (parsed_edid)
+    {
+      output_info->vendor = g_strndup (parsed_edid->manufacturer_code, 4);
+      if (!g_utf8_validate (output_info->vendor, -1, NULL))
+        g_clear_pointer (&output_info->vendor, g_free);
+
+      output_info->product = g_strndup (parsed_edid->dsc_product_name, 14);
+      if (!g_utf8_validate (output_info->product, -1, NULL) ||
+          output_info->product[0] == '\0')
+        {
+          g_clear_pointer (&output_info->product, g_free);
+          output_info->product = g_strdup_printf ("0x%04x", (unsigned) parsed_edid->product_code);
+        }
+
+      output_info->serial = g_strndup (parsed_edid->dsc_serial_number, 14);
+      if (!g_utf8_validate (output_info->serial, -1, NULL) ||
+          output_info->serial[0] == '\0')
+        {
+          g_clear_pointer (&output_info->serial, g_free);
+          output_info->serial = g_strdup_printf ("0x%08x", parsed_edid->serial_number);
+        }
+
+      g_free (parsed_edid);
+    }
+
+ out:
+  if (!output_info->vendor)
+    output_info->vendor = g_strdup ("unknown");
+  if (!output_info->product)
+    output_info->product = g_strdup ("unknown");
+  if (!output_info->serial)
+    output_info->serial = g_strdup ("unknown");
+}
+
+gboolean
+meta_output_is_laptop (MetaOutput *output)
+{
+  const MetaOutputInfo *output_info = meta_output_get_info (output);
+
+  switch (output_info->connector_type)
+    {
+    case META_CONNECTOR_TYPE_eDP:
+    case META_CONNECTOR_TYPE_LVDS:
+    case META_CONNECTOR_TYPE_DSI:
+      return TRUE;
+    default:
+      return FALSE;
+    }
 }
 
 static void

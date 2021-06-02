@@ -78,7 +78,9 @@ on_stack_changed (MetaStack *stack)
   GArray *hidden_stack_ids;
   GList *sorted;
 
-  meta_topic (META_DEBUG_STACK, "Syncing window stack to server\n");
+  COGL_TRACE_BEGIN_SCOPED (StackChanged, "Stack changed");
+
+  meta_topic (META_DEBUG_STACK, "Syncing window stack to server");
 
   all_root_children_stacked = g_array_new (FALSE, FALSE, sizeof (uint64_t));
   hidden_stack_ids = g_array_new (FALSE, FALSE, sizeof (uint64_t));
@@ -97,7 +99,7 @@ on_stack_changed (MetaStack *stack)
       if (w->unmanaging)
         continue;
 
-      meta_topic (META_DEBUG_STACK, "%u:%d - %s ",
+      meta_topic (META_DEBUG_STACK, "  %u:%d - %s ",
 		  w->layer, w->stack_position, w->desc);
 
       if (w->frame)
@@ -122,7 +124,6 @@ on_stack_changed (MetaStack *stack)
       g_array_append_val (all_root_children_stacked, stack_id);
     }
 
-  meta_topic (META_DEBUG_STACK, "\n");
   meta_pop_no_msg_prefix ();
 
   if (display->x11_display)
@@ -137,7 +138,7 @@ on_stack_changed (MetaStack *stack)
 
   /* Sync to server */
 
-  meta_topic (META_DEBUG_STACK, "Restacking %u windows\n",
+  meta_topic (META_DEBUG_STACK, "Restacking %u windows",
               all_root_children_stacked->len);
 
   meta_stack_tracker_restack_managed (display->stack_tracker,
@@ -260,6 +261,8 @@ meta_stack_changed (MetaStack *stack)
   if (stack->freeze_count > 0)
     return;
 
+  COGL_TRACE_BEGIN_SCOPED (MetaStackChangedSort, "Stack: Changed");
+
   stack_ensure_sorted (stack);
   g_signal_emit (stack, signals[CHANGED], 0);
 }
@@ -275,10 +278,10 @@ meta_stack_add (MetaStack  *stack,
 
   g_return_if_fail (meta_window_is_stackable (window));
 
-  meta_topic (META_DEBUG_STACK, "Adding window %s to the stack\n", window->desc);
+  meta_topic (META_DEBUG_STACK, "Adding window %s to the stack", window->desc);
 
   if (meta_window_is_in_stack (window))
-    meta_bug ("Window %s had stack position already\n", window->desc);
+    meta_bug ("Window %s had stack position already", window->desc);
 
   stack->sorted = g_list_prepend (stack->sorted, window);
   stack->need_resort = TRUE; /* may not be needed as we add to top */
@@ -290,7 +293,7 @@ meta_stack_add (MetaStack  *stack,
   window->stack_position = stack->n_positions;
   stack->n_positions += 1;
   meta_topic (META_DEBUG_STACK,
-              "Window %s has stack_position initialized to %d\n",
+              "Window %s has stack_position initialized to %d",
               window->desc, window->stack_position);
 
   meta_stack_changed (stack);
@@ -306,7 +309,7 @@ meta_stack_remove (MetaStack  *stack,
   COGL_TRACE_BEGIN_SCOPED (MetaStackRemove,
                            "Stack (remove window)");
 
-  meta_topic (META_DEBUG_STACK, "Removing window %s from the stack\n", window->desc);
+  meta_topic (META_DEBUG_STACK, "Removing window %s from the stack", window->desc);
 
   /* Set window to top position, so removing it will not leave gaps
    * in the set of positions
@@ -576,7 +579,7 @@ create_constraints (Constraint **constraints,
 
       if (!meta_window_is_in_stack (w))
         {
-          meta_topic (META_DEBUG_STACK, "Window %s not in the stack, not constraining it\n",
+          meta_topic (META_DEBUG_STACK, "Window %s not in the stack, not constraining it",
                       w->desc);
           tmp = tmp->next;
           continue;
@@ -619,7 +622,8 @@ create_constraints (Constraint **constraints,
               if (!meta_window_has_transient_type (group_window))
 #endif
                 {
-                  meta_topic (META_DEBUG_STACK, "Constraining %s above %s as it's transient for its group\n",
+                  meta_topic (META_DEBUG_STACK,
+                              "Constraining %s above %s as it's transient for its group",
                               w->desc, group_window->desc);
                   add_constraint (constraints, w, group_window);
                 }
@@ -637,7 +641,8 @@ create_constraints (Constraint **constraints,
 
           if (parent && meta_window_is_in_stack (parent))
             {
-              meta_topic (META_DEBUG_STACK, "Constraining %s above %s due to transiency\n",
+              meta_topic (META_DEBUG_STACK,
+                          "Constraining %s above %s due to transiency",
                           w->desc, parent->desc);
               add_constraint (constraints, w, parent);
             }
@@ -728,7 +733,7 @@ ensure_above (MetaWindow *above,
   if (is_transient && above->layer < below->layer)
     {
       meta_topic (META_DEBUG_STACK,
-		  "Promoting window %s from layer %u to %u due to constraint\n",
+		  "Promoting window %s from layer %u to %u due to constraint",
 		  above->desc, above->layer, below->layer);
       above->layer = below->layer;
     }
@@ -739,7 +744,7 @@ ensure_above (MetaWindow *above,
       meta_window_set_stack_position_no_sync (above, below->stack_position);
       g_assert (below->stack_position + 1 == above->stack_position);
     }
-  meta_topic (META_DEBUG_STACK, "%s above at %d > %s below at %d\n",
+  meta_topic (META_DEBUG_STACK, "%s above at %d > %s below at %d",
               above->desc, above->stack_position,
               below->desc, below->stack_position);
 }
@@ -819,7 +824,7 @@ stack_do_relayer (MetaStack *stack)
     return;
 
   meta_topic (META_DEBUG_STACK,
-              "Recomputing layers\n");
+              "Recomputing layers");
 
   tmp = stack->sorted;
 
@@ -836,7 +841,7 @@ stack_do_relayer (MetaStack *stack)
       if (w->layer != old_layer)
         {
           meta_topic (META_DEBUG_STACK,
-                      "Window %s moved from layer %u to %u\n",
+                      "Window %s moved from layer %u to %u",
                       w->desc, old_layer, w->layer);
           stack->need_resort = TRUE;
           stack->need_constrain = TRUE;
@@ -869,7 +874,7 @@ stack_do_constrain (MetaStack *stack)
     return;
 
   meta_topic (META_DEBUG_STACK,
-              "Reapplying constraints\n");
+              "Reapplying constraints");
 
   constraints = g_new0 (Constraint*,
                         stack->n_positions);
@@ -898,7 +903,7 @@ stack_do_resort (MetaStack *stack)
     return;
 
   meta_topic (META_DEBUG_STACK,
-              "Sorting stack list\n");
+              "Sorting stack list");
 
   stack->sorted = g_list_sort (stack->sorted,
                                (GCompareFunc) compare_window_position);
@@ -1243,7 +1248,7 @@ meta_stack_set_positions (MetaStack *stack,
   if (!lists_contain_same_windows (windows, stack->sorted))
     {
       meta_warning ("This list of windows has somehow changed; not resetting "
-                    "positions of the windows.\n");
+                    "positions of the windows.");
       return;
     }
 
@@ -1263,7 +1268,7 @@ meta_stack_set_positions (MetaStack *stack,
     }
 
   meta_topic (META_DEBUG_STACK,
-              "Reset the stack positions of (nearly) all windows\n");
+              "Reset the stack positions of (nearly) all windows");
 
   meta_stack_changed (stack);
   meta_stack_update_window_tile_matches (stack, NULL);
@@ -1283,7 +1288,7 @@ meta_window_set_stack_position_no_sync (MetaWindow *window,
 
   if (position == window->stack_position)
     {
-      meta_topic (META_DEBUG_STACK, "Window %s already has position %d\n",
+      meta_topic (META_DEBUG_STACK, "Window %s already has position %d",
                   window->desc, position);
       return;
     }
@@ -1319,7 +1324,7 @@ meta_window_set_stack_position_no_sync (MetaWindow *window,
   window->stack_position = position;
 
   meta_topic (META_DEBUG_STACK,
-              "Window %s had stack_position set to %d\n",
+              "Window %s had stack_position set to %d",
               window->desc, window->stack_position);
 }
 
