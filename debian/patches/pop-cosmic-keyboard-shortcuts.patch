@@ -1,0 +1,1036 @@
+Index: mutter/data/50-mutter-system.xml
+===================================================================
+--- mutter.orig/data/50-mutter-system.xml
++++ mutter/data/50-mutter-system.xml
+@@ -7,7 +7,5 @@
+ 
+ 	<KeyListEntry name="panel-run-dialog" description="Show the run command prompt"/>
+ 
+-	<KeyListEntry name="panel-main-menu" description="Show the activities overview"/>
+-
+ </KeyListEntries>
+ 
+Index: mutter/po/ar.po
+===================================================================
+--- mutter.orig/po/ar.po
++++ mutter/po/ar.po
+@@ -167,10 +167,6 @@
+ msgid "Show the run command prompt"
+ msgstr "أظهر محث تشغيل أمر"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "أظهر نظرة عامة على الأنشطة"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "استعد اختصارات لوحة المفاتيح"
+Index: mutter/po/as.po
+===================================================================
+--- mutter.orig/po/as.po
++++ mutter/po/as.po
+@@ -193,10 +193,6 @@
+ msgid "Show the run command prompt"
+ msgstr "ৰান কমান্ড প্ৰম্পট দেখুৱাওক"
+ 
+-#: ../data/50-mutter-system.xml.in.h:3
+-msgid "Show the activities overview"
+-msgstr "কাৰ্য্যসমূহৰ অভাৰভিউ দেখুৱাওক"
+-
+ #: ../data/50-mutter-windows.xml.in.h:1
+ msgid "Windows"
+ msgstr "উইন্ডোসমূহ"
+Index: mutter/po/ast.po
+===================================================================
+--- mutter.orig/po/ast.po
++++ mutter/po/ast.po
+@@ -2014,11 +2014,6 @@
+ msgid "Switch windows of an application"
+ msgstr "Movese ente les ventanes d'una aplicación"
+ 
+-#: ../src/50-mutter-system.xml.in.h:1
+-#, fuzzy
+-msgid "Show the activities overview"
+-msgstr "Amosar el resume d'actividaes"
+-
+ #: ../src/50-mutter-system.xml.in.h:2
+ #, fuzzy
+ msgid "Show the run command prompt"
+Index: mutter/po/be.po
+===================================================================
+--- mutter.orig/po/be.po
++++ mutter/po/be.po
+@@ -160,10 +160,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Паказаць акенца для выканання загаду"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Паказаць агляд дзейнасцяў"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Аднавіць клавіятурныя скароты"
+Index: mutter/po/bg.po
+===================================================================
+--- mutter.orig/po/bg.po
++++ mutter/po/bg.po
+@@ -185,10 +185,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Показване на прозореца за стартиране на команда"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Преглед на дейностите"
+-
+ #: data/50-mutter-windows.xml:6
+ msgid "Windows"
+ msgstr "Прозорци"
+Index: mutter/po/bn_IN.po
+===================================================================
+--- mutter.orig/po/bn_IN.po
++++ mutter/po/bn_IN.po
+@@ -172,10 +172,6 @@
+ msgid "Show the run command prompt"
+ msgstr "চালনা কম্যান্ড প্রমপ্ট দেখান"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "ক্রিয়াকলাপের পূর্বরূপ দেখান"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "কীবোর্ড শর্টকাটগুলি পুনরুদ্ধার করুন"
+Index: mutter/po/bs.po
+===================================================================
+--- mutter.orig/po/bs.po
++++ mutter/po/bs.po
+@@ -179,10 +179,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Prikazuje prompt za pokretanje naredbe"
+ 
+-#: ../data/50-mutter-system.xml.in.h:3
+-msgid "Show the activities overview"
+-msgstr "Prikazuje pregled aktivnosti"
+-
+ #: ../data/50-mutter-windows.xml.in.h:1
+ msgid "Windows"
+ msgstr "Windows"
+Index: mutter/po/ca.po
+===================================================================
+--- mutter.orig/po/ca.po
++++ mutter/po/ca.po
+@@ -167,10 +167,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Mostra l'indicador d'execució d'aplicacions"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Mostra la vista general d'activitats"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Restaura les dreceres de teclat"
+Index: mutter/po/ca@valencia.po
+===================================================================
+--- mutter.orig/po/ca@valencia.po
++++ mutter/po/ca@valencia.po
+@@ -184,10 +184,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Mostra l'indicador d'execució d'aplicacions"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Mostra la vista general d'activitats"
+-
+ #: data/50-mutter-windows.xml:6
+ msgid "Windows"
+ msgstr "Finestres"
+Index: mutter/po/cs.po
+===================================================================
+--- mutter.orig/po/cs.po
++++ mutter/po/cs.po
+@@ -168,10 +168,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Zobrazit řádek ke spuštění příkazu"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Zobrazit přehled činností"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Obnovit klávesové zkratky"
+Index: mutter/po/da.po
+===================================================================
+--- mutter.orig/po/da.po
++++ mutter/po/da.po
+@@ -174,10 +174,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Vis “kør kommando”-prompten"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Vis aktivitetsoversigten"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Gendan tastaturgenvejene"
+Index: mutter/po/de.po
+===================================================================
+--- mutter.orig/po/de.po
++++ mutter/po/de.po
+@@ -170,10 +170,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Den »Befehl ausführen«-Dialog anzeigen"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Aktivitäten-Übersicht anzeigen"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Die Tastenkombinationen wiederherstellen"
+Index: mutter/po/el.po
+===================================================================
+--- mutter.orig/po/el.po
++++ mutter/po/el.po
+@@ -192,10 +192,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Εμφάνιση της προτροπής της εντολής run"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Εμφάνιση της επισκόπησης των δραστηριοτήτων"
+-
+ #: data/50-mutter-windows.xml:6
+ msgid "Windows"
+ msgstr "Παράθυρα"
+Index: mutter/po/en_GB.po
+===================================================================
+--- mutter.orig/po/en_GB.po
++++ mutter/po/en_GB.po
+@@ -168,10 +168,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Show the run command prompt"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Show the activities overview"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Restore the keyboard shortcuts"
+Index: mutter/po/eo.po
+===================================================================
+--- mutter.orig/po/eo.po
++++ mutter/po/eo.po
+@@ -180,10 +180,6 @@
+ msgid "Show the run command prompt"
+ msgstr ""
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr ""
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr ""
+Index: mutter/po/es.po
+===================================================================
+--- mutter.orig/po/es.po
++++ mutter/po/es.po
+@@ -168,10 +168,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Mostrar el elemento «ejecutar comando»"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Mostrar la vista de actividades"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Restaurar los atajos de teclado"
+Index: mutter/po/et.po
+===================================================================
+--- mutter.orig/po/et.po
++++ mutter/po/et.po
+@@ -175,10 +175,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Käsuviiba kuvamine"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Tegevuste ülevaate avamine"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr ""
+Index: mutter/po/eu.po
+===================================================================
+--- mutter.orig/po/eu.po
++++ mutter/po/eu.po
+@@ -164,10 +164,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Erakutsi gonbitea komandoa exekutatzeko"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Erakutsi jardueren aurkezpen orokorra"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Leheneratu laster-teklak"
+Index: mutter/po/fa.po
+===================================================================
+--- mutter.orig/po/fa.po
++++ mutter/po/fa.po
+@@ -1733,11 +1733,6 @@
+ msgid "Switch windows of an application"
+ msgstr "تعویض پنجره‌های یک برنامه"
+ 
+-#: ../src/50-mutter-system.xml.in.h:1
+-#, fuzzy
+-msgid "Show the activities overview"
+-msgstr "نمایش نمای‌کلی فعالیت‌ها"
+-
+ #: ../src/50-mutter-system.xml.in.h:2
+ #, fuzzy
+ #| msgid "Show the panel's main menu"
+Index: mutter/po/fi.po
+===================================================================
+--- mutter.orig/po/fi.po
++++ mutter/po/fi.po
+@@ -175,10 +175,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Näytä komennonsuorituskehote"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Näytä toimintojen yleisnäkymä"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Palauta pikanäppäimet"
+Index: mutter/po/fr.po
+===================================================================
+--- mutter.orig/po/fr.po
++++ mutter/po/fr.po
+@@ -175,10 +175,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Afficher la fenêtre pour lancer une commande"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Afficher la vue d’ensemble des activités"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Restaurer les raccourcis clavier"
+Index: mutter/po/fur.po
+===================================================================
+--- mutter.orig/po/fur.po
++++ mutter/po/fur.po
+@@ -161,10 +161,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Mostre la richieste “eseguìs comant”"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Mostre la panoramiche ativitâts"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Ripristine lis scurtis di tastiere"
+Index: mutter/po/ga.po
+===================================================================
+--- mutter.orig/po/ga.po
++++ mutter/po/ga.po
+@@ -128,10 +128,6 @@
+ msgid "Show the run command prompt"
+ msgstr ""
+ 
+-#: ../src/50-mutter-system.xml.in.h:3
+-msgid "Show the activities overview"
+-msgstr ""
+-
+ #: ../src/50-mutter-windows.xml.in.h:1
+ msgid "Windows"
+ msgstr "Fuinneoga"
+Index: mutter/po/gd.po
+===================================================================
+--- mutter.orig/po/gd.po
++++ mutter/po/gd.po
+@@ -180,10 +180,6 @@
+ msgid "Show the run command prompt"
+ msgstr ""
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Foir-shealladh air na gnìomhachdan"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Aisig ath-ghoiridean a’ mheur-chlàir"
+Index: mutter/po/gl.po
+===================================================================
+--- mutter.orig/po/gl.po
++++ mutter/po/gl.po
+@@ -171,10 +171,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Mostrar o diálogo de executar orde"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Mostrar a vista xeral de actividades"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Restaurar os atallos de teclado"
+Index: mutter/po/gu.po
+===================================================================
+--- mutter.orig/po/gu.po
++++ mutter/po/gu.po
+@@ -202,10 +202,6 @@
+ msgid "Show the run command prompt"
+ msgstr "ચાલતા આદેશ પ્રોમ્પ્ટને બતાવો"
+ 
+-#: ../data/50-mutter-system.xml.in.h:3
+-msgid "Show the activities overview"
+-msgstr "પ્રવૃત્તિઓની ઝાંખીને બતાવો"
+-
+ #: ../data/50-mutter-windows.xml.in.h:1
+ msgid "Windows"
+ msgstr "વિન્ડો"
+Index: mutter/po/he.po
+===================================================================
+--- mutter.orig/po/he.po
++++ mutter/po/he.po
+@@ -165,10 +165,6 @@
+ msgid "Show the run command prompt"
+ msgstr "הצגת החלונית להרצת פקודה"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "הצגת סקירת הפעילויות"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "שחזור צירופי מקשים"
+Index: mutter/po/hi.po
+===================================================================
+--- mutter.orig/po/hi.po
++++ mutter/po/hi.po
+@@ -204,10 +204,6 @@
+ msgid "Show the run command prompt"
+ msgstr "चलाए जाने वाले कमांड फ़लक को दिखाएँ"
+ 
+-#: ../data/50-mutter-system.xml.in.h:3
+-msgid "Show the activities overview"
+-msgstr "गतिविधियों के अवलोकन दिखाएँ"
+-
+ #: ../data/50-mutter-windows.xml.in.h:1
+ msgid "Windows"
+ msgstr "विंडोज़"
+Index: mutter/po/hr.po
+===================================================================
+--- mutter.orig/po/hr.po
++++ mutter/po/hr.po
+@@ -162,10 +162,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Prikaži dijalog pokretanja naredbe"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Prikaži pregled aktivnosti"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Vrati izvorne prečace tipkovnice"
+Index: mutter/po/hu.po
+===================================================================
+--- mutter.orig/po/hu.po
++++ mutter/po/hu.po
+@@ -166,10 +166,6 @@
+ msgid "Show the run command prompt"
+ msgstr "A parancs futtatása ablak megjelenítése"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "A tevékenységek áttekintés megjelenítése"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Gyorsbillentyűk helyreállítása"
+Index: mutter/po/id.po
+===================================================================
+--- mutter.orig/po/id.po
++++ mutter/po/id.po
+@@ -166,10 +166,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Tampilkan sapaan jalankan perintah"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Tampilkan ringkasan aktivitas"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Pulihkan pintasan papan tik"
+Index: mutter/po/is.po
+===================================================================
+--- mutter.orig/po/is.po
++++ mutter/po/is.po
+@@ -185,10 +185,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Birta skipanalínuna"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Birta virkniyfirlit"
+-
+ #: data/50-mutter-windows.xml:6
+ msgid "Windows"
+ msgstr "Gluggar"
+Index: mutter/po/it.po
+===================================================================
+--- mutter.orig/po/it.po
++++ mutter/po/it.po
+@@ -167,10 +167,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Mostra il prompt esegui comando"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Mostra la panoramica delle attività"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Ripristina le scorciatoie da tastiera"
+Index: mutter/po/ja.po
+===================================================================
+--- mutter.orig/po/ja.po
++++ mutter/po/ja.po
+@@ -171,10 +171,6 @@
+ msgid "Show the run command prompt"
+ msgstr "コマンド実行プロンプトを表示する"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "アクティビティ画面を表示する"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "キーボードショートカットを復元する"
+Index: mutter/po/kk.po
+===================================================================
+--- mutter.orig/po/kk.po
++++ mutter/po/kk.po
+@@ -161,10 +161,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Команданы жөнелту сұхбатын көрсету"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Шолуды көрсету"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Пернетақта жарлықтарын қалпына келтіру"
+Index: mutter/po/kn.po
+===================================================================
+--- mutter.orig/po/kn.po
++++ mutter/po/kn.po
+@@ -191,10 +191,6 @@
+ msgid "Show the run command prompt"
+ msgstr "ಚಲಾಯಿಸುವ ಆದೇಶ ಪ್ರಾಂಪ್ಟನ್ನು ತೋರಿಸು"
+ 
+-#: ../data/50-mutter-system.xml.in.h:3
+-msgid "Show the activities overview"
+-msgstr "ಚಟುವಟಿಕೆಗಳ ಅವಲೋಕನವನ್ನು ತೋರಿಸು"
+-
+ #: ../data/50-mutter-windows.xml.in.h:1
+ msgid "Windows"
+ msgstr "ಕಿಟಕಿಗಳು"
+Index: mutter/po/ko.po
+===================================================================
+--- mutter.orig/po/ko.po
++++ mutter/po/ko.po
+@@ -173,10 +173,6 @@
+ msgid "Show the run command prompt"
+ msgstr "실행 명령 프롬프트 보이기"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "현재 활동 보이기"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "키보드 바로 가기 복구"
+Index: mutter/po/lt.po
+===================================================================
+--- mutter.orig/po/lt.po
++++ mutter/po/lt.po
+@@ -168,10 +168,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Rodyti komandų paleidimo langelį"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Rodyti veiklų apžvalgą"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Atkurti klaviatūros trumpinius"
+Index: mutter/po/lv.po
+===================================================================
+--- mutter.orig/po/lv.po
++++ mutter/po/lv.po
+@@ -168,10 +168,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Rādīt palaišanas komandrindu"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Rādīt aktivitāšu pārskatu"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Atjaunot tastatūras saīsnes"
+Index: mutter/po/ml.po
+===================================================================
+--- mutter.orig/po/ml.po
++++ mutter/po/ml.po
+@@ -132,10 +132,6 @@
+ msgid "Show the run command prompt"
+ msgstr "കമാന്‍ഡ് പ്രോപ്റ്റ് കാണിയ്ക്കുക"
+ 
+-#: ../src/50-mutter-system.xml.in.h:3
+-msgid "Show the activities overview"
+-msgstr "പ്രവര്‍ത്തനങ്ങളുടെ അവലോകനം കാണിയ്ക്കുക"
+-
+ #: ../src/50-mutter-windows.xml.in.h:1
+ msgid "Windows"
+ msgstr "ജാലകങ്ങള്‍ (_W)"
+Index: mutter/po/mr.po
+===================================================================
+--- mutter.orig/po/mr.po
++++ mutter/po/mr.po
+@@ -193,10 +193,6 @@
+ msgid "Show the run command prompt"
+ msgstr "रन कमांड प्रॉम्प्ट दाखवा"
+ 
+-#: ../data/50-mutter-system.xml.in.h:3
+-msgid "Show the activities overview"
+-msgstr "कार्यांचे अवलोकन दाखवा"
+-
+ #: ../data/50-mutter-windows.xml.in.h:1
+ msgid "Windows"
+ msgstr "पटल"
+Index: mutter/po/ms.po
+===================================================================
+--- mutter.orig/po/ms.po
++++ mutter/po/ms.po
+@@ -169,10 +169,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Tunjuk bisikan jalan perintah"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Tunjuk selayang pandang aktiviti"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Pulih pintasan papan kekunci"
+Index: mutter/po/nb.po
+===================================================================
+--- mutter.orig/po/nb.po
++++ mutter/po/nb.po
+@@ -159,10 +159,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Vis kommandolinje"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Vis oversikt over aktiviteter"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Gjenopprett tastatursnarveier"
+Index: mutter/po/ne.po
+===================================================================
+--- mutter.orig/po/ne.po
++++ mutter/po/ne.po
+@@ -184,11 +184,6 @@
+ msgid "Show the run command prompt"
+ msgstr "टर्मिनलमा आदेश चलाउनुहोस् ।"
+ 
+-#: data/50-mutter-system.xml:10
+-#, fuzzy
+-msgid "Show the activities overview"
+-msgstr "अधिलेखन हेर्नुहोस्"
+-
+ #: data/50-mutter-windows.xml:6
+ msgid "Windows"
+ msgstr "विन्डोहरू"
+Index: mutter/po/nl.po
+===================================================================
+--- mutter.orig/po/nl.po
++++ mutter/po/nl.po
+@@ -166,10 +166,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Het opdrachtregelvenster tonen"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Het activiteitenoverzicht tonen"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Sneltoetsen opnieuw instellen"
+Index: mutter/po/oc.po
+===================================================================
+--- mutter.orig/po/oc.po
++++ mutter/po/oc.po
+@@ -180,10 +180,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Afichar la fenèstra per aviar una comanda"
+ 
+-#: ../data/50-mutter-system.xml.in.h:3
+-msgid "Show the activities overview"
+-msgstr "Afichar l'apercebut de las activitats"
+-
+ #: ../data/50-mutter-windows.xml.in.h:1
+ msgid "Windows"
+ msgstr "Fenèstras"
+Index: mutter/po/or.po
+===================================================================
+--- mutter.orig/po/or.po
++++ mutter/po/or.po
+@@ -197,10 +197,6 @@
+ msgid "Show the run command prompt"
+ msgstr "ନିର୍ଦ୍ଦେଶ ପ୍ରମ୍ପଟକୁ ଚଲାନ୍ତୁକୁ ଦେଖାନ୍ତୁ"
+ 
+-#: ../data/50-mutter-system.xml.in.h:3
+-msgid "Show the activities overview"
+-msgstr "କାର୍ଯ୍ୟକଳାପଗୁଡ଼ିକର ସମୀକ୍ଷାକୁ ଦର୍ଶାନ୍ତୁ"
+-
+ #: ../data/50-mutter-windows.xml.in.h:1
+ msgid "Windows"
+ msgstr "ୱିଣ୍ଡୋମାନ"
+Index: mutter/po/pa.po
+===================================================================
+--- mutter.orig/po/pa.po
++++ mutter/po/pa.po
+@@ -169,10 +169,6 @@
+ msgid "Show the run command prompt"
+ msgstr "ਕਮਾਂਡ ਚਲਾਉ ਪਰੋਉਟ ਵੇਖੋ"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "ਸਰਗਰਮੀ ਸੰਖੇਪ ਜਾਣਕਾਰੀ ਵੇਖੋ"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "ਕੀ-ਬੋਰਡ ਸ਼ਾਰਟਕੱਟ ਬਹਾਲ ਕਰੋ"
+Index: mutter/po/pl.po
+===================================================================
+--- mutter.orig/po/pl.po
++++ mutter/po/pl.po
+@@ -168,10 +168,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Wyświetlenie okna wykonania polecenia"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Wyświetlenie podglądu aktywności"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Przywrócenie skrótów klawiszowych"
+Index: mutter/po/pt.po
+===================================================================
+--- mutter.orig/po/pt.po
++++ mutter/po/pt.po
+@@ -167,10 +167,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Mostrar a linha de comando de execução"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Mostrar o resumo de atividades"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Redefinir as teclas de atalho"
+Index: mutter/po/pt_BR.po
+===================================================================
+--- mutter.orig/po/pt_BR.po
++++ mutter/po/pt_BR.po
+@@ -181,10 +181,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Mostrar o prompt de comando de execução"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Mostrar o panorama de atividades"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Restaurar os atalhos de teclado"
+Index: mutter/po/ro.po
+===================================================================
+--- mutter.orig/po/ro.po
++++ mutter/po/ro.po
+@@ -168,10 +168,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Arată prompterul de comandă al comenzii run (rulează)"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Arată prezentarea generală a activităților"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Restaurează scurtăturile de tastatură"
+Index: mutter/po/ru.po
+===================================================================
+--- mutter.orig/po/ru.po
++++ mutter/po/ru.po
+@@ -188,10 +188,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Показать командную строку"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Открыть обзор"
+-
+ #: data/50-mutter-windows.xml:6
+ msgid "Windows"
+ msgstr "Окна"
+Index: mutter/po/sk.po
+===================================================================
+--- mutter.orig/po/sk.po
++++ mutter/po/sk.po
+@@ -204,11 +204,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Zobraziť riadok pre spustenie príkazu"
+ 
+-# description
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Zobraziť prehľad aktivít"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Obnoviť klávesové skratky"
+Index: mutter/po/sl.po
+===================================================================
+--- mutter.orig/po/sl.po
++++ mutter/po/sl.po
+@@ -167,10 +167,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Pokaži možnost zagona ukazne vrstice"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Pokaži okno pregleda dejavnosti"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Obnovi tipkovne bližnjice"
+Index: mutter/po/sr.po
+===================================================================
+--- mutter.orig/po/sr.po
++++ mutter/po/sr.po
+@@ -169,10 +169,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Приказује упит за извршавање наредбе"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Приказује преглед активности"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Поврати пречице на тастатури"
+Index: mutter/po/sr@latin.po
+===================================================================
+--- mutter.orig/po/sr@latin.po
++++ mutter/po/sr@latin.po
+@@ -167,10 +167,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Prikazuje upit za izvršavanje naredbe"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Prikazuje pregled aktivnosti"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Povrati prečice na tastaturi"
+Index: mutter/po/sv.po
+===================================================================
+--- mutter.orig/po/sv.po
++++ mutter/po/sv.po
+@@ -164,10 +164,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Visa Kör kommando-dialogen"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Visa aktivitetsöversikt"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Återställ tangentbordsgenvägarna"
+Index: mutter/po/ta.po
+===================================================================
+--- mutter.orig/po/ta.po
++++ mutter/po/ta.po
+@@ -202,10 +202,6 @@
+ msgid "Show the run command prompt"
+ msgstr "இயக்கு கட்டளையின் தூண்டலைக் காட்டு"
+ 
+-#: ../data/50-mutter-system.xml.in.h:3
+-msgid "Show the activities overview"
+-msgstr "செயல்பாடுகளின் மேல் பார்வையை காட்டுக"
+-
+ #: ../data/50-mutter-windows.xml.in.h:1
+ msgid "Windows"
+ msgstr "சாளரங்கள்"
+Index: mutter/po/te.po
+===================================================================
+--- mutter.orig/po/te.po
++++ mutter/po/te.po
+@@ -195,10 +195,6 @@
+ msgid "Show the run command prompt"
+ msgstr "రన్ కమాండు మెనూను చూపించు"
+ 
+-#: ../data/50-mutter-system.xml.in.h:3
+-msgid "Show the activities overview"
+-msgstr "కార్యకలాపాల పై పై పరిశీలనను చూపించు"
+-
+ #: ../data/50-mutter-windows.xml.in.h:1
+ msgid "Windows"
+ msgstr "కిటికీలు"
+Index: mutter/po/th.po
+===================================================================
+--- mutter.orig/po/th.po
++++ mutter/po/th.po
+@@ -184,10 +184,6 @@
+ msgid "Show the run command prompt"
+ msgstr "แสดงกล่องเรียกคำสั่ง"
+ 
+-#: ../data/50-mutter-system.xml.in.h:3
+-msgid "Show the activities overview"
+-msgstr "แสดงภาพรวมของกิจกรรมต่างๆ"
+-
+ #: ../data/50-mutter-windows.xml.in.h:1
+ msgid "Windows"
+ msgstr "หน้าต่าง"
+Index: mutter/po/tr.po
+===================================================================
+--- mutter.orig/po/tr.po
++++ mutter/po/tr.po
+@@ -170,10 +170,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Komut çalıştırma istemini göster"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Etkinlik genel görünümünü göster"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Klavye kısayollarını geri yükle"
+Index: mutter/po/ug.po
+===================================================================
+--- mutter.orig/po/ug.po
++++ mutter/po/ug.po
+@@ -126,10 +126,6 @@
+ msgid "Show the run command prompt"
+ msgstr "بۇيرۇق قۇرىنى كۆرسىتىدۇ"
+ 
+-#: ../src/50-mutter-system.xml.in.h:3
+-msgid "Show the activities overview"
+-msgstr "پائالىيەتلەرنىڭ قىسقىچە بايانىنى كۆرسىتىدۇ"
+-
+ #: ../src/50-mutter-windows.xml.in.h:1
+ msgid "Windows"
+ msgstr "كۆزنەكلەر"
+Index: mutter/po/uk.po
+===================================================================
+--- mutter.orig/po/uk.po
++++ mutter/po/uk.po
+@@ -164,10 +164,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Показати запуск командного рядка"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Показати огляд активності"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Відновити клавіатурні скорочення"
+Index: mutter/po/vi.po
+===================================================================
+--- mutter.orig/po/vi.po
++++ mutter/po/vi.po
+@@ -164,10 +164,6 @@
+ msgid "Show the run command prompt"
+ msgstr "Hiện dấu nhắc dòng lệnh"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "Hiện tổng quan hoạt động"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "Hoàn nguyên lại các phím tắt"
+Index: mutter/po/zh_CN.po
+===================================================================
+--- mutter.orig/po/zh_CN.po
++++ mutter/po/zh_CN.po
+@@ -175,10 +175,6 @@
+ msgid "Show the run command prompt"
+ msgstr "显示运行命令提示符"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "显示活动视图"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "还原键盘快捷键"
+Index: mutter/po/zh_HK.po
+===================================================================
+--- mutter.orig/po/zh_HK.po
++++ mutter/po/zh_HK.po
+@@ -189,10 +189,6 @@
+ msgid "Show the run command prompt"
+ msgstr "顯示執行指令提示"
+ 
+-#: ../data/50-mutter-system.xml.in.h:3
+-msgid "Show the activities overview"
+-msgstr "顯示活動概覽"
+-
+ #: ../data/50-mutter-windows.xml.in.h:1
+ msgid "Windows"
+ msgstr "視窗"
+Index: mutter/po/zh_TW.po
+===================================================================
+--- mutter.orig/po/zh_TW.po
++++ mutter/po/zh_TW.po
+@@ -165,10 +165,6 @@
+ msgid "Show the run command prompt"
+ msgstr "顯示執行指令提示"
+ 
+-#: data/50-mutter-system.xml:10
+-msgid "Show the activities overview"
+-msgstr "顯示活動概覽"
+-
+ #: data/50-mutter-wayland.xml:8
+ msgid "Restore the keyboard shortcuts"
+ msgstr "重設鍵盤快捷鍵"
