@@ -14,3 +14,4 @@ shaped-texture-Expose-ensure_size_valid-API.patch
 wayland-actor-surface-Call-ensure_size_valid-on-shaped-te.patch
 build-Use-Xwayland-pkg-config-if-available.patch
 xwayland-Check-for-listenfd-option.patch
+pop-cosmic-keyboard-shortcuts.patch
