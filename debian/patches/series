@@ -3,6 +3,7 @@ theme-load-icons-as-Gtk-does-with-fallback-and-RTL-suppor.patch
 meson-add-back-default_driver-option.patch
 mutter-cogl.test-Use-xvfb-run-to-run-the-cogl-tests.patch
 mutter-all.test-Run-tests-in-a-environment-with-display-a.patch
+tests-Mark-view-verification-tests-as-incomplete-in-big-e.patch
 debian/synaptics-support.patch
 debian/tests-Tag-unstable-tests-as-flaky.patch
 debian/tests-Do-not-run-screencast-tests.patch
