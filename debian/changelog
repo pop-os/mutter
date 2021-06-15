@@ -1,4 +1,4 @@
-mutter (40.2-1) UNRELEASED; urgency=medium
+mutter (40.2-1) experimental; urgency=medium
 
   * New upstream release:
     - Fix mouse position in remote desktop with fractional scaling
@@ -13,7 +13,7 @@ mutter (40.2-1) UNRELEASED; urgency=medium
     the tests for now, checking only the basic metadata but not comparing
     the contents.
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 15 Jun 2021 20:47:09 +0200
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 15 Jun 2021 22:07:25 +0200
 
 mutter (40.1-1) experimental; urgency=medium
 
