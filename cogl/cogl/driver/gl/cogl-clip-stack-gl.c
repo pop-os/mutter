@@ -42,15 +42,6 @@
 #include "driver/gl/cogl-pipeline-opengl-private.h"
 #include "driver/gl/cogl-clip-stack-gl-private.h"
 
-#ifndef GL_CLIP_PLANE0
-#define GL_CLIP_PLANE0 0x3000
-#define GL_CLIP_PLANE1 0x3001
-#define GL_CLIP_PLANE2 0x3002
-#define GL_CLIP_PLANE3 0x3003
-#define GL_CLIP_PLANE4 0x3004
-#define GL_CLIP_PLANE5 0x3005
-#endif
-
 static void
 add_stencil_clip_rectangle (CoglFramebuffer *framebuffer,
                             CoglMatrixEntry *modelview_entry,
@@ -76,6 +67,7 @@ add_stencil_clip_rectangle (CoglFramebuffer *framebuffer,
 
   GE( ctx, glColorMask (FALSE, FALSE, FALSE, FALSE) );
   GE( ctx, glDepthMask (FALSE) );
+  GE( ctx, glStencilMask (0x3) );
 
   if (merge)
     {
@@ -102,7 +94,6 @@ add_stencil_clip_rectangle (CoglFramebuffer *framebuffer,
   else
     {
       GE( ctx, glEnable (GL_STENCIL_TEST) );
-      GE( ctx, glStencilMask (0x1) );
 
       /* Initially disallow everything */
       GE( ctx, glClearStencil (0) );
@@ -122,6 +113,7 @@ add_stencil_clip_rectangle (CoglFramebuffer *framebuffer,
   /* Restore the stencil mode */
   GE( ctx, glDepthMask (TRUE) );
   GE( ctx, glColorMask (TRUE, TRUE, TRUE, TRUE) );
+  GE( ctx, glStencilMask (0x0) );
   GE( ctx, glStencilFunc (GL_EQUAL, 0x1, 0x1) );
   GE( ctx, glStencilOp (GL_KEEP, GL_KEEP, GL_KEEP) );
 }
@@ -166,6 +158,7 @@ add_stencil_clip_region (CoglFramebuffer *framebuffer,
 
   GE( ctx, glColorMask (FALSE, FALSE, FALSE, FALSE) );
   GE( ctx, glDepthMask (FALSE) );
+  GE( ctx, glStencilMask (0x3) );
 
   if (merge)
     {
@@ -175,7 +168,6 @@ add_stencil_clip_region (CoglFramebuffer *framebuffer,
   else
     {
       GE( ctx, glEnable (GL_STENCIL_TEST) );
-      GE( ctx, glStencilMask (0x1) );
 
       /* Initially disallow everything */
       GE( ctx, glClearStencil (0) );
@@ -248,6 +240,7 @@ add_stencil_clip_region (CoglFramebuffer *framebuffer,
   /* Restore the stencil mode */
   GE (ctx, glDepthMask (TRUE));
   GE (ctx, glColorMask (TRUE, TRUE, TRUE, TRUE));
+  GE( ctx, glStencilMask (0x0) );
   GE( ctx, glStencilFunc (GL_EQUAL, 0x1, 0x1) );
   GE( ctx, glStencilOp (GL_KEEP, GL_KEEP, GL_KEEP) );
 }
@@ -509,7 +502,8 @@ _cogl_clip_stack_gl_flush (CoglClipStack *stack,
 
               /* We don't need to do anything extra if the clip for this
                  rectangle was entirely described by its scissor bounds */
-              if (!rect->can_be_scissor)
+              if (!rect->can_be_scissor ||
+                  G_UNLIKELY (COGL_DEBUG_ENABLED (COGL_DEBUG_STENCILLING)))
                 {
                   COGL_NOTE (CLIPPING, "Adding stencil clip for rectangle");
 
@@ -531,7 +525,8 @@ _cogl_clip_stack_gl_flush (CoglClipStack *stack,
               /* If nrectangles <= 1, it can be fully represented with the
                * scissor clip.
                */
-              if (cairo_region_num_rectangles (region->region) > 1)
+              if (cairo_region_num_rectangles (region->region) > 1 ||
+                  G_UNLIKELY (COGL_DEBUG_ENABLED (COGL_DEBUG_STENCILLING)))
                 {
                   COGL_NOTE (CLIPPING, "Adding stencil clip for region");
 
