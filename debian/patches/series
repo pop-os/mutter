@@ -1,7 +1,6 @@
 theme-use-gtk_render_icon_suface-to-paint-button-icon.patch
 theme-load-icons-as-Gtk-does-with-fallback-and-RTL-suppor.patch
 meson-add-back-default_driver-option.patch
-test-runner-Disconnect-display-opened-signal-on-destructi.patch
 mutter-cogl.test-Use-xvfb-run-to-run-the-cogl-tests.patch
 mutter-all.test-Run-tests-in-a-environment-with-display-a.patch
 debian/synaptics-support.patch
