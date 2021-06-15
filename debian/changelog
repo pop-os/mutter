@@ -7,8 +7,13 @@ mutter (40.2-1) UNRELEASED; urgency=medium
     - Fix adding virtual monitor to physical session
     - Unbreak press-drag-release to pop up and select right click menus
     - Fix VKMS detection
+  * debian/patches: Refresh, dropping applied upstream
+  * d/p: Mark view-verification tests as incomplete in big-endian archs.
+    Saved pixmaps are invalid in big-endian architectures, so let's disable
+    the tests for now, checking only the basic metadata but not comparing
+    the contents.
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 15 Jun 2021 20:06:22 +0200
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 15 Jun 2021 20:47:09 +0200
 
 mutter (40.1-1) experimental; urgency=medium
 
