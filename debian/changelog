@@ -1,8 +1,9 @@
-mutter (40.2.1-1) UNRELEASED; urgency=medium
+mutter (40.2.1-1) experimental; urgency=medium
 
   * New upstream release
+  * debian/patches: Refresh
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 16 Jun 2021 01:33:36 +0200
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 16 Jun 2021 01:36:22 +0200
 
 mutter (40.2-1) experimental; urgency=medium
 
