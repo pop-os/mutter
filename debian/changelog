@@ -1,3 +1,9 @@
+mutter (3.38.6-1) UNRELEASED; urgency=medium
+
+  * New upstream release
+
+ -- Simon McVittie <smcv@debian.org>  Wed, 25 Aug 2021 13:34:16 +0100
+
 mutter (3.38.4-1) unstable; urgency=medium
 
   * Team upload
