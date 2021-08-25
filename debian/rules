@@ -2,6 +2,8 @@
 
 include /usr/share/dpkg/default.mk
 
+built_binaries := $(shell dh_listpackages)
+
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 export DEB_LDFLAGS_MAINT_APPEND = -Wl,-O1
 export DPKG_GENSYMBOLS_CHECK_LEVEL = 4
@@ -71,6 +73,14 @@ else ifeq (,$(filter mips mips64el mipsel riscv64 alpha hppa powerpc sparc64 x32
 	$(TEST_COMMAND)
 	-$(TEST_COMMAND_FLAKY)
 endif
+endif
+
+# debhelper >= 13.4 makes all of /usr/libexec executable, which is not
+# quite right for installed-tests
+override_dh_fixperms:
+	dh_fixperms -Xusr/libexec/installed-tests
+ifneq ($(filter %-tests,$(built_binaries)),)
+	chmod --recursive --changes a+rX,u+w,og-w debian/*-tests/usr/libexec/installed-tests
 endif
 
 override_dh_girepository:
