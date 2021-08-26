@@ -30,6 +30,7 @@
 #include <glib-unix.h>
 #include <glib.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #if defined(HAVE_SYS_RANDOM)
 #include <sys/random.h>
@@ -47,6 +48,9 @@
 #include "meta/meta-backend.h"
 #include "wayland/meta-xwayland-surface.h"
 #include "x11/meta-x11-display-private.h"
+
+#define X11_TMP_UNIX_DIR     "/tmp/.X11-unix"
+#define X11_TMP_UNIX_PATH    "/tmp/.X11-unix/X"
 
 static int display_number_override = -1;
 
@@ -260,7 +264,7 @@ bind_to_abstract_socket (int       display,
 
   addr.sun_family = AF_LOCAL;
   name_size = snprintf (addr.sun_path, sizeof addr.sun_path,
-                        "%c/tmp/.X11-unix/X%d", 0, display);
+                        "%c%s%d", 0, X11_TMP_UNIX_PATH, display);
   size = offsetof (struct sockaddr_un, sun_path) + name_size;
   if (bind (fd, (struct sockaddr *) &addr, size) < 0)
     {
@@ -295,7 +299,7 @@ bind_to_unix_socket (int display)
 
   addr.sun_family = AF_LOCAL;
   name_size = snprintf (addr.sun_path, sizeof addr.sun_path,
-                        "/tmp/.X11-unix/X%d", display) + 1;
+                        "%s%d", X11_TMP_UNIX_PATH, display) + 1;
   size = offsetof (struct sockaddr_un, sun_path) + name_size;
   unlink (addr.sun_path);
   if (bind (fd, (struct sockaddr *) &addr, size) < 0)
@@ -414,9 +418,70 @@ open_display_sockets (MetaXWaylandManager *manager,
 }
 
 static gboolean
+ensure_x11_unix_perms (GError **error)
+{
+  struct stat buf;
+
+  if (lstat (X11_TMP_UNIX_DIR, &buf) != 0)
+    {
+      g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                   "Failed to check permissions on directory \"%s\": %s",
+                   X11_TMP_UNIX_DIR, g_strerror (errno));
+      return FALSE;
+    }
+
+  /* If the directory already exists, it should belong to root or ourselves ... */
+  if (buf.st_uid != 0 && buf.st_uid != getuid ())
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                   "Wrong ownership for directory \"%s\"",
+                   X11_TMP_UNIX_DIR);
+      return FALSE;
+    }
+
+  /* ... be writable ... */
+  if ((buf.st_mode & 0022) != 0022)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                   "Directory \"%s\" is not writable",
+                   X11_TMP_UNIX_DIR);
+      return FALSE;
+    }
+
+  /* ... and have the sticky bit set */
+  if ((buf.st_mode & 01000) != 01000)
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                   "Directory \"%s\" is missing the sticky bit",
+                   X11_TMP_UNIX_DIR);
+      return FALSE;
+    }
+
+  return TRUE;
+}
+
+static gboolean
+ensure_x11_unix_dir (GError **error)
+{
+  if (mkdir (X11_TMP_UNIX_DIR, 01777) != 0)
+    {
+      if (errno == EEXIST)
+        return ensure_x11_unix_perms (error);
+
+      g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                   "Failed to create directory \"%s\": %s",
+                   X11_TMP_UNIX_DIR, g_strerror (errno));
+      return FALSE;
+    }
+
+  return TRUE;
+}
+
+static gboolean
 choose_xdisplay (MetaXWaylandManager    *manager,
                  MetaXWaylandConnection *connection)
 {
+  g_autoptr (GError) error = NULL;
   int display = 0;
   char *lock_file = NULL;
   gboolean fatal = FALSE;
@@ -425,6 +490,13 @@ choose_xdisplay (MetaXWaylandManager    *manager,
     display = display_number_override;
   else if (g_getenv ("RUNNING_UNDER_GDM"))
     display = 1024;
+
+  if (!ensure_x11_unix_dir (&error))
+    {
+      g_warning ("Failed to ensure X11 socket directory: %s",
+                 error->message);
+      return FALSE;
+    }
 
   do
     {
@@ -925,10 +997,12 @@ meta_xwayland_shutdown (MetaXWaylandManager *manager)
 
   g_cancellable_cancel (manager->xserver_died_cancellable);
 
-  snprintf (path, sizeof path, "/tmp/.X11-unix/X%d", manager->public_connection.display_index);
+  snprintf (path, sizeof path, "%s%d", X11_TMP_UNIX_PATH,
+            manager->public_connection.display_index);
   unlink (path);
 
-  snprintf (path, sizeof path, "/tmp/.X11-unix/X%d", manager->private_connection.display_index);
+  snprintf (path, sizeof path, "%s%d", X11_TMP_UNIX_PATH,
+            manager->private_connection.display_index);
   unlink (path);
 
   g_clear_pointer (&manager->public_connection.name, g_free);

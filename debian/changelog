@@ -1,3 +1,17 @@
+mutter (3.38.6-1) UNRELEASED; urgency=medium
+
+  * New upstream release
+    - xwayland: Check permissions on /tmp/.X11-unix
+    - Ensure valid window texture size after viewport changes
+    - kms: Improve handling of common video modes that might exceed the
+      possible bandwidth
+    - Fix damage propagation for rotated transforms with viewport
+    - Improve Wayland subsurface reordering
+  * Update GLib build-dependency (no practical effect, the new dependency
+    is already in bullseye)
+
+ -- Simon McVittie <smcv@debian.org>  Wed, 25 Aug 2021 13:34:16 +0100
+
 mutter (3.38.4-1) unstable; urgency=medium
 
   * Team upload
