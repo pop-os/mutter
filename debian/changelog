@@ -1,5 +1,9 @@
-mutter (3.38.6-1) UNRELEASED; urgency=medium
+mutter (3.38.6-1) unstable; urgency=medium
 
+  [ Marco Trevisan ]
+  * d/gbp.conf, d/control.in: Update VCS details for debian/unstable branch
+
+  [ Simon McVittie ]
   * New upstream release
     - xwayland: Check permissions on /tmp/.X11-unix
     - Ensure valid window texture size after viewport changes
@@ -10,7 +14,15 @@ mutter (3.38.6-1) UNRELEASED; urgency=medium
   * Update GLib build-dependency (no practical effect, the new dependency
     is already in bullseye)
 
- -- Simon McVittie <smcv@debian.org>  Wed, 25 Aug 2021 13:34:16 +0100
+  [ Laurent Bigonville ]
+  * Fixes for non-Linux ports:
+    - Build-depend on libegl1-mesa-dev on all architectures (not just Linux).
+      It is required for EGL support.
+    - Only build-depend on udev on Linux architectures
+    - Only depend on libwayland on Linux architectures
+    - Drop unnecessary -dev dependency on libudev-dev
+
+ -- Simon McVittie <smcv@debian.org>  Thu, 26 Aug 2021 08:54:46 +0100
 
 mutter (3.38.4-1) unstable; urgency=medium
 
