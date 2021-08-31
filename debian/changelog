@@ -1,9 +1,19 @@
 mutter (40.4-1) UNRELEASED; urgency=medium
 
+  * New upstream release
+    - Don't require a newly attached buffer to apply state
+    - Fix upside-down Xshape surface with EGLstream
+    - Handle failure to allocate offscreen
+    - Improve window state checks
+    - Fix area-based screencast recording for unredirected windows such
+      as fullscreen games
+    - Fix ability to map a graphics tablet to a monitor
+    - Fix a crash if scanout fails unexpectedly
+    - Fix a logic error in determining number of input device modes
+    - Translation updates
   * Don't let debhelper 13.4+ make all of /usr/libexec executable.
     This is not what we want for installed-tests' associated data.
   * Add a lintian override for dh-exec-subst-unknown-variable
-  * New upstream release
 
  -- Simon McVittie <smcv@debian.org>  Tue, 31 Aug 2021 10:07:15 +0100
 
