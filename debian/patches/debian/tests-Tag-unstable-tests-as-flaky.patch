@@ -31,10 +31,10 @@ index 387360d..683400b 100644
      is_parallel: false,
    )
 diff --git a/src/tests/meson.build b/src/tests/meson.build
-index 8ee409e..3222a8c 100644
+index 2a2e357..ad5f992 100644
 --- a/src/tests/meson.build
 +++ b/src/tests/meson.build
-@@ -279,7 +279,7 @@ test('headless-start', headless_start_test,
+@@ -282,7 +282,7 @@ test('headless-start', headless_start_test,
  )
  
  test('stage-view', stage_view_tests,
