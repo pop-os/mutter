@@ -1,5 +1,6 @@
-mutter (40.4-1) UNRELEASED; urgency=medium
+mutter (40.4-1) experimental; urgency=medium
 
+  * Team upload
   * New upstream release
     - Don't require a newly attached buffer to apply state
     - Fix upside-down Xshape surface with EGLstream
@@ -15,7 +16,7 @@ mutter (40.4-1) UNRELEASED; urgency=medium
     This is not what we want for installed-tests' associated data.
   * Add a lintian override for dh-exec-subst-unknown-variable
 
- -- Simon McVittie <smcv@debian.org>  Tue, 31 Aug 2021 10:07:15 +0100
+ -- Simon McVittie <smcv@debian.org>  Tue, 31 Aug 2021 10:14:04 +0100
 
 mutter (40.2.1-1) experimental; urgency=medium
 
