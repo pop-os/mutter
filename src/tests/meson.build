@@ -84,6 +84,8 @@ unit_tests = executable('mutter-test-unit-tests',
     'meta-gpu-test.h',
     'meta-monitor-manager-test.c',
     'meta-monitor-manager-test.h',
+    'meta-wayland-test-driver.c',
+    'meta-wayland-test-driver.h',
     'monitor-config-migration-unit-tests.c',
     'monitor-config-migration-unit-tests.h',
     'monitor-store-unit-tests.c',
@@ -250,6 +252,7 @@ stacking_tests = [
   'restore-position',
   'default-size',
   'modals',
+  'map-fixed-size',
 ]
 
 foreach stacking_test: stacking_tests
