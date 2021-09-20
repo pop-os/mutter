@@ -57,10 +57,10 @@ typedef struct _MetaScreenCast MetaScreenCast;
 typedef struct _MetaScreenCastSession MetaScreenCastSession;
 typedef struct _MetaScreenCastStream MetaScreenCastStream;
 
-typedef struct _MetaWaylandCompositor MetaWaylandCompositor;
-
 typedef struct _MetaVirtualMonitor MetaVirtualMonitor;
 typedef struct _MetaVirtualMonitorInfo MetaVirtualMonitorInfo;
+
+typedef struct _MetaIdleManager MetaIdleManager;
 
 #ifdef HAVE_REMOTE_DESKTOP
 typedef struct _MetaRemoteDesktop MetaRemoteDesktop;

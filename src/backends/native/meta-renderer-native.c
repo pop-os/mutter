@@ -48,9 +48,11 @@
 
 #include "backends/meta-gles3.h"
 #include "backends/meta-logical-monitor.h"
+#include "backends/native/meta-backend-native-private.h"
 #include "backends/native/meta-cogl-utils.h"
 #include "backends/native/meta-crtc-kms.h"
 #include "backends/native/meta-crtc-virtual.h"
+#include "backends/native/meta-device-pool.h"
 #include "backends/native/meta-kms-device.h"
 #include "backends/native/meta-kms.h"
 #include "backends/native/meta-onscreen-native.h"
@@ -100,6 +102,11 @@ G_DEFINE_TYPE_WITH_CODE (MetaRendererNative,
 static const CoglWinsysEGLVtable _cogl_winsys_egl_vtable;
 static const CoglWinsysVtable *parent_vtable;
 
+static gboolean
+meta_renderer_native_ensure_gpu_data (MetaRendererNative  *renderer_native,
+                                      MetaGpuKms          *gpu_kms,
+                                      GError             **error);
+
 static void
 meta_renderer_native_queue_modes_reset (MetaRendererNative *renderer_native);
 
@@ -127,6 +134,7 @@ meta_renderer_native_gpu_data_free (MetaRendererNativeGpuData *renderer_gpu_data
     meta_egl_terminate (egl, renderer_gpu_data->egl_display, NULL);
 
   g_clear_pointer (&renderer_gpu_data->gbm.device, gbm_device_destroy);
+  g_clear_pointer (&renderer_gpu_data->device_file, meta_device_file_release);
   g_free (renderer_gpu_data);
 }
 
@@ -161,6 +169,17 @@ MetaGpuKms *
 meta_renderer_native_get_primary_gpu (MetaRendererNative *renderer_native)
 {
   return renderer_native->primary_gpu_kms;
+}
+
+MetaDeviceFile *
+meta_renderer_native_get_primary_device_file (MetaRendererNative *renderer_native)
+{
+  MetaGpuKms *gpu_kms = renderer_native->primary_gpu_kms;
+  MetaRendererNativeGpuData *renderer_gpu_data;
+
+  renderer_gpu_data = meta_renderer_native_get_gpu_data (renderer_native,
+                                                         gpu_kms);
+  return renderer_gpu_data->device_file;
 }
 
 static MetaRendererNativeGpuData *
@@ -611,6 +630,44 @@ clear_kept_alive_onscreens (MetaRendererNative *renderer_native)
                 g_object_unref);
 }
 
+static gboolean
+is_gpu_unused (gpointer key,
+               gpointer value,
+               gpointer user_data)
+{
+  GHashTable *used_gpus = user_data;
+
+  return !g_hash_table_contains (used_gpus, key);
+}
+
+static void
+free_unused_gpu_datas (MetaRendererNative *renderer_native)
+{
+  MetaRenderer *renderer = META_RENDERER (renderer_native);
+  g_autoptr (GHashTable) used_gpus = NULL;
+  GList *l;
+
+  used_gpus = g_hash_table_new (NULL, NULL);
+  g_hash_table_add (used_gpus, renderer_native->primary_gpu_kms);
+
+  for (l = meta_renderer_get_views (renderer); l; l = l->next)
+    {
+      MetaRendererView *view = l->data;
+      MetaCrtc *crtc = meta_renderer_view_get_crtc (view);
+      MetaGpu *gpu;
+
+      gpu = meta_crtc_get_gpu (crtc);
+      if (!gpu)
+        continue;
+
+      g_hash_table_add (used_gpus, gpu);
+    }
+
+  g_hash_table_foreach_remove (renderer_native->gpu_datas,
+                               is_gpu_unused,
+                               used_gpus);
+}
+
 void
 meta_renderer_native_post_mode_set_updates (MetaRendererNative *renderer_native)
 {
@@ -651,6 +708,10 @@ meta_renderer_native_post_mode_set_updates (MetaRendererNative *renderer_native)
     }
 
   clear_kept_alive_onscreens (renderer_native);
+
+  meta_kms_notify_modes_set (kms);
+
+  free_unused_gpu_datas (renderer_native);
 }
 
 static void
@@ -978,8 +1039,7 @@ should_force_shadow_fb (MetaRendererNative *renderer_native,
   MetaRenderer *renderer = META_RENDERER (renderer_native);
   CoglContext *cogl_context =
     cogl_context_from_renderer_native (renderer_native);
-  int kms_fd;
-  uint64_t prefer_shadow = 0;
+  MetaKmsDevice *kms_device = meta_gpu_kms_get_kms_device (primary_gpu);
 
   if (meta_renderer_is_hardware_accelerated (renderer))
     return FALSE;
@@ -987,24 +1047,30 @@ should_force_shadow_fb (MetaRendererNative *renderer_native,
   if (!cogl_has_feature (cogl_context, COGL_FEATURE_ID_BLIT_FRAMEBUFFER))
     return FALSE;
 
-  kms_fd = meta_gpu_kms_get_fd (primary_gpu);
-  if (drmGetCap (kms_fd, DRM_CAP_DUMB_PREFER_SHADOW, &prefer_shadow) == 0)
+  return meta_kms_device_prefers_shadow_buffer (kms_device);
+}
+
+static CoglFramebuffer *
+create_fallback_offscreen (MetaRendererNative *renderer_native,
+                           CoglContext        *cogl_context,
+                           int                 width,
+                           int                 height)
+{
+  CoglOffscreen *fallback_offscreen;
+  GError *error = NULL;
+
+  fallback_offscreen = meta_renderer_native_create_offscreen (renderer_native,
+                                                              cogl_context,
+                                                              width,
+                                                              height,
+                                                              &error);
+  if (!fallback_offscreen)
     {
-      if (prefer_shadow)
-        {
-          static gboolean logged_once = FALSE;
-
-          if (!logged_once)
-            {
-              g_message ("Forcing shadow framebuffer");
-              logged_once = TRUE;
-            }
-
-          return TRUE;
-        }
+      g_error ("Failed to create fallback offscreen framebuffer: %s",
+               error->message);
     }
 
-  return FALSE;
+  return COGL_FRAMEBUFFER (fallback_offscreen);
 }
 
 static MetaRendererView *
@@ -1041,22 +1107,52 @@ meta_renderer_native_create_view (MetaRenderer       *renderer,
 
   if (META_IS_CRTC_KMS (crtc))
     {
+      MetaGpuKms *gpu_kms = META_GPU_KMS (meta_crtc_get_gpu (crtc));
       MetaOnscreenNative *onscreen_native;
 
-      onscreen_native = meta_onscreen_native_new (renderer_native,
-                                                  renderer_native->primary_gpu_kms,
-                                                  output,
-                                                  crtc,
-                                                  cogl_context,
-                                                  onscreen_width,
-                                                  onscreen_height);
+      if (!meta_renderer_native_ensure_gpu_data (renderer_native,
+                                                 gpu_kms,
+                                                 &error))
+        {
+          g_warning ("Failed to create secondary GPU data for %s: %s",
+                      meta_gpu_kms_get_file_path (gpu_kms),
+                      error->message);
+          use_shadowfb = FALSE;
+          framebuffer = create_fallback_offscreen (renderer_native,
+                                                   cogl_context,
+                                                   onscreen_width,
+                                                   onscreen_height);
+        }
+      else
+        {
+          MetaGpuKms *primary_gpu_kms = renderer_native->primary_gpu_kms;
 
-      if (!cogl_framebuffer_allocate (COGL_FRAMEBUFFER (onscreen_native), &error))
-        g_error ("Failed to allocate onscreen framebuffer: %s", error->message);
+          onscreen_native = meta_onscreen_native_new (renderer_native,
+                                                      primary_gpu_kms,
+                                                      output,
+                                                      crtc,
+                                                      cogl_context,
+                                                      onscreen_width,
+                                                      onscreen_height);
 
-      use_shadowfb = should_force_shadow_fb (renderer_native,
-                                             renderer_native->primary_gpu_kms);
-      framebuffer = COGL_FRAMEBUFFER (onscreen_native);
+          if (!cogl_framebuffer_allocate (COGL_FRAMEBUFFER (onscreen_native), &error))
+            {
+              g_warning ("Failed to allocate onscreen framebuffer for %s: %s",
+                         meta_gpu_kms_get_file_path (gpu_kms),
+                         error->message);
+              use_shadowfb = FALSE;
+              framebuffer = create_fallback_offscreen (renderer_native,
+                                                       cogl_context,
+                                                       onscreen_width,
+                                                       onscreen_height);
+            }
+          else
+            {
+              use_shadowfb = should_force_shadow_fb (renderer_native,
+                                                     primary_gpu_kms);
+              framebuffer = COGL_FRAMEBUFFER (onscreen_native);
+            }
+        }
     }
   else
     {
@@ -1123,6 +1219,7 @@ meta_renderer_native_create_view (MetaRenderer       *renderer,
                        "use-shadowfb", use_shadowfb,
                        "transform", view_transform,
                        "refresh-rate", crtc_mode_info->refresh_rate,
+                       "vblank-duration-us", crtc_mode_info->vblank_duration_us,
                        NULL);
 
   if (META_IS_ONSCREEN_NATIVE (framebuffer))
@@ -1301,6 +1398,22 @@ meta_renderer_native_ensure_gles3 (MetaRendererNative *renderer_native)
   renderer_native->gles3 = meta_gles3_new (egl);
 }
 
+static void
+maybe_restore_cogl_egl_api (MetaRendererNative *renderer_native)
+{
+  CoglContext *cogl_context;
+  CoglDisplay *cogl_display;
+  CoglRenderer *cogl_renderer;
+
+  cogl_context = cogl_context_from_renderer_native (renderer_native);
+  if (!cogl_context)
+    return;
+
+  cogl_display = cogl_context_get_display (cogl_context);
+  cogl_renderer = cogl_display_get_renderer (cogl_display);
+  cogl_renderer_bind_api (cogl_renderer);
+}
+
 static gboolean
 init_secondary_gpu_data_gpu (MetaRendererNativeGpuData *renderer_gpu_data,
                              GError                   **error)
@@ -1313,13 +1426,15 @@ init_secondary_gpu_data_gpu (MetaRendererNativeGpuData *renderer_gpu_data,
   const char **missing_gl_extensions;
   const char *renderer_str;
 
+  meta_egl_bind_api (egl, EGL_OPENGL_ES_API, NULL);
+
   if (!create_secondary_egl_config (egl, renderer_gpu_data->mode, egl_display,
                                     &egl_config, error))
-    return FALSE;
+    goto err;
 
   egl_context = create_secondary_egl_context (egl, egl_display, egl_config, error);
   if (egl_context == EGL_NO_CONTEXT)
-    return FALSE;
+    goto err;
 
   meta_renderer_native_ensure_gles3 (renderer_native);
 
@@ -1331,7 +1446,7 @@ init_secondary_gpu_data_gpu (MetaRendererNativeGpuData *renderer_gpu_data,
                               error))
     {
       meta_egl_destroy_context (egl, egl_display, egl_context, NULL);
-      return FALSE;
+      goto err;
     }
 
   renderer_str = (const char *) glGetString (GL_RENDERER);
@@ -1342,7 +1457,7 @@ init_secondary_gpu_data_gpu (MetaRendererNativeGpuData *renderer_gpu_data,
       g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
                    "Do not want to use software renderer (%s), falling back to CPU copy path",
                    renderer_str);
-      goto out_fail_with_context;
+      goto err_fail_with_context;
     }
 
   if (!meta_gles3_has_extensions (renderer_native->gles3,
@@ -1360,7 +1475,7 @@ init_secondary_gpu_data_gpu (MetaRendererNativeGpuData *renderer_gpu_data,
       g_free (missing_gl_extensions_str);
       g_free (missing_gl_extensions);
 
-      goto out_fail_with_context;
+      goto err_fail_with_context;
     }
 
   renderer_gpu_data->secondary.is_hardware_rendering = TRUE;
@@ -1373,9 +1488,11 @@ init_secondary_gpu_data_gpu (MetaRendererNativeGpuData *renderer_gpu_data,
                              "EGL_EXT_image_dma_buf_import_modifiers",
                              NULL);
 
+  maybe_restore_cogl_egl_api (renderer_native);
+
   return TRUE;
 
-out_fail_with_context:
+err_fail_with_context:
   meta_egl_make_current (egl,
                          egl_display,
                          EGL_NO_SURFACE,
@@ -1383,6 +1500,9 @@ out_fail_with_context:
                          EGL_NO_CONTEXT,
                          NULL);
   meta_egl_destroy_context (egl, egl_display, egl_context, NULL);
+
+err:
+  maybe_restore_cogl_egl_api (renderer_native);
 
   return FALSE;
 }
@@ -1457,17 +1577,14 @@ init_gbm_egl_display (MetaRendererNative  *renderer_native,
 
 static MetaRendererNativeGpuData *
 create_renderer_gpu_data_gbm (MetaRendererNative  *renderer_native,
-                              MetaGpuKms          *gpu_kms,
+                              MetaDeviceFile      *device_file,
                               GError             **error)
 {
   struct gbm_device *gbm_device;
-  int kms_fd;
   MetaRendererNativeGpuData *renderer_gpu_data;
   g_autoptr (GError) local_error = NULL;
 
-  kms_fd = meta_gpu_kms_get_fd (gpu_kms);
-
-  gbm_device = gbm_create_device (kms_fd);
+  gbm_device = gbm_create_device (meta_device_file_get_fd (device_file));
   if (!gbm_device)
     {
       g_set_error (error, G_IO_ERROR,
@@ -1477,6 +1594,7 @@ create_renderer_gpu_data_gbm (MetaRendererNative  *renderer_native,
     }
 
   renderer_gpu_data = meta_create_renderer_native_gpu_data ();
+  renderer_gpu_data->device_file = meta_device_file_acquire (device_file);
   renderer_gpu_data->renderer_native = renderer_native;
   renderer_gpu_data->gbm.device = gbm_device;
   renderer_gpu_data->mode = META_RENDERER_NATIVE_MODE_GBM;
@@ -1487,7 +1605,7 @@ create_renderer_gpu_data_gbm (MetaRendererNative  *renderer_native,
   if (renderer_gpu_data->egl_display == EGL_NO_DISPLAY)
     {
       g_debug ("GBM EGL init for %s failed: %s",
-               meta_gpu_kms_get_file_path (gpu_kms),
+               meta_device_file_get_path (device_file),
                local_error->message);
 
       init_secondary_gpu_data_cpu (renderer_gpu_data);
@@ -1581,7 +1699,7 @@ get_drm_device_file (MetaEgl     *egl,
 
 static EGLDeviceEXT
 find_egl_device (MetaRendererNative  *renderer_native,
-                 MetaGpuKms          *gpu_kms,
+                 MetaDeviceFile      *device_file,
                  GError             **error)
 {
   MetaEgl *egl = meta_renderer_native_get_egl (renderer_native);
@@ -1621,7 +1739,7 @@ find_egl_device (MetaRendererNative  *renderer_native,
       return EGL_NO_DEVICE_EXT;
     }
 
-  kms_file_path = meta_gpu_kms_get_file_path (gpu_kms);
+  kms_file_path = meta_device_file_get_path (device_file);
 
   device = EGL_NO_DEVICE_EXT;
   for (i = 0; i < num_devices; i++)
@@ -1656,12 +1774,12 @@ find_egl_device (MetaRendererNative  *renderer_native,
 
 static EGLDisplay
 get_egl_device_display (MetaRendererNative  *renderer_native,
-                        MetaGpuKms          *gpu_kms,
+                        MetaDeviceFile      *device_file,
                         EGLDeviceEXT         egl_device,
                         GError             **error)
 {
   MetaEgl *egl = meta_renderer_native_get_egl (renderer_native);
-  int kms_fd = meta_gpu_kms_get_fd (gpu_kms);
+  int kms_fd = meta_device_file_get_fd (device_file);
   EGLint platform_attribs[] = {
     EGL_DRM_MASTER_FD_EXT, kms_fd,
     EGL_NONE
@@ -1684,7 +1802,7 @@ count_drm_devices (MetaRendererNative *renderer_native)
 
 static MetaRendererNativeGpuData *
 create_renderer_gpu_data_egl_device (MetaRendererNative  *renderer_native,
-                                     MetaGpuKms          *gpu_kms,
+                                     MetaDeviceFile      *device_file,
                                      GError             **error)
 {
   MetaEgl *egl = meta_renderer_native_get_egl (renderer_native);
@@ -1701,11 +1819,11 @@ create_renderer_gpu_data_egl_device (MetaRendererNative  *renderer_native,
       return NULL;
     }
 
-  egl_device = find_egl_device (renderer_native, gpu_kms, error);
+  egl_device = find_egl_device (renderer_native, device_file, error);
   if (egl_device == EGL_NO_DEVICE_EXT)
     return NULL;
 
-  egl_display = get_egl_device_display (renderer_native, gpu_kms,
+  egl_display = get_egl_device_display (renderer_native, device_file,
                                         egl_device, error);
   if (egl_display == EGL_NO_DISPLAY)
     return NULL;
@@ -1739,6 +1857,7 @@ create_renderer_gpu_data_egl_device (MetaRendererNative  *renderer_native,
     }
 
   renderer_gpu_data = meta_create_renderer_native_gpu_data ();
+  renderer_gpu_data->device_file = meta_device_file_acquire (device_file);
   renderer_gpu_data->renderer_native = renderer_native;
   renderer_gpu_data->egl.device = egl_device;
   renderer_gpu_data->mode = META_RENDERER_NATIVE_MODE_EGL_DEVICE;
@@ -1753,7 +1872,13 @@ meta_renderer_native_create_renderer_gpu_data (MetaRendererNative  *renderer_nat
                                                MetaGpuKms          *gpu_kms,
                                                GError             **error)
 {
+  MetaRenderer *renderer = META_RENDERER (renderer_native);
+  MetaBackend *backend = meta_renderer_get_backend (renderer);
+  MetaDevicePool *device_pool =
+    meta_backend_native_get_device_pool (META_BACKEND_NATIVE (backend));
   MetaRendererNativeGpuData *renderer_gpu_data;
+  MetaDeviceFileFlags device_file_flags = META_DEVICE_FILE_FLAG_NONE;
+  g_autoptr (MetaDeviceFile) device_file = NULL;
   GError *gbm_error = NULL;
 #ifdef HAVE_EGL_DEVICE
   GError *egl_device_error = NULL;
@@ -1762,6 +1887,17 @@ meta_renderer_native_create_renderer_gpu_data (MetaRendererNative  *renderer_nat
   if (!gpu_kms)
     return create_renderer_gpu_data_surfaceless (renderer_native, error);
 
+  if (!(meta_kms_device_get_flags (meta_gpu_kms_get_kms_device (gpu_kms)) &
+        META_KMS_DEVICE_FLAG_NO_MODE_SETTING))
+    device_file_flags = META_DEVICE_FILE_FLAG_TAKE_CONTROL;
+
+  device_file = meta_device_pool_open (device_pool,
+                                       meta_gpu_kms_get_file_path (gpu_kms),
+                                       device_file_flags,
+                                       error);
+  if (!device_file)
+    return NULL;
+
 #ifdef HAVE_EGL_DEVICE
   /* Try to initialize the EGLDevice backend first. Whenever we use a
    * non-NVIDIA GPU, the EGLDevice enumeration function won't find a match, and
@@ -1769,14 +1905,14 @@ meta_renderer_native_create_renderer_gpu_data (MetaRendererNative  *renderer_nat
    * rendering fallback)
    */
   renderer_gpu_data = create_renderer_gpu_data_egl_device (renderer_native,
-                                                           gpu_kms,
+                                                           device_file,
                                                            &egl_device_error);
   if (renderer_gpu_data)
     return renderer_gpu_data;
 #endif
 
   renderer_gpu_data = create_renderer_gpu_data_gbm (renderer_native,
-                                                    gpu_kms,
+                                                    device_file,
                                                     &gbm_error);
   if (renderer_gpu_data)
     {
@@ -1826,6 +1962,20 @@ create_renderer_gpu_data (MetaRendererNative  *renderer_native,
                        renderer_gpu_data);
 
   return TRUE;
+}
+
+static gboolean
+meta_renderer_native_ensure_gpu_data (MetaRendererNative  *renderer_native,
+                                      MetaGpuKms          *gpu_kms,
+                                      GError             **error)
+{
+  MetaRendererNativeGpuData *renderer_gpu_data;
+
+  renderer_gpu_data = g_hash_table_lookup (renderer_native->gpu_datas, gpu_kms);
+  if (renderer_gpu_data)
+    return TRUE;
+
+  return create_renderer_gpu_data (renderer_native, gpu_kms, error);
 }
 
 static void

@@ -21,13 +21,15 @@
 
 #include "tests/monitor-test-utils.h"
 
+#include <float.h>
+
 #include "backends/meta-backend-private.h"
 #include "backends/meta-crtc.h"
 #include "backends/meta-logical-monitor.h"
 #include "backends/meta-monitor-config-manager.h"
 #include "backends/meta-monitor-config-store.h"
 #include "backends/meta-output.h"
-#include "tests/test-utils.h"
+#include "tests/meta-test-utils.h"
 #include "meta-backend-test.h"
 
 MetaGpu *
@@ -378,6 +380,7 @@ check_monitor_configuration (MonitorTestCaseExpect *expect)
       MetaMonitorMode *expected_current_mode;
 
       outputs = meta_monitor_get_outputs (monitor);
+      g_debug ("Checking monitor %d", i);
 
       g_assert_cmpint ((int) g_list_length (outputs),
                        ==,
@@ -432,6 +435,8 @@ check_monitor_configuration (MonitorTestCaseExpect *expect)
           meta_monitor_mode_get_resolution (mode, &width, &height);
           refresh_rate = meta_monitor_mode_get_refresh_rate (mode);
           flags = meta_monitor_mode_get_flags (mode);
+
+          g_debug ("Checking mode %dx%d @ %f", width, height, refresh_rate);
 
           g_assert_cmpint (width,
                            ==,
@@ -551,6 +556,8 @@ check_monitor_configuration (MonitorTestCaseExpect *expect)
       MetaCrtc *crtc = l->data;
       const MetaCrtcConfig *crtc_config = meta_crtc_get_config (crtc);
 
+      g_debug ("Checking CRTC %d", i);
+
       if (expect->crtcs[i].current_mode == -1)
         {
           g_assert_null (meta_crtc_get_outputs (crtc));
@@ -559,15 +566,19 @@ check_monitor_configuration (MonitorTestCaseExpect *expect)
       else
         {
           MetaCrtcMode *expected_current_mode;
+          const GList *outputs = meta_crtc_get_outputs (crtc);
           const GList *l_output;
           MetaRendererView *view;
           cairo_rectangle_int_t view_layout;
 
-          for (l_output = meta_crtc_get_outputs (crtc);
+          for (l_output = outputs;
                l_output;
                l_output = l_output->next)
             {
               MetaOutput *output = l_output->data;
+
+              g_debug ("Checking CRTC Output %d",
+                       g_list_index ((GList *) outputs, output));
 
               g_assert (meta_output_get_assigned_crtc (output) == crtc);
               g_assert_null (g_list_find (l_output->next, output));
@@ -777,4 +788,91 @@ create_monitor_test_setup (MonitorTestCaseSetup *setup,
     }
 
   return test_setup;
+}
+
+static void
+check_expected_scales (MetaMonitor                 *monitor,
+                       MetaMonitorMode             *monitor_mode,
+                       MetaMonitorScalesConstraint  constraints,
+                       int                          n_expected_scales,
+                       float                       *expected_scales)
+{
+  g_autofree float *scales = NULL;
+  int n_supported_scales;
+  int width, height;
+  int i;
+
+  scales = meta_monitor_calculate_supported_scales (monitor, monitor_mode,
+                                                    constraints,
+                                                    &n_supported_scales);
+  g_assert_cmpint (n_expected_scales, ==, n_supported_scales);
+
+  meta_monitor_mode_get_resolution (monitor_mode, &width, &height);
+
+  for (i = 0; i < n_supported_scales; i++)
+    {
+      g_assert_cmpfloat (scales[i], >, 0.0);
+      g_assert_cmpfloat_with_epsilon (scales[i], expected_scales[i], 0.000001);
+
+      if (!(constraints & META_MONITOR_SCALES_CONSTRAINT_NO_FRAC))
+        {
+          /* Also ensure that the scale will generate an integral resolution */
+          g_assert_cmpfloat (fmodf (width / scales[i], 1.0), ==, 0.0);
+          g_assert_cmpfloat (fmodf (height / scales[i], 1.0), ==, 0.0);
+        }
+
+      if (i > 0)
+        {
+          /* And that scales are sorted and unique */
+          g_assert_cmpfloat (scales[i], >, scales[i-1]);
+          g_assert_false (G_APPROX_VALUE (scales[i], scales[i-1], 0.000001));
+        }
+    }
+}
+
+void check_monitor_scales (MonitorTestCaseExpect       *expect,
+                           MetaMonitorScalesConstraint  scales_constraints)
+{
+  MetaBackend *backend = meta_get_backend ();
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
+
+  GList *monitors;
+  GList *l;
+  int i;
+
+  monitors = meta_monitor_manager_get_monitors (monitor_manager);
+  g_assert_cmpuint (g_list_length (monitors), ==, expect->n_monitors);
+
+  for (l = monitors, i = 0; l; l = l->next, i++)
+    {
+      MetaMonitor *monitor = l->data;
+      MonitorTestCaseMonitor *expected_monitor = &expect->monitors[i];
+      GList *modes = meta_monitor_get_modes (monitor);
+      GList *k;
+      int j;
+
+      g_debug ("Checking monitor %d", i);
+      g_assert_cmpuint (g_list_length (modes), ==, expected_monitor->n_modes);
+
+      for (j = 0, k = modes; k; k = k->next, j++)
+        {
+          MetaMonitorMode *monitor_mode = k->data;
+          MetaMonitorTestCaseMonitorMode *expected_mode =
+            &expected_monitor->modes[j];
+          int width, height;
+
+          meta_monitor_mode_get_resolution (monitor_mode, &width, &height);
+          g_debug ("Checking %s scaling values for mode %dx%d",
+            (scales_constraints & META_MONITOR_SCALES_CONSTRAINT_NO_FRAC) ?
+            "integer" : "fractional", width, height);
+
+          g_assert_cmpint (width, ==, expected_mode->width);
+          g_assert_cmpint (height, ==, expected_mode->height);
+
+          check_expected_scales (monitor, monitor_mode, scales_constraints,
+                                 expected_mode->n_scales,
+                                 expected_mode->scales);
+        }
+    }
 }

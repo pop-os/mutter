@@ -21,6 +21,7 @@
 
 #include "backends/native/meta-kms-impl-device-atomic.h"
 
+#include "backends/native/meta-backend-native-private.h"
 #include "backends/native/meta-kms-connector-private.h"
 #include "backends/native/meta-kms-crtc-private.h"
 #include "backends/native/meta-kms-device-private.h"
@@ -43,6 +44,8 @@ struct _MetaKmsImplDeviceAtomic
 
   GHashTable *page_flip_datas;
 };
+
+static GInitableIface *initable_parent_iface;
 
 static void
 initable_iface_init (GInitableIface *iface);
@@ -261,9 +264,11 @@ process_mode_set (MetaKmsImplDevice  *impl_device,
       uint32_t mode_id;
       GList *l;
 
-      mode_id = meta_kms_mode_ensure_blob_id (mode, error);
+      mode_id = meta_kms_mode_create_blob_id (mode, error);
       if (mode_id == 0)
         return FALSE;
+
+      g_array_append_val (blob_ids, mode_id);
 
       meta_topic (META_DEBUG_KMS,
                   "[atomic] Setting mode of CRTC %u (%s) to %s",
@@ -343,14 +348,28 @@ add_plane_property (MetaKmsImplDevice  *impl_device,
       return FALSE;
     }
 
-  meta_topic (META_DEBUG_KMS,
-              "[atomic] Setting plane %u (%s) property '%s' (%u) to %"
-              G_GUINT64_FORMAT,
-              meta_kms_plane_get_id (plane),
-              meta_kms_impl_device_get_path (impl_device),
-              meta_kms_plane_get_prop_name (plane, prop),
-              meta_kms_plane_get_prop_id (plane, prop),
-              value);
+  switch (meta_kms_plane_get_prop_internal_type (plane, prop))
+    {
+    case META_KMS_PROP_TYPE_RAW:
+      meta_topic (META_DEBUG_KMS,
+                  "[atomic] Setting plane %u (%s) property '%s' (%u) to %"
+                  G_GUINT64_FORMAT,
+                  meta_kms_plane_get_id (plane),
+                  meta_kms_impl_device_get_path (impl_device),
+                  meta_kms_plane_get_prop_name (plane, prop),
+                  meta_kms_plane_get_prop_id (plane, prop),
+                  value);
+      break;
+    case META_KMS_PROP_TYPE_FIXED_16:
+      meta_topic (META_DEBUG_KMS,
+                  "[atomic] Setting plane %u (%s) property '%s' (%u) to %.2f",
+                  meta_kms_plane_get_id (plane),
+                  meta_kms_impl_device_get_path (impl_device),
+                  meta_kms_plane_get_prop_name (plane, prop),
+                  meta_kms_plane_get_prop_id (plane, prop),
+                  meta_fixed_16_to_double (value));
+      break;
+    }
   ret = drmModeAtomicAddProperty (req,
                                   meta_kms_plane_get_id (plane),
                                   prop_id,
@@ -397,6 +416,8 @@ process_plane_assignment (MetaKmsImplDevice  *impl_device,
   MetaKmsPlaneAssignment *plane_assignment = update_entry;
   MetaKmsPlane *plane = plane_assignment->plane;
   MetaDrmBuffer *buffer;
+  MetaKmsFbDamage *fb_damage;
+  uint32_t prop_id;
 
   buffer = plane_assignment->buffer;
 
@@ -520,6 +541,32 @@ process_plane_assignment (MetaKmsImplDevice  *impl_device,
         return FALSE;
     }
 
+  fb_damage = plane_assignment->fb_damage;
+  if (fb_damage &&
+      meta_kms_plane_get_prop_id (plane,
+                                  META_KMS_PLANE_PROP_FB_DAMAGE_CLIPS_ID))
+    {
+      meta_topic (META_DEBUG_KMS,
+                  "[atomic] Setting %d damage clips on %u",
+                  fb_damage->n_rects,
+                  meta_kms_plane_get_id (plane));
+
+      prop_id = store_new_blob (impl_device,
+                                blob_ids,
+                                fb_damage->rects,
+                                fb_damage->n_rects *
+                                sizeof (struct drm_mode_rect),
+                                error);
+      if (!prop_id)
+        return FALSE;
+
+      if (!add_plane_property (impl_device,
+                               plane, req,
+                               META_KMS_PLANE_PROP_FB_DAMAGE_CLIPS_ID,
+                               prop_id,
+                               error))
+        return FALSE;
+    }
   return TRUE;
 }
 
@@ -596,6 +643,8 @@ process_page_flip_listener (MetaKmsImplDevice  *impl_device,
       g_hash_table_insert (impl_device_atomic->page_flip_datas,
                            GUINT_TO_POINTER (crtc_id),
                            page_flip_data);
+
+      meta_kms_impl_device_hold_fd (impl_device);
 
       meta_topic (META_DEBUG_KMS,
                   "[atomic] Adding page flip data for (%u, %s): %p",
@@ -703,6 +752,8 @@ atomic_page_flip_handler (int           fd,
 
   if (!page_flip_data)
     return;
+
+  meta_kms_impl_device_unhold_fd (impl_device);
 
   meta_kms_page_flip_data_set_timings_in_impl (page_flip_data,
                                                sequence, tv_sec, tv_usec);
@@ -1009,8 +1060,10 @@ dispose_page_flip_data (gpointer key,
                         gpointer user_data)
 {
   MetaKmsPageFlipData *page_flip_data = value;
+  MetaKmsImplDevice *impl_device = user_data;
 
   meta_kms_page_flip_data_discard_in_impl (page_flip_data, NULL);
+  meta_kms_impl_device_unhold_fd (impl_device);
 
   return TRUE;
 }
@@ -1023,7 +1076,7 @@ meta_kms_impl_device_atomic_prepare_shutdown (MetaKmsImplDevice *impl_device)
 
   g_hash_table_foreach_remove (impl_device_atomic->page_flip_datas,
                                dispose_page_flip_data,
-                               NULL);
+                               impl_device);
 }
 
 static void
@@ -1039,14 +1092,104 @@ meta_kms_impl_device_atomic_finalize (GObject *object)
   G_OBJECT_CLASS (meta_kms_impl_device_atomic_parent_class)->finalize (object);
 }
 
+static MetaDeviceFile *
+meta_kms_impl_device_atomic_open_device_file (MetaKmsImplDevice  *impl_device,
+                                              const char         *path,
+                                              GError            **error)
+{
+  MetaKmsDevice *device = meta_kms_impl_device_get_device (impl_device);
+  MetaKms *kms = meta_kms_device_get_kms (device);
+  MetaBackend *backend = meta_kms_get_backend (kms);
+  MetaDevicePool *device_pool =
+    meta_backend_native_get_device_pool (META_BACKEND_NATIVE (backend));
+  g_autoptr (MetaDeviceFile) device_file = NULL;
+
+  device_file = meta_device_pool_open (device_pool, path,
+                                       META_DEVICE_FILE_FLAG_TAKE_CONTROL,
+                                       error);
+  if (!device_file)
+    return NULL;
+
+  if (!meta_device_file_has_tag (device_file,
+                                 META_DEVICE_FILE_TAG_KMS,
+                                 META_KMS_DEVICE_FILE_TAG_ATOMIC))
+    {
+      int fd = meta_device_file_get_fd (device_file);
+
+      g_warn_if_fail (!meta_device_file_has_tag (device_file,
+                                                 META_DEVICE_FILE_TAG_KMS,
+                                                 META_KMS_DEVICE_FILE_TAG_SIMPLE));
+
+      if (drmSetClientCap (fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) != 0)
+        {
+          g_set_error (error, META_KMS_ERROR, META_KMS_ERROR_NOT_SUPPORTED,
+                       "DRM_CLIENT_CAP_UNIVERSAL_PLANES not supported");
+          return NULL;
+        }
+
+      if (drmSetClientCap (fd, DRM_CLIENT_CAP_ATOMIC, 1) != 0)
+        {
+          g_set_error (error, META_KMS_ERROR, META_KMS_ERROR_NOT_SUPPORTED,
+                       "DRM_CLIENT_CAP_ATOMIC not supported");
+          return NULL;
+        }
+
+      meta_device_file_tag (device_file,
+                            META_DEVICE_FILE_TAG_KMS,
+                            META_KMS_DEVICE_FILE_TAG_ATOMIC);
+    }
+
+  return g_steal_pointer (&device_file);
+}
+
+static gboolean
+is_atomic_allowed (const char *driver_name)
+{
+  const char *atomic_driver_deny_list[] = {
+    "qxl",
+    "vmwgfx",
+    "vboxvideo",
+    "nvidia-drm",
+    NULL,
+  };
+
+  return !g_strv_contains (atomic_driver_deny_list, driver_name);
+}
+
 static gboolean
 meta_kms_impl_device_atomic_initable_init (GInitable     *initable,
                                            GCancellable  *cancellable,
                                            GError       **error)
 {
   MetaKmsImplDevice *impl_device = META_KMS_IMPL_DEVICE (initable);
+  const char *atomic_kms_enable_env;
 
-  return meta_kms_impl_device_init_mode_setting (impl_device, error);
+  atomic_kms_enable_env = getenv ("MUTTER_DEBUG_ENABLE_ATOMIC_KMS");
+  if (atomic_kms_enable_env && g_strcmp0 (atomic_kms_enable_env, "1") != 0)
+    {
+      g_set_error (error, META_KMS_ERROR, META_KMS_ERROR_USER_INHIBITED,
+                   "Atomic mode setting disable via env var");
+      return FALSE;
+    }
+
+  if (!initable_parent_iface->init (initable, cancellable, error))
+    return FALSE;
+
+  if (!is_atomic_allowed (meta_kms_impl_device_get_driver_name (impl_device)))
+    {
+      g_set_error (error, META_KMS_ERROR, META_KMS_ERROR_DENY_LISTED,
+                   "Atomic mode setting disable via driver deny list");
+      return FALSE;
+    }
+
+  if (!meta_kms_impl_device_init_mode_setting (impl_device, error))
+    return FALSE;
+
+  g_message ("Added device '%s' (%s) using atomic mode setting.",
+             meta_kms_impl_device_get_path (impl_device),
+             meta_kms_impl_device_get_driver_name (impl_device));
+
+  return TRUE;
 }
 
 static void
@@ -1058,6 +1201,8 @@ meta_kms_impl_device_atomic_init (MetaKmsImplDeviceAtomic *impl_device_atomic)
 static void
 initable_iface_init (GInitableIface *iface)
 {
+  initable_parent_iface = g_type_interface_peek_parent (iface);
+
   iface->init = meta_kms_impl_device_atomic_initable_init;
 }
 
@@ -1070,6 +1215,8 @@ meta_kms_impl_device_atomic_class_init (MetaKmsImplDeviceAtomicClass *klass)
 
   object_class->finalize = meta_kms_impl_device_atomic_finalize;
 
+  impl_device_class->open_device_file =
+    meta_kms_impl_device_atomic_open_device_file;
   impl_device_class->setup_drm_event_context =
     meta_kms_impl_device_atomic_setup_drm_event_context;
   impl_device_class->process_update =

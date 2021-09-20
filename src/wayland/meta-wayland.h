@@ -24,6 +24,7 @@
 #define META_WAYLAND_H
 
 #include "clutter/clutter.h"
+#include "core/meta-context-private.h"
 #include "core/util-private.h"
 #include "meta/types.h"
 #include "wayland/meta-wayland-types.h"
@@ -31,15 +32,9 @@
 META_EXPORT_TEST
 void                    meta_wayland_override_display_name (const char *display_name);
 
-void                    meta_wayland_pre_clutter_init           (void);
+MetaWaylandCompositor * meta_wayland_compositor_new             (MetaContext *context);
 
-void                    meta_wayland_init                       (void);
-
-void                    meta_wayland_finalize                   (void);
-
-MetaWaylandCompositor * meta_wayland_compositor_new             (MetaBackend *backend);
-
-void                    meta_wayland_compositor_setup           (MetaWaylandCompositor *compositor);
+void                    meta_wayland_compositor_prepare_shutdown (MetaWaylandCompositor *compositor);
 
 META_EXPORT_TEST
 MetaWaylandCompositor  *meta_wayland_compositor_get_default     (void);

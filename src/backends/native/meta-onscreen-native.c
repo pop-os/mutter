@@ -34,10 +34,12 @@
 #include "backends/meta-egl-ext.h"
 #include "backends/native/meta-cogl-utils.h"
 #include "backends/native/meta-crtc-kms.h"
+#include "backends/native/meta-device-pool.h"
 #include "backends/native/meta-drm-buffer-dumb.h"
 #include "backends/native/meta-drm-buffer-gbm.h"
 #include "backends/native/meta-drm-buffer-import.h"
 #include "backends/native/meta-drm-buffer.h"
+#include "backends/native/meta-kms-device.h"
 #include "backends/native/meta-kms-utils.h"
 #include "backends/native/meta-kms.h"
 #include "backends/native/meta-output-kms.h"
@@ -246,8 +248,7 @@ page_flip_feedback_flipped (MetaKmsCrtc  *kms_crtc,
 {
   MetaRendererView *view = user_data;
   struct timeval page_flip_time;
-  MetaCrtc *crtc;
-  MetaGpuKms *gpu_kms;
+  MetaKmsDevice *kms_device;
   int64_t presentation_time_us;
   CoglFrameInfoFlag flags = COGL_FRAME_INFO_FLAG_VSYNC;
 
@@ -256,9 +257,8 @@ page_flip_feedback_flipped (MetaKmsCrtc  *kms_crtc,
     .tv_usec = tv_usec,
   };
 
-  crtc = META_CRTC (meta_crtc_kms_from_kms_crtc (kms_crtc));
-  gpu_kms = META_GPU_KMS (meta_crtc_get_gpu (crtc));
-  if (meta_gpu_kms_is_clock_monotonic (gpu_kms))
+  kms_device = meta_kms_crtc_get_device (kms_crtc);
+  if (meta_kms_device_uses_monotonic_clock (kms_device))
     {
       presentation_time_us = timeval_to_microseconds (&page_flip_time);
       flags |= COGL_FRAME_INFO_FLAG_HW_CLOCK;
@@ -416,7 +416,9 @@ static void
 meta_onscreen_native_flip_crtc (CoglOnscreen                *onscreen,
                                 MetaRendererView            *view,
                                 MetaCrtc                    *crtc,
-                                MetaKmsPageFlipListenerFlag  flags)
+                                MetaKmsPageFlipListenerFlag  flags,
+                                const int                   *rectangles,
+                                int                          n_rectangles)
 {
   MetaOnscreenNative *onscreen_native = META_ONSCREEN_NATIVE (onscreen);
   MetaRendererNative *renderer_native = onscreen_native->renderer_native;
@@ -430,6 +432,7 @@ meta_onscreen_native_flip_crtc (CoglOnscreen                *onscreen,
   MetaKmsUpdate *kms_update;
   MetaOnscreenNativeSecondaryGpuState *secondary_gpu_state = NULL;
   MetaDrmBuffer *buffer;
+  MetaKmsPlaneAssignment *plane_assignment;
 
   COGL_TRACE_BEGIN_SCOPED (MetaOnscreenNativeFlipCrtcs,
                            "Onscreen (flip CRTCs)");
@@ -456,8 +459,15 @@ meta_onscreen_native_flip_crtc (CoglOnscreen                *onscreen,
           buffer = secondary_gpu_state->gbm.next_fb;
         }
 
-      meta_crtc_kms_assign_primary_plane (crtc_kms, buffer, kms_update);
+      plane_assignment = meta_crtc_kms_assign_primary_plane (crtc_kms,
+                                                             buffer,
+                                                             kms_update);
 
+      if (rectangles != NULL && n_rectangles != 0)
+        {
+          meta_kms_plane_assignment_set_fb_damage (plane_assignment,
+                                                   rectangles, n_rectangles);
+        }
       break;
     case META_RENDERER_NATIVE_MODE_SURFACELESS:
       g_assert_not_reached ();
@@ -561,7 +571,7 @@ import_shared_framebuffer (CoglOnscreen                        *onscreen,
 {
   MetaOnscreenNative *onscreen_native = META_ONSCREEN_NATIVE (onscreen);
   MetaGpuKms *gpu_kms;
-  MetaKmsDevice *kms_device;
+  MetaDeviceFile *device_file;
   struct gbm_device *gbm_device;
   MetaDrmBufferGbm *buffer_gbm;
   MetaDrmBufferImport *buffer_import;
@@ -570,17 +580,19 @@ import_shared_framebuffer (CoglOnscreen                        *onscreen,
   buffer_gbm = META_DRM_BUFFER_GBM (onscreen_native->gbm.next_fb);
 
   gpu_kms = secondary_gpu_state->gpu_kms;
-  kms_device = meta_gpu_kms_get_kms_device (gpu_kms);
+  device_file = secondary_gpu_state->renderer_gpu_data->device_file;
   gbm_device = meta_gbm_device_from_gpu (gpu_kms);
-  buffer_import = meta_drm_buffer_import_new (kms_device,
+  buffer_import = meta_drm_buffer_import_new (device_file,
                                               gbm_device,
                                               buffer_gbm,
                                               &error);
   if (!buffer_import)
     {
-      g_debug ("Zero-copy disabled for %s, meta_drm_buffer_import_new failed: %s",
-               meta_gpu_kms_get_file_path (secondary_gpu_state->gpu_kms),
-               error->message);
+      meta_topic (META_DEBUG_KMS,
+                  "Zero-copy disabled for %s, "
+                  "meta_drm_buffer_import_new failed: %s",
+                  meta_device_file_get_path (device_file),
+                  error->message);
 
       g_warn_if_fail (secondary_gpu_state->import_status ==
                       META_SHARED_FRAMEBUFFER_IMPORT_STATUS_NONE);
@@ -619,8 +631,9 @@ import_shared_framebuffer (CoglOnscreen                        *onscreen,
        */
       secondary_gpu_release_dumb (secondary_gpu_state);
 
-      g_debug ("Using zero-copy for %s succeeded once.",
-               meta_gpu_kms_get_file_path (secondary_gpu_state->gpu_kms));
+      meta_topic (META_DEBUG_KMS,
+                  "Using zero-copy for %s succeeded once.",
+                  meta_device_file_get_path (device_file));
     }
 
   secondary_gpu_state->import_status =
@@ -640,7 +653,7 @@ copy_shared_framebuffer_gpu (CoglOnscreen                        *onscreen,
   MetaGles3 *gles3 = meta_renderer_native_get_gles3 (renderer_native);
   GError *error = NULL;
   gboolean use_modifiers;
-  MetaKmsDevice *kms_device;
+  MetaDeviceFile *device_file;
   MetaDrmBufferGbm *buffer_gbm;
   struct gbm_bo *bo;
 
@@ -691,9 +704,9 @@ copy_shared_framebuffer_gpu (CoglOnscreen                        *onscreen,
     }
 
   use_modifiers = meta_renderer_native_use_modifiers (renderer_native);
-  kms_device = meta_gpu_kms_get_kms_device (secondary_gpu_state->gpu_kms);
+  device_file = secondary_gpu_state->renderer_gpu_data->device_file;
   buffer_gbm =
-    meta_drm_buffer_gbm_new_lock_front (kms_device,
+    meta_drm_buffer_gbm_new_lock_front (device_file,
                                         secondary_gpu_state->gbm.surface,
                                         use_modifiers,
                                         &error);
@@ -767,7 +780,8 @@ copy_shared_framebuffer_primary_gpu (CoglOnscreen                        *onscre
   dmabuf_fd = meta_drm_buffer_dumb_ensure_dmabuf_fd (buffer_dumb, &error);
   if (!dmabuf_fd)
     {
-      g_debug ("Failed to create DMA buffer: %s", error->message);
+      meta_topic (META_DEBUG_KMS,
+                  "Failed to create DMA buffer: %s", error->message);
       return FALSE;
     }
 
@@ -783,8 +797,9 @@ copy_shared_framebuffer_primary_gpu (CoglOnscreen                        *onscre
 
   if (error)
     {
-      g_debug ("%s: Failed to blit DMA buffer image: %s",
-               G_STRFUNC, error->message);
+      meta_topic (META_DEBUG_KMS,
+                  "Failed to create DMA buffer for blitting: %s",
+                  error->message);
       return FALSE;
     }
 
@@ -875,8 +890,10 @@ update_secondary_gpu_state_pre_swap_buffers (CoglOnscreen *onscreen)
   if (secondary_gpu_state)
     {
       MetaRendererNativeGpuData *renderer_gpu_data;
+      MetaDeviceFile *device_file;
 
       renderer_gpu_data = secondary_gpu_state->renderer_gpu_data;
+      device_file = renderer_gpu_data->device_file;
       switch (renderer_gpu_data->secondary.copy_mode)
         {
         case META_SHARED_FRAMEBUFFER_COPY_MODE_SECONDARY_GPU:
@@ -895,8 +912,9 @@ update_secondary_gpu_state_pre_swap_buffers (CoglOnscreen *onscreen)
             {
               if (!secondary_gpu_state->noted_primary_gpu_copy_failed)
                 {
-                  g_debug ("Using primary GPU to copy for %s failed once.",
-                           meta_gpu_kms_get_file_path (secondary_gpu_state->gpu_kms));
+                  meta_topic (META_DEBUG_KMS,
+                              "Using primary GPU to copy for %s failed once.",
+                              meta_device_file_get_path (device_file));
                   secondary_gpu_state->noted_primary_gpu_copy_failed = TRUE;
                 }
 
@@ -906,8 +924,9 @@ update_secondary_gpu_state_pre_swap_buffers (CoglOnscreen *onscreen)
             }
           else if (!secondary_gpu_state->noted_primary_gpu_copy_ok)
             {
-              g_debug ("Using primary GPU to copy for %s succeeded once.",
-                       meta_gpu_kms_get_file_path (secondary_gpu_state->gpu_kms));
+              meta_topic (META_DEBUG_KMS,
+                          "Using primary GPU to copy for %s succeeded once.",
+                          meta_device_file_get_path (device_file));
               secondary_gpu_state->noted_primary_gpu_copy_ok = TRUE;
             }
           break;
@@ -993,7 +1012,7 @@ meta_onscreen_native_swap_buffers_with_damage (CoglOnscreen  *onscreen,
   MetaKms *kms = meta_backend_native_get_kms (backend_native);
   MetaOnscreenNative *onscreen_native = META_ONSCREEN_NATIVE (onscreen);
   MetaGpuKms *render_gpu = onscreen_native->render_gpu;
-  MetaKmsDevice *render_kms_device = meta_gpu_kms_get_kms_device (render_gpu);
+  MetaDeviceFile *render_device_file;
   ClutterFrame *frame = user_data;
   CoglOnscreenClass *parent_class;
   gboolean egl_context_changed = FALSE;
@@ -1021,6 +1040,7 @@ meta_onscreen_native_swap_buffers_with_damage (CoglOnscreen  *onscreen,
 
   renderer_gpu_data = meta_renderer_native_get_gpu_data (renderer_native,
                                                          render_gpu);
+  render_device_file = renderer_gpu_data->device_file;
   switch (renderer_gpu_data->mode)
     {
     case META_RENDERER_NATIVE_MODE_GBM:
@@ -1029,13 +1049,14 @@ meta_onscreen_native_swap_buffers_with_damage (CoglOnscreen  *onscreen,
 
       use_modifiers = meta_renderer_native_use_modifiers (renderer_native);
       buffer_gbm =
-        meta_drm_buffer_gbm_new_lock_front (render_kms_device,
+        meta_drm_buffer_gbm_new_lock_front (render_device_file,
                                             onscreen_native->gbm.surface,
                                             use_modifiers,
                                             &error);
       if (!buffer_gbm)
         {
-          g_warning ("meta_drm_buffer_gbm_new_lock_front failed: %s",
+          g_warning ("Failed to lock front buffer on %s: %s",
+                     meta_device_file_get_path (render_device_file),
                      error->message);
           return;
         }
@@ -1070,7 +1091,9 @@ meta_onscreen_native_swap_buffers_with_damage (CoglOnscreen  *onscreen,
       meta_onscreen_native_flip_crtc (onscreen,
                                       onscreen_native->view,
                                       onscreen_native->crtc,
-                                      META_KMS_PAGE_FLIP_LISTENER_FLAG_NONE);
+                                      META_KMS_PAGE_FLIP_LISTENER_FLAG_NONE,
+                                      rectangles,
+                                      n_rectangles);
     }
   else
     {
@@ -1123,7 +1146,7 @@ meta_onscreen_native_swap_buffers_with_damage (CoglOnscreen  *onscreen,
           meta_renderer_native_post_mode_set_updates (renderer_native);
           clutter_frame_set_result (frame,
                                     CLUTTER_FRAME_RESULT_PENDING_PRESENTED);
-	  return;
+          return;
         }
       break;
 #endif
@@ -1222,6 +1245,8 @@ meta_onscreen_native_direct_scanout (CoglOnscreen   *onscreen,
     meta_backend_get_monitor_manager (backend);
   MetaPowerSave power_save_mode;
   ClutterFrame *frame = user_data;
+  MetaDrmBuffer *scanout_buffer;
+  GError *fill_timings_error = NULL;
   MetaKmsCrtc *kms_crtc;
   MetaKmsDevice *kms_device;
   MetaKmsUpdateFlag flags;
@@ -1255,11 +1280,40 @@ meta_onscreen_native_direct_scanout (CoglOnscreen   *onscreen,
 
   g_set_object (&onscreen_native->gbm.next_fb, META_DRM_BUFFER (scanout));
 
+  /* Try to get a measurement of GPU rendering time on the scanout buffer.
+   *
+   * The successful operation here adds ~0.4 ms to a ~0.1 ms total frame clock
+   * dispatch duration when displaying an unredirected client, thus
+   * unfortunately bringing it more in line with duration of the regular
+   * non-unredirected frame clock dispatch. However, measuring GPU rendering
+   * time is important for computing accurate max render time without
+   * underestimating. Also this operation should be optimizable by caching
+   * EGLImage for each buffer instead of re-creating it every time it's needed.
+   * This should also help all other cases which convert the buffer to a
+   * EGLImage.
+   */
+  if (META_IS_DRM_BUFFER (scanout))
+    {
+      scanout_buffer = META_DRM_BUFFER (scanout);
+      if (meta_drm_buffer_supports_fill_timings (scanout_buffer))
+        {
+          if (!meta_drm_buffer_fill_timings (scanout_buffer, frame_info,
+                                             &fill_timings_error))
+            {
+              g_warning ("Failed to fill timings for a scanout buffer: %s",
+                         fill_timings_error->message);
+              g_error_free (fill_timings_error);
+            }
+        }
+    }
+
   ensure_crtc_modes (onscreen);
   meta_onscreen_native_flip_crtc (onscreen,
                                   onscreen_native->view,
                                   onscreen_native->crtc,
-                                  META_KMS_PAGE_FLIP_LISTENER_FLAG_DROP_ON_ERROR);
+                                  META_KMS_PAGE_FLIP_LISTENER_FLAG_DROP_ON_ERROR,
+                                  NULL,
+                                  0);
 
   kms_crtc = meta_crtc_kms_get_kms_crtc (META_CRTC_KMS (onscreen_native->crtc));
   kms_device = meta_kms_crtc_get_device (kms_crtc);
@@ -1302,8 +1356,8 @@ add_onscreen_frame_info (MetaCrtc *crtc)
   MetaRenderer *renderer = meta_backend_get_renderer (backend);
   MetaRendererView *view = meta_renderer_get_view_for_crtc (renderer, crtc);
 
-  clutter_stage_cogl_add_onscreen_frame_info (CLUTTER_STAGE_COGL (stage_window),
-                                              CLUTTER_STAGE_VIEW (view));
+  meta_stage_impl_add_onscreen_frame_info (META_STAGE_IMPL (stage_window),
+                                           CLUTTER_STAGE_VIEW (view));
 }
 
 void
@@ -1701,7 +1755,7 @@ meta_onscreen_native_allocate (CoglFramebuffer  *framebuffer,
   int width;
   int height;
 #ifdef HAVE_EGL_DEVICE
-  MetaKmsDevice *render_kms_device;
+  MetaDeviceFile *render_device_file;
   EGLStreamKHR egl_stream;
 #endif
   CoglFramebufferClass *parent_class;
@@ -1738,10 +1792,9 @@ meta_onscreen_native_allocate (CoglFramebuffer  *framebuffer,
       break;
 #ifdef HAVE_EGL_DEVICE
     case META_RENDERER_NATIVE_MODE_EGL_DEVICE:
-      render_kms_device =
-        meta_gpu_kms_get_kms_device (onscreen_native->render_gpu);
+      render_device_file = renderer_gpu_data->device_file;
       onscreen_native->egl.dumb_fb =
-        meta_drm_buffer_dumb_new (render_kms_device,
+        meta_drm_buffer_dumb_new (render_device_file,
                                   width, height,
                                   DRM_FORMAT_XRGB8888,
                                   error);
@@ -1897,7 +1950,7 @@ init_secondary_gpu_state_cpu_copy_mode (MetaRendererNative         *renderer_nat
   MetaOnscreenNative *onscreen_native = META_ONSCREEN_NATIVE (onscreen);
   MetaOnscreenNativeSecondaryGpuState *secondary_gpu_state;
   MetaGpuKms *gpu_kms;
-  MetaKmsDevice *kms_device;
+  MetaDeviceFile *device_file;
   int width, height;
   unsigned int i;
   uint32_t drm_format;
@@ -1915,12 +1968,13 @@ init_secondary_gpu_state_cpu_copy_mode (MetaRendererNative         *renderer_nat
   height = cogl_framebuffer_get_height (framebuffer);
 
   gpu_kms = META_GPU_KMS (meta_crtc_get_gpu (onscreen_native->crtc));
-  kms_device = meta_gpu_kms_get_kms_device (gpu_kms);
-  g_debug ("Secondary GPU %s using DRM format '%s' (0x%x) for a %dx%d output.",
-           meta_gpu_kms_get_file_path (gpu_kms),
-           meta_drm_format_to_string (&tmp, drm_format),
-           drm_format,
-           width, height);
+  device_file = renderer_gpu_data->device_file;
+  meta_topic (META_DEBUG_KMS,
+              "Secondary GPU %s using DRM format '%s' (0x%x) for a %dx%d output.",
+              meta_device_file_get_path (device_file),
+              meta_drm_format_to_string (&tmp, drm_format),
+              drm_format,
+              width, height);
 
   secondary_gpu_state = g_new0 (MetaOnscreenNativeSecondaryGpuState, 1);
   secondary_gpu_state->renderer_gpu_data = renderer_gpu_data;
@@ -1930,7 +1984,7 @@ init_secondary_gpu_state_cpu_copy_mode (MetaRendererNative         *renderer_nat
   for (i = 0; i < G_N_ELEMENTS (secondary_gpu_state->cpu.dumb_fbs); i++)
     {
       secondary_gpu_state->cpu.dumb_fbs[i] =
-        meta_drm_buffer_dumb_new (kms_device,
+        meta_drm_buffer_dumb_new (device_file,
                                   width, height,
                                   drm_format,
                                   error);

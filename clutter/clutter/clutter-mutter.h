@@ -26,6 +26,8 @@
 #define __CLUTTER_H_INSIDE__
 
 #include "clutter-backend.h"
+#include "clutter-backend-private.h"
+#include "clutter-damage-history.h"
 #include "clutter-event-private.h"
 #include "clutter-input-device-private.h"
 #include "clutter-input-pointer-a11y-private.h"
@@ -33,8 +35,8 @@
 #include "clutter-private.h"
 #include "clutter-stage-private.h"
 #include "clutter-stage-view.h"
-#include "cogl/clutter-stage-cogl.h"
-#include "clutter/x11/clutter-backend-x11.h"
+#include "clutter-stage-view-private.h"
+#include "clutter.h"
 
 CLUTTER_EXPORT
 GList * clutter_stage_peek_stage_views (ClutterStage *stage);
@@ -100,6 +102,11 @@ void clutter_stage_get_device_coords (ClutterStage         *stage,
 CLUTTER_EXPORT
 void clutter_stage_repick_device (ClutterStage       *stage,
                                   ClutterInputDevice *device);
+
+CLUTTER_EXPORT
+void clutter_get_debug_flags (ClutterDebugFlag     *debug_flags,
+                              ClutterDrawDebugFlag *draw_flags,
+                              ClutterPickDebugFlag *pick_flags);
 
 #undef __CLUTTER_H_INSIDE__
 

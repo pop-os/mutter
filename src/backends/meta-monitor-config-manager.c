@@ -30,6 +30,7 @@
 #include "backends/meta-monitor-manager-private.h"
 #include "backends/meta-output.h"
 #include "core/boxes-private.h"
+#include "meta/meta-monitor-manager.h"
 
 #define CONFIG_HISTORY_MAX_SIZE 3
 
@@ -542,31 +543,88 @@ meta_monitor_config_manager_get_stored (MetaMonitorConfigManager *config_manager
 typedef enum _MonitorMatchRule
 {
   MONITOR_MATCH_ALL = 0,
-  MONITOR_MATCH_EXTERNAL = (1 << 0)
+  MONITOR_MATCH_EXTERNAL = (1 << 0),
+  MONITOR_MATCH_BUILTIN = (1 << 1),
+  MONITOR_MATCH_VISIBLE = (1 << 2),
+  MONITOR_MATCH_WITH_SUGGESTED_POSITION = (1 << 3),
+  MONITOR_MATCH_PRIMARY = (1 << 4),
+  MONITOR_MATCH_ALLOW_FALLBACK = (1 << 5),
 } MonitorMatchRule;
+
+static gboolean
+monitor_matches_rule (MetaMonitor        *monitor,
+                      MetaMonitorManager *monitor_manager,
+                      MonitorMatchRule    match_rule)
+{
+  if (!monitor)
+    return FALSE;
+
+  if (match_rule & MONITOR_MATCH_BUILTIN)
+    {
+      if (!meta_monitor_is_laptop_panel (monitor))
+        return FALSE;
+    }
+  else if (match_rule & MONITOR_MATCH_EXTERNAL)
+    {
+      if (meta_monitor_is_laptop_panel (monitor))
+        return FALSE;
+    }
+
+  if (match_rule & MONITOR_MATCH_VISIBLE)
+    {
+      if (meta_monitor_is_laptop_panel (monitor) &&
+          is_lid_closed (monitor_manager))
+        return FALSE;
+    }
+
+  if (match_rule & MONITOR_MATCH_WITH_SUGGESTED_POSITION)
+    {
+      if (!meta_monitor_get_suggested_position (monitor, NULL, NULL))
+        return FALSE;
+    }
+
+  return TRUE;
+}
+
+static GList *
+find_monitors (MetaMonitorManager *monitor_manager,
+               MonitorMatchRule    match_rule,
+               MetaMonitor        *not_this_one)
+{
+  GList *result = NULL;
+  GList *monitors, *l;
+
+  monitors = meta_monitor_manager_get_monitors (monitor_manager);
+  for (l = g_list_last (monitors); l; l = l->prev)
+    {
+      MetaMonitor *monitor = l->data;
+
+      if (not_this_one && monitor == not_this_one)
+        continue;
+
+      if (monitor_matches_rule (monitor, monitor_manager, match_rule))
+        result = g_list_prepend (result, monitor);
+    }
+
+  return result;
+}
 
 static MetaMonitor *
 find_monitor_with_highest_preferred_resolution (MetaMonitorManager *monitor_manager,
                                                 MonitorMatchRule    match_rule)
 {
-  GList *monitors;
+  g_autoptr (GList) monitors = NULL;
   GList *l;
   int largest_area = 0;
   MetaMonitor *largest_monitor = NULL;
 
-  monitors = meta_monitor_manager_get_monitors (monitor_manager);
+  monitors = find_monitors (monitor_manager, match_rule, NULL);
   for (l = monitors; l; l = l->next)
     {
       MetaMonitor *monitor = l->data;
       MetaMonitorMode *mode;
       int width, height;
       int area;
-
-      if (match_rule & MONITOR_MATCH_EXTERNAL)
-        {
-          if (meta_monitor_is_laptop_panel (monitor))
-            continue;
-        }
 
       mode = meta_monitor_get_preferred_mode (monitor);
       meta_monitor_mode_get_resolution (mode, &width, &height);
@@ -593,38 +651,29 @@ find_monitor_with_highest_preferred_resolution (MetaMonitorManager *monitor_mana
  * alternatives, except if no other alternatives exist.
  */
 static MetaMonitor *
-find_primary_monitor (MetaMonitorManager *monitor_manager)
+find_primary_monitor (MetaMonitorManager *monitor_manager,
+                      MonitorMatchRule    match_rule)
 {
   MetaMonitor *monitor;
 
-  if (is_lid_closed (monitor_manager))
-    {
-      monitor = meta_monitor_manager_get_primary_monitor (monitor_manager);
-      if (monitor && !meta_monitor_is_laptop_panel (monitor))
-        return monitor;
+  monitor = meta_monitor_manager_get_primary_monitor (monitor_manager);
+  if (monitor_matches_rule (monitor, monitor_manager, match_rule))
+    return monitor;
 
-      monitor =
-        find_monitor_with_highest_preferred_resolution (monitor_manager,
-                                                        MONITOR_MATCH_EXTERNAL);
-      if (monitor)
-        return monitor;
+  monitor = meta_monitor_manager_get_laptop_panel (monitor_manager);
+  if (monitor_matches_rule (monitor, monitor_manager, match_rule))
+    return monitor;
 
-      return find_monitor_with_highest_preferred_resolution (monitor_manager,
-                                                             MONITOR_MATCH_ALL);
-    }
-  else
-    {
-      monitor = meta_monitor_manager_get_primary_monitor (monitor_manager);
-      if (monitor)
-        return monitor;
+  monitor = find_monitor_with_highest_preferred_resolution (monitor_manager,
+                                                            match_rule);
+  if (monitor)
+    return monitor;
 
-      monitor = meta_monitor_manager_get_laptop_panel (monitor_manager);
-      if (monitor)
-        return monitor;
+  if (match_rule & MONITOR_MATCH_ALLOW_FALLBACK)
+    return find_monitor_with_highest_preferred_resolution (monitor_manager,
+                                                           MONITOR_MATCH_ALL);
 
-      return find_monitor_with_highest_preferred_resolution (monitor_manager,
-                                                             MONITOR_MATCH_ALL);
-    }
+  return NULL;
 }
 
 static MetaMonitorConfig *
@@ -653,27 +702,18 @@ get_monitor_transform (MetaMonitorManager *monitor_manager,
                        MetaMonitor        *monitor)
 {
   MetaOrientationManager *orientation_manager;
+  MetaOrientation orientation;
   MetaBackend *backend;
 
-  if (!meta_monitor_is_laptop_panel (monitor))
+  if (!meta_monitor_is_laptop_panel (monitor) ||
+      !meta_monitor_manager_get_panel_orientation_managed (monitor_manager))
     return META_MONITOR_TRANSFORM_NORMAL;
 
   backend = meta_monitor_manager_get_backend (monitor_manager);
   orientation_manager = meta_backend_get_orientation_manager (backend);
+  orientation = meta_orientation_manager_get_orientation (orientation_manager);
 
-  switch (meta_orientation_manager_get_orientation (orientation_manager))
-    {
-    case META_ORIENTATION_BOTTOM_UP:
-      return META_MONITOR_TRANSFORM_180;
-    case META_ORIENTATION_LEFT_UP:
-      return META_MONITOR_TRANSFORM_90;
-    case META_ORIENTATION_RIGHT_UP:
-      return META_MONITOR_TRANSFORM_270;
-    case META_ORIENTATION_UNDEFINED:
-    case META_ORIENTATION_NORMAL:
-    default:
-      return META_MONITOR_TRANSFORM_NORMAL;
-    }
+  return meta_monitor_transform_from_orientation (orientation);
 }
 
 static MetaLogicalMonitorConfig *
@@ -681,27 +721,17 @@ create_preferred_logical_monitor_config (MetaMonitorManager          *monitor_ma
                                          MetaMonitor                 *monitor,
                                          int                          x,
                                          int                          y,
-                                         MetaLogicalMonitorConfig    *primary_logical_monitor_config,
+                                         float                        scale,
                                          MetaLogicalMonitorLayoutMode layout_mode)
 {
   MetaMonitorMode *mode;
   int width, height;
-  float scale;
   MetaMonitorTransform transform;
   MetaMonitorConfig *monitor_config;
   MetaLogicalMonitorConfig *logical_monitor_config;
 
   mode = meta_monitor_get_preferred_mode (monitor);
   meta_monitor_mode_get_resolution (mode, &width, &height);
-
-  if ((meta_monitor_manager_get_capabilities (monitor_manager) &
-       META_MONITOR_MANAGER_CAPABILITY_GLOBAL_SCALE_REQUIRED) &&
-      primary_logical_monitor_config)
-    scale = primary_logical_monitor_config->scale;
-  else
-    scale = meta_monitor_manager_calculate_monitor_mode_scale (monitor_manager,
-                                                               monitor,
-                                                               mode);
 
   switch (layout_mode)
     {
@@ -739,179 +769,172 @@ create_preferred_logical_monitor_config (MetaMonitorManager          *monitor_ma
   return logical_monitor_config;
 }
 
-MetaMonitorsConfig *
-meta_monitor_config_manager_create_linear (MetaMonitorConfigManager *config_manager)
+static float
+compute_scale_for_monitor (MetaMonitorManager *monitor_manager,
+                           MetaMonitor        *monitor,
+                           MetaMonitor        *primary_monitor)
+{
+  MetaMonitor *target_monitor = monitor;
+  MetaLogicalMonitorLayoutMode layout_mode;
+  MetaMonitorMode *monitor_mode;
+
+  if ((meta_monitor_manager_get_capabilities (monitor_manager) &
+       META_MONITOR_MANAGER_CAPABILITY_GLOBAL_SCALE_REQUIRED) &&
+      primary_monitor)
+    target_monitor = primary_monitor;
+
+  layout_mode = meta_monitor_manager_get_default_layout_mode (monitor_manager);
+  monitor_mode = meta_monitor_get_preferred_mode (target_monitor);
+
+  return meta_monitor_manager_calculate_monitor_mode_scale (monitor_manager,
+                                                            layout_mode,
+                                                            target_monitor,
+                                                            monitor_mode);
+}
+
+typedef enum _MonitorPositioningMode
+{
+  MONITOR_POSITIONING_LINEAR,
+  MONITOR_POSITIONING_SUGGESTED,
+} MonitorPositioningMode;
+
+static gboolean
+verify_suggested_monitors_config (GList *logical_monitor_configs)
+{
+  g_autoptr (GList) region = NULL;
+  GList *l;
+
+  for (l = logical_monitor_configs; l; l = l->next)
+    {
+      MetaLogicalMonitorConfig *logical_monitor_config = l->data;
+      MetaRectangle *rect = &logical_monitor_config->layout;
+
+      if (meta_rectangle_overlaps_with_region (region, rect))
+        {
+          g_warning ("Suggested monitor config has overlapping region, "
+                      "rejecting");
+          return FALSE;
+        }
+
+      region = g_list_prepend (region, rect);
+    }
+
+  for (l = region; region->next && l; l = l->next)
+    {
+      MetaRectangle *rect = l->data;
+
+      if (!meta_rectangle_is_adjacent_to_any_in_region (region, rect))
+        {
+          g_warning ("Suggested monitor config has monitors with no "
+                      "neighbors, rejecting");
+          return FALSE;
+        }
+    }
+
+  return TRUE;
+}
+
+static MetaMonitorsConfig *
+create_monitors_config (MetaMonitorConfigManager *config_manager,
+                        MonitorMatchRule          match_rule,
+                        MonitorPositioningMode    positioning,
+                        MetaMonitorsConfigFlag    config_flags)
 {
   MetaMonitorManager *monitor_manager = config_manager->monitor_manager;
-  GList *logical_monitor_configs;
+  g_autoptr (GList) monitors = NULL;
+  g_autolist (MetaLogicalMonitorConfig) logical_monitor_configs = NULL;
   MetaMonitor *primary_monitor;
   MetaLogicalMonitorLayoutMode layout_mode;
-  MetaLogicalMonitorConfig *primary_logical_monitor_config;
-  int x;
-  GList *monitors;
+  float scale;
   GList *l;
-  MetaMonitorsConfig *monitors_config;
+  int x, y;
 
-  primary_monitor = find_primary_monitor (monitor_manager);
+  primary_monitor = find_primary_monitor (monitor_manager,
+                                          match_rule | MONITOR_MATCH_VISIBLE);
   if (!primary_monitor)
     return NULL;
 
+  x = y = 0;
   layout_mode = meta_monitor_manager_get_default_layout_mode (monitor_manager);
 
-  primary_logical_monitor_config =
-    create_preferred_logical_monitor_config (monitor_manager,
-                                             primary_monitor,
-                                             0, 0,
-                                             NULL,
-                                             layout_mode);
-  primary_logical_monitor_config->is_primary = TRUE;
-  logical_monitor_configs = g_list_append (NULL,
-                                           primary_logical_monitor_config);
+  if (!(match_rule & MONITOR_MATCH_PRIMARY))
+    monitors = find_monitors (monitor_manager, match_rule, primary_monitor);
 
-  x = primary_logical_monitor_config->layout.width;
-  monitors = meta_monitor_manager_get_monitors (monitor_manager);
+  /* The primary monitor needs to be at the head of the list for the
+   * linear positioning to be correct.
+   */
+  monitors = g_list_prepend (monitors, primary_monitor);
+
   for (l = monitors; l; l = l->next)
     {
       MetaMonitor *monitor = l->data;
       MetaLogicalMonitorConfig *logical_monitor_config;
+      gboolean has_suggested_position;
 
-      if (monitor == primary_monitor)
-        continue;
+      switch (positioning)
+        {
+        case MONITOR_POSITIONING_LINEAR:
+          break;
+        case MONITOR_POSITIONING_SUGGESTED:
+          has_suggested_position =
+            meta_monitor_get_suggested_position (monitor, &x, &y);
+          g_assert (has_suggested_position);
+          break;
+        }
 
-      if (meta_monitor_is_laptop_panel (monitor) &&
-          is_lid_closed (monitor_manager))
-        continue;
-
+      scale = compute_scale_for_monitor (monitor_manager, monitor,
+                                         primary_monitor);
       logical_monitor_config =
         create_preferred_logical_monitor_config (monitor_manager,
                                                  monitor,
-                                                 x, 0,
-                                                 primary_logical_monitor_config,
+                                                 x, y, scale,
                                                  layout_mode);
+      logical_monitor_config->is_primary = (monitor == primary_monitor);
       logical_monitor_configs = g_list_append (logical_monitor_configs,
                                                logical_monitor_config);
 
       x += logical_monitor_config->layout.width;
     }
 
-  monitors_config = meta_monitors_config_new (monitor_manager,
-                                              logical_monitor_configs,
-                                              layout_mode,
-                                              META_MONITORS_CONFIG_FLAG_NONE);
+  if (positioning == MONITOR_POSITIONING_SUGGESTED)
+    {
+      if (!verify_suggested_monitors_config (logical_monitor_configs))
+        return NULL;
+    }
 
-  if (monitors_config)
-    meta_monitors_config_set_switch_config (monitors_config, META_MONITOR_SWITCH_CONFIG_ALL_LINEAR);
+  return meta_monitors_config_new (monitor_manager,
+                                   g_steal_pointer (&logical_monitor_configs),
+                                   layout_mode,
+                                   config_flags);
+}
 
-  return monitors_config;
+MetaMonitorsConfig *
+meta_monitor_config_manager_create_linear (MetaMonitorConfigManager *config_manager)
+{
+  return create_monitors_config (config_manager,
+                                 MONITOR_MATCH_VISIBLE |
+                                 MONITOR_MATCH_ALLOW_FALLBACK,
+                                 MONITOR_POSITIONING_LINEAR,
+                                 META_MONITORS_CONFIG_FLAG_NONE);
 }
 
 MetaMonitorsConfig *
 meta_monitor_config_manager_create_fallback (MetaMonitorConfigManager *config_manager)
 {
-  MetaMonitorManager *monitor_manager = config_manager->monitor_manager;
-  MetaMonitor *primary_monitor;
-  GList *logical_monitor_configs;
-  MetaLogicalMonitorLayoutMode layout_mode;
-  MetaLogicalMonitorConfig *primary_logical_monitor_config;
-
-  primary_monitor = find_primary_monitor (monitor_manager);
-  if (!primary_monitor)
-    return NULL;
-
-  layout_mode = meta_monitor_manager_get_default_layout_mode (monitor_manager);
-
-  primary_logical_monitor_config =
-    create_preferred_logical_monitor_config (monitor_manager,
-                                             primary_monitor,
-                                             0, 0,
-                                             NULL,
-                                             layout_mode);
-  primary_logical_monitor_config->is_primary = TRUE;
-  logical_monitor_configs = g_list_append (NULL,
-                                           primary_logical_monitor_config);
-
-  return meta_monitors_config_new (monitor_manager,
-                                   logical_monitor_configs,
-                                   layout_mode,
-                                   META_MONITORS_CONFIG_FLAG_NONE);
+  return create_monitors_config (config_manager,
+                                 MONITOR_MATCH_PRIMARY |
+                                 MONITOR_MATCH_ALLOW_FALLBACK,
+                                 MONITOR_POSITIONING_LINEAR,
+                                 META_MONITORS_CONFIG_FLAG_NONE);
 }
 
 MetaMonitorsConfig *
 meta_monitor_config_manager_create_suggested (MetaMonitorConfigManager *config_manager)
 {
-  MetaMonitorManager *monitor_manager = config_manager->monitor_manager;
-  MetaLogicalMonitorConfig *primary_logical_monitor_config = NULL;
-  MetaMonitor *primary_monitor;
-  MetaLogicalMonitorLayoutMode layout_mode;
-  GList *logical_monitor_configs;
-  GList *region;
-  int x, y;
-  GList *monitors;
-  GList *l;
-
-  primary_monitor = find_primary_monitor (monitor_manager);
-  if (!primary_monitor)
-    return NULL;
-
-  if (!meta_monitor_get_suggested_position (primary_monitor, &x, &y))
-    return NULL;
-
-  layout_mode = meta_monitor_manager_get_default_layout_mode (monitor_manager);
-
-  primary_logical_monitor_config =
-    create_preferred_logical_monitor_config (monitor_manager,
-                                             primary_monitor,
-                                             x, y,
-                                             NULL,
-                                             layout_mode);
-  primary_logical_monitor_config->is_primary = TRUE;
-  logical_monitor_configs = g_list_append (NULL,
-                                           primary_logical_monitor_config);
-  region = g_list_prepend (NULL, &primary_logical_monitor_config->layout);
-
-  monitors = meta_monitor_manager_get_monitors (monitor_manager);
-  for (l = monitors; l; l = l->next)
-    {
-      MetaMonitor *monitor = l->data;
-      MetaLogicalMonitorConfig *logical_monitor_config;
-
-      if (monitor == primary_monitor)
-        continue;
-
-      if (!meta_monitor_get_suggested_position (monitor, &x, &y))
-        continue;
-
-      logical_monitor_config =
-        create_preferred_logical_monitor_config (monitor_manager,
-                                                 monitor,
-                                                 x, y,
-                                                 primary_logical_monitor_config,
-                                                 layout_mode);
-      logical_monitor_configs = g_list_append (logical_monitor_configs,
-                                               logical_monitor_config);
-
-      if (meta_rectangle_overlaps_with_region (region,
-                                               &logical_monitor_config->layout))
-        {
-          g_warning ("Suggested monitor config has overlapping region, rejecting");
-          g_list_free (region);
-          g_list_free_full (logical_monitor_configs,
-                            (GDestroyNotify) meta_logical_monitor_config_free);
-          return NULL;
-        }
-
-      region = g_list_prepend (region, &logical_monitor_config->layout);
-    }
-
-  g_list_free (region);
-
-  if (!logical_monitor_configs)
-    return NULL;
-
-  return meta_monitors_config_new (monitor_manager,
-                                   logical_monitor_configs,
-                                   layout_mode,
-                                   META_MONITORS_CONFIG_FLAG_NONE);
+  return create_monitors_config (config_manager,
+                                 MONITOR_MATCH_WITH_SUGGESTED_POSITION,
+                                 MONITOR_POSITIONING_SUGGESTED,
+                                 META_MONITORS_CONFIG_FLAG_NONE);
 }
 
 static GList *
@@ -965,8 +988,8 @@ clone_logical_monitor_config_list (GList *logical_monitor_configs_in)
 }
 
 static MetaLogicalMonitorConfig *
-find_logical_config_for_builtin_display_rotation (MetaMonitorConfigManager *config_manager,
-                                                  GList                    *logical_monitor_configs)
+find_logical_config_for_builtin_monitor (MetaMonitorConfigManager *config_manager,
+                                         GList                    *logical_monitor_configs)
 {
   MetaLogicalMonitorConfig *logical_monitor_config;
   MetaMonitorConfig *monitor_config;
@@ -974,7 +997,7 @@ find_logical_config_for_builtin_display_rotation (MetaMonitorConfigManager *conf
   GList *l;
 
   panel = meta_monitor_manager_get_laptop_panel (config_manager->monitor_manager);
-  if (panel && meta_monitor_is_active (panel))
+  if (panel)
     {
       for (l = logical_monitor_configs; l; l = l->next)
         {
@@ -989,7 +1012,14 @@ find_logical_config_for_builtin_display_rotation (MetaMonitorConfigManager *conf
           monitor_config = logical_monitor_config->monitor_configs->data;
           if (meta_monitor_spec_equals (meta_monitor_get_spec (panel),
                                         monitor_config->monitor_spec))
-            return logical_monitor_config;
+            {
+              MetaMonitorMode *mode;
+
+              mode = meta_monitor_get_mode_from_spec (panel,
+                                                      monitor_config->mode_spec);
+              if (mode)
+                return logical_monitor_config;
+            }
         }
     }
 
@@ -998,22 +1028,22 @@ find_logical_config_for_builtin_display_rotation (MetaMonitorConfigManager *conf
 
 static MetaMonitorsConfig *
 create_for_builtin_display_rotation (MetaMonitorConfigManager *config_manager,
+                                     MetaMonitorsConfig       *base_config,
                                      gboolean                  rotate,
                                      MetaMonitorTransform      transform)
 {
   MetaMonitorManager *monitor_manager = config_manager->monitor_manager;
   MetaLogicalMonitorConfig *logical_monitor_config;
   MetaLogicalMonitorConfig *current_logical_monitor_config;
+  MetaMonitorsConfig *config;
   GList *logical_monitor_configs, *current_configs;
   MetaLogicalMonitorLayoutMode layout_mode;
 
-  if (!config_manager->current_config)
-    return NULL;
+  g_return_val_if_fail (base_config, NULL);
 
-  current_configs = config_manager->current_config->logical_monitor_configs;
+  current_configs = base_config->logical_monitor_configs;
   current_logical_monitor_config =
-    find_logical_config_for_builtin_display_rotation (config_manager,
-                                                      current_configs);
+    find_logical_config_for_builtin_monitor (config_manager, current_configs);
   if (!current_logical_monitor_config)
     return NULL;
 
@@ -1038,9 +1068,10 @@ create_for_builtin_display_rotation (MetaMonitorConfigManager *config_manager,
     return NULL;
 
   logical_monitor_configs =
-    clone_logical_monitor_config_list (config_manager->current_config->logical_monitor_configs);
+    clone_logical_monitor_config_list (base_config->logical_monitor_configs);
   logical_monitor_config =
-    find_logical_config_for_builtin_display_rotation (config_manager, logical_monitor_configs);
+    find_logical_config_for_builtin_monitor (config_manager,
+                                             logical_monitor_configs);
   logical_monitor_config->transform = transform;
 
   if (meta_monitor_transform_is_rotated (current_logical_monitor_config->transform) !=
@@ -1051,24 +1082,72 @@ create_for_builtin_display_rotation (MetaMonitorConfigManager *config_manager,
       logical_monitor_config->layout.height = temp;
     }
 
-  layout_mode = config_manager->current_config->layout_mode;
-  return meta_monitors_config_new (monitor_manager,
-                                   logical_monitor_configs,
-                                   layout_mode,
-                                   META_MONITORS_CONFIG_FLAG_NONE);
+  layout_mode = base_config->layout_mode;
+  config = meta_monitors_config_new (monitor_manager,
+                                     logical_monitor_configs,
+                                     layout_mode,
+                                     META_MONITORS_CONFIG_FLAG_NONE);
+  meta_monitors_config_set_parent_config (config, base_config);
+
+  return config;
 }
 
 MetaMonitorsConfig *
 meta_monitor_config_manager_create_for_orientation (MetaMonitorConfigManager *config_manager,
+                                                    MetaMonitorsConfig       *base_config,
                                                     MetaMonitorTransform      transform)
 {
-  return create_for_builtin_display_rotation (config_manager, FALSE, transform);
+  return create_for_builtin_display_rotation (config_manager, base_config,
+                                              FALSE, transform);
+}
+
+MetaMonitorsConfig *
+meta_monitor_config_manager_create_for_builtin_orientation (MetaMonitorConfigManager *config_manager,
+                                                            MetaMonitorsConfig       *base_config)
+{
+  MetaMonitorManager *monitor_manager = config_manager->monitor_manager;
+  MetaMonitorTransform current_transform;
+  MetaMonitor *laptop_panel;
+
+  g_return_val_if_fail (
+    meta_monitor_manager_get_panel_orientation_managed (monitor_manager), NULL);
+
+  laptop_panel = meta_monitor_manager_get_laptop_panel (monitor_manager);
+  current_transform = get_monitor_transform (monitor_manager, laptop_panel);
+
+  return create_for_builtin_display_rotation (config_manager, base_config,
+                                              FALSE, current_transform);
 }
 
 MetaMonitorsConfig *
 meta_monitor_config_manager_create_for_rotate_monitor (MetaMonitorConfigManager *config_manager)
 {
-  return create_for_builtin_display_rotation (config_manager, TRUE, META_MONITOR_TRANSFORM_NORMAL);
+  if (!config_manager->current_config)
+    return NULL;
+
+  return create_for_builtin_display_rotation (config_manager,
+                                              config_manager->current_config,
+                                              TRUE,
+                                              META_MONITOR_TRANSFORM_NORMAL);
+}
+
+static MetaMonitorsConfig *
+create_monitors_switch_config (MetaMonitorConfigManager    *config_manager,
+                               MonitorMatchRule             match_rule,
+                               MonitorPositioningMode       positioning,
+                               MetaMonitorsConfigFlag       config_flags,
+                               MetaMonitorSwitchConfigType  switch_config)
+{
+  MetaMonitorsConfig *monitors_config;
+
+  monitors_config = create_monitors_config (config_manager, match_rule,
+                                            positioning, config_flags);
+
+  if (!monitors_config)
+    return NULL;
+
+  meta_monitors_config_set_switch_config (monitors_config, switch_config);
+  return monitors_config;
 }
 
 static MetaMonitorsConfig *
@@ -1087,6 +1166,7 @@ create_for_switch_config_all_mirror (MetaMonitorConfigManager *config_manager)
   GList *l;
   MetaMonitorsConfig *monitors_config;
 
+  layout_mode = meta_monitor_manager_get_default_layout_mode (monitor_manager);
   monitors = meta_monitor_manager_get_monitors (monitor_manager);
   monitor = monitors->data;
   modes = meta_monitor_get_modes (monitor);
@@ -1159,7 +1239,9 @@ create_for_switch_config_all_mirror (MetaMonitorConfigManager *config_manager)
       if (!mode)
         continue;
 
-      scale = meta_monitor_manager_calculate_monitor_mode_scale (monitor_manager, monitor, mode);
+      scale = meta_monitor_manager_calculate_monitor_mode_scale (monitor_manager,
+                                                                 layout_mode,
+                                                                 monitor, mode);
       best_scale = MAX (best_scale, scale);
       monitor_configs = g_list_prepend (monitor_configs, create_monitor_config (monitor, mode));
     }
@@ -1177,7 +1259,6 @@ create_for_switch_config_all_mirror (MetaMonitorConfigManager *config_manager)
   };
 
   logical_monitor_configs = g_list_append (NULL, logical_monitor_config);
-  layout_mode = meta_monitor_manager_get_default_layout_mode (monitor_manager);
   monitors_config = meta_monitors_config_new (monitor_manager,
                                               logical_monitor_configs,
                                               layout_mode,
@@ -1192,89 +1273,21 @@ create_for_switch_config_all_mirror (MetaMonitorConfigManager *config_manager)
 static MetaMonitorsConfig *
 create_for_switch_config_external (MetaMonitorConfigManager *config_manager)
 {
-  MetaMonitorManager *monitor_manager = config_manager->monitor_manager;
-  GList *logical_monitor_configs = NULL;
-  int x = 0;
-  MetaLogicalMonitorLayoutMode layout_mode;
-  GList *monitors;
-  GList *l;
-  MetaMonitorsConfig *monitors_config;
-
-  layout_mode = meta_monitor_manager_get_default_layout_mode (monitor_manager);
-
-  monitors = meta_monitor_manager_get_monitors (monitor_manager);
-  for (l = monitors; l; l = l->next)
-    {
-      MetaMonitor *monitor = l->data;
-      MetaLogicalMonitorConfig *logical_monitor_config;
-
-      if (meta_monitor_is_laptop_panel (monitor))
-        continue;
-
-      logical_monitor_config =
-        create_preferred_logical_monitor_config (monitor_manager,
-                                                 monitor,
-                                                 x, 0,
-                                                 NULL,
-                                                 layout_mode);
-      logical_monitor_configs = g_list_append (logical_monitor_configs,
-                                               logical_monitor_config);
-
-      if (x == 0)
-        logical_monitor_config->is_primary = TRUE;
-
-      x += logical_monitor_config->layout.width;
-    }
-
-  if (!logical_monitor_configs)
-    return NULL;
-
-  monitors_config = meta_monitors_config_new (monitor_manager,
-                                              logical_monitor_configs,
-                                              layout_mode,
-                                              META_MONITORS_CONFIG_FLAG_NONE);
-
-  if (monitors_config)
-    meta_monitors_config_set_switch_config (monitors_config, META_MONITOR_SWITCH_CONFIG_EXTERNAL);
-
-  return monitors_config;
+  return create_monitors_switch_config (config_manager,
+                                        MONITOR_MATCH_EXTERNAL,
+                                        MONITOR_POSITIONING_LINEAR,
+                                        META_MONITORS_CONFIG_FLAG_NONE,
+                                        META_MONITOR_SWITCH_CONFIG_EXTERNAL);
 }
 
 static MetaMonitorsConfig *
 create_for_switch_config_builtin (MetaMonitorConfigManager *config_manager)
 {
-  MetaMonitorManager *monitor_manager = config_manager->monitor_manager;
-  MetaLogicalMonitorLayoutMode layout_mode;
-  GList *logical_monitor_configs;
-  MetaLogicalMonitorConfig *primary_logical_monitor_config;
-  MetaMonitor *monitor;
-  MetaMonitorsConfig *monitors_config;
-
-  monitor = meta_monitor_manager_get_laptop_panel (monitor_manager);
-  if (!monitor)
-    return NULL;
-
-  layout_mode = meta_monitor_manager_get_default_layout_mode (monitor_manager);
-
-  primary_logical_monitor_config =
-    create_preferred_logical_monitor_config (monitor_manager,
-                                             monitor,
-                                             0, 0,
-                                             NULL,
-                                             layout_mode);
-  primary_logical_monitor_config->is_primary = TRUE;
-  logical_monitor_configs = g_list_append (NULL,
-                                           primary_logical_monitor_config);
-
-  monitors_config = meta_monitors_config_new (monitor_manager,
-                                              logical_monitor_configs,
-                                              layout_mode,
-                                              META_MONITORS_CONFIG_FLAG_NONE);
-
-  if (monitors_config)
-    meta_monitors_config_set_switch_config (monitors_config, META_MONITOR_SWITCH_CONFIG_BUILTIN);
-
-  return monitors_config;
+  return create_monitors_switch_config (config_manager,
+                                        MONITOR_MATCH_BUILTIN,
+                                        MONITOR_POSITIONING_LINEAR,
+                                        META_MONITORS_CONFIG_FLAG_NONE,
+                                        META_MONITOR_SWITCH_CONFIG_BUILTIN);
 }
 
 MetaMonitorsConfig *
@@ -1310,11 +1323,37 @@ meta_monitor_config_manager_create_for_switch_config (MetaMonitorConfigManager  
   return config;
 }
 
+static MetaMonitorsConfig *
+get_root_config (MetaMonitorsConfig *config)
+{
+  if (!config->parent_config)
+    return config;
+
+  return get_root_config (config->parent_config);
+}
+
+static gboolean
+has_same_root_config (MetaMonitorsConfig *config_a,
+                      MetaMonitorsConfig *config_b)
+{
+  return get_root_config (config_a) == get_root_config (config_b);
+}
+
 void
 meta_monitor_config_manager_set_current (MetaMonitorConfigManager *config_manager,
                                          MetaMonitorsConfig       *config)
 {
-  if (config_manager->current_config)
+  MetaMonitorsConfig *current_config = config_manager->current_config;
+  gboolean overrides_current = FALSE;
+
+  if (config && current_config &&
+      has_same_root_config (config, current_config))
+    {
+      overrides_current = meta_monitors_config_key_equal (config->key,
+                                                          current_config->key);
+    }
+
+  if (current_config && !overrides_current)
     {
       g_queue_push_head (&config_manager->config_history,
                          g_object_ref (config_manager->current_config));
@@ -1513,6 +1552,16 @@ meta_monitors_config_set_switch_config (MetaMonitorsConfig          *config,
   config->switch_config = switch_config;
 }
 
+void
+meta_monitors_config_set_parent_config (MetaMonitorsConfig *config,
+                                        MetaMonitorsConfig *parent_config)
+{
+  g_assert (config != parent_config);
+  g_assert (!parent_config || parent_config->parent_config != config);
+
+  g_set_object (&config->parent_config, parent_config);
+}
+
 MetaMonitorsConfig *
 meta_monitors_config_new_full (GList                        *logical_monitor_configs,
                                GList                        *disabled_monitor_specs,
@@ -1549,8 +1598,8 @@ meta_monitors_config_new (MetaMonitorManager           *monitor_manager,
       MetaMonitor *monitor = l->data;
       MetaMonitorSpec *monitor_spec;
 
-      if (is_lid_closed (monitor_manager) &&
-          meta_monitor_is_laptop_panel (monitor))
+      if (!monitor_matches_rule (monitor, monitor_manager,
+                                 MONITOR_MATCH_VISIBLE))
         continue;
 
       monitor_spec = meta_monitor_get_spec (monitor);
@@ -1574,6 +1623,7 @@ meta_monitors_config_finalize (GObject *object)
 {
   MetaMonitorsConfig *config = META_MONITORS_CONFIG (object);
 
+  g_clear_object (&config->parent_config);
   meta_monitors_config_key_free (config->key);
   g_list_free_full (config->logical_monitor_configs,
                     (GDestroyNotify) meta_logical_monitor_config_free);

@@ -41,6 +41,7 @@ typedef enum _MetaKmsPlaneProp
   META_KMS_PLANE_PROP_CRTC_H,
   META_KMS_PLANE_PROP_FB_ID,
   META_KMS_PLANE_PROP_CRTC_ID,
+  META_KMS_PLANE_PROP_FB_DAMAGE_CLIPS_ID,
   META_KMS_PLANE_N_PROPS
 } MetaKmsPlaneProp;
 
@@ -57,5 +58,8 @@ uint32_t meta_kms_plane_get_prop_id (MetaKmsPlane     *plane,
 
 const char * meta_kms_plane_get_prop_name (MetaKmsPlane     *plane,
                                            MetaKmsPlaneProp  prop);
+
+MetaKmsPropType meta_kms_plane_get_prop_internal_type (MetaKmsPlane     *plane,
+                                                       MetaKmsPlaneProp  prop);
 
 #endif /* META_KMS_PLANE_PRIVATE_H */

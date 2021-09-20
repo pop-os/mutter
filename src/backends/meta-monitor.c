@@ -127,6 +127,17 @@ meta_monitor_spec_clone (MetaMonitorSpec *monitor_spec)
   return new_monitor_spec;
 }
 
+guint
+meta_monitor_spec_hash (gconstpointer key)
+{
+  const MetaMonitorSpec *monitor_spec = key;
+
+  return (g_str_hash (monitor_spec->connector) +
+          g_str_hash (monitor_spec->vendor) +
+          g_str_hash (monitor_spec->product) +
+          g_str_hash (monitor_spec->serial));
+}
+
 gboolean
 meta_monitor_spec_equals (MetaMonitorSpec *monitor_spec,
                           MetaMonitorSpec *other_monitor_spec)
@@ -730,8 +741,11 @@ meta_monitor_normal_get_suggested_position (MetaMonitor *monitor,
   if (output_info->suggested_x < 0 && output_info->suggested_y < 0)
     return FALSE;
 
-  *x = output_info->suggested_x;
-  *y = output_info->suggested_y;
+  if (x)
+    *x = output_info->suggested_x;
+
+  if (y)
+    *y = output_info->suggested_y;
 
   return TRUE;
 }
@@ -1657,8 +1671,9 @@ meta_monitor_calculate_crtc_pos (MetaMonitor          *monitor,
 #define SMALLEST_4K_WIDTH 3656
 
 static float
-calculate_scale (MetaMonitor     *monitor,
-                 MetaMonitorMode *monitor_mode)
+calculate_scale (MetaMonitor                *monitor,
+                 MetaMonitorMode            *monitor_mode,
+                 MetaMonitorScalesConstraint constraints)
 {
   int resolution_width, resolution_height;
   int width_mm, height_mm;
@@ -1671,7 +1686,7 @@ calculate_scale (MetaMonitor     *monitor,
                                     &resolution_height);
 
   if (resolution_height < HIDPI_MIN_HEIGHT)
-    goto out;
+    return scale;
 
   /* 4K TV */
   switch (meta_monitor_get_connector_type (monitor))
@@ -1679,7 +1694,7 @@ calculate_scale (MetaMonitor     *monitor,
     case META_CONNECTOR_TYPE_HDMIA:
     case META_CONNECTOR_TYPE_HDMIB:
       if (resolution_width < SMALLEST_4K_WIDTH)
-        goto out;
+        return scale;
       break;
     default:
       break;
@@ -1692,7 +1707,7 @@ calculate_scale (MetaMonitor     *monitor,
    * size.
    */
   if (meta_monitor_has_aspect_as_size (monitor))
-    goto out;
+    return scale;
 
   if (width_mm > 0 && height_mm > 0)
     {
@@ -1709,13 +1724,13 @@ calculate_scale (MetaMonitor     *monitor,
         scale = 2.0;
     }
 
-out:
   return scale;
 }
 
 float
-meta_monitor_calculate_mode_scale (MetaMonitor     *monitor,
-                                   MetaMonitorMode *monitor_mode)
+meta_monitor_calculate_mode_scale (MetaMonitor                *monitor,
+                                   MetaMonitorMode            *monitor_mode,
+                                   MetaMonitorScalesConstraint constraints)
 {
   MetaBackend *backend = meta_get_backend ();
   MetaSettings *settings = meta_backend_get_settings (backend);
@@ -1725,7 +1740,7 @@ meta_monitor_calculate_mode_scale (MetaMonitor     *monitor,
                                                &global_scaling_factor))
     return global_scaling_factor;
 
-  return calculate_scale (monitor, monitor_mode);
+  return calculate_scale (monitor, monitor_mode, constraints);
 }
 
 static gboolean
@@ -1733,6 +1748,18 @@ is_logical_size_large_enough (int width,
                               int height)
 {
   return width * height >= MINIMUM_LOGICAL_AREA;
+}
+
+static gboolean
+is_scale_valid_for_size (float width,
+                         float height,
+                         float scale)
+{
+  if (scale < MINIMUM_SCALE_FACTOR || scale > MAXIMUM_SCALE_FACTOR)
+    return FALSE;
+
+  return is_logical_size_large_enough (floorf (width / scale),
+                                       floorf (height / scale));
 }
 
 gboolean
@@ -1754,7 +1781,8 @@ meta_monitor_mode_should_be_advertised (MetaMonitorMode *monitor_mode)
 static float
 get_closest_scale_factor_for_resolution (float width,
                                          float height,
-                                         float scale)
+                                         float scale,
+                                         float threshold)
 {
   unsigned int i, j;
   float scaled_h;
@@ -1764,20 +1792,16 @@ get_closest_scale_factor_for_resolution (float width,
   gboolean found_one;
 
   best_scale = 0;
-  scaled_w = width / scale;
-  scaled_h = height / scale;
 
-  if (scale < MINIMUM_SCALE_FACTOR ||
-      scale > MAXIMUM_SCALE_FACTOR ||
-      !is_logical_size_large_enough (floorf (scaled_w), floorf (scaled_h)))
-    goto out;
+  if (!is_scale_valid_for_size (width, height, scale))
+    return best_scale;
 
-  if (floorf (scaled_w) == scaled_w && floorf (scaled_h) == scaled_h)
+  if (fmodf (width, scale) == 0.0 && fmodf (height, scale) == 0.0)
     return scale;
 
   i = 0;
   found_one = FALSE;
-  base_scaled_w = floorf (scaled_w);
+  base_scaled_w = floorf (width / scale);
 
   do
     {
@@ -1790,12 +1814,12 @@ get_closest_scale_factor_for_resolution (float width,
           current_scale = width / scaled_w;
           scaled_h = height / current_scale;
 
-          if (current_scale >= scale + SCALE_FACTORS_STEPS ||
-              current_scale <= scale - SCALE_FACTORS_STEPS ||
+          if (current_scale >= scale + threshold ||
+              current_scale <= scale - threshold ||
               current_scale < MINIMUM_SCALE_FACTOR ||
               current_scale > MAXIMUM_SCALE_FACTOR)
             {
-              goto out;
+              return best_scale;
             }
 
           if (floorf (scaled_h) == scaled_h)
@@ -1811,7 +1835,6 @@ get_closest_scale_factor_for_resolution (float width,
     }
   while (!found_one);
 
-out:
   return best_scale;
 }
 
@@ -1833,23 +1856,35 @@ meta_monitor_calculate_supported_scales (MetaMonitor                 *monitor,
        i <= ceilf (MAXIMUM_SCALE_FACTOR);
        i++)
     {
-      for (j = 0; j < SCALE_FACTORS_PER_INTEGER; j++)
+      if (constraints & META_MONITOR_SCALES_CONSTRAINT_NO_FRAC)
         {
-          float scale;
-          float scale_value = i + j * SCALE_FACTORS_STEPS;
-
-          if ((constraints & META_MONITOR_SCALES_CONSTRAINT_NO_FRAC) &&
-              fmodf (scale_value, 1.0) != 0.0)
+          if (is_scale_valid_for_size (width, height, i))
             {
-              continue;
+              float scale = i;
+              g_array_append_val (supported_scales, scale);
             }
+        }
+      else
+        {
+          float max_bound;
 
-          scale = get_closest_scale_factor_for_resolution (width,
-                                                           height,
-                                                           scale_value);
+          if (i == floorf (MINIMUM_SCALE_FACTOR) ||
+              i == ceilf (MAXIMUM_SCALE_FACTOR))
+            max_bound = SCALE_FACTORS_STEPS;
+          else
+            max_bound = SCALE_FACTORS_STEPS / 2.0;
 
-          if (scale > 0.0f)
-            g_array_append_val (supported_scales, scale);
+          for (j = 0; j < SCALE_FACTORS_PER_INTEGER; j++)
+            {
+              float scale;
+              float scale_value = i + j * SCALE_FACTORS_STEPS;
+
+              scale = get_closest_scale_factor_for_resolution (width, height,
+                                                               scale_value,
+                                                               max_bound);
+              if (scale > 0.0)
+                g_array_append_val (supported_scales, scale);
+            }
         }
     }
 

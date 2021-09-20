@@ -19,6 +19,7 @@
 
 #include "clutter/clutter-frame-clock.h"
 
+#include "clutter/clutter-debug.h"
 #include "clutter/clutter-main.h"
 #include "clutter/clutter-private.h"
 #include "clutter/clutter-timeline-private.h"
@@ -33,8 +34,21 @@ enum
 
 static guint signals[N_SIGNALS];
 
-/* Wait 2ms after vblank before starting to draw next frame */
-#define SYNC_DELAY_US ms2us (2)
+/* An estimate queue holds several int64_t values. Adding a new value to the
+ * queue overwrites the oldest value.
+ */
+#define ESTIMATE_QUEUE_LENGTH 16
+
+typedef struct _EstimateQueue
+{
+  int64_t values[ESTIMATE_QUEUE_LENGTH];
+  int next_index;
+} EstimateQueue;
+
+/* When heuristic render time is off,
+ * wait 2ms after vblank before starting to draw next frame.
+ */
+#define SYNC_DELAY_FALLBACK_US ms2us (2)
 
 typedef struct _ClutterFrameListener
 {
@@ -63,6 +77,7 @@ struct _ClutterFrameClock
   GObject parent;
 
   float refresh_rate;
+  int64_t refresh_interval_us;
   ClutterFrameListener listener;
 
   GSource *source;
@@ -71,10 +86,27 @@ struct _ClutterFrameClock
 
   ClutterFrameClockState state;
   int64_t last_dispatch_time_us;
+  int64_t last_dispatch_lateness_us;
   int64_t last_presentation_time_us;
 
   gboolean is_next_presentation_time_valid;
   int64_t next_presentation_time_us;
+
+  /* Buffer must be submitted to KMS and GPU rendering must be finished
+   * this amount of time before the next presentation time.
+   */
+  int64_t vblank_duration_us;
+  /* Last KMS buffer submission time. */
+  int64_t last_flip_time_us;
+
+  /* Last few durations between dispatch start and buffer swap. */
+  EstimateQueue dispatch_to_swap_us;
+  /* Last few durations between buffer swap and GPU rendering finish. */
+  EstimateQueue swap_to_rendering_done_us;
+  /* Last few durations between buffer swap and KMS submission. */
+  EstimateQueue swap_to_flip_us;
+  /* If we got new measurements last frame. */
+  gboolean got_measurements_last_frame;
 
   gboolean pending_reschedule;
   gboolean pending_reschedule_now;
@@ -87,10 +119,27 @@ struct _ClutterFrameClock
 G_DEFINE_TYPE (ClutterFrameClock, clutter_frame_clock,
                G_TYPE_OBJECT)
 
+static void
+estimate_queue_add_value (EstimateQueue *queue,
+                          int64_t        value)
+{
+  queue->values[queue->next_index] = value;
+  queue->next_index = (queue->next_index + 1) % ESTIMATE_QUEUE_LENGTH;
+}
+
 float
 clutter_frame_clock_get_refresh_rate (ClutterFrameClock *frame_clock)
 {
   return frame_clock->refresh_rate;
+}
+
+static void
+clutter_frame_clock_set_refresh_rate (ClutterFrameClock *frame_clock,
+                                      float              refresh_rate)
+{
+  frame_clock->refresh_rate = refresh_rate;
+  frame_clock->refresh_interval_us =
+    (int64_t) (0.5 + G_USEC_PER_SEC / refresh_rate);
 }
 
 void
@@ -184,8 +233,43 @@ clutter_frame_clock_notify_presented (ClutterFrameClock *frame_clock,
 {
   frame_clock->last_presentation_time_us = frame_info->presentation_time;
 
+  frame_clock->got_measurements_last_frame = FALSE;
+
+  if (frame_info->cpu_time_before_buffer_swap_us != 0 &&
+      frame_info->gpu_rendering_duration_ns != 0)
+    {
+      int64_t dispatch_to_swap_us, swap_to_rendering_done_us, swap_to_flip_us;
+
+      dispatch_to_swap_us =
+        frame_info->cpu_time_before_buffer_swap_us -
+        frame_clock->last_dispatch_time_us;
+      swap_to_rendering_done_us =
+        frame_info->gpu_rendering_duration_ns / 1000;
+      swap_to_flip_us =
+        frame_clock->last_flip_time_us -
+        frame_info->cpu_time_before_buffer_swap_us;
+
+      CLUTTER_NOTE (FRAME_TIMINGS,
+                    "dispatch2swap %ld µs, swap2render %ld µs, swap2flip %ld µs",
+                    dispatch_to_swap_us,
+                    swap_to_rendering_done_us,
+                    swap_to_flip_us);
+
+      estimate_queue_add_value (&frame_clock->dispatch_to_swap_us,
+                                dispatch_to_swap_us);
+      estimate_queue_add_value (&frame_clock->swap_to_rendering_done_us,
+                                swap_to_rendering_done_us);
+      estimate_queue_add_value (&frame_clock->swap_to_flip_us,
+                                swap_to_flip_us);
+
+      frame_clock->got_measurements_last_frame = TRUE;
+    }
+
   if (frame_info->refresh_rate > 1)
-    frame_clock->refresh_rate = frame_info->refresh_rate;
+    {
+      clutter_frame_clock_set_refresh_rate (frame_clock,
+                                            frame_info->refresh_rate);
+    }
 
   switch (frame_clock->state)
     {
@@ -220,6 +304,58 @@ clutter_frame_clock_notify_ready (ClutterFrameClock *frame_clock)
     }
 }
 
+static int64_t
+clutter_frame_clock_compute_max_render_time_us (ClutterFrameClock *frame_clock)
+{
+  int64_t refresh_interval_us;
+  int64_t max_dispatch_to_swap_us = 0;
+  int64_t max_swap_to_rendering_done_us = 0;
+  int64_t max_swap_to_flip_us = 0;
+  int64_t max_render_time_us;
+  int i;
+
+  refresh_interval_us =
+    (int64_t) (0.5 + G_USEC_PER_SEC / frame_clock->refresh_rate);
+
+  if (!frame_clock->got_measurements_last_frame ||
+      G_UNLIKELY (clutter_paint_debug_flags &
+                  CLUTTER_DEBUG_DISABLE_DYNAMIC_MAX_RENDER_TIME))
+    return refresh_interval_us - SYNC_DELAY_FALLBACK_US;
+
+  for (i = 0; i < ESTIMATE_QUEUE_LENGTH; ++i)
+    {
+      max_dispatch_to_swap_us =
+        MAX (max_dispatch_to_swap_us,
+             frame_clock->dispatch_to_swap_us.values[i]);
+      max_swap_to_rendering_done_us =
+        MAX (max_swap_to_rendering_done_us,
+             frame_clock->swap_to_rendering_done_us.values[i]);
+      max_swap_to_flip_us =
+        MAX (max_swap_to_flip_us,
+             frame_clock->swap_to_flip_us.values[i]);
+    }
+
+  /* Max render time shows how early the frame clock needs to be dispatched
+   * to make it to the predicted next presentation time. It is composed of:
+   * - An estimate of duration from dispatch start to buffer swap.
+   * - Maximum between estimates of duration from buffer swap to GPU rendering
+   *   finish and duration from buffer swap to buffer submission to KMS. This
+   *   is because both of these things need to happen before the vblank, and
+   *   they are done in parallel.
+   * - Duration of the vblank.
+   * - A constant to account for variations in the above estimates.
+   */
+  max_render_time_us =
+    max_dispatch_to_swap_us +
+    MAX (max_swap_to_rendering_done_us, max_swap_to_flip_us) +
+    frame_clock->vblank_duration_us +
+    clutter_max_render_time_constant_us;
+
+  max_render_time_us = CLAMP (max_render_time_us, 0, refresh_interval_us);
+
+  return max_render_time_us;
+}
+
 static void
 calculate_next_update_time_us (ClutterFrameClock *frame_clock,
                                int64_t           *out_next_update_time_us,
@@ -227,7 +363,6 @@ calculate_next_update_time_us (ClutterFrameClock *frame_clock,
 {
   int64_t last_presentation_time_us;
   int64_t now_us;
-  float refresh_rate;
   int64_t refresh_interval_us;
   int64_t min_render_time_allowed_us;
   int64_t max_render_time_allowed_us;
@@ -238,14 +373,14 @@ calculate_next_update_time_us (ClutterFrameClock *frame_clock,
 
   now_us = g_get_monotonic_time ();
 
-  refresh_rate = frame_clock->refresh_rate;
-  refresh_interval_us = (int64_t) (0.5 + G_USEC_PER_SEC / refresh_rate);
+  refresh_interval_us = frame_clock->refresh_interval_us;
 
   if (frame_clock->last_presentation_time_us == 0)
     {
       *out_next_update_time_us =
         frame_clock->last_dispatch_time_us ?
-        frame_clock->last_dispatch_time_us + refresh_interval_us :
+        ((frame_clock->last_dispatch_time_us -
+          frame_clock->last_dispatch_lateness_us) + refresh_interval_us) :
         now_us;
 
       *out_next_presentation_time_us = 0;
@@ -253,7 +388,8 @@ calculate_next_update_time_us (ClutterFrameClock *frame_clock,
     }
 
   min_render_time_allowed_us = refresh_interval_us / 2;
-  max_render_time_allowed_us = refresh_interval_us - SYNC_DELAY_US;
+  max_render_time_allowed_us =
+    clutter_frame_clock_compute_max_render_time_us (frame_clock);
 
   if (min_render_time_allowed_us > max_render_time_allowed_us)
     min_render_time_allowed_us = max_render_time_allowed_us;
@@ -349,7 +485,7 @@ calculate_next_update_time_us (ClutterFrameClock *frame_clock,
    */
   last_next_presentation_time_us = frame_clock->next_presentation_time_us;
   time_since_last_next_presentation_time_us =
-      next_presentation_time_us - last_next_presentation_time_us;
+    next_presentation_time_us - last_next_presentation_time_us;
   if (frame_clock->is_next_presentation_time_valid &&
       time_since_last_next_presentation_time_us < (refresh_interval_us / 2))
     {
@@ -479,8 +615,19 @@ clutter_frame_clock_dispatch (ClutterFrameClock *frame_clock,
 {
   int64_t frame_count;
   ClutterFrameResult result;
+  int64_t ideal_dispatch_time_us, lateness_us;
 
   COGL_TRACE_BEGIN_SCOPED (ClutterFrameClockDispatch, "Frame Clock (dispatch)");
+
+  ideal_dispatch_time_us = (frame_clock->last_dispatch_time_us -
+                            frame_clock->last_dispatch_lateness_us) +
+                           frame_clock->refresh_interval_us;
+
+  lateness_us = time_us - ideal_dispatch_time_us;
+  if (lateness_us < 0 || lateness_us >= frame_clock->refresh_interval_us)
+    frame_clock->last_dispatch_lateness_us = 0;
+  else
+    frame_clock->last_dispatch_lateness_us = lateness_us;
 
   frame_clock->last_dispatch_time_us = time_us;
   g_source_set_ready_time (frame_clock->source, -1);
@@ -548,6 +695,58 @@ frame_clock_source_dispatch (GSource     *source,
   return G_SOURCE_CONTINUE;
 }
 
+void
+clutter_frame_clock_record_flip_time (ClutterFrameClock *frame_clock,
+                                      int64_t            flip_time_us)
+{
+  frame_clock->last_flip_time_us = flip_time_us;
+}
+
+GString *
+clutter_frame_clock_get_max_render_time_debug_info (ClutterFrameClock *frame_clock)
+{
+  int64_t max_dispatch_to_swap_us = 0;
+  int64_t max_swap_to_rendering_done_us = 0;
+  int64_t max_swap_to_flip_us = 0;
+  int i;
+  GString *string;
+
+  string = g_string_new (NULL);
+  g_string_append_printf (string, "Max render time: %ld µs",
+                          clutter_frame_clock_compute_max_render_time_us (frame_clock));
+
+  if (frame_clock->got_measurements_last_frame)
+    g_string_append_printf (string, " =");
+  else
+    g_string_append_printf (string, " (no measurements last frame)");
+
+  for (i = 0; i < ESTIMATE_QUEUE_LENGTH; ++i)
+    {
+      max_dispatch_to_swap_us =
+        MAX (max_dispatch_to_swap_us,
+             frame_clock->dispatch_to_swap_us.values[i]);
+      max_swap_to_rendering_done_us =
+        MAX (max_swap_to_rendering_done_us,
+             frame_clock->swap_to_rendering_done_us.values[i]);
+      max_swap_to_flip_us =
+        MAX (max_swap_to_flip_us,
+             frame_clock->swap_to_flip_us.values[i]);
+    }
+
+  g_string_append_printf (string, "\nVblank duration: %ld µs +",
+                          frame_clock->vblank_duration_us);
+  g_string_append_printf (string, "\nDispatch to swap: %ld µs +",
+                          max_dispatch_to_swap_us);
+  g_string_append_printf (string, "\nmax(Swap to rendering done: %ld µs,",
+                          max_swap_to_rendering_done_us);
+  g_string_append_printf (string, "\nSwap to flip: %ld µs) +",
+                          max_swap_to_flip_us);
+  g_string_append_printf (string, "\nConstant: %d µs",
+                          clutter_max_render_time_constant_us);
+
+  return string;
+}
+
 static GSourceFuncs frame_clock_source_funcs = {
   NULL,
   NULL,
@@ -577,6 +776,7 @@ init_frame_clock_source (ClutterFrameClock *frame_clock)
 
 ClutterFrameClock *
 clutter_frame_clock_new (float                            refresh_rate,
+                         int64_t                          vblank_duration_us,
                          const ClutterFrameListenerIface *iface,
                          gpointer                         user_data)
 {
@@ -591,7 +791,8 @@ clutter_frame_clock_new (float                            refresh_rate,
 
   init_frame_clock_source (frame_clock);
 
-  frame_clock->refresh_rate = refresh_rate;
+  clutter_frame_clock_set_refresh_rate (frame_clock, refresh_rate);
+  frame_clock->vblank_duration_us = vblank_duration_us;
 
   return frame_clock;
 }

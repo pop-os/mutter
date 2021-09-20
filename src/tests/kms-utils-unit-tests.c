@@ -18,17 +18,17 @@
 
 #include "config.h"
 
-#include "tests/kms-utils-unit-tests.h"
+#include <glib.h>
 
-#include "tests/test-utils.h"
 #include "backends/native/meta-kms-utils.h"
+#include "backends/native/meta-kms-update.h"
 
 typedef struct {
   drmModeModeInfo drm_mode;
   float expected_refresh_rate;
-} ModeInfoTestCase;
+} RefreshRateTestCase;
 
-static const ModeInfoTestCase test_cases[] = {
+static const RefreshRateTestCase refresh_rate_test_cases[] = {
   /* "cvt 640 480" */
   {
     .drm_mode = {
@@ -121,13 +121,13 @@ static const ModeInfoTestCase test_cases[] = {
 };
 
 static void
-refresh_rate (void)
+meta_test_kms_refresh_rate (void)
 {
   size_t index;
 
-  for (index = 0; index < G_N_ELEMENTS(test_cases); index++)
+  for (index = 0; index < G_N_ELEMENTS (refresh_rate_test_cases); index++)
     {
-      const ModeInfoTestCase *test_case = test_cases + index;
+      const RefreshRateTestCase *test_case = refresh_rate_test_cases + index;
       float refresh_rate;
 
       refresh_rate =
@@ -138,8 +138,130 @@ refresh_rate (void)
     }
 }
 
-void
+typedef struct
+{
+  drmModeModeInfo drm_mode;
+  int64_t expected_vblank_duration_us;
+} VblankDurationTestCase;
+
+static const VblankDurationTestCase vblank_duration_test_cases[] = {
+  /* "cvt 640 480" */
+  {
+    .drm_mode = {
+      .clock = 23975,
+      .hdisplay = 640,
+      .hsync_start = 664,
+      .hsync_end = 720,
+      .htotal = 800,
+      .vdisplay = 480,
+      .vsync_start = 483,
+      .vsync_end = 487,
+      .vtotal = 500,
+      .vscan = 0,
+      .flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_PVSYNC,
+    },
+    .expected_vblank_duration_us = 668,
+  },
+
+  /* "cvt 640 480" with htotal 0 */
+  {
+    .drm_mode = {
+       .clock = 23975,
+       .hdisplay = 640,
+       .hsync_start = 664,
+       .hsync_end = 720,
+       .htotal = 0,
+       .vdisplay = 480,
+       .vsync_start = 483,
+       .vsync_end = 487,
+       .vtotal = 500,
+       .vscan = 0,
+       .flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_PVSYNC,
+    },
+    .expected_vblank_duration_us = 0,
+  },
+
+  /* "cvt 640 480" with vtotal 0 */
+  {
+    .drm_mode = {
+      .clock = 23975,
+      .hdisplay = 640,
+      .hsync_start = 664,
+      .hsync_end = 720,
+      .htotal = 800,
+      .vdisplay = 480,
+      .vsync_start = 483,
+      .vsync_end = 487,
+      .vtotal = 0,
+      .vscan = 0,
+      .flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_PVSYNC,
+    },
+    .expected_vblank_duration_us = 0,
+  },
+
+  /* "cvt 640 480" with DBLSCAN */
+  {
+    .drm_mode = {
+      .clock = 23975,
+      .hdisplay = 640,
+      .hsync_start = 664,
+      .hsync_end = 720,
+      .htotal = 800,
+      .vdisplay = 480,
+      .vsync_start = 483,
+      .vsync_end = 487,
+      .vtotal = 500,
+      .vscan = 0,
+      .flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_PVSYNC |
+               DRM_MODE_FLAG_DBLSCAN,
+    },
+    .expected_vblank_duration_us = 1335,
+  },
+};
+
+static void
+meta_test_kms_vblank_duration (void)
+{
+  size_t index;
+
+  for (index = 0; index < G_N_ELEMENTS (vblank_duration_test_cases); index++)
+    {
+      const VblankDurationTestCase *test_case = vblank_duration_test_cases + index;
+      int64_t vblank_duration_us;
+
+      vblank_duration_us =
+        meta_calculate_drm_mode_vblank_duration_us (&test_case->drm_mode);
+      g_assert_cmpint (vblank_duration_us,
+                       ==,
+                       test_case->expected_vblank_duration_us);
+    }
+}
+
+static void
+meta_test_kms_update_fixed16 (void)
+{
+  g_assert_cmpint (meta_fixed_16_from_int (12345), ==, 809041920);
+  g_assert_cmpint (meta_fixed_16_to_int (809041920), ==, 12345);
+  g_assert_cmpint (meta_fixed_16_from_int (-12345), ==, -809041920);
+  g_assert_cmpint (meta_fixed_16_to_int (-809041920), ==, -12345);
+}
+
+static void
 init_kms_utils_tests (void)
 {
-  g_test_add_func ("/kms-utils/refresh-rate", refresh_rate);
+  g_test_add_func ("/backends/native/kms/refresh-rate",
+                   meta_test_kms_refresh_rate);
+  g_test_add_func ("/backends/native/kms/vblank-duration",
+                   meta_test_kms_vblank_duration);
+  g_test_add_func ("/backends/native/kms/update/fixed16",
+                   meta_test_kms_update_fixed16);
+}
+
+int
+main (int    argc,
+      char **argv)
+{
+  g_test_init (&argc, &argv, NULL);
+  init_kms_utils_tests ();
+  return g_test_run ();
 }

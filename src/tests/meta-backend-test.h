@@ -23,12 +23,26 @@
 #include "backends/x11/nested/meta-backend-x11-nested.h"
 
 #define META_TYPE_BACKEND_TEST (meta_backend_test_get_type ())
+META_EXPORT
 G_DECLARE_FINAL_TYPE (MetaBackendTest, meta_backend_test,
                       META, BACKEND_TEST, MetaBackendX11Nested)
 
+META_EXPORT
 void meta_backend_test_set_is_lid_closed (MetaBackendTest *backend_test,
                                           gboolean         is_lid_closed);
 
+META_EXPORT
 MetaGpu * meta_backend_test_get_gpu (MetaBackendTest *backend_test);
+
+META_EXPORT_TEST
+ClutterInputDevice * meta_backend_test_add_test_device (MetaBackendTest        *backend,
+                                                        const char             *name,
+                                                        ClutterInputDeviceType  device_type,
+                                                        int                     n_buttons);
+
+META_EXPORT_TEST
+void meta_backend_test_remove_device (MetaBackendTest    *backend,
+                                      ClutterInputDevice *device);
+
 
 #endif /* META_BACKEND_TEST_H */

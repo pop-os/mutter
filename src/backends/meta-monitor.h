@@ -211,8 +211,9 @@ void meta_monitor_calculate_crtc_pos (MetaMonitor          *monitor,
                                       int                  *out_y);
 
 META_EXPORT_TEST
-float meta_monitor_calculate_mode_scale (MetaMonitor     *monitor,
-                                         MetaMonitorMode *monitor_mode);
+float meta_monitor_calculate_mode_scale (MetaMonitor                 *monitor,
+                                         MetaMonitorMode             *monitor_mode,
+                                         MetaMonitorScalesConstraint  constraints);
 
 META_EXPORT_TEST
 float * meta_monitor_calculate_supported_scales (MetaMonitor                 *monitor,
@@ -260,6 +261,8 @@ gboolean meta_monitor_mode_should_be_advertised (MetaMonitorMode *monitor_mode);
 
 META_EXPORT_TEST
 MetaMonitorSpec * meta_monitor_spec_clone (MetaMonitorSpec *monitor_id);
+
+guint meta_monitor_spec_hash (gconstpointer key);
 
 META_EXPORT_TEST
 gboolean meta_monitor_spec_equals (MetaMonitorSpec *monitor_id,

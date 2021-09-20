@@ -31,10 +31,6 @@
 #include <X11/extensions/sync.h>
 #include <X11/Xlib.h>
 
-#ifdef HAVE_STARTUP_NOTIFICATION
-#include <libsn/sn.h>
-#endif
-
 #include "clutter/clutter.h"
 #include "core/keybindings-private.h"
 #include "core/meta-gesture-tracker-private.h"
@@ -260,7 +256,8 @@ struct _MetaDisplayClass
      (time2) != 0)                                                      \
   )
 
-gboolean      meta_display_open                (void);
+MetaDisplay * meta_display_new (MetaContext  *context,
+                                GError      **error);
 
 void meta_display_manage_all_xwindows (MetaDisplay *display);
 void meta_display_unmanage_windows   (MetaDisplay *display,

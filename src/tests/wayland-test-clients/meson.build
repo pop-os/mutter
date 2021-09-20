@@ -47,6 +47,7 @@ common_sources = [
 
 wayland_test_clients = [
   'subsurface-remap-toplevel',
+  'subsurface-reparenting',
   'invalid-subsurfaces',
   'invalid-xdg-shell-actions',
   'xdg-apply-limits',
@@ -58,7 +59,7 @@ foreach test : wayland_test_clients
       '@0@.c'.format(test),
       common_sources,
     ],
-    include_directories: tests_includepath,
+    include_directories: tests_includes,
     c_args: tests_c_args,
     dependencies: [
       glib_dep,

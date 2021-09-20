@@ -43,6 +43,7 @@ enum
   PROP_USE_SHADOWFB,
   PROP_SCALE,
   PROP_REFRESH_RATE,
+  PROP_VBLANK_DURATION_US,
 
   PROP_LAST
 };
@@ -79,6 +80,7 @@ typedef struct _ClutterStageViewPrivate
   cairo_region_t *redraw_clip;
 
   float refresh_rate;
+  int64_t vblank_duration_us;
   ClutterFrameClock *frame_clock;
 
   struct {
@@ -1187,6 +1189,9 @@ handle_frame_clock_frame (ClutterFrameClock *frame_clock,
 
       _clutter_stage_window_redraw_view (stage_window, view, &frame);
 
+      clutter_frame_clock_record_flip_time (frame_clock,
+                                            g_get_monotonic_time ());
+
       clutter_stage_emit_after_paint (stage, view);
 
       if (_clutter_context_get_show_fps ())
@@ -1295,6 +1300,9 @@ clutter_stage_view_get_property (GObject    *object,
     case PROP_REFRESH_RATE:
       g_value_set_float (value, priv->refresh_rate);
       break;
+    case PROP_VBLANK_DURATION_US:
+      g_value_set_int64 (value, priv->vblank_duration_us);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
     }
@@ -1338,6 +1346,9 @@ clutter_stage_view_set_property (GObject      *object,
     case PROP_REFRESH_RATE:
       priv->refresh_rate = g_value_get_float (value);
       break;
+    case PROP_VBLANK_DURATION_US:
+      priv->vblank_duration_us = g_value_get_int64 (value);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
     }
@@ -1354,8 +1365,12 @@ clutter_stage_view_constructed (GObject *object)
     init_shadowfb (view);
 
   priv->frame_clock = clutter_frame_clock_new (priv->refresh_rate,
+                                               priv->vblank_duration_us,
                                                &frame_clock_listener_iface,
                                                view);
+
+  clutter_stage_view_add_redraw_clip (view, NULL);
+  clutter_stage_view_schedule_update (view);
 
   G_OBJECT_CLASS (clutter_stage_view_parent_class)->constructed (object);
 }
@@ -1495,6 +1510,15 @@ clutter_stage_view_class_init (ClutterStageViewClass *klass)
                         1.0, G_MAXFLOAT, 60.0,
                         G_PARAM_READWRITE |
                         G_PARAM_CONSTRUCT |
+                        G_PARAM_STATIC_STRINGS);
+
+  obj_props[PROP_VBLANK_DURATION_US] =
+    g_param_spec_int64 ("vblank-duration-us",
+                        "Vblank duration (µs)",
+                        "The vblank duration",
+                        0, G_MAXINT64, 0,
+                        G_PARAM_READWRITE |
+                        G_PARAM_CONSTRUCT_ONLY |
                         G_PARAM_STATIC_STRINGS);
 
   g_object_class_install_properties (object_class, PROP_LAST, obj_props);

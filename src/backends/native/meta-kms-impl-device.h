@@ -25,6 +25,7 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 
+#include "backends/native/meta-device-pool.h"
 #include "backends/native/meta-kms-device.h"
 #include "backends/native/meta-kms-page-flip-private.h"
 #include "backends/native/meta-kms-types.h"
@@ -36,6 +37,9 @@ typedef struct _MetaKmsDeviceCaps
   gboolean has_cursor_size;
   uint64_t cursor_width;
   uint64_t cursor_height;
+
+  gboolean prefers_shadow_buffer;
+  gboolean uses_monotonic_clock;
 } MetaKmsDeviceCaps;
 
 typedef struct _MetaKmsProp MetaKmsProp;
@@ -44,6 +48,7 @@ struct _MetaKmsProp
 {
   const char *name;
   uint32_t type;
+  MetaKmsPropType internal_type;
   void (* parse) (MetaKmsImplDevice  *impl_device,
                   MetaKmsProp        *prop,
                   drmModePropertyPtr  drm_prop,
@@ -62,6 +67,9 @@ struct _MetaKmsImplDeviceClass
 {
   GObjectClass parent_class;
 
+  MetaDeviceFile * (* open_device_file) (MetaKmsImplDevice  *impl_device,
+                                         const char         *path,
+                                         GError            **error);
   void (* setup_drm_event_context) (MetaKmsImplDevice *impl_device,
                                     drmEventContext   *drm_event_context);
   MetaKmsFeedback * (* process_update) (MetaKmsImplDevice *impl_device,
@@ -72,6 +80,22 @@ struct _MetaKmsImplDeviceClass
   void (* discard_pending_page_flips) (MetaKmsImplDevice *impl_device);
   void (* prepare_shutdown) (MetaKmsImplDevice *impl_device);
 };
+
+enum
+{
+  META_KMS_ERROR_USER_INHIBITED,
+  META_KMS_ERROR_DENY_LISTED,
+  META_KMS_ERROR_NOT_SUPPORTED,
+};
+
+enum
+{
+  META_KMS_DEVICE_FILE_TAG_ATOMIC = 1 << 0,
+  META_KMS_DEVICE_FILE_TAG_SIMPLE = 1 << 1,
+};
+
+#define META_KMS_ERROR meta_kms_error_quark ()
+GQuark meta_kms_error_quark (void);
 
 MetaKmsDevice * meta_kms_impl_device_get_device (MetaKmsImplDevice *impl_device);
 
@@ -107,12 +131,16 @@ drmModePropertyPtr meta_kms_impl_device_find_property (MetaKmsImplDevice       *
 
 int meta_kms_impl_device_get_fd (MetaKmsImplDevice *impl_device);
 
-int meta_kms_impl_device_leak_fd (MetaKmsImplDevice *impl_device);
+void meta_kms_impl_device_hold_fd (MetaKmsImplDevice *impl_device);
+
+void meta_kms_impl_device_unhold_fd (MetaKmsImplDevice *impl_device);
 
 void meta_kms_impl_device_update_states (MetaKmsImplDevice *impl_device);
 
 void meta_kms_impl_device_predict_states (MetaKmsImplDevice *impl_device,
                                           MetaKmsUpdate     *update);
+
+void meta_kms_impl_device_notify_modes_set (MetaKmsImplDevice *impl_device);
 
 MetaKmsPlane * meta_kms_impl_device_add_fake_plane (MetaKmsImplDevice *impl_device,
                                                     MetaKmsPlaneType   plane_type,
@@ -141,8 +169,6 @@ void meta_kms_impl_device_handle_page_flip_callback (MetaKmsImplDevice   *impl_d
                                                      MetaKmsPageFlipData *page_flip_data);
 
 void meta_kms_impl_device_discard_pending_page_flips (MetaKmsImplDevice *impl_device);
-
-int meta_kms_impl_device_close (MetaKmsImplDevice *impl_device);
 
 gboolean meta_kms_impl_device_init_mode_setting (MetaKmsImplDevice  *impl_device,
                                                  GError            **error);

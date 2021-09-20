@@ -27,7 +27,7 @@ typedef struct _MonitorTestCase MonitorTestCase;
 
 void init_monitor_tests (void);
 
-void pre_run_monitor_tests (void);
+void pre_run_monitor_tests (MetaContext *context);
 
 void finish_monitor_tests (void);
 

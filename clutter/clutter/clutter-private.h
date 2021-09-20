@@ -173,6 +173,7 @@ void     _clutter_threads_dispatch_free (gpointer data);
 ClutterMainContext *    _clutter_context_get_default                    (void);
 void                    _clutter_context_lock                           (void);
 void                    _clutter_context_unlock                         (void);
+CLUTTER_EXPORT
 gboolean                _clutter_context_is_initialized                 (void);
 gboolean                _clutter_context_get_show_fps                   (void);
 
@@ -214,9 +215,11 @@ void  _clutter_util_fully_transform_vertices (const graphene_matrix_t  *modelvie
                                               graphene_point3d_t       *vertices_out,
                                               int                       n_vertices);
 
+CLUTTER_EXPORT
 void _clutter_util_rect_from_rectangle (const cairo_rectangle_int_t *src,
                                         graphene_rect_t             *dest);
 
+CLUTTER_EXPORT
 void _clutter_util_rectangle_int_extents (const graphene_rect_t *src,
                                           cairo_rectangle_int_t *dest);
 

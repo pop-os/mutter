@@ -29,6 +29,7 @@
 
 #include "clutter/clutter.h"
 #include "meta/meta-dnd.h"
+#include "meta/meta-idle-monitor.h"
 #include "meta/meta-remote-access-controller.h"
 
 #define META_TYPE_BACKEND (meta_backend_get_type ())
@@ -49,8 +50,7 @@ void meta_backend_lock_layout_group (MetaBackend *backend,
                                      guint        idx);
 
 META_EXPORT
-void meta_backend_set_numlock (MetaBackend *backend,
-                               gboolean     numlock_state);
+MetaContext * meta_backend_get_context (MetaBackend *backend);
 
 META_EXPORT
 ClutterActor *meta_backend_get_stage (MetaBackend *backend);
@@ -60,6 +60,9 @@ MetaDnd      *meta_backend_get_dnd   (MetaBackend *backend);
 
 META_EXPORT
 MetaSettings *meta_backend_get_settings (MetaBackend *backend);
+
+META_EXPORT
+MetaIdleMonitor * meta_backend_get_core_idle_monitor (MetaBackend *backend);
 
 META_EXPORT
 MetaRemoteAccessController * meta_backend_get_remote_access_controller (MetaBackend *backend);

@@ -40,6 +40,7 @@
 #include "core/window-private.h"
 #include "core/workspace-private.h"
 #include "meta/meta-backend.h"
+#include "meta/meta-context.h"
 #include "meta/meta-x11-errors.h"
 #include "x11/meta-startup-notification-x11.h"
 #include "x11/meta-x11-display-private.h"
@@ -358,6 +359,28 @@ alarm_state_to_string (XSyncAlarmState state)
     }
 }
 
+static const char *
+get_xi2_event_name (XIEvent *input_event)
+{
+  switch (input_event->evtype)
+    {
+    case XI_FocusIn:
+      return "XI_FocusIn";
+    case XI_FocusOut:
+      return "XI_FocusOut";
+    case XI_Enter:
+      return "XI_Enter";
+    case XI_Leave:
+      return "XI_Leave";
+    case XI_BarrierHit:
+      return "XI_BarrierHit";
+    case XI_BarrierLeave:
+      return "XI_BarrierLeave";
+    }
+
+  return NULL;
+}
+
 static void
 meta_spew_xi2_event (MetaX11Display *x11_display,
                      XIEvent        *input_event,
@@ -369,27 +392,7 @@ meta_spew_xi2_event (MetaX11Display *x11_display,
 
   XIEnterEvent *enter_event = (XIEnterEvent *) input_event;
 
-  switch (input_event->evtype)
-    {
-    case XI_FocusIn:
-      name = "XI_FocusIn";
-      break;
-    case XI_FocusOut:
-      name = "XI_FocusOut";
-      break;
-    case XI_Enter:
-      name = "XI_Enter";
-      break;
-    case XI_Leave:
-      name = "XI_Leave";
-      break;
-    case XI_BarrierHit:
-      name = "XI_BarrierHit";
-      break;
-    case XI_BarrierLeave:
-      name = "XI_BarrierLeave";
-      break;
-    }
+  name = get_xi2_event_name (input_event);
 
   switch (input_event->evtype)
     {
@@ -416,6 +419,130 @@ meta_spew_xi2_event (MetaX11Display *x11_display,
   *extra_p = extra;
 }
 
+static const char *
+get_core_event_name (XEvent *event)
+{
+  /* GenericEvent is omitted here, as it's handled separately. */
+  switch (event->type)
+    {
+    case KeyPress:
+      return "KeyPress";
+    case KeyRelease:
+      return "KeyRelease";
+    case ButtonPress:
+      return "ButtonPress";
+    case ButtonRelease:
+      return "ButtonRelease";
+    case MotionNotify:
+      return "MotionNotify";
+    case EnterNotify:
+      return "EnterNotify";
+    case LeaveNotify:
+      return "LeaveNotify";
+    case FocusIn:
+      return "FocusIn";
+    case FocusOut:
+      return "FocusOut";
+    case KeymapNotify:
+      return "KeymapNotify";
+    case Expose:
+      return "Expose";
+    case GraphicsExpose:
+      return "GraphicsExpose";
+    case NoExpose:
+      return "NoExpose";
+    case VisibilityNotify:
+      return "VisibilityNotify";
+    case CreateNotify:
+      return "CreateNotify";
+    case DestroyNotify:
+      return "DestroyNotify";
+    case UnmapNotify:
+      return "UnmapNotify";
+    case MapNotify:
+      return "MapNotify";
+    case MapRequest:
+      return "MapRequest";
+    case ReparentNotify:
+      return "ReparentNotify";
+    case ConfigureNotify:
+      return "ConfigureNotify";
+    case ConfigureRequest:
+      return "ConfigureRequest";
+    case GravityNotify:
+      return "GravityNotify";
+    case ResizeRequest:
+      return "ResizeRequest";
+    case CirculateNotify:
+      return "CirculateNotify";
+    case CirculateRequest:
+      return "CirculateRequest";
+    case PropertyNotify:
+      return "PropertyNotify";
+    case SelectionClear:
+      return "SelectionClear";
+    case SelectionRequest:
+      return "SelectionRequest";
+    case SelectionNotify:
+      return "SelectionNotify";
+    case ColormapNotify:
+      return "ColormapNotify";
+    case ClientMessage:
+      return "ClientMessage";
+    case MappingNotify:
+      return "MappingNotify";
+    }
+
+  return NULL;
+}
+
+static const char *
+get_extension_event_name (MetaX11Display *x11_display,
+                          XEvent         *event)
+{
+  if (META_X11_DISPLAY_HAS_XSYNC (x11_display) &&
+      event->type == (x11_display->xsync_event_base + XSyncAlarmNotify))
+    return "XSyncAlarmNotify";
+
+  if (META_X11_DISPLAY_HAS_SHAPE (x11_display) &&
+      event->type == (x11_display->shape_event_base + ShapeNotify))
+    return "ShapeNotify";
+
+  if (META_X11_DISPLAY_HAS_DAMAGE (x11_display) &&
+      event->type == (x11_display->damage_event_base + XDamageNotify))
+    return "XDamageNotify";
+
+  if (event->type == (x11_display->xfixes_event_base + XFixesSelectionNotify))
+    return "XFixesSelectionNotify";
+
+  return NULL;
+}
+
+static const char *
+get_event_name (MetaX11Display *x11_display,
+                XEvent         *event)
+{
+  const char *name;
+  XIEvent *input_event;
+
+  if (event->type < GenericEvent)
+    return get_core_event_name (event);
+
+  name = get_extension_event_name (x11_display, event);
+  if (name)
+    return name;
+
+  input_event = get_input_event (x11_display, event);
+  if (input_event)
+    {
+      name = get_xi2_event_name (input_event);
+      if (name)
+        return name;
+    }
+
+  return "Unknown event";
+}
+
 static void
 meta_spew_core_event (MetaX11Display *x11_display,
                       XEvent         *event,
@@ -425,64 +552,60 @@ meta_spew_core_event (MetaX11Display *x11_display,
   const char *name = NULL;
   char *extra = NULL;
 
+  name = get_core_event_name (event);
+
+  if (!name)
+    name = get_extension_event_name (x11_display, event);
+
   switch (event->type)
     {
     case KeymapNotify:
-      name = "KeymapNotify";
-      break;
     case Expose:
-      name = "Expose";
-      break;
     case GraphicsExpose:
-      name = "GraphicsExpose";
-      break;
     case NoExpose:
-      name = "NoExpose";
-      break;
     case VisibilityNotify:
-      name = "VisibilityNotify";
+    case GravityNotify:
+    case CirculateNotify:
+    case CirculateRequest:
+    case SelectionClear:
+    case SelectionRequest:
+    case SelectionNotify:
+    case ColormapNotify:
       break;
     case CreateNotify:
-      name = "CreateNotify";
       extra = g_strdup_printf ("parent: 0x%lx window: 0x%lx",
                                event->xcreatewindow.parent,
                                event->xcreatewindow.window);
       break;
     case DestroyNotify:
-      name = "DestroyNotify";
       extra = g_strdup_printf ("event: 0x%lx window: 0x%lx",
                                event->xdestroywindow.event,
                                event->xdestroywindow.window);
       break;
     case UnmapNotify:
-      name = "UnmapNotify";
       extra = g_strdup_printf ("event: 0x%lx window: 0x%lx from_configure: %d",
                                event->xunmap.event,
                                event->xunmap.window,
                                event->xunmap.from_configure);
       break;
     case MapNotify:
-      name = "MapNotify";
       extra = g_strdup_printf ("event: 0x%lx window: 0x%lx override_redirect: %d",
                                event->xmap.event,
                                event->xmap.window,
                                event->xmap.override_redirect);
       break;
     case MapRequest:
-      name = "MapRequest";
       extra = g_strdup_printf ("window: 0x%lx parent: 0x%lx\n",
                                event->xmaprequest.window,
                                event->xmaprequest.parent);
       break;
     case ReparentNotify:
-      name = "ReparentNotify";
       extra = g_strdup_printf ("window: 0x%lx parent: 0x%lx event: 0x%lx\n",
                                event->xreparent.window,
                                event->xreparent.parent,
                                event->xreparent.event);
       break;
     case ConfigureNotify:
-      name = "ConfigureNotify";
       extra = g_strdup_printf ("x: %d y: %d w: %d h: %d above: 0x%lx override_redirect: %d",
                                event->xconfigure.x,
                                event->xconfigure.y,
@@ -492,7 +615,6 @@ meta_spew_core_event (MetaX11Display *x11_display,
                                event->xconfigure.override_redirect);
       break;
     case ConfigureRequest:
-      name = "ConfigureRequest";
       extra = g_strdup_printf ("parent: 0x%lx window: 0x%lx x: %d %sy: %d %sw: %d %sh: %d %sborder: %d %sabove: %lx %sstackmode: %s %s",
                                event->xconfigurerequest.parent,
                                event->xconfigurerequest.window,
@@ -518,27 +640,15 @@ meta_spew_core_event (MetaX11Display *x11_display,
                                event->xconfigurerequest.value_mask &
                                CWStackMode ? "" : "(unset)");
       break;
-    case GravityNotify:
-      name = "GravityNotify";
-      break;
     case ResizeRequest:
-      name = "ResizeRequest";
       extra = g_strdup_printf ("width = %d height = %d",
                                event->xresizerequest.width,
                                event->xresizerequest.height);
-      break;
-    case CirculateNotify:
-      name = "CirculateNotify";
-      break;
-    case CirculateRequest:
-      name = "CirculateRequest";
       break;
     case PropertyNotify:
       {
         char *str;
         const char *state;
-
-        name = "PropertyNotify";
 
         meta_x11_error_trap_push (x11_display);
         str = XGetAtomName (x11_display->xdisplay,
@@ -558,22 +668,9 @@ meta_spew_core_event (MetaX11Display *x11_display,
         meta_XFree (str);
       }
       break;
-    case SelectionClear:
-      name = "SelectionClear";
-      break;
-    case SelectionRequest:
-      name = "SelectionRequest";
-      break;
-    case SelectionNotify:
-      name = "SelectionNotify";
-      break;
-    case ColormapNotify:
-      name = "ColormapNotify";
-      break;
     case ClientMessage:
       {
         char *str;
-        name = "ClientMessage";
         meta_x11_error_trap_push (x11_display);
         str = XGetAtomName (x11_display->xdisplay,
                             event->xclient.message_type);
@@ -585,7 +682,6 @@ meta_spew_core_event (MetaX11Display *x11_display,
       }
       break;
     case MappingNotify:
-      name = "MappingNotify";
       break;
     default:
       if (META_X11_DISPLAY_HAS_XSYNC (x11_display) &&
@@ -593,7 +689,6 @@ meta_spew_core_event (MetaX11Display *x11_display,
         {
           XSyncAlarmNotifyEvent *aevent = (XSyncAlarmNotifyEvent*) event;
 
-          name = "XSyncAlarmNotify";
           extra =
             g_strdup_printf ("alarm: 0x%lx"
                              " counter_value: %" G_GINT64_FORMAT
@@ -606,29 +701,28 @@ meta_spew_core_event (MetaX11Display *x11_display,
                              alarm_state_to_string (aevent->state));
         }
       else
-        if (META_X11_DISPLAY_HAS_SHAPE (x11_display) &&
-            event->type == (x11_display->shape_event_base + ShapeNotify))
-          {
-            XShapeEvent *sev = (XShapeEvent*) event;
+        {
+          if (META_X11_DISPLAY_HAS_SHAPE (x11_display) &&
+              event->type == (x11_display->shape_event_base + ShapeNotify))
+            {
+              XShapeEvent *sev = (XShapeEvent*) event;
 
-            name = "ShapeNotify";
-
-            extra =
-              g_strdup_printf ("kind: %s "
-                               "x: %d y: %d w: %u h: %u "
-                               "shaped: %d",
-                               sev->kind == ShapeBounding ?
-                               "ShapeBounding" :
-                               (sev->kind == ShapeClip ?
-                                "ShapeClip" : "(unknown)"),
-                               sev->x, sev->y, sev->width, sev->height,
-                               sev->shaped);
-          }
-        else
-          {
-            name = "(Unknown event)";
-            extra = g_strdup_printf ("type: %d", event->xany.type);
-          }
+              extra =
+                g_strdup_printf ("kind: %s "
+                                 "x: %d y: %d w: %u h: %u "
+                                 "shaped: %d",
+                                 sev->kind == ShapeBounding ?
+                                 "ShapeBounding" :
+                                 (sev->kind == ShapeClip ?
+                                  "ShapeClip" : "(unknown)"),
+                                 sev->x, sev->y, sev->width, sev->height,
+                                 sev->shaped);
+            }
+          else
+            {
+              extra = g_strdup_printf ("type: %d", event->xany.type);
+            }
+        }
       break;
     }
 
@@ -1145,10 +1239,13 @@ static gboolean
 close_display_idle_cb (gpointer user_data)
 {
   MetaX11Display *x11_display = META_X11_DISPLAY (user_data);
+  MetaDisplay *display = x11_display->display;
+  MetaContext *context = meta_display_get_context (display);
 
-  meta_display_close (x11_display->display,
+  meta_display_close (display,
                       x11_display->xselectionclear_timestamp);
   x11_display->display_close_idle = 0;
+  meta_context_terminate (context);
 
   return G_SOURCE_REMOVE;
 }
@@ -1778,8 +1875,8 @@ meta_x11_display_handle_xevent (MetaX11Display *x11_display,
   XIEvent *input_event;
   MetaCursorTracker *cursor_tracker;
 
-  COGL_TRACE_BEGIN_SCOPED (MetaX11DisplayHandleXevent,
-                           "X11Display (handle X11 event)");
+  COGL_TRACE_BEGIN (MetaX11DisplayHandleXevent,
+                    "X11Display (handle X11 event)");
 
 #if 0
   meta_spew_event_print (x11_display, event);
@@ -1902,6 +1999,11 @@ meta_x11_display_handle_xevent (MetaX11Display *x11_display,
     }
 
   display->current_time = META_CURRENT_TIME;
+
+  COGL_TRACE_DESCRIBE (MetaX11DisplayHandleXevent,
+                       get_event_name (x11_display, event));
+  COGL_TRACE_END (MetaX11DisplayHandleXevent);
+
   return bypass_gtk;
 }
 

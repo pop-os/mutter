@@ -212,7 +212,8 @@ on_monitors_changed (MetaMonitorManager    *manager,
 void
 meta_wayland_init_presentation_time (MetaWaylandCompositor *compositor)
 {
-  MetaBackend *backend = compositor->backend;
+  MetaContext *context = compositor->context;
+  MetaBackend *backend = meta_context_get_backend (context);
   MetaMonitorManager *monitor_manager =
     meta_backend_get_monitor_manager (backend);
   ClutterActor *stage = meta_backend_get_stage (backend);
@@ -309,7 +310,7 @@ meta_wayland_presentation_feedback_present (MetaWaylandPresentationFeedback *fee
   uint32_t refresh_interval_ns;
   uint32_t seq_hi, seq_lo;
   uint32_t flags;
-  GList *l;
+  const GList *l;
 
   if (output == NULL)
     {
@@ -342,7 +343,7 @@ meta_wayland_presentation_feedback_present (MetaWaylandPresentationFeedback *fee
   if (frame_info->flags & CLUTTER_FRAME_INFO_FLAG_VSYNC)
     flags |= WP_PRESENTATION_FEEDBACK_KIND_VSYNC;
 
-  for (l = output->resources; l; l = l->next)
+  for (l = meta_wayland_output_get_resources (output); l; l = l->next)
     {
       struct wl_resource *output_resource = l->data;
 

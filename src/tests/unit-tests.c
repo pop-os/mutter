@@ -19,25 +19,27 @@
 
 #include "config.h"
 
+#include "tests/unit-tests.h"
+
 #include <glib.h>
 #include <stdlib.h>
 
 #include <meta/main.h>
 #include <meta/util.h>
 
-#include "compositor/meta-plugin-manager.h"
 #include "core/boxes-private.h"
-#include "core/main-private.h"
+#include "meta-test/meta-context-test.h"
+#include "meta/meta-context.h"
 #include "tests/boxes-tests.h"
-#include "tests/kms-utils-unit-tests.h"
-#include "tests/meta-backend-test.h"
 #include "tests/monitor-config-migration-unit-tests.h"
 #include "tests/monitor-unit-tests.h"
 #include "tests/monitor-store-unit-tests.h"
 #include "tests/monitor-transform-tests.h"
-#include "tests/test-utils.h"
+#include "tests/meta-test-utils.h"
+#include "tests/orientation-manager-unit-tests.h"
 #include "tests/wayland-unit-tests.h"
-#include "wayland/meta-wayland.h"
+
+MetaContext *test_context;
 
 typedef struct _MetaTestLaterOrderCallbackData
 {
@@ -217,33 +219,8 @@ meta_test_adjacent_to (void)
     g_assert (!meta_rectangle_is_adjacent_to (&base, &not_adjacent[i]));
 }
 
-static gboolean
-run_tests (gpointer data)
-{
-  MetaBackend *backend = meta_get_backend ();
-  MetaSettings *settings = meta_backend_get_settings (backend);
-  gboolean ret;
-
-  meta_settings_override_experimental_features (settings);
-
-  meta_settings_enable_experimental_feature (
-    settings,
-    META_EXPERIMENTAL_FEATURE_SCALE_MONITOR_FRAMEBUFFER);
-
-  pre_run_monitor_tests ();
-  pre_run_wayland_tests ();
-
-  ret = g_test_run ();
-
-  finish_monitor_tests ();
-
-  meta_quit (ret != 0);
-
-  return FALSE;
-}
-
 static void
-init_tests (int argc, char **argv)
+init_tests (void)
 {
   g_test_add_func ("/util/meta-later/order", meta_test_util_later_order);
   g_test_add_func ("/util/meta-later/schedule-from-later",
@@ -251,31 +228,34 @@ init_tests (int argc, char **argv)
 
   g_test_add_func ("/core/boxes/adjacent-to", meta_test_adjacent_to);
 
-  init_kms_utils_tests ();
   init_monitor_store_tests ();
   init_monitor_config_migration_tests ();
   init_monitor_tests ();
   init_boxes_tests ();
   init_wayland_tests ();
   init_monitor_transform_tests ();
+  init_orientation_manager_tests ();
 }
 
 int
 main (int argc, char *argv[])
 {
-  test_init (&argc, &argv);
-  init_tests (argc, argv);
+  g_autoptr (MetaContext) context = NULL;
 
-  meta_plugin_manager_load (test_get_plugin_name ());
+  context = meta_create_test_context (META_CONTEXT_TEST_TYPE_NESTED,
+                                      META_CONTEXT_TEST_FLAG_TEST_CLIENT);
+  g_assert (meta_context_configure (context, &argc, &argv, NULL));
 
-  meta_override_compositor_configuration (META_COMPOSITOR_TYPE_WAYLAND,
-                                          META_TYPE_BACKEND_TEST,
-                                          NULL);
+  test_context = context;
 
-  meta_init ();
-  meta_register_with_session ();
+  init_tests ();
 
-  g_idle_add (run_tests, NULL);
+  g_signal_connect (context, "before-tests",
+                    G_CALLBACK (pre_run_monitor_tests), NULL);
+  g_signal_connect (context, "before-tests",
+                    G_CALLBACK (pre_run_wayland_tests), NULL);
+  g_signal_connect (context, "after-tests",
+                    G_CALLBACK (finish_monitor_tests), NULL);
 
-  return meta_run ();
+  return meta_context_test_run_tests (META_CONTEXT_TEST (context));
 }
