@@ -21,6 +21,7 @@
 
 #include "backends/native/meta-kms-impl-device-simple.h"
 
+#include "backends/native/meta-backend-native-private.h"
 #include "backends/native/meta-drm-buffer-gbm.h"
 #include "backends/native/meta-kms-connector-private.h"
 #include "backends/native/meta-kms-crtc-private.h"
@@ -59,6 +60,8 @@ struct _MetaKmsImplDeviceSimple
 
   GHashTable *cached_mode_sets;
 };
+
+static GInitableIface *initable_parent_iface;
 
 static void
 initable_iface_init (GInitableIface *iface);
@@ -652,6 +655,7 @@ retry_page_flips (gpointer user_data)
             g_critical ("Failed to page flip: %s", error->message);
 
           meta_kms_page_flip_data_discard_in_impl (page_flip_data, error);
+          meta_kms_impl_device_unhold_fd (impl_device);
         }
       else
         {
@@ -974,6 +978,7 @@ dispatch_page_flip (MetaKmsImplDevice    *impl_device,
             fb_id = 0;
           drm_mode = cached_mode_set->drm_mode;
           refresh_rate = meta_calculate_drm_mode_refresh_rate (drm_mode);
+          meta_kms_impl_device_hold_fd (impl_device);
           schedule_retry_page_flip (impl_device_simple,
                                     crtc,
                                     fb_id,
@@ -1013,6 +1018,8 @@ dispatch_page_flip (MetaKmsImplDevice    *impl_device,
     }
   else
     {
+      meta_kms_impl_device_hold_fd (impl_device);
+
       impl_device_simple->posted_page_flip_datas =
         g_list_prepend (impl_device_simple->posted_page_flip_datas,
                         page_flip_data);
@@ -1364,6 +1371,8 @@ page_flip_handler (int           fd,
               page_flip_data,
               meta_kms_crtc_get_id (crtc));
 
+  meta_kms_impl_device_unhold_fd (impl_device);
+
   meta_kms_impl_device_handle_page_flip_callback (impl_device, page_flip_data);
   impl_device_simple->posted_page_flip_datas =
     g_list_remove (impl_device_simple->posted_page_flip_datas,
@@ -1463,6 +1472,14 @@ meta_kms_impl_device_simple_handle_page_flip_callback (MetaKmsImplDevice   *impl
 }
 
 static void
+dispose_page_flip_data (MetaKmsPageFlipData *page_flip_data,
+                        MetaKmsImplDevice   *impl_device)
+{
+  meta_kms_page_flip_data_discard_in_impl (page_flip_data, NULL);
+  meta_kms_impl_device_unhold_fd (impl_device);
+}
+
+static void
 meta_kms_impl_device_simple_discard_pending_page_flips (MetaKmsImplDevice *impl_device)
 {
   MetaKmsImplDeviceSimple *impl_device_simple =
@@ -1486,7 +1503,7 @@ meta_kms_impl_device_simple_discard_pending_page_flips (MetaKmsImplDevice *impl_
                   meta_kms_impl_device_get_path (
                     meta_kms_page_flip_data_get_impl_device (page_flip_data)));
 
-      meta_kms_page_flip_data_discard_in_impl (page_flip_data, NULL);
+      dispose_page_flip_data (page_flip_data, impl_device);
       retry_page_flip_data_free (retry_page_flip_data);
     }
   g_clear_pointer (&impl_device_simple->pending_page_flip_retries, g_list_free);
@@ -1502,8 +1519,8 @@ meta_kms_impl_device_simple_prepare_shutdown (MetaKmsImplDevice *impl_device)
     META_KMS_IMPL_DEVICE_SIMPLE (impl_device);
 
   g_list_foreach (impl_device_simple->posted_page_flip_datas,
-                  (GFunc) meta_kms_page_flip_data_discard_in_impl,
-                  NULL);
+                  (GFunc) dispose_page_flip_data,
+                  impl_device);
   g_clear_list (&impl_device_simple->posted_page_flip_datas, NULL);
 }
 
@@ -1512,18 +1529,16 @@ meta_kms_impl_device_simple_finalize (GObject *object)
 {
   MetaKmsImplDeviceSimple *impl_device_simple =
     META_KMS_IMPL_DEVICE_SIMPLE (object);
+  MetaKmsImplDevice *impl_device = META_KMS_IMPL_DEVICE (impl_device_simple);
 
   g_list_free_full (impl_device_simple->pending_page_flip_retries,
                     (GDestroyNotify) retry_page_flip_data_free);
-  dispatch_page_flip_datas (&impl_device_simple->posted_page_flip_datas,
-                            (GFunc) meta_kms_page_flip_data_discard_in_impl,
-                            NULL);
   dispatch_page_flip_datas (&impl_device_simple->postponed_page_flip_datas,
-                            (GFunc) meta_kms_page_flip_data_discard_in_impl,
-                            NULL);
+                            (GFunc) dispose_page_flip_data,
+                            impl_device);
   dispatch_page_flip_datas (&impl_device_simple->postponed_mode_set_fallback_datas,
-                            (GFunc) meta_kms_page_flip_data_discard_in_impl,
-                            NULL);
+                            (GFunc) dispose_page_flip_data,
+                            impl_device);
 
   g_assert (!impl_device_simple->posted_page_flip_datas);
 
@@ -1532,6 +1547,49 @@ meta_kms_impl_device_simple_finalize (GObject *object)
   g_hash_table_destroy (impl_device_simple->cached_mode_sets);
 
   G_OBJECT_CLASS (meta_kms_impl_device_simple_parent_class)->finalize (object);
+}
+
+static MetaDeviceFile *
+meta_kms_impl_device_simple_open_device_file (MetaKmsImplDevice  *impl_device,
+                                              const char         *path,
+                                              GError            **error)
+{
+  MetaKmsDevice *device = meta_kms_impl_device_get_device (impl_device);
+  MetaKms *kms = meta_kms_device_get_kms (device);
+  MetaBackend *backend = meta_kms_get_backend (kms);
+  MetaDevicePool *device_pool =
+    meta_backend_native_get_device_pool (META_BACKEND_NATIVE (backend));
+  g_autoptr (MetaDeviceFile) device_file = NULL;
+
+  device_file = meta_device_pool_open (device_pool, path,
+                                       META_DEVICE_FILE_FLAG_TAKE_CONTROL,
+                                       error);
+  if (!device_file)
+    return NULL;
+
+  if (!meta_device_file_has_tag (device_file,
+                                 META_DEVICE_FILE_TAG_KMS,
+                                 META_KMS_DEVICE_FILE_TAG_SIMPLE))
+    {
+      int fd = meta_device_file_get_fd (device_file);
+
+      g_warn_if_fail (!meta_device_file_has_tag (device_file,
+                                                 META_DEVICE_FILE_TAG_KMS,
+                                                 META_KMS_DEVICE_FILE_TAG_ATOMIC));
+
+      if (drmSetClientCap (fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) != 0)
+        {
+          g_set_error (error, META_KMS_ERROR, META_KMS_ERROR_NOT_SUPPORTED,
+                       "DRM_CLIENT_CAP_UNIVERSAL_PLANES not supported");
+          return NULL;
+        }
+
+      meta_device_file_tag (device_file,
+                            META_DEVICE_FILE_TAG_KMS,
+                            META_KMS_DEVICE_FILE_TAG_SIMPLE);
+    }
+
+  return g_steal_pointer (&device_file);
 }
 
 static gboolean
@@ -1544,6 +1602,9 @@ meta_kms_impl_device_simple_initable_init (GInitable     *initable,
   MetaKmsImplDevice *impl_device = META_KMS_IMPL_DEVICE (impl_device_simple);
   MetaKmsDevice *device = meta_kms_impl_device_get_device (impl_device);
   GList *l;
+
+  if (!initable_parent_iface->init (initable, cancellable, error))
+    return FALSE;
 
   if (!meta_kms_impl_device_init_mode_setting (impl_device, error))
     return FALSE;
@@ -1573,6 +1634,10 @@ meta_kms_impl_device_simple_initable_init (GInitable     *initable,
                                               crtc);
     }
 
+  g_message ("Added device '%s' (%s) using non-atomic mode setting.",
+             meta_kms_impl_device_get_path (impl_device),
+             meta_kms_impl_device_get_driver_name (impl_device));
+
   return TRUE;
 }
 
@@ -1584,6 +1649,8 @@ meta_kms_impl_device_simple_init (MetaKmsImplDeviceSimple *impl_device_simple)
 static void
 initable_iface_init (GInitableIface *iface)
 {
+  initable_parent_iface = g_type_interface_peek_parent (iface);
+
   iface->init = meta_kms_impl_device_simple_initable_init;
 }
 
@@ -1596,6 +1663,8 @@ meta_kms_impl_device_simple_class_init (MetaKmsImplDeviceSimpleClass *klass)
 
   object_class->finalize = meta_kms_impl_device_simple_finalize;
 
+  impl_device_class->open_device_file =
+    meta_kms_impl_device_simple_open_device_file;
   impl_device_class->setup_drm_event_context =
     meta_kms_impl_device_simple_setup_drm_event_context;
   impl_device_class->process_update =

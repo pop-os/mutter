@@ -382,6 +382,9 @@ struct _MetaWindow
   /* TRUE iff window == window->display->focus_window */
   guint has_focus : 1;
 
+  /* TRUE if window appears focused at the moment */
+  guint appears_focused : 1;
+
   /* Have we placed this window? */
   guint placed : 1;
 
@@ -562,6 +565,9 @@ struct _MetaWindow
   guint unmanage_idle_id;
 
   pid_t client_pid;
+
+  gboolean has_valid_cgroup;
+  GFile *cgroup_path;
 };
 
 struct _MetaWindowClass
@@ -716,6 +722,8 @@ void        meta_window_get_session_geometry (MetaWindow  *window,
                                               int         *height);
 
 void        meta_window_update_unfocused_button_grabs (MetaWindow *window);
+
+void        meta_window_update_appears_focused (MetaWindow *window);
 
 void     meta_window_set_focused_internal (MetaWindow *window,
                                            gboolean    focused);
@@ -885,4 +893,8 @@ gboolean meta_window_shortcuts_inhibited (MetaWindow         *window,
                                           ClutterInputDevice *source);
 gboolean meta_window_is_stackable (MetaWindow *window);
 gboolean meta_window_is_focus_async (MetaWindow *window);
+
+GFile *meta_window_get_unit_cgroup (MetaWindow *window);
+gboolean meta_window_unit_cgroup_equal (MetaWindow *window1,
+                                        MetaWindow *window2);
 #endif

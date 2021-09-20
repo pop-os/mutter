@@ -62,6 +62,7 @@ struct _MetaMonitorsConfig
 {
   GObject parent;
 
+  MetaMonitorsConfig *parent_config;
   MetaMonitorsConfigKey *key;
   GList *logical_monitor_configs;
 
@@ -105,7 +106,12 @@ MetaMonitorsConfig * meta_monitor_config_manager_create_suggested (MetaMonitorCo
 
 META_EXPORT_TEST
 MetaMonitorsConfig * meta_monitor_config_manager_create_for_orientation (MetaMonitorConfigManager *config_manager,
+                                                                         MetaMonitorsConfig       *base_config,
                                                                          MetaMonitorTransform      transform);
+
+META_EXPORT_TEST
+MetaMonitorsConfig * meta_monitor_config_manager_create_for_builtin_orientation (MetaMonitorConfigManager *config_manager,
+                                                                                 MetaMonitorsConfig       *base_config);
 
 META_EXPORT_TEST
 MetaMonitorsConfig * meta_monitor_config_manager_create_for_rotate_monitor (MetaMonitorConfigManager *config_manager);
@@ -153,6 +159,10 @@ void meta_monitors_config_set_switch_config (MetaMonitorsConfig          *config
                                              MetaMonitorSwitchConfigType  switch_config);
 
 META_EXPORT_TEST
+void meta_monitors_config_set_parent_config (MetaMonitorsConfig *config,
+                                             MetaMonitorsConfig *parent_config);
+
+META_EXPORT_TEST
 unsigned int meta_monitors_config_key_hash (gconstpointer config_key);
 
 META_EXPORT_TEST
@@ -197,5 +207,12 @@ META_EXPORT_TEST
 gboolean meta_verify_monitors_config (MetaMonitorsConfig *config,
                                       MetaMonitorManager *monitor_manager,
                                       GError            **error);
+
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (MetaMonitorConfig, meta_monitor_config_free)
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (MetaLogicalMonitorConfig,
+                               meta_logical_monitor_config_free)
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (MetaMonitorsConfigKey,
+                               meta_monitors_config_key_free)
 
 #endif /* META_MONITOR_CONFIG_MANAGER_H */

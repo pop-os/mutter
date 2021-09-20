@@ -1,6 +1,6 @@
 project('mutter', 'c',
-  version: '40.4',
-  meson_version: '>= 0.51.0',
+  version: '41.0',
+  meson_version: '>= 0.53.0',
   license: 'GPLv2+'
 )
 
@@ -11,9 +11,12 @@ split_version = meson.project_version().split('.')
 api_version = split_version[0].to_int() - 32
 libmutter_api_version = '@0@'.format(api_version)
 
+mutter_srcdir = meson.current_source_dir()
+mutter_builddir = meson.current_build_dir()
+
 # generic version requirements
 fribidi_req = '>= 1.0.0'
-glib_req = '>= 2.67.3'
+glib_req = '>= 2.69.0'
 gi_req = '>= 0.9.5'
 graphene_req = '>= 1.10.2'
 gtk3_req = '>= 3.19.8'
@@ -41,10 +44,10 @@ gudev_req = '>= 232'
 
 # wayland version requirements
 wayland_server_req = '>= 1.18'
-wayland_protocols_req = '>= 1.19'
+wayland_protocols_req = '>= 1.21'
 
 # native backend version requirements
-libinput_req = '>= 1.15.0'
+libinput_req = '>= 1.18.0'
 gbm_req = '>= 17.3'
 
 # screen cast version requirements
@@ -188,13 +191,15 @@ if have_libgudev
   endif
 endif
 
+have_libsystemd = get_option('systemd')
+libsystemd_dep = dependency('libsystemd', required: have_libsystemd)
+
 have_native_backend = get_option('native_backend')
 if have_native_backend
   libdrm_dep = dependency('libdrm')
   libgbm_dep = dependency('gbm', version: gbm_req)
   libinput_dep = dependency('libinput', version: libinput_req)
 
-  libsystemd_dep = dependency('libsystemd', required: false)
   if libsystemd_dep.found()
     logind_provider_dep = libsystemd_dep
   else
@@ -289,6 +294,28 @@ if have_tests
   have_cogl_tests = get_option('cogl_tests')
   have_clutter_tests = get_option('clutter_tests')
   have_installed_tests = get_option('installed_tests')
+
+  meta_dbus_runner = find_program('src/tests/meta-dbus-runner.py')
+  default_test_wrappers = [
+    meta_dbus_runner,
+  ]
+
+  add_test_setup('default',
+    is_default: true,
+    exe_wrapper: default_test_wrappers,
+  )
+
+  add_test_setup('CI',
+    env: [
+      'MUTTER_DEBUG_DUMMY_MODE_SPECS=800x600@10.0',
+    ],
+    exe_wrapper: [
+      default_test_wrappers,
+      find_program('catchsegv'),
+      find_program('xvfb-run'), '-a', '-s', '+iglx -noreset',
+    ],
+    timeout_multiplier: 10,
+  )
 endif
 
 have_profiler = get_option('profiler')
@@ -386,6 +413,7 @@ cdata.set_quoted('PACKAGE_VERSION', meson.project_version())
 
 cdata.set('HAVE_EGL', have_egl)
 cdata.set('HAVE_WAYLAND', have_wayland)
+cdata.set('HAVE_LIBSYSTEMD', have_libsystemd)
 cdata.set('HAVE_NATIVE_BACKEND', have_native_backend)
 cdata.set('HAVE_REMOTE_DESKTOP', have_remote_desktop)
 cdata.set('HAVE_EGL_DEVICE', have_egl_device)
@@ -510,52 +538,35 @@ subdir('po')
 subdir('doc/man')
 
 meson.add_install_script('meson/meson-postinstall.sh')
+meson.add_dist_script('meson/check-version.py', meson.project_version(), 'NEWS')
 
-output = [
-  '',
-  '',
-  '   Mutter ' + meson.project_version(),
-  '  ===============',
-  '',
-  '    Prefix....................... ' + prefix,
-  '    libexecdir................... ' + libexecdir,
-  '    pkgdatadir................... ' + pkgdatadir,
-  '',
-  '    Rendering APIs:',
-  '',
-  '        OpenGL................... ' + have_gl.to_string(),
-  '        GLES2.................... ' + have_gles2.to_string(),
-  '        EGL...................... ' + have_egl.to_string(),
-  '        GLX...................... ' + have_glx.to_string(),
-  '',
-  '    Options:',
-  '',
-  '        Wayland.................. ' + have_wayland.to_string(),
-  '        Wayland EGLStream........ ' + have_wayland_eglstream.to_string(),
-  '        Native Backend........... ' + have_native_backend.to_string(),
-  '        EGL Device............... ' + have_egl_device.to_string(),
-  '        Remote desktop........... ' + have_remote_desktop.to_string(),
-  '        gudev.................... ' + have_libgudev.to_string(),
-  '        Wacom.................... ' + have_libwacom.to_string(),
-  '        SM....................... ' + have_sm.to_string(),
-  '        Startup notification..... ' + have_startup_notification.to_string(),
-  '        Introspection............ ' + have_introspection.to_string(),
-  '        Profiler................. ' + have_profiler.to_string(),
-  '        Xwayland initfd.......... ' + have_xwayland_initfd.to_string(),
-  '        Xwayland listenfd........ ' + have_xwayland_listenfd.to_string(),
-  '        Safe X11 I/O errors...... ' + have_xsetioerrorexithandler.to_string(),
-  '',
-  '    Tests:',
-  '',
-  '        Enabled.................. ' + have_tests.to_string(),
-  '        Core tests............... ' + have_core_tests.to_string(),
-  '        Cogl tests............... ' + have_cogl_tests.to_string(),
-  '        Clutter tests............ ' + have_clutter_tests.to_string(),
-  '        Installed tests.......... ' + have_installed_tests.to_string(),
-  '        Coverage................. ' + get_option('b_coverage').to_string(),
-  '',
-  '  Now type \'ninja -C ' + meson.build_root() + '\' to build ' + meson.project_name(),
-  '',
-  '',
-]
-message('\n'.join(output))
+summary('prefix', prefix)
+summary('libexecdir', libexecdir)
+summary('pkgdatadir', pkgdatadir)
+
+summary('OpenGL', have_gl, section: 'Rendering APIs')
+summary('GLES2', have_gles2, section: 'Rendering APIs')
+summary('EGL', have_egl, section: 'Rendering APIs')
+summary('GLX', have_glx, section: 'Rendering APIs')
+
+summary('Wayland', have_wayland, section: 'Options')
+summary('Wayland EGLStream', have_wayland_eglstream, section: 'Options')
+summary('Native Backend', have_native_backend, section: 'Options')
+summary('EGL Device', have_egl_device, section: 'Options')
+summary('Remote desktop', have_remote_desktop, section: 'Options')
+summary('gudev', have_libgudev, section: 'Options')
+summary('Wacom', have_libwacom, section: 'Options')
+summary('SM', have_sm, section: 'Options')
+summary('Startup notification', have_startup_notification, section: 'Options')
+summary('Introspection', have_introspection, section: 'Options')
+summary('Profiler', have_profiler, section: 'Options')
+summary('Xwayland initfd', have_xwayland_initfd, section: 'Options')
+summary('Xwayland listenfd', have_xwayland_listenfd, section: 'Options')
+summary('Safe X11 I/O errors', have_xsetioerrorexithandler, section: 'Options')
+
+summary('Enabled', have_tests, section: 'Tests')
+summary('Core tests', have_core_tests, section: 'Tests')
+summary('Cogl tests', have_cogl_tests, section: 'Tests')
+summary('Clutter tests', have_clutter_tests, section: 'Tests')
+summary('Installed tests', have_installed_tests, section: 'Tests')
+summary('Coverage', get_option('b_coverage'), section: 'Tests')

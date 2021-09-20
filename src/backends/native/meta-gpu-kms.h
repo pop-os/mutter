@@ -51,13 +51,9 @@ gboolean meta_gpu_kms_disable_modifiers (MetaGpuKms *gpu_kms);
 
 MetaKmsDevice * meta_gpu_kms_get_kms_device (MetaGpuKms *gpu_kms);
 
-int meta_gpu_kms_get_fd (MetaGpuKms *gpu_kms);
-
 uint32_t meta_gpu_kms_get_id (MetaGpuKms *gpu_kms);
 
 const char * meta_gpu_kms_get_file_path (MetaGpuKms *gpu_kms);
-
-gboolean meta_gpu_kms_is_clock_monotonic (MetaGpuKms *gpu_kms);
 
 void meta_gpu_kms_set_power_save_mode (MetaGpuKms    *gpu_kms,
                                        uint64_t       state,

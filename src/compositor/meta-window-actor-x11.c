@@ -60,7 +60,6 @@ struct _MetaWindowActorX11
   guint send_frame_messages_timer;
   int64_t frame_drawn_time;
   gboolean pending_schedule_update_now;
-  ClutterFrameClock *frame_clock;
 
   gulong repaint_scheduled_id;
   gulong size_changed_id;
@@ -167,6 +166,9 @@ do_send_frame_drawn (MetaWindowActorX11 *actor_x11,
 
   XClientMessageEvent ev = { 0, };
 
+  COGL_TRACE_BEGIN (MetaWindowActorX11FrameDrawn,
+                    "X11: Send _NET_WM_FRAME_DRAWN");
+
   now_us = g_get_monotonic_time ();
   frame->frame_drawn_time =
     meta_compositor_monotonic_to_high_res_xserver_time (display->compositor,
@@ -186,6 +188,21 @@ do_send_frame_drawn (MetaWindowActorX11 *actor_x11,
   XSendEvent (xdisplay, ev.window, False, 0, (XEvent *) &ev);
   XFlush (xdisplay);
   meta_x11_error_trap_pop (display->x11_display);
+
+#ifdef COGL_HAS_TRACING
+  if (G_UNLIKELY (cogl_is_tracing_enabled ()))
+    {
+      g_autofree char *description = NULL;
+
+      description = g_strdup_printf ("frame drawn time: %" G_GINT64_FORMAT ", "
+                                     "sync request serial: %" G_GINT64_FORMAT,
+                                     frame->frame_drawn_time,
+                                     frame->sync_request_serial);
+      COGL_TRACE_DESCRIBE (MetaWindowActorX11FrameDrawn,
+                           description);
+      COGL_TRACE_END (MetaWindowActorX11FrameDrawn);
+    }
+#endif
 }
 
 static void
@@ -200,6 +217,9 @@ do_send_frame_timings (MetaWindowActorX11 *actor_x11,
   Display *xdisplay = meta_x11_display_get_xdisplay (display->x11_display);
 
   XClientMessageEvent ev = { 0, };
+
+  COGL_TRACE_BEGIN (MetaWindowActorX11FrameTimings,
+                    "X11: Send _NET_WM_FRAME_TIMINGS");
 
   ev.type = ClientMessage;
   ev.window = meta_window_get_xwindow (window);
@@ -231,6 +251,23 @@ do_send_frame_timings (MetaWindowActorX11 *actor_x11,
   XSendEvent (xdisplay, ev.window, False, 0, (XEvent *) &ev);
   XFlush (xdisplay);
   meta_x11_error_trap_pop (display->x11_display);
+
+#ifdef COGL_HAS_TRACING
+  if (G_UNLIKELY (cogl_is_tracing_enabled ()))
+    {
+      g_autofree char *description = NULL;
+
+      description =
+        g_strdup_printf ("refresh interval: %d, "
+                         "presentation time: %" G_GINT64_FORMAT ", "
+                         "sync request serial: %" G_GINT64_FORMAT,
+                         refresh_interval,
+                         frame->sync_request_serial,
+                         presentation_time);
+      COGL_TRACE_DESCRIBE (MetaWindowActorX11FrameTimings, description);
+      COGL_TRACE_END (MetaWindowActorX11FrameTimings);
+    }
+#endif
 }
 
 static void
@@ -461,8 +498,12 @@ meta_window_actor_x11_queue_frame_drawn (MetaWindowActor *actor,
 
   if (skip_sync_delay)
     {
-      if (actor_x11->frame_clock)
-        clutter_frame_clock_schedule_update_now (actor_x11->frame_clock);
+      ClutterFrameClock *frame_clock;
+
+      frame_clock = clutter_actor_pick_frame_clock (CLUTTER_ACTOR (actor),
+                                                    NULL);
+      if (frame_clock)
+        clutter_frame_clock_schedule_update_now (frame_clock);
       else
         actor_x11->pending_schedule_update_now = TRUE;
     }
@@ -1246,11 +1287,16 @@ handle_stage_views_changed (MetaWindowActorX11 *actor_x11)
 {
   ClutterActor *actor = CLUTTER_ACTOR (actor_x11);
 
-  actor_x11->frame_clock = clutter_actor_pick_frame_clock (actor, NULL);
-  if (actor_x11->frame_clock && actor_x11->pending_schedule_update_now)
+  if (actor_x11->pending_schedule_update_now)
     {
-      clutter_frame_clock_schedule_update_now (actor_x11->frame_clock);
-      actor_x11->pending_schedule_update_now = FALSE;
+      ClutterFrameClock *frame_clock;
+
+      frame_clock = clutter_actor_pick_frame_clock (actor, NULL);
+      if (frame_clock)
+        {
+          clutter_frame_clock_schedule_update_now (frame_clock);
+          actor_x11->pending_schedule_update_now = FALSE;
+        }
     }
 }
 

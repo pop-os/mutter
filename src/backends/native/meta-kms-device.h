@@ -31,8 +31,6 @@ G_DECLARE_FINAL_TYPE (MetaKmsDevice, meta_kms_device,
 
 MetaKms * meta_kms_device_get_kms (MetaKmsDevice *device);
 
-int meta_kms_device_leak_fd (MetaKmsDevice *device);
-
 const char * meta_kms_device_get_path (MetaKmsDevice *device);
 
 const char * meta_kms_device_get_driver_name (MetaKmsDevice *device);
@@ -44,6 +42,10 @@ MetaKmsDeviceFlag meta_kms_device_get_flags (MetaKmsDevice *device);
 gboolean meta_kms_device_get_cursor_size (MetaKmsDevice *device,
                                           uint64_t      *out_cursor_width,
                                           uint64_t      *out_cursor_height);
+
+gboolean meta_kms_device_prefers_shadow_buffer (MetaKmsDevice *device);
+
+gboolean meta_kms_device_uses_monotonic_clock (MetaKmsDevice *device);
 
 GList * meta_kms_device_get_connectors (MetaKmsDevice *device);
 

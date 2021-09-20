@@ -243,10 +243,6 @@ meta_backend_x11_nested_post_init (MetaBackend *backend)
     META_BACKEND_CLASS (meta_backend_x11_nested_parent_class);
 
   backend_class->post_init (backend);
-
-#ifdef HAVE_WAYLAND
-  meta_backend_init_wayland (backend);
-#endif
 }
 
 static gboolean
@@ -254,10 +250,6 @@ meta_backend_x11_nested_initable_init (GInitable     *initable,
                                        GCancellable  *cancellable,
                                        GError       **error)
 {
-#ifdef HAVE_WAYLAND
-  meta_backend_init_wayland_display (META_BACKEND (initable));
-#endif
-
   return initable_parent_iface->init (initable, cancellable, error);
 }
 

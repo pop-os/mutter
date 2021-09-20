@@ -777,10 +777,8 @@ struct _ClutterActorPrivate
 
   ClutterColor bg_color;
 
-#ifdef CLUTTER_ENABLE_DEBUG
   /* a string used for debugging messages */
-  gchar *debug_name;
-#endif
+  char *debug_name;
 
   /* a set of clones of the actor */
   GHashTable *clones;
@@ -1110,13 +1108,12 @@ G_DEFINE_TYPE_WITH_CODE (ClutterActor,
  *
  * Return value: a string with a printable name
  */
-const gchar *
+const char *
 _clutter_actor_get_debug_name (ClutterActor *actor)
 {
   ClutterActorPrivate *priv = actor->priv;
-  const gchar *retval;
+  const char *retval;
 
-#ifdef CLUTTER_ENABLE_DEBUG
   if (G_UNLIKELY (priv->debug_name == NULL))
     {
       priv->debug_name = g_strdup_printf ("<%s>[<%s>:%p]",
@@ -1127,11 +1124,6 @@ _clutter_actor_get_debug_name (ClutterActor *actor)
     }
 
   retval = priv->debug_name;
-#else
-  retval = priv->name != NULL
-         ? priv->name
-         : G_OBJECT_TYPE_NAME (actor);
-#endif
 
   return retval;
 }
@@ -3659,6 +3651,18 @@ clutter_actor_paint (ClutterActor        *self,
   if (!CLUTTER_ACTOR_IS_MAPPED (self))
     return;
 
+#ifdef COGL_HAS_TRACING
+  COGL_TRACE_SCOPED_ANCHOR (ClutterActorPaint);
+
+  if (G_UNLIKELY (clutter_debug_flags & CLUTTER_DEBUG_DETAILED_TRACE))
+    {
+      COGL_TRACE_BEGIN_ANCHORED (ClutterActorPaint,
+                                 "ClutterActor (paint)");
+      COGL_TRACE_DESCRIBE (ClutterActorPaint,
+                           _clutter_actor_get_debug_name (self));
+    }
+#endif
+
   actor_node = clutter_actor_node_new (self, -1);
   root_node = clutter_paint_node_ref (actor_node);
 
@@ -5582,9 +5586,7 @@ clutter_actor_finalize (GObject *object)
 
   g_free (priv->name);
 
-#ifdef CLUTTER_ENABLE_DEBUG
   g_free (priv->debug_name);
-#endif
 
   G_OBJECT_CLASS (clutter_actor_parent_class)->finalize (object);
 }
@@ -9202,6 +9204,18 @@ clutter_actor_allocate (ClutterActor          *self,
       !CLUTTER_ACTOR_IS_MAPPED (self) &&
       !clutter_actor_has_mapped_clones (self))
     return;
+
+#ifdef COGL_HAS_TRACING
+  COGL_TRACE_SCOPED_ANCHOR (ClutterActorAllocate);
+
+  if (G_UNLIKELY (clutter_debug_flags & CLUTTER_DEBUG_DETAILED_TRACE))
+    {
+      COGL_TRACE_BEGIN_ANCHORED (ClutterActorAllocate,
+                                 "ClutterActor (allocate)");
+      COGL_TRACE_DESCRIBE (ClutterActorAllocate,
+                           _clutter_actor_get_debug_name (self));
+    }
+#endif
 
   old_allocation = priv->allocation;
   real_allocation = *box;

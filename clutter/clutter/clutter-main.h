@@ -53,6 +53,8 @@ typedef enum
   CLUTTER_DEBUG_EVENTLOOP           = 1 << 14,
   CLUTTER_DEBUG_CLIPPING            = 1 << 15,
   CLUTTER_DEBUG_OOB_TRANSFORMS      = 1 << 16,
+  CLUTTER_DEBUG_FRAME_TIMINGS       = 1 << 17,
+  CLUTTER_DEBUG_DETAILED_TRACE      = 1 << 18,
 } ClutterDebugFlag;
 
 typedef enum
@@ -62,15 +64,17 @@ typedef enum
 
 typedef enum
 {
-  CLUTTER_DEBUG_DISABLE_SWAP_EVENTS        = 1 << 0,
-  CLUTTER_DEBUG_DISABLE_CLIPPED_REDRAWS    = 1 << 1,
-  CLUTTER_DEBUG_REDRAWS                    = 1 << 2,
-  CLUTTER_DEBUG_PAINT_VOLUMES              = 1 << 3,
-  CLUTTER_DEBUG_DISABLE_CULLING            = 1 << 4,
-  CLUTTER_DEBUG_DISABLE_OFFSCREEN_REDIRECT = 1 << 5,
-  CLUTTER_DEBUG_CONTINUOUS_REDRAW          = 1 << 6,
-  CLUTTER_DEBUG_PAINT_DEFORM_TILES         = 1 << 7,
-  CLUTTER_DEBUG_PAINT_DAMAGE_REGION        = 1 << 8,
+  CLUTTER_DEBUG_DISABLE_SWAP_EVENTS             = 1 << 0,
+  CLUTTER_DEBUG_DISABLE_CLIPPED_REDRAWS         = 1 << 1,
+  CLUTTER_DEBUG_REDRAWS                         = 1 << 2,
+  CLUTTER_DEBUG_PAINT_VOLUMES                   = 1 << 3,
+  CLUTTER_DEBUG_DISABLE_CULLING                 = 1 << 4,
+  CLUTTER_DEBUG_DISABLE_OFFSCREEN_REDIRECT      = 1 << 5,
+  CLUTTER_DEBUG_CONTINUOUS_REDRAW               = 1 << 6,
+  CLUTTER_DEBUG_PAINT_DEFORM_TILES              = 1 << 7,
+  CLUTTER_DEBUG_PAINT_DAMAGE_REGION             = 1 << 8,
+  CLUTTER_DEBUG_DISABLE_DYNAMIC_MAX_RENDER_TIME = 1 << 9,
+  CLUTTER_DEBUG_PAINT_MAX_RENDER_TIME           = 1 << 10,
 } ClutterDrawDebugFlag;
 
 /**
@@ -88,7 +92,7 @@ typedef enum
  * @CLUTTER_INIT_ERROR_BACKEND: Backend initialisation failed
  * @CLUTTER_INIT_ERROR_INTERNAL: Internal error
  *
- * Error conditions returned by clutter_init() and clutter_init_with_args().
+ * Error conditions returned by clutter_init().
  *
  * Since: 0.2
  */
@@ -123,13 +127,6 @@ void                    clutter_base_init                       (void);
 CLUTTER_EXPORT
 ClutterInitError        clutter_init                            (int          *argc,
                                                                  char       ***argv) G_GNUC_WARN_UNUSED_RESULT;
-CLUTTER_EXPORT
-ClutterInitError        clutter_init_with_args                  (int          *argc,
-                                                                 char       ***argv,
-                                                                 const char   *parameter_string,
-                                                                 GOptionEntry *entries,
-                                                                 const char   *translation_domain,
-                                                                 GError      **error) G_GNUC_WARN_UNUSED_RESULT;
 
 CLUTTER_EXPORT
 GOptionGroup *          clutter_get_option_group                (void);
@@ -195,6 +192,9 @@ CLUTTER_EXPORT
 void                    clutter_remove_debug_flags              (ClutterDebugFlag     debug_flags,
                                                                  ClutterDrawDebugFlag draw_flags,
                                                                  ClutterPickDebugFlag pick_flags);
+
+CLUTTER_EXPORT
+void                    clutter_debug_set_max_render_time_constant (int max_render_time_constant_us);
 
 G_END_DECLS
 

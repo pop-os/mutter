@@ -41,6 +41,7 @@
 #include "backends/meta-pointer-constraint.h"
 #include "backends/meta-renderer.h"
 #include "backends/meta-settings-private.h"
+#include "core/meta-context-private.h"
 #include "core/util-private.h"
 
 #define DEFAULT_XKB_RULES_FILE "evdev"
@@ -107,34 +108,23 @@ struct _MetaBackendClass
                                    MetaPointerConstraint *constraint);
 };
 
-void meta_init_backend (GType         backend_gtype,
-                        unsigned int  n_properties,
-                        const char   *names[],
-                        const GValue *values);
-void meta_release_backend (void);
+void meta_backend_destroy (MetaBackend *backend);
 
 void meta_backend_prepare_shutdown (MetaBackend *backend);
 
-#ifdef HAVE_WAYLAND
-MetaWaylandCompositor * meta_backend_get_wayland_compositor (MetaBackend *backend);
-
-void meta_backend_init_wayland_display (MetaBackend *backend);
-
-void meta_backend_init_wayland (MetaBackend *backend);
-#endif
-
+META_EXPORT_TEST
 ClutterBackend * meta_backend_get_clutter_backend (MetaBackend *backend);
 
 ClutterSeat * meta_backend_get_default_seat (MetaBackend *bakcend);
 
 MetaIdleMonitor * meta_backend_get_idle_monitor (MetaBackend        *backend,
                                                  ClutterInputDevice *device);
-void meta_backend_foreach_device_monitor (MetaBackend *backend,
-                                          GFunc        func,
-                                          gpointer     user_data);
+
+MetaIdleManager * meta_backend_get_idle_manager (MetaBackend *backend);
 
 META_EXPORT_TEST
 MetaMonitorManager * meta_backend_get_monitor_manager (MetaBackend *backend);
+META_EXPORT_TEST
 MetaOrientationManager * meta_backend_get_orientation_manager (MetaBackend *backend);
 MetaCursorTracker * meta_backend_get_cursor_tracker (MetaBackend *backend);
 MetaCursorRenderer * meta_backend_get_cursor_renderer_for_device (MetaBackend        *backend,

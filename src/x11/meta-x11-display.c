@@ -82,9 +82,6 @@ typedef struct _MetaX11DisplayLogicalMonitorData
 
 static GdkDisplay *prepared_gdk_display = NULL;
 
-static const char *gnome_wm_keybindings = "Mutter";
-static const char *net_wm_name = "Mutter";
-
 static char *get_screen_name (Display *xdisplay,
                               int      number);
 
@@ -730,6 +727,8 @@ static void
 init_leader_window (MetaX11Display *x11_display,
                     guint32        *timestamp)
 {
+  MetaContext *context = meta_display_get_context (x11_display->display);
+  const char *gnome_wm_keybindings;
   gulong data[1];
   XEvent event;
 
@@ -746,8 +745,9 @@ init_leader_window (MetaX11Display *x11_display,
   meta_prop_set_utf8_string_hint (x11_display,
                                   x11_display->leader_window,
                                   x11_display->atom__NET_WM_NAME,
-                                  net_wm_name);
+                                  meta_context_get_name (context));
 
+  gnome_wm_keybindings = meta_context_get_gnome_wm_keybindings (context);
   meta_prop_set_utf8_string_hint (x11_display,
                                   x11_display->leader_window,
                                   x11_display->atom__GNOME_WM_KEYBINDINGS,
@@ -924,7 +924,7 @@ set_workspace_work_area_hint (MetaWorkspace  *workspace,
   int num_monitors;
   unsigned long *data;
   unsigned long *tmp;
-  g_autofree char *workarea_name;
+  g_autofree char *workarea_name = NULL;
   Atom workarea_atom;
 
   monitor_manager = meta_backend_get_monitor_manager (meta_get_backend ());
@@ -1002,36 +1002,6 @@ set_work_area_hint (MetaDisplay    *display,
   meta_x11_error_trap_pop (x11_display);
 
   g_free (data);
-}
-
-/**
- * meta_set_wm_name: (skip)
- * @wm_name: value for _NET_WM_NAME
- *
- * Set the value to use for the _NET_WM_NAME property. To take effect,
- * it is necessary to call this function before meta_init().
- */
-void
-meta_set_wm_name (const char *wm_name)
-{
-  g_return_if_fail (meta_get_display () == NULL);
-
-  net_wm_name = wm_name;
-}
-
-/**
- * meta_set_gnome_wm_keybindings: (skip)
- * @wm_keybindings: value for _GNOME_WM_KEYBINDINGS
- *
- * Set the value to use for the _GNOME_WM_KEYBINDINGS property. To take
- * effect, it is necessary to call this function before meta_init().
- */
-void
-meta_set_gnome_wm_keybindings (const char *wm_keybindings)
-{
-  g_return_if_fail (meta_get_display () == NULL);
-
-  gnome_wm_keybindings = wm_keybindings;
 }
 
 const gchar *
@@ -1187,7 +1157,8 @@ meta_x11_display_new (MetaDisplay *display, GError **error)
   if (meta_is_syncing ())
     XSynchronize (xdisplay, True);
 
-  replace_current_wm = meta_get_replace_current_wm ();
+  replace_current_wm =
+    meta_context_is_replacing (meta_backend_get_context (backend));
 
   /* According to _gdk_x11_display_open (), this will be returned
    * by gdk_display_get_default_screen ()

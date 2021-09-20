@@ -24,6 +24,8 @@
 
 #include <glib-object.h>
 
+#include "core/util-private.h"
+
 typedef enum
 {
   META_ORIENTATION_UNDEFINED,
@@ -32,13 +34,18 @@ typedef enum
   META_ORIENTATION_LEFT_UP,
   META_ORIENTATION_RIGHT_UP
 } MetaOrientation;
+#define META_N_ORIENTATIONS (META_ORIENTATION_RIGHT_UP + 1)
 
 #define META_TYPE_ORIENTATION_MANAGER (meta_orientation_manager_get_type ())
+
+META_EXPORT_TEST
 G_DECLARE_FINAL_TYPE (MetaOrientationManager, meta_orientation_manager,
                       META, ORIENTATION_MANAGER, GObject)
 
+META_EXPORT_TEST
 MetaOrientation meta_orientation_manager_get_orientation (MetaOrientationManager *self);
 
+META_EXPORT_TEST
 gboolean meta_orientation_manager_has_accelerometer (MetaOrientationManager *self);
 
 #endif  /* META_ORIENTATION_MANAGER_H */

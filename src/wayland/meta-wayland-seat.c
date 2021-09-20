@@ -46,8 +46,7 @@ seat_get_pointer (struct wl_client *client,
   MetaWaylandSeat *seat = wl_resource_get_user_data (resource);
   MetaWaylandPointer *pointer = seat->pointer;
 
-  if (meta_wayland_seat_has_pointer (seat))
-    meta_wayland_pointer_create_new_resource (pointer, client, resource, id);
+  meta_wayland_pointer_create_new_resource (pointer, client, resource, id);
 }
 
 static void
@@ -58,8 +57,7 @@ seat_get_keyboard (struct wl_client *client,
   MetaWaylandSeat *seat = wl_resource_get_user_data (resource);
   MetaWaylandKeyboard *keyboard = seat->keyboard;
 
-  if (meta_wayland_seat_has_keyboard (seat))
-    meta_wayland_keyboard_create_new_resource (keyboard, client, resource, id);
+  meta_wayland_keyboard_create_new_resource (keyboard, client, resource, id);
 }
 
 static void
@@ -70,8 +68,7 @@ seat_get_touch (struct wl_client *client,
   MetaWaylandSeat *seat = wl_resource_get_user_data (resource);
   MetaWaylandTouch *touch = seat->touch;
 
-  if (meta_wayland_seat_has_touch (seat))
-    meta_wayland_touch_create_new_resource (touch, client, resource, id);
+  meta_wayland_touch_create_new_resource (touch, client, resource, id);
 }
 
 static void
@@ -386,6 +383,14 @@ meta_wayland_seat_handle_event (MetaWaylandSeat *seat,
   if (!(clutter_event_get_flags (event) & CLUTTER_EVENT_FLAG_INPUT_METHOD) &&
       !event_from_supported_hardware_device (seat, event))
     return FALSE;
+
+  if (event->type == CLUTTER_BUTTON_PRESS ||
+      event->type == CLUTTER_TOUCH_BEGIN)
+    {
+      meta_wayland_text_input_handle_event (seat->text_input, event);
+      meta_wayland_gtk_text_input_handle_event (seat->gtk_text_input,
+                                                event);
+    }
 
   switch (event->type)
     {

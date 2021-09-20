@@ -82,7 +82,7 @@ struct _MetaWaylandCompositor
 {
   GObject parent;
 
-  MetaBackend *backend;
+  MetaContext *context;
 
   struct wl_display *wayland_display;
   char *display_name;
@@ -93,6 +93,7 @@ struct _MetaWaylandCompositor
 
   MetaWaylandSeat *seat;
   MetaWaylandTabletManager *tablet_manager;
+  MetaWaylandActivation *activation;
 
   GHashTable *scheduled_surface_associations;
 

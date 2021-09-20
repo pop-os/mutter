@@ -396,8 +396,7 @@ init_keymap (MetaDefaultPlugin *self)
                                          &error);
   if (!proxy)
     {
-      g_message ("Failed to acquire org.freedesktop.locale1 proxy: %s, "
-                 "probably running in CI",
+      g_warning ("Failed to acquire org.freedesktop.locale1 proxy: %s",
                  error->message);
       return;
     }
@@ -900,7 +899,7 @@ on_dialog_closed (GPid     pid,
   MetaPlugin *plugin = user_data;
   gboolean ok;
 
-  ok = g_spawn_check_exit_status (status, NULL);
+  ok = g_spawn_check_wait_status (status, NULL);
   meta_plugin_complete_display_change (plugin, ok);
 }
 

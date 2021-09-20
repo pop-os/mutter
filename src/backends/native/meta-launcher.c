@@ -51,9 +51,6 @@ struct _MetaLauncher
   MetaDbusLogin1Seat *seat_proxy;
   char *seat_id;
 
-  struct {
-    GHashTable *sysfs_fds;
-  } impl;
   gboolean session_active;
 };
 
@@ -279,172 +276,6 @@ get_seat_proxy (gchar        *seat_id,
   return seat;
 }
 
-static gboolean
-take_device (MetaDbusLogin1Session  *session_proxy,
-             int                     dev_major,
-             int                     dev_minor,
-             int                    *out_fd,
-             GCancellable           *cancellable,
-             GError                **error)
-{
-  g_autoptr (GVariant) fd_variant = NULL;
-  g_autoptr (GUnixFDList) fd_list = NULL;
-  int fd = -1;
-
-  if (!meta_dbus_login1_session_call_take_device_sync (session_proxy,
-                                                       dev_major,
-                                                       dev_minor,
-                                                       NULL,
-                                                       &fd_variant,
-                                                       NULL, /* paused */
-                                                       &fd_list,
-                                                       cancellable,
-                                                       error))
-    return FALSE;
-
-  fd = g_unix_fd_list_get (fd_list, g_variant_get_handle (fd_variant), error);
-  if (fd == -1)
-    return FALSE;
-
-  *out_fd = fd;
-  return TRUE;
-}
-
-static gboolean
-get_device_info_from_path (const char *path,
-                           int        *out_major,
-                           int        *out_minor)
-{
-  int r;
-  struct stat st;
-
-  r = stat (path, &st);
-  if (r < 0 || !S_ISCHR (st.st_mode))
-    return FALSE;
-
-  *out_major = major (st.st_rdev);
-  *out_minor = minor (st.st_rdev);
-  return TRUE;
-}
-
-static gboolean
-get_device_info_from_fd (int  fd,
-                         int *out_major,
-                         int *out_minor)
-{
-  int r;
-  struct stat st;
-
-  r = fstat (fd, &st);
-  if (r < 0 || !S_ISCHR (st.st_mode))
-    return FALSE;
-
-  *out_major = major (st.st_rdev);
-  *out_minor = minor (st.st_rdev);
-  return TRUE;
-}
-
-int
-meta_launcher_open_restricted (MetaLauncher *launcher,
-                               const char   *path,
-                               GError      **error)
-{
-  int fd;
-  int major, minor;
-
-  if (!get_device_info_from_path (path, &major, &minor))
-    {
-      g_set_error (error,
-                   G_IO_ERROR,
-                   G_IO_ERROR_NOT_FOUND,
-                   "Could not get device info for path %s: %m", path);
-      return -1;
-    }
-
-  if (!take_device (launcher->session_proxy, major, minor, &fd, NULL, error))
-    return -1;
-
-  return fd;
-}
-
-void
-meta_launcher_close_restricted (MetaLauncher *launcher,
-                                int           fd)
-{
-  MetaDbusLogin1Session *session_proxy = launcher->session_proxy;
-  int major, minor;
-  GError *error = NULL;
-
-  if (!get_device_info_from_fd (fd, &major, &minor))
-    {
-      g_warning ("Could not get device info for fd %d: %m", fd);
-      goto out;
-    }
-
-  if (!meta_dbus_login1_session_call_release_device_sync (session_proxy,
-                                                          major, minor,
-                                                          NULL, &error))
-    {
-      g_warning ("Could not release device (%d,%d): %s",
-                 major, minor, error->message);
-    }
-
-out:
-  close (fd);
-}
-
-static int
-on_evdev_device_open_in_input_impl (const char  *path,
-                                    int          flags,
-                                    gpointer     user_data,
-                                    GError     **error)
-{
-  MetaLauncher *self = user_data;
-
-  /* Allow readonly access to sysfs */
-  if (g_str_has_prefix (path, "/sys/"))
-    {
-      int fd;
-
-      do
-        {
-          fd = open (path, flags);
-        }
-      while (fd < 0 && errno == EINTR);
-
-      if (fd < 0)
-        {
-          g_set_error (error,
-                       G_FILE_ERROR,
-                       g_file_error_from_errno (errno),
-                       "Could not open /sys file: %s: %m", path);
-          return -1;
-        }
-
-      g_hash_table_add (self->impl.sysfs_fds, GINT_TO_POINTER (fd));
-      return fd;
-    }
-
-  return meta_launcher_open_restricted (self, path, error);
-}
-
-static void
-on_evdev_device_close_in_input_impl (int      fd,
-                                     gpointer user_data)
-{
-  MetaLauncher *self = user_data;
-
-  if (g_hash_table_lookup (self->impl.sysfs_fds, GINT_TO_POINTER (fd)))
-    {
-      /* /sys/ paths just need close() here */
-      g_hash_table_remove (self->impl.sysfs_fds, GINT_TO_POINTER (fd));
-      close (fd);
-      return;
-    }
-
-  meta_launcher_close_restricted (self, fd);
-}
-
 static void
 sync_active (MetaLauncher *self)
 {
@@ -503,6 +334,12 @@ get_seat_id (GError **error)
   return seat_id;
 }
 
+MetaDbusLogin1Session *
+meta_launcher_get_session_proxy (MetaLauncher *launcher)
+{
+  return launcher->session_proxy;
+}
+
 MetaLauncher *
 meta_launcher_new (GError **error)
 {
@@ -539,12 +376,7 @@ meta_launcher_new (GError **error)
   self->session_proxy = g_object_ref (session_proxy);
   self->seat_proxy = g_object_ref (seat_proxy);
   self->seat_id = g_steal_pointer (&seat_id);
-  self->impl.sysfs_fds = g_hash_table_new (NULL, NULL);
   self->session_active = TRUE;
-
-  meta_seat_impl_set_device_callbacks (on_evdev_device_open_in_input_impl,
-                                       on_evdev_device_close_in_input_impl,
-                                       self);
 
   g_signal_connect (self->session_proxy, "notify::active", G_CALLBACK (on_active_changed), self);
 
@@ -562,11 +394,9 @@ meta_launcher_new (GError **error)
 void
 meta_launcher_free (MetaLauncher *self)
 {
-  meta_seat_impl_set_device_callbacks (NULL, NULL, NULL);
   g_free (self->seat_id);
   g_object_unref (self->seat_proxy);
   g_object_unref (self->session_proxy);
-  g_hash_table_destroy (self->impl.sysfs_fds);
   g_free (self);
 }
 

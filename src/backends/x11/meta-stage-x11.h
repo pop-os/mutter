@@ -26,8 +26,8 @@
 #include <X11/Xatom.h>
 
 #include "backends/meta-backend-private.h"
+#include "backends/x11/meta-clutter-backend-x11.h"
 #include "clutter/clutter-mutter.h"
-#include "clutter/x11/clutter-x11.h"
 
 G_BEGIN_DECLS
 
@@ -50,7 +50,7 @@ typedef enum
 
 struct _MetaStageX11
 {
-  ClutterStageCogl parent_instance;
+  MetaStageImpl parent_instance;
 
   MetaBackend *backend;
 
@@ -72,7 +72,7 @@ struct _MetaStageX11
 
 struct _MetaStageX11Class
 {
-  ClutterStageCoglClass parent_class;
+  MetaStageImplClass parent_class;
 };
 
 CLUTTER_EXPORT

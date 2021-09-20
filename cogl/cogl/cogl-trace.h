@@ -43,6 +43,7 @@ typedef struct _CoglTraceHead
 {
   uint64_t begin_time;
   const char *name;
+  char *description;
 } CoglTraceHead;
 
 COGL_EXPORT
@@ -76,6 +77,10 @@ cogl_trace_begin (CoglTraceHead *head,
 COGL_EXPORT void
 cogl_trace_end (CoglTraceHead *head);
 
+COGL_EXPORT void
+cogl_trace_describe (CoglTraceHead *head,
+                     const char    *description);
+
 static inline void
 cogl_auto_trace_end_helper (CoglTraceHead **head)
 {
@@ -83,22 +88,44 @@ cogl_auto_trace_end_helper (CoglTraceHead **head)
     cogl_trace_end (*head);
 }
 
-#define COGL_TRACE_BEGIN(Name, description) \
+static inline gboolean
+cogl_is_tracing_enabled (void)
+{
+  return !!g_private_get (&cogl_trace_thread_data);
+}
+
+#define COGL_TRACE_BEGIN(Name, name) \
   CoglTraceHead CoglTrace##Name = { 0 }; \
-  if (g_private_get (&cogl_trace_thread_data)) \
-    cogl_trace_begin (&CoglTrace##Name, description); \
+  if (cogl_is_tracing_enabled ()) \
+    cogl_trace_begin (&CoglTrace##Name, name); \
 
 #define COGL_TRACE_END(Name)\
-  if (g_private_get (&cogl_trace_thread_data)) \
+  if (cogl_is_tracing_enabled ()) \
     cogl_trace_end (&CoglTrace##Name);
 
-#define COGL_TRACE_BEGIN_SCOPED(Name, description) \
+#define COGL_TRACE_BEGIN_SCOPED(Name, name) \
   CoglTraceHead CoglTrace##Name = { 0 }; \
   __attribute__((cleanup (cogl_auto_trace_end_helper))) \
     CoglTraceHead *ScopedCoglTrace##Name = NULL; \
-  if (g_private_get (&cogl_trace_thread_data)) \
+  if (cogl_is_tracing_enabled ()) \
     { \
-      cogl_trace_begin (&CoglTrace##Name, description); \
+      cogl_trace_begin (&CoglTrace##Name, name); \
+      ScopedCoglTrace##Name = &CoglTrace##Name; \
+    }
+
+#define COGL_TRACE_DESCRIBE(Name, description)\
+  if (cogl_is_tracing_enabled ()) \
+    cogl_trace_describe (&CoglTrace##Name, description);
+
+#define COGL_TRACE_SCOPED_ANCHOR(Name) \
+  CoglTraceHead G_GNUC_UNUSED CoglTrace##Name = { 0 }; \
+  __attribute__((cleanup (cogl_auto_trace_end_helper))) \
+    CoglTraceHead *ScopedCoglTrace##Name = NULL; \
+
+#define COGL_TRACE_BEGIN_ANCHORED(Name, name) \
+  if (cogl_is_tracing_enabled ()) \
+    { \
+      cogl_trace_begin (&CoglTrace##Name, name); \
       ScopedCoglTrace##Name = &CoglTrace##Name; \
     }
 
@@ -106,9 +133,12 @@ cogl_auto_trace_end_helper (CoglTraceHead **head)
 
 #include <stdio.h>
 
-#define COGL_TRACE_BEGIN(Name, description) (void) 0
+#define COGL_TRACE_BEGIN(Name, name) (void) 0
 #define COGL_TRACE_END(Name) (void) 0
-#define COGL_TRACE_BEGIN_SCOPED(Name, description) (void) 0
+#define COGL_TRACE_BEGIN_SCOPED(Name, name) (void) 0
+#define COGL_TRACE_DESCRIBE(Name, description) (void) 0
+#define COGL_TRACE_ANCHOR(Name) (void) 0
+#define COGL_TRACE_BEGIN_ANCHORED(Name, name) (void) 0
 
 COGL_EXPORT void
 cogl_set_tracing_enabled_on_thread_with_fd (void       *data,

@@ -80,6 +80,7 @@ clutter_headers = [
   'clutter-tap-action.h',
   'clutter-text.h',
   'clutter-text-buffer.h',
+  'clutter-texture-content.h',
   'clutter-timeline.h',
   'clutter-transition-group.h',
   'clutter-transition.h',
@@ -173,6 +174,7 @@ clutter_sources = [
   'clutter-tap-action.c',
   'clutter-text.c',
   'clutter-text-buffer.c',
+  'clutter-texture-content.c',
   'clutter-transition-group.c',
   'clutter-transition.c',
   'clutter-timeline.c',
@@ -229,47 +231,7 @@ clutter_deprecated_headers = [
   'deprecated/clutter-timeline.h',
 ]
 
-clutter_backend_sources = []
-clutter_backend_nonintrospected_sources = [
-  'cogl/clutter-stage-cogl.c',
-]
-clutter_backend_headers = []
-clutter_backend_private_headers = [
-  'cogl/clutter-stage-cogl.h',
-]
-
-if have_x11
-  clutter_x11_sources = [
-    'x11/clutter-backend-x11.c',
-  ]
-  clutter_backend_sources += clutter_x11_sources
-
-  clutter_x11_headers = [
-    'x11/clutter-x11.h',
-  ]
-  clutter_backend_headers += clutter_x11_headers
-
-  clutter_x11_private_headers = [
-    'x11/clutter-backend-x11.h',
-    'x11/clutter-settings-x11.h',
-  ]
-  clutter_backend_private_headers += clutter_x11_private_headers
-
-  clutter_x11_nonintrospected_sources = [
-    'x11/xsettings/xsettings-client.c',
-    'x11/xsettings/xsettings-client.h',
-    'x11/xsettings/xsettings-common.c',
-    'x11/xsettings/xsettings-common.h',
-  ]
-  clutter_backend_nonintrospected_sources += clutter_x11_nonintrospected_sources
-endif
-
-if have_wayland
-  clutter_wayland_private_headers = [
-    'wayland/clutter-wayland-compositor.h',
-  ]
-  clutter_backend_private_headers += clutter_wayland_private_headers
-endif
+clutter_backend_private_headers = []
 
 cally_headers = [
     'cally/cally-actor.h',
@@ -304,8 +266,6 @@ clutter_built_private_headers = []
 cdata = configuration_data()
 cdata.set_quoted('MUTTER_VERSION', meson.project_version())
 cdata.set('CLUTTER_DRIVERS', '"*"')
-cdata.set('HAVE_EVDEV', have_native_backend)
-cdata.set('HAVE_LIBWACOM', have_libwacom)
 cdata.set('HAVE_PANGO_FT2', have_pango_ft2)
 
 clutter_build_config_h = configure_file(
@@ -315,30 +275,6 @@ clutter_build_config_h = configure_file(
   install: false,
 )
 clutter_built_private_headers += clutter_build_config_h
-
-cdata = configuration_data()
-if have_wayland
-  cdata.set10('CLUTTER_HAS_WAYLAND_COMPOSITOR_SUPPORT', true)
-endif
-if have_x11
-  cdata.set_quoted('CLUTTER_WINDOWING_X11', 'x11')
-  cdata.set_quoted('CLUTTER_INPUT_X11', 'x11')
-  cdata.set_quoted('CLUTTER_WINDOWING_GLX', 'glx')
-endif
-if have_native_backend
-  cdata.set_quoted('CLUTTER_WINDOWING_EGL', 'eglnative')
-  cdata.set_quoted('CLUTTER_INPUT_EVDEV', 'evdev')
-endif
-cdata.set_quoted('CLUTTER_INPUT_NULL', 'null')
-
-clutter_config_h = configure_file(
-  input: 'clutter-config.h.in',
-  output: 'clutter-config.h',
-  configuration: cdata,
-  install: true,
-  install_dir: clutter_clutter_includedir,
-)
-clutter_built_headers += clutter_config_h
 
 clutter_enum_types = gnome.mkenums('clutter-enum-types',
   sources: [clutter_headers, clutter_deprecated_headers],
@@ -369,10 +305,6 @@ libmutter_clutter = shared_library(libmutter_clutter_name,
     clutter_private_headers,
     clutter_nonintrospected_sources,
     clutter_deprecated_headers,
-    clutter_backend_sources,
-    clutter_backend_nonintrospected_sources,
-    clutter_backend_headers,
-    clutter_backend_private_headers,
     clutter_built_sources,
     clutter_built_headers,
     cally_sources,
@@ -452,29 +384,6 @@ if have_introspection
     install_dir_typelib: pkglibdir,
     install: true
   )
-
-  if have_x11
-    libmutter_clutter_x11_gir = gnome.generate_gir(libmutter_clutter,
-      sources: [
-        clutter_x11_sources,
-        clutter_x11_headers,
-      ],
-      nsversion: libmutter_api_version,
-      namespace: 'ClutterX11',
-      export_packages: ['mutter-clutter-x11-' + libmutter_api_version],
-      includes: [
-        libmutter_cogl_gir[0],
-        libmutter_cogl_pango_gir[0],
-        libmutter_clutter_gir[0],
-        'xlib-2.0',
-      ],
-      dependencies: [],
-      extra_args: clutter_introspection_args,
-      install_dir_gir: pkglibdir,
-      install_dir_typelib: pkglibdir,
-      install: true
-    )
-  endif
 endif
 
 install_headers(clutter_headers,
@@ -486,27 +395,10 @@ install_headers(cally_headers,
 install_headers(clutter_deprecated_headers,
   subdir: join_paths(clutter_clutter_includesubdir, 'deprecated'))
 
-install_headers(clutter_x11_headers,
-  subdir: join_paths(clutter_clutter_includesubdir, 'x11'))
-
 pkg.generate(libmutter_clutter,
   name: 'Mutters Clutter',
   filebase: libmutter_clutter_name,
   description: 'Mutters Clutter Private Library',
-  libraries: [m_dep],
-  subdirs: join_paths(pkgname, 'clutter'),
-  requires: [clutter_pkg_deps, libmutter_cogl_name],
-  version: meson.project_version(),
-  variables: [
-    'apiversion=' + libmutter_api_version,
-  ],
-  install_dir: pcdir,
-)
-
-pkg.generate(libmutter_clutter,
-  name: 'Mutters ClutterX11',
-  filebase: 'mutter-clutter-x11-' + libmutter_api_version,
-  description: 'Mutters ClutterX11 Private Library',
   libraries: [m_dep],
   subdirs: join_paths(pkgname, 'clutter'),
   requires: [clutter_pkg_deps, libmutter_cogl_name],
