@@ -1,3 +1,10 @@
+mutter (40.4-3) UNRELEASED; urgency=medium
+
+  [ Jeremy Bicha ]
+  * debian/watch: Watch for stable releases
+
+ -- Simon McVittie <smcv@debian.org>  Mon, 20 Sep 2021 10:06:30 +0100
+
 mutter (40.4-2) unstable; urgency=medium
 
   * Team upload
