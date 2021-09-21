@@ -225,7 +225,9 @@ Description: Development files for the Mutter window manager
  This package contains the development files.
 
 Package: libmutter-test-9
+Section: libs
 Architecture: any
+Multi-Arch: same
 Depends: libmutter-9-0 (= ${binary:Version}),
          ${misc:Depends},
          ${shlibs:Depends}
