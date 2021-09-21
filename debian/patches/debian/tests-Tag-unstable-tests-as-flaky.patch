@@ -13,10 +13,10 @@ Forwarded: not-needed
  2 files changed, 6 insertions(+), 2 deletions(-)
 
 diff --git a/src/tests/clutter/conform/meson.build b/src/tests/clutter/conform/meson.build
-index 387360d..683400b 100644
+index aec4a91..9c9772a 100644
 --- a/src/tests/clutter/conform/meson.build
 +++ b/src/tests/clutter/conform/meson.build
-@@ -73,8 +73,12 @@ foreach test : clutter_conform_tests
+@@ -71,8 +71,12 @@ foreach test : clutter_conform_tests
      install: false,
    )
  
@@ -31,10 +31,10 @@ index 387360d..683400b 100644
      is_parallel: false,
    )
 diff --git a/src/tests/meson.build b/src/tests/meson.build
-index 2a2e357..ad5f992 100644
+index 3d0aec3..8bc3044 100644
 --- a/src/tests/meson.build
 +++ b/src/tests/meson.build
-@@ -282,7 +282,7 @@ test('headless-start', headless_start_test,
+@@ -321,7 +321,7 @@ test('headless-start', headless_start_test,
  )
  
  test('stage-view', stage_view_tests,

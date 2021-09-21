@@ -10,14 +10,14 @@ simultaneously, both under the heading of XI2.
 Bug-Ubuntu: https://launchpad.net/bugs/1686081
 Forwarded: https://gitlab.gnome.org/GNOME/mutter/merge_requests/37
 Applied-upstream: no, rejected as not long-term sustainable
-Last-Update: 2018-03-16
+Last-Update: 2021-09-21
 ---
  src/backends/x11/meta-input-settings-x11.c | 155 ++++++++++++++++++++++++++---
  src/backends/x11/meta-seat-x11.c           |  12 ++-
  2 files changed, 151 insertions(+), 16 deletions(-)
 
 diff --git a/src/backends/x11/meta-input-settings-x11.c b/src/backends/x11/meta-input-settings-x11.c
-index 9639028..915da8f 100644
+index 26048f8..9f140a2 100644
 --- a/src/backends/x11/meta-input-settings-x11.c
 +++ b/src/backends/x11/meta-input-settings-x11.c
 @@ -175,8 +175,6 @@ meta_input_settings_x11_set_send_events (MetaInputSettings        *settings,
@@ -258,7 +258,7 @@ index 9639028..915da8f 100644
    switch (mode)
      {
 diff --git a/src/backends/x11/meta-seat-x11.c b/src/backends/x11/meta-seat-x11.c
-index d43834b..e758786 100644
+index 2f2637a..64cc566 100644
 --- a/src/backends/x11/meta-seat-x11.c
 +++ b/src/backends/x11/meta-seat-x11.c
 @@ -246,7 +246,8 @@ is_touch_device (XIAnyClassInfo         **classes,
@@ -271,16 +271,16 @@ index d43834b..e758786 100644
  {
    gulong nitems, bytes_after;
    uint32_t *data = NULL;
-@@ -254,7 +255,7 @@ is_touchpad_device (XIDeviceInfo *info)
-   Atom type;
+@@ -255,7 +256,7 @@ is_touchpad_device (XIDeviceInfo *info)
    Atom prop;
  
--  prop = XInternAtom (clutter_x11_get_default_display (), "libinput Tapping Enabled", True);
-+  prop = XInternAtom (clutter_x11_get_default_display (), name, True);
+   prop = XInternAtom (meta_clutter_x11_get_default_display (),
+-                      "libinput Tapping Enabled", True);
++                      name, True);
    if (prop == None)
      return FALSE;
  
-@@ -275,6 +276,13 @@ is_touchpad_device (XIDeviceInfo *info)
+@@ -276,6 +277,13 @@ is_touchpad_device (XIDeviceInfo *info)
    return TRUE;
  }
  

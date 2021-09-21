@@ -11,10 +11,10 @@ So let's disable this for now
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/src/tests/native-headless.c b/src/tests/native-headless.c
-index 6b5da66..fe31c9e 100644
+index 6680ba7..8a2d24f 100644
 --- a/src/tests/native-headless.c
 +++ b/src/tests/native-headless.c
-@@ -34,7 +34,8 @@ static void
+@@ -28,7 +28,8 @@ static void
  init_tests (void)
  {
    init_virtual_monitor_tests ();
@@ -23,4 +23,4 @@ index 6b5da66..fe31c9e 100644
 +  (void) init_screen_cast_tests;
  }
  
- static gboolean
+ int
