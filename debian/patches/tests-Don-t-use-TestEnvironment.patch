@@ -8,6 +8,7 @@ currently removes all other environment variables, causing test failure
 (see GNOME/gnome-desktop-testing#1).
 
 Signed-off-by: Simon McVittie <smcv@debian.org>
+Forwarded: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2009
 ---
  cogl/tests/conform/mutter-cogl.test.in | 3 +--
  src/tests/mutter-all.test.in           | 3 +--

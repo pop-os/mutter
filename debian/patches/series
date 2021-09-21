@@ -6,3 +6,4 @@ debian/tests-Tag-unstable-tests-as-flaky.patch
 debian/tests-Do-not-run-screencast-tests.patch
 meta-dbus-runner-Import-importlib.util.patch
 tests-Don-t-use-TestEnvironment.patch
+tests-Don-t-continue-if-setup-commands-fail.patch
