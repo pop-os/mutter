@@ -117,6 +117,7 @@ Depends: at-spi2-core,
          dbus,
          dmz-cursor-theme,
          libmutter-9-0 (= ${binary:Version}),
+         libmutter-test-9 (= ${binary:Version}),
          mutter (= ${binary:Version}),
          python3,
          python3-dbus,
@@ -226,6 +227,20 @@ Description: Development files for the Mutter window manager
  of Clutter, a scene graph and user interface toolkit.
  .
  This package contains the development files.
+
+Package: libmutter-test-9
+Architecture: any
+Depends: libmutter-9-0 (= ${binary:Version}),
+         ${misc:Depends},
+         ${shlibs:Depends}
+Description: Test helper library for GNOME's window manager library
+ Mutter is a Wayland display server and X11 window manager and
+ compositor library. It contains functionality related to, among other
+ things, window management, window compositing, focus tracking, workspace
+ management, keybindings and monitor configuration.
+ .
+ This package contains a private library used by the automated tests for
+ mutter and gnome-shell. It should not be used by non-GNOME packages.
 
 Package: mutter-common
 Section: misc

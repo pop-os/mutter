@@ -1,4 +1,4 @@
-libmutter-test-9.so mutter-9-tests #MINVER#
+libmutter-test-9.so libmutter-test-9 #MINVER#
 * Build-Depends-Package: libmutter-9-dev
  meta_async_waiter_destroy@Base 41.0
  meta_async_waiter_new@Base 41.0
