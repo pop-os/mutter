@@ -1,4 +1,5 @@
 # These RUNPATHs are needed to find mutter's private cogl fork
 mutter-9-tests: custom-library-search-path usr/libexec/installed-tests/mutter-*/cogl/conform/test-conformance /usr/lib/*/mutter-*
+mutter-9-tests: custom-library-search-path usr/lib/*/libmutter-test-9.so /usr/lib/*/mutter-*
 # Private to mutter and gnome-shell, and in step with the package name
 mutter-9-tests: package-name-doesnt-match-sonames libmutter-test-9
