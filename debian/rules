@@ -39,9 +39,6 @@ endif
 ifeq ($(DEB_HOST_ARCH),$(findstring $(DEB_HOST_ARCH),armel armhf))
 CONFFLAGS += \
 	-Ddefault_driver=gles2
-else
-CONFFLAGS += \
-	-Ddefault_driver=gl
 endif
 
 override_dh_auto_configure:
