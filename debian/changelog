@@ -1,4 +1,6 @@
-mutter (41.0-1) UNRELEASED; urgency=medium
+mutter (41.0-1) experimental; urgency=medium
+
+  * Team upload
 
   [ Jeremy Bicha ]
   * debian/watch: Watch for stable releases
@@ -33,7 +35,9 @@ mutter (41.0-1) UNRELEASED; urgency=medium
     d/p/tests-Don-t-continue-if-setup-commands-fail.patch:
     Add patch to avoid using TestEnvironment.
     This works around a gnome-desktop-testing bug.
-  * Add Lintian override for another RUNPATH in the tests
+  * Add Lintian override for another RUNPATH in the tests.
+    As with the existing tests, this is necessary to use mutter's fork of
+    clutter and cogl.
   * Standards-Version: 4.6.0 (no changes required)
   * Put the new libmutter-test-9 in its own binary package.
     To avoid micro-packages, this includes the -dev files too; there is no
@@ -41,7 +45,7 @@ mutter (41.0-1) UNRELEASED; urgency=medium
     this library are expected to build-depend on both. Outside mutter
     itself, it is only expected to be used by gnome-shell.
 
- -- Simon McVittie <smcv@debian.org>  Tue, 21 Sep 2021 16:56:43 +0100
+ -- Simon McVittie <smcv@debian.org>  Tue, 21 Sep 2021 18:44:18 +0100
 
 mutter (40.4-2) unstable; urgency=medium
 
