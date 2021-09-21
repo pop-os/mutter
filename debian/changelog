@@ -5,8 +5,43 @@ mutter (41.0-1) UNRELEASED; urgency=medium
 
   [ Simon McVittie ]
   * New upstream release
+  * Update package names for ABI break
+  * Update build-dependencies
+  * d/copyright: Update
+  * Rebase patch series
+  * Update symbols file
+  * d/p/debian/synaptics-support.patch:
+    Stop patching in Xorg synaptics driver support.
+    Upstream rejected this patch back in 2018, but we continued to apply it
+    as a transitional step for Ubuntu 18.04. Since then we've had stable/LTS
+    releases of Debian 10, Ubuntu 18.04, Debian 11 and Ubuntu 20.04,
+    libinput has improved, and both Debian and Ubuntu have switched to
+    running GNOME in Wayland mode by default; let's have another try at
+    following upstream on this. (Closes: #993171)
+  * d/rules: Use upstream driver selection, except on 32-bit ARM.
+    Specifying -Ddefault_driver=gl on x86 (and other architectures that are
+    not 32-bit ARM) is no longer the same as the upstream default: the
+    upstream default is now gl3, meaning modern OpenGL, whereas the gl driver
+    is legacy (pre-3.2) OpenGL. Assume upstream are doing this for a reason.
+    For now we continue to specify -Ddefault_driver=gles2 on 32-bit ARM, and
+    apply the patch that adds the default_driver option, because 32-bit ARM
+    has historically been an exception to the usual rules.
+  * Add test-dependency on python3-dbus, python3-dbusmock
+  * d/p/meta-dbus-runner-Import-importlib.util.patch:
+    Add patch to fix test failure by working around #994806
+  * d/p/tests-Don-t-use-TestEnvironment.patch,
+    d/p/tests-Don-t-continue-if-setup-commands-fail.patch:
+    Add patch to avoid using TestEnvironment.
+    This works around a gnome-desktop-testing bug.
+  * Add Lintian override for another RUNPATH in the tests
+  * Standards-Version: 4.6.0 (no changes required)
+  * Put the new libmutter-test-9 in its own binary package.
+    To avoid micro-packages, this includes the -dev files too; there is no
+    explicit dependency on libmutter-9-dev, but packages compiling against
+    this library are expected to build-depend on both. Outside mutter
+    itself, it is only expected to be used by gnome-shell.
 
- -- Simon McVittie <smcv@debian.org>  Mon, 20 Sep 2021 10:07:04 +0100
+ -- Simon McVittie <smcv@debian.org>  Tue, 21 Sep 2021 16:56:43 +0100
 
 mutter (40.4-2) unstable; urgency=medium
 
