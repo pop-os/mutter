@@ -1,3 +1,43 @@
+mutter (40.5-1) unstable; urgency=medium
+
+  * New upstream release:
+    - Fix monitor screencast scanouts
+    - Fix middle-click emulation support on X11
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 24 Sep 2021 21:11:07 +0200
+
+mutter (40.4-2) unstable; urgency=medium
+
+  * Team upload
+
+  [ Jeremy Bicha ]
+  * Build-Depend on libsysprof-capture-4-dev instead of sysprof
+
+  [ Simon McVittie ]
+  * Upload to unstable, part of transition #992870
+
+ -- Simon McVittie <smcv@debian.org>  Sat, 11 Sep 2021 21:34:10 +0100
+
+mutter (40.4-1) experimental; urgency=medium
+
+  * Team upload
+  * New upstream release
+    - Don't require a newly attached buffer to apply state
+    - Fix upside-down Xshape surface with EGLstream
+    - Handle failure to allocate offscreen
+    - Improve window state checks
+    - Fix area-based screencast recording for unredirected windows such
+      as fullscreen games
+    - Fix ability to map a graphics tablet to a monitor
+    - Fix a crash if scanout fails unexpectedly
+    - Fix a logic error in determining number of input device modes
+    - Translation updates
+  * Don't let debhelper 13.4+ make all of /usr/libexec executable.
+    This is not what we want for installed-tests' associated data.
+  * Add a lintian override for dh-exec-subst-unknown-variable
+
+ -- Simon McVittie <smcv@debian.org>  Tue, 31 Aug 2021 10:14:04 +0100
+
 mutter (40.2.1-1ubuntu1) impish; urgency=medium
 
   * Merge with debian, containing new upstream version
@@ -88,6 +128,41 @@ mutter (40.1-1) experimental; urgency=medium
   * Remove Conflicts for old libmutter-*-dev packages
 
  -- Laurent Bigonville <bigon@debian.org>  Thu, 27 May 2021 21:31:05 +0200
+
+mutter (3.38.6-2) unstable; urgency=medium
+
+  * Team upload
+  * d/p/monitor-manager-Don-t-include-generated-code-in-header-fi.patch:
+    Add patch from upstream 40.1 to fix FTBFS seen on s390x.
+    Thanks to Adrian Bunk.
+
+ -- Simon McVittie <smcv@debian.org>  Thu, 26 Aug 2021 16:12:19 +0100
+
+mutter (3.38.6-1) unstable; urgency=medium
+
+  [ Marco Trevisan ]
+  * d/gbp.conf, d/control.in: Update VCS details for debian/unstable branch
+
+  [ Simon McVittie ]
+  * New upstream release
+    - xwayland: Check permissions on /tmp/.X11-unix
+    - Ensure valid window texture size after viewport changes
+    - kms: Improve handling of common video modes that might exceed the
+      possible bandwidth
+    - Fix damage propagation for rotated transforms with viewport
+    - Improve Wayland subsurface reordering
+  * Update GLib build-dependency (no practical effect, the new dependency
+    is already in bullseye)
+
+  [ Laurent Bigonville ]
+  * Fixes for non-Linux ports:
+    - Build-depend on libegl1-mesa-dev on all architectures (not just Linux).
+      It is required for EGL support.
+    - Only build-depend on udev on Linux architectures
+    - Only depend on libwayland on Linux architectures
+    - Drop unnecessary -dev dependency on libudev-dev
+
+ -- Simon McVittie <smcv@debian.org>  Thu, 26 Aug 2021 08:54:46 +0100
 
 mutter (3.38.4-1ubuntu2) hirsute; urgency=medium
 

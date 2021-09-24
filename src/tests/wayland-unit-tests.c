@@ -20,14 +20,12 @@
 #include "tests/wayland-unit-tests.h"
 
 #include <gio/gio.h>
-#include <wayland-server.h>
 
+#include "core/display-private.h"
+#include "core/window-private.h"
+#include "tests/meta-wayland-test-driver.h"
 #include "wayland/meta-wayland.h"
-#include "wayland/meta-wayland-actor-surface.h"
 #include "wayland/meta-wayland-surface.h"
-#include "wayland/meta-wayland-private.h"
-
-#include "test-driver-server-protocol.h"
 
 typedef struct _WaylandTestClient
 {
@@ -35,6 +33,8 @@ typedef struct _WaylandTestClient
   char *path;
   GMainLoop *main_loop;
 } WaylandTestClient;
+
+static MetaWaylandTestDriver *test_driver;
 
 static char *
 get_test_client_path (const char *test_client_name)
@@ -120,12 +120,40 @@ wayland_test_client_finish (WaylandTestClient *wayland_test_client)
   g_free (wayland_test_client);
 }
 
+static MetaWindow *
+find_client_window (const char *title)
+{
+  MetaDisplay *display = meta_get_display ();
+  g_autoptr (GSList) windows = NULL;
+  GSList *l;
+
+  windows = meta_display_list_windows (display, META_LIST_DEFAULT);
+  for (l = windows; l; l = l->next)
+    {
+      MetaWindow *window = l->data;
+
+      if (g_strcmp0 (meta_window_get_title (window), title) == 0)
+        return window;
+    }
+
+  return NULL;
+}
+
 static void
 subsurface_remap_toplevel (void)
 {
   WaylandTestClient *wayland_test_client;
 
   wayland_test_client = wayland_test_client_new ("subsurface-remap-toplevel");
+  wayland_test_client_finish (wayland_test_client);
+}
+
+static void
+subsurface_reparenting (void)
+{
+  WaylandTestClient *wayland_test_client;
+
+  wayland_test_client = wayland_test_client_new ("subsurface-reparenting");
   wayland_test_client_finish (wayland_test_client);
 }
 
@@ -155,55 +183,69 @@ subsurface_invalid_xdg_shell_actions (void)
   g_test_assert_expected_messages ();
 }
 
-static void
-on_actor_destroyed (ClutterActor       *actor,
-                    struct wl_resource *callback)
+typedef enum _ApplyLimitState
 {
-  wl_callback_send_done (callback, 0);
-  wl_resource_destroy (callback);
+  APPLY_LIMIT_STATE_INIT,
+  APPLY_LIMIT_STATE_RESET,
+  APPLY_LIMIT_STATE_FINISH,
+} ApplyLimitState;
+
+typedef struct _ApplyLimitData
+{
+  GMainLoop *loop;
+  WaylandTestClient *wayland_test_client;
+  ApplyLimitState state;
+} ApplyLimitData;
+
+static void
+on_sync_point (MetaWaylandTestDriver *test_driver,
+               unsigned int           sequence,
+               struct wl_client      *wl_client,
+               ApplyLimitData        *data)
+{
+  MetaWindow *window;
+
+  if (sequence == 0)
+    g_assert (data->state == APPLY_LIMIT_STATE_INIT);
+  else if (sequence == 0)
+    g_assert (data->state == APPLY_LIMIT_STATE_RESET);
+
+  window = find_client_window ("toplevel-limits-test");
+
+  if (sequence == 0)
+    {
+      g_assert_nonnull (window);
+      g_assert_cmpint (window->size_hints.max_width, ==, 700);
+      g_assert_cmpint (window->size_hints.max_height, ==, 500);
+      g_assert_cmpint (window->size_hints.min_width, ==, 700);
+      g_assert_cmpint (window->size_hints.min_height, ==, 500);
+
+      data->state = APPLY_LIMIT_STATE_RESET;
+    }
+  else if (sequence == 1)
+    {
+      g_assert_null (window);
+      data->state = APPLY_LIMIT_STATE_FINISH;
+      g_main_loop_quit (data->loop);
+    }
+  else
+    {
+      g_assert_not_reached ();
+    }
 }
 
 static void
-sync_actor_destroy (struct wl_client   *client,
-                    struct wl_resource *resource,
-                    uint32_t            id,
-                    struct wl_resource *surface_resource)
+toplevel_apply_limits (void)
 {
-  MetaWaylandSurface *surface = wl_resource_get_user_data (surface_resource);
-  MetaWaylandActorSurface *actor_surface;
-  MetaSurfaceActor *actor;
-  struct wl_resource *callback;
+  ApplyLimitData data = {};
 
-  g_assert_nonnull (surface);
-
-  actor_surface = (MetaWaylandActorSurface *) surface->role;
-  g_assert_nonnull (actor_surface);
-
-  actor = meta_wayland_actor_surface_get_actor (actor_surface);
-  g_assert_nonnull (actor);
-
-  callback = wl_resource_create (client, &wl_callback_interface, 1, id);
-
-  g_signal_connect (actor, "destroy", G_CALLBACK (on_actor_destroyed),
-                    callback);
-}
-
-static const struct test_driver_interface meta_test_driver_interface = {
-  sync_actor_destroy,
-};
-
-static void
-bind_test_driver (struct wl_client *client,
-                  void             *data,
-                  uint32_t          version,
-                  uint32_t          id)
-{
-  struct wl_resource *resource;
-
-  resource = wl_resource_create (client, &test_driver_interface,
-                                 version, id);
-  wl_resource_set_implementation (resource, &meta_test_driver_interface,
-                                  NULL, NULL);
+  data.loop = g_main_loop_new (NULL, FALSE);
+  data.wayland_test_client = wayland_test_client_new ("xdg-apply-limits");
+  g_signal_connect (test_driver, "sync-point", G_CALLBACK (on_sync_point), &data);
+  g_main_loop_run (data.loop);
+  g_assert_cmpint (data.state, ==, APPLY_LIMIT_STATE_FINISH);
+  wayland_test_client_finish (data.wayland_test_client);
+  g_test_assert_expected_messages ();
 }
 
 void
@@ -214,11 +256,7 @@ pre_run_wayland_tests (void)
   compositor = meta_wayland_compositor_get_default ();
   g_assert_nonnull (compositor);
 
-  if (wl_global_create (compositor->wayland_display,
-                        &test_driver_interface,
-                        1,
-                        NULL, bind_test_driver) == NULL)
-    g_error ("Failed to register a global wl-subcompositor object");
+  test_driver = meta_wayland_test_driver_new (compositor);
 }
 
 void
@@ -226,8 +264,12 @@ init_wayland_tests (void)
 {
   g_test_add_func ("/wayland/subsurface/remap-toplevel",
                    subsurface_remap_toplevel);
+  g_test_add_func ("/wayland/subsurface/reparent",
+                   subsurface_reparenting);
   g_test_add_func ("/wayland/subsurface/invalid-subsurfaces",
                    subsurface_invalid_subsurfaces);
   g_test_add_func ("/wayland/subsurface/invalid-xdg-shell-actions",
                    subsurface_invalid_xdg_shell_actions);
+  g_test_add_func ("/wayland/toplevel/apply-limits",
+                   toplevel_apply_limits);
 }
