@@ -1,11 +1,11 @@
-mutter (40.5-1ubuntu1) UNRELEASED; urgency=medium
+mutter (40.5-1ubuntu1) impish; urgency=medium
 
   * Merge with debian, remaining changes:
     - debian/gbp.conf: update upstream branch to point to ubuntu/master
     - debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
       + X11: Add support for fractional scaling using Randr
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 24 Sep 2021 21:24:15 +0200
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 24 Sep 2021 21:26:36 +0200
 
 mutter (40.5-1) unstable; urgency=medium
 
