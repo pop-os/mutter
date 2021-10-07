@@ -1,3 +1,7 @@
+# from the gnome-40 branch
+clutter-frame-clock-Remember-the-refresh-interval.patch
+clutter-frame-clock-Apply-error-diff-to-dispatch-times.patch
+
 theme-use-gtk_render_icon_suface-to-paint-button-icon.patch
 theme-load-icons-as-Gtk-does-with-fallback-and-RTL-suppor.patch
 meson-add-back-default_driver-option.patch
