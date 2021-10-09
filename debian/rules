@@ -65,10 +65,10 @@ ifeq ($(filter nocheck,$(DEB_BUILD_OPTIONS)),)
 	glib-compile-schemas $(BUILDDIR)/data
 ifneq (,$(filter hurd-i386 kfreebsd-i386 kfreebsd-amd64,$(DEB_HOST_ARCH)))
 	-$(TEST_COMMAND)
-	-$(TEST_COMMAND_FLAKY)
+	-$(TEST_COMMAND_FLAKY) --logbase flaky-tests
 else ifeq (,$(filter mips mips64el mipsel riscv64 alpha hppa powerpc sparc64 x32,$(DEB_HOST_ARCH)))
 	$(TEST_COMMAND)
-	-$(TEST_COMMAND_FLAKY)
+	-$(TEST_COMMAND_FLAKY) --logbase flaky-tests
 endif
 endif
 
