@@ -2,37 +2,46 @@ From: Simon McVittie <smcv@debian.org>
 Date: Tue, 21 Sep 2021 12:20:20 +0100
 Subject: tests: Don't use TestEnvironment
 
-The specification for installed-tests says it's an overlay onto the
-current environment, but the implementation in gnome-desktop-testing
-currently removes all other environment variables, causing test failure
-(see GNOME/gnome-desktop-testing#1).
+The assumption here seems to be that it's an overlay onto the
+current environment which would make sense; but the implementation in
+gnome-desktop-testing currently removes all other environment variables
+(see GNOME/gnome-desktop-testing#1). This causes test failure when the
+tests are run in Debian's autopkgtest framework, possibly because PATH
+is cleared.
 
 Signed-off-by: Simon McVittie <smcv@debian.org>
 Forwarded: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2009
 ---
- cogl/tests/conform/mutter-cogl.test.in | 3 +--
- src/tests/mutter-all.test.in           | 3 +--
- 2 files changed, 2 insertions(+), 4 deletions(-)
+ cogl/tests/conform/mutter-cogl.test.in | 6 ++++--
+ src/tests/mutter-all.test.in           | 7 +++++--
+ 2 files changed, 9 insertions(+), 4 deletions(-)
 
 diff --git a/cogl/tests/conform/mutter-cogl.test.in b/cogl/tests/conform/mutter-cogl.test.in
-index fae4f5c..7a8cd13 100644
+index fae4f5c..a584469 100644
 --- a/cogl/tests/conform/mutter-cogl.test.in
 +++ b/cogl/tests/conform/mutter-cogl.test.in
-@@ -1,4 +1,3 @@
+@@ -1,4 +1,6 @@
  [Test]
  Type=session
 -TestEnvironment=COGL_TEST_VERBOSE=1
 -Exec=sh -c "cd @libexecdir@/installed-tests/mutter-@apiversion@/cogl/conform; xvfb-run -a -s '+iglx -noreset' ./run-tests.sh ./config.env ./test-conformance ./unit-tests"
++# Can't use TestEnvironment for COGL_TEST_VERBOSE until there's a solution
++# for https://gitlab.gnome.org/GNOME/gnome-desktop-testing/-/issues/1,
++# and anyway we'd still need to use the shell to 'cd'
 +Exec=sh -c "export COGL_TEST_VERBOSE=1; cd @libexecdir@/installed-tests/mutter-@apiversion@/cogl/conform; xvfb-run -a -s '+iglx -noreset' ./run-tests.sh ./config.env ./test-conformance ./unit-tests"
 diff --git a/src/tests/mutter-all.test.in b/src/tests/mutter-all.test.in
-index 413d2ac..c6b06a9 100644
+index 413d2ac..df47c63 100644
 --- a/src/tests/mutter-all.test.in
 +++ b/src/tests/mutter-all.test.in
-@@ -1,6 +1,5 @@
+@@ -1,6 +1,9 @@
  [Test]
  Description=All Mutter tests
 -TestEnvironment=GSETTINGS_BACKEND=memory;
 -Exec=sh -c 'env XDG_RUNTIME_DIR="$(mktemp -d -t mutter-@apiversion@-all-tests-XXXXXX)" @libexecdir@/installed-tests/mutter-@apiversion@/meta-dbus-runner.py xvfb-run -a -s "+iglx -noreset" -- @libexecdir@/installed-tests/mutter-@apiversion@/mutter-test-runner --all'
++# Can't use TestEnvironment for GSETTINGS_BACKEND=memory until there's
++# a solution for
++# https://gitlab.gnome.org/GNOME/gnome-desktop-testing/-/issues/1,
++# and anyway that wouldn't be sufficient to handle XDG_RUNTIME_DIR
 +Exec=sh -c 'env GSETTINGS_BACKEND=memory XDG_RUNTIME_DIR="$(mktemp -d -t mutter-@apiversion@-all-tests-XXXXXX)" @libexecdir@/installed-tests/mutter-@apiversion@/meta-dbus-runner.py xvfb-run -a -s "+iglx -noreset" -- @libexecdir@/installed-tests/mutter-@apiversion@/mutter-test-runner --all'
  Type=session
  Output=TAP
