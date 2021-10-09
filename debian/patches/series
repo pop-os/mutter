@@ -1,3 +1,4 @@
+tests-dbus-runner-Make-sure-to-tear-down-even-on-test-fai.patch
 theme-use-gtk_render_icon_suface-to-paint-button-icon.patch
 theme-load-icons-as-Gtk-does-with-fallback-and-RTL-suppor.patch
 meson-add-back-default_driver-option.patch

@@ -1,0 +1,35 @@
+From: =?utf-8?q?Jonas_=C3=85dahl?= <jadahl@gmail.com>
+Date: Mon, 20 Sep 2021 13:18:25 +0200
+Subject: tests/dbus-runner: Make sure to tear-down even on test failure
+
+When a test failed, an exception would be raised. This meant that the
+mocked service would stay alive, and the test case being run eventually
+failing due to a timeout, not the failure itself.
+
+Fix this by catching the exception during the test, ensuring that we
+tear down properly, then re-raise the same exception again after having
+teared down.
+
+This avoids the dead lock, while still printing the appropriate error
+message.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2008>
+Origin: upstream, 42, commit:1031de5605845c15743d9fce37b3e513570cccf6
+---
+ src/tests/meta-dbus-runner.py | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/tests/meta-dbus-runner.py b/src/tests/meta-dbus-runner.py
+index 254d4d5..2dbf315 100755
+--- a/src/tests/meta-dbus-runner.py
++++ b/src/tests/meta-dbus-runner.py
+@@ -122,5 +122,7 @@ if __name__ == '__main__':
+     MutterDBusTestCase.setUpClass()
+     test_case = MutterDBusTestCase()
+     test_case.assertGreater(len(sys.argv), 1)
+-    test_case.wrap_call(sys.argv[1:])
+-    MutterDBusTestCase.tearDownClass()
++    try:
++        test_case.wrap_call(sys.argv[1:])
++    finally:
++        MutterDBusTestCase.tearDownClass()
