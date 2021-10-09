@@ -1,4 +1,4 @@
-mutter (41.0-2) UNRELEASED; urgency=medium
+mutter (41.0-2) experimental; urgency=medium
 
   * Team upload
   * Build-depend on libgl-dev instead of transitional libgl1-mesa-dev
@@ -14,7 +14,7 @@ mutter (41.0-2) UNRELEASED; urgency=medium
   * d/p/tests-Add-additional-debug-for-Debian-995929.patch:
     Add more debug logging to try to diagnose #995929
 
- -- Simon McVittie <smcv@debian.org>  Sat, 09 Oct 2021 18:30:43 +0100
+ -- Simon McVittie <smcv@debian.org>  Sat, 09 Oct 2021 18:54:23 +0100
 
 mutter (41.0-1) experimental; urgency=medium
 
