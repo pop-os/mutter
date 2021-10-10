@@ -229,6 +229,7 @@ Section: libs
 Architecture: any
 Multi-Arch: same
 Depends: libmutter-9-0 (= ${binary:Version}),
+         mutter (= ${binary:Version}),
          ${misc:Depends},
          ${shlibs:Depends}
 Description: Test helper library for GNOME's window manager library
