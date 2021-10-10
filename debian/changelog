@@ -1,3 +1,14 @@
+mutter (41.0-3) experimental; urgency=medium
+
+  * Team upload
+  * d/p/tests-Change-how-we-wait-for-an-orientation-change.patch:
+    Add patch attempting to fix #995929
+  * d/p/tests-Add-additional-debug-in-wait_for_orientation.patch,
+    d/p/tests-Watch-the-orientation-manager-independently.patch:
+    Try to diagnose what's going on if #995929 is still not fixed
+
+ -- Simon McVittie <smcv@debian.org>  Sun, 10 Oct 2021 21:05:02 +0100
+
 mutter (41.0-2) experimental; urgency=medium
 
   * Team upload
