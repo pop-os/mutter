@@ -22,13 +22,13 @@ Bug: https://gitlab.gnome.org/GNOME/mutter/-/issues/1967
 Bug-Debian: https://bugs.debian.org/995929
 Signed-off-by: Simon McVittie <smcv@debian.org>
 ---
- src/tests/monitor-unit-tests.c             | 104 +++++++++++-----------
- src/tests/orientation-manager-unit-tests.c | 134 +++++++++++++++++++++++------
+ src/tests/monitor-unit-tests.c             | 107 +++++++++++-----------
+ src/tests/orientation-manager-unit-tests.c | 142 ++++++++++++++++++++++++-----
  src/tests/orientation-manager-unit-tests.h |   8 +-
- 3 files changed, 165 insertions(+), 81 deletions(-)
+ 3 files changed, 176 insertions(+), 81 deletions(-)
 
 diff --git a/src/tests/monitor-unit-tests.c b/src/tests/monitor-unit-tests.c
-index 6b93db0..65bf3d4 100644
+index 6b93db0..1aa81c8 100644
 --- a/src/tests/monitor-unit-tests.c
 +++ b/src/tests/monitor-unit-tests.c
 @@ -3558,7 +3558,7 @@ meta_sensors_proxy_reset (MetaSensorsProxyMock *proxy)
@@ -276,23 +276,26 @@ index 6b93db0..65bf3d4 100644
        /* Change orientation */
        meta_sensors_proxy_mock_set_orientation (orientation_mock, i);
 -      wait_for_orientation_changes (orientation_manager);
-+      wait_for_possible_orientation_change (orientation_manager, &times_signalled);
++      wait_for_orientation (orientation_manager, i, &times_signalled);
 +      g_assert_cmpuint (times_signalled, <=, 1);
        check_monitor_configuration (&test_case.expect);
  
        /* Open the lid */
-@@ -4760,7 +4750,9 @@ meta_test_monitor_orientation_changes_with_hotplugging (void)
+@@ -4760,7 +4750,12 @@ meta_test_monitor_orientation_changes_with_hotplugging (void)
        meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), FALSE);
        emulate_hotplug (test_setup);
  
 -      wait_for_orientation_changes (orientation_manager);
++      /* We don't actually expect the orientation to change here, so we
++       * just wait for a moment (so that if the orientation *did* change,
++       * mutter has had a chance to process it), and then continue. */
 +      wait_for_possible_orientation_change (orientation_manager, &times_signalled);
-+      g_assert_cmpuint (times_signalled, <=, 1);
++      g_assert_cmpuint (times_signalled, ==, 0);
 +
        META_TEST_LOG_CALL ("Checking configuration per orientation",
                            check_monitor_configuration_per_orientation (
                              &test_case.expect, 0, i, 1024, 768));
-@@ -4797,7 +4789,9 @@ meta_test_monitor_orientation_changes_with_hotplugging (void)
+@@ -4797,7 +4792,9 @@ meta_test_monitor_orientation_changes_with_hotplugging (void)
  
    meta_sensors_proxy_mock_set_orientation (orientation_mock,
                                             META_ORIENTATION_NORMAL);
@@ -304,10 +307,10 @@ index 6b93db0..65bf3d4 100644
  
  static void
 diff --git a/src/tests/orientation-manager-unit-tests.c b/src/tests/orientation-manager-unit-tests.c
-index a936dcc..4d568a6 100644
+index a936dcc..999b0a3 100644
 --- a/src/tests/orientation-manager-unit-tests.c
 +++ b/src/tests/orientation-manager-unit-tests.c
-@@ -24,42 +24,112 @@
+@@ -24,42 +24,120 @@
  
  #include "tests/meta-sensors-proxy-mock.h"
  
@@ -385,13 +388,16 @@ index a936dcc..4d568a6 100644
 -                                            G_CALLBACK (on_orientation_changed),
 -                                            &changed);
 +  wfo.orientation = meta_orientation_manager_get_orientation (orientation_manager);
+ 
+-  while (!changed && timeout_id)
++  /* This timeout can be relatively generous because we don't expect to
++   * reach it: if we do, that's a test failure. */
 +  wfo.timeout_id = g_timeout_add_seconds (10, on_max_wait_timeout, &wfo);
 +  wfo.connection_id = g_signal_connect_swapped (orientation_manager,
 +                                                 "orientation-changed",
 +                                                 G_CALLBACK (on_orientation_changed),
 +                                                 &wfo);
- 
--  while (!changed && timeout_id)
++
 +  while (wfo.orientation != orientation && wfo.timeout_id != 0)
      g_main_context_iteration (NULL, TRUE);
  
@@ -421,6 +427,11 @@ index a936dcc..4d568a6 100644
 +  WaitForOrientation wfo = { META_ORIENTATION_UNDEFINED, META_ORIENTATION_UNDEFINED, 0, 0, 0 };
 +
 +  wfo.orientation = meta_orientation_manager_get_orientation (orientation_manager);
++
++  /* This can't be as long as the timeout for wait_for_orientation(),
++   * because in the usual case we expect to reach this timeout: we're
++   * only waiting so that if the orientation (incorrectly?) changed here,
++   * we'd have a chance to detect that. */
 +  wfo.timeout_id = g_timeout_add (300, on_max_wait_timeout, &wfo);
 +  wfo.connection_id = g_signal_connect_swapped (orientation_manager,
 +                                                 "orientation-changed",
@@ -438,7 +449,7 @@ index a936dcc..4d568a6 100644
  }
  
  static void
-@@ -90,25 +160,40 @@ meta_test_orientation_manager_no_device (void)
+@@ -90,25 +168,40 @@ meta_test_orientation_manager_no_device (void)
    g_object_unref (orientation_mock);
  }
  
@@ -480,7 +491,7 @@ index a936dcc..4d568a6 100644
  }
  
  static void
-@@ -141,14 +226,13 @@ meta_test_orientation_manager_accelerometer_orientations (void)
+@@ -141,14 +234,13 @@ meta_test_orientation_manager_accelerometer_orientations (void)
  
    for (i = initial + 1; i != initial; i = (i + 1) % META_N_ORIENTATIONS)
      {
