@@ -48,7 +48,10 @@ override_dh_auto_configure:
 # Use meson test directly as it allows us to use the timeout multiplier
 BUILDDIR=$(CURDIR)/obj-$(DEB_HOST_GNU_TYPE)
 TEST_COMMAND_BASE=env \
+	GIO_USE_VFS=local \
+	GIO_USE_VOLUME_MONITOR=unix \
 	GSETTINGS_SCHEMA_DIR=$(BUILDDIR)/data \
+	GVFS_DISABLE_FUSE=1 \
 	dbus-run-session -- xvfb-run -s '+iglx -noreset' -a \
 	dh_auto_test -- -C $(BUILDDIR) --no-rebuild --verbose --timeout-multiplier 6 \
 	           --no-stdsplit --print-errorlogs
