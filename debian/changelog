@@ -1,3 +1,14 @@
+mutter (41.0-4) experimental; urgency=medium
+
+  * Team upload
+  * d/control.in: libmutter-test-9 Depends on mutter.
+    It wants the libdefault.so plugin, which is in mutter.deb.
+  * Update Lintian overrides for RUNPATH
+  * d/patches: Another try at fixing #995929
+  * d/rules: Disable gvfs when running unit tests
+
+ -- Simon McVittie <smcv@debian.org>  Mon, 11 Oct 2021 11:41:12 +0100
+
 mutter (41.0-3) experimental; urgency=medium
 
   * Team upload
