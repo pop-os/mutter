@@ -87,6 +87,14 @@ mutter (41.0-1) experimental; urgency=medium
 
  -- Simon McVittie <smcv@debian.org>  Tue, 21 Sep 2021 18:44:18 +0100
 
+mutter (40.5-1) unstable; urgency=medium
+
+  * New upstream release:
+    - Fix monitor screencast scanouts
+    - Fix middle-click emulation support on X11
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 24 Sep 2021 21:11:07 +0200
+
 mutter (40.4-2) unstable; urgency=medium
 
   * Team upload
