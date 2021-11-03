@@ -1,0 +1,204 @@
+From: "Y.C Cheng" <yc.cheng@canonical.com>
+Date: Mon, 1 Nov 2021 12:54:08 +0800
+Subject: mutter-wayland-seat-race-fix
+
+Back ported one of the chunk of the patch from upstream to works with
+mutter 3.38.4 and 3.36.9.
+
+commit 20bb8bf502ae4afde96a35d4637382d893efc029
+Author: Olivier Fourdan <ofourdan@redhat.com>
+Date:   Tue Nov 28 10:54:08 2017 +0100
+
+    wayland: Avoid a race in wl_seat capabilities
+    
+    The way wl_seat capabilities work, by notifying clients of capabilities
+    changes, and clients consequently requesting the relevant interface
+    objects (pointer, keyboard, touch) is inherently racy.
+    
+    On quick VT changes for example, capabilities on the seat will be added
+    and removed, and by the time the client receives the capability change
+    notification and requests the relevant keyboard, pointer or touch,
+    another VT switch might have occurred and the wl_pointer, wl_keyboard or
+    wl_touch already destroyed, leading to a protocol error which kills the
+    client.
+    
+    To avoid this, create the objects when requested regardless of the
+    capabilities.
+    
+    Closes: https://gitlab.gnome.org/GNOME/mutter/-/issues/1797
+    Related: https://bugzilla.gnome.org/show_bug.cgi?id=790932
+    Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/77>
+
+Origin: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/77
+Bug-GNOME: https://gitlab.gnome.org/GNOME/mutter/-/issues/1797
+Bug-Ubuntu: https://launchpad.net/bugs/1948894
+Forwarded: yes
+Last-Update: 2021-11-01
+---
+ src/wayland/meta-wayland-pointer.c | 45 +++++++++++++++++++++++++++++++-------
+ src/wayland/meta-wayland-seat.c    |  9 +++-----
+ src/wayland/meta-wayland-touch.c   |  8 -------
+ 3 files changed, 40 insertions(+), 22 deletions(-)
+
+diff --git a/src/wayland/meta-wayland-pointer.c b/src/wayland/meta-wayland-pointer.c
+index d300852..a24a049 100644
+--- a/src/wayland/meta-wayland-pointer.c
++++ b/src/wayland/meta-wayland-pointer.c
+@@ -110,7 +110,7 @@ meta_wayland_pointer_client_new (void)
+ }
+ 
+ static void
+-meta_wayland_pointer_client_free (MetaWaylandPointerClient *pointer_client)
++meta_wayland_pointer_make_resources_inert (MetaWaylandPointerClient *pointer_client)
+ {
+   struct wl_resource *resource, *next;
+ 
+@@ -138,10 +138,25 @@ meta_wayland_pointer_client_free (MetaWaylandPointerClient *pointer_client)
+       wl_list_remove (wl_resource_get_link (resource));
+       wl_list_init (wl_resource_get_link (resource));
+     }
++}
+ 
++static void
++meta_wayland_pointer_client_free (MetaWaylandPointerClient *pointer_client)
++{
++  meta_wayland_pointer_make_resources_inert (pointer_client);
+   g_slice_free (MetaWaylandPointerClient, pointer_client);
+ }
+ 
++static void
++make_resources_inert_foreach (gpointer key,
++                              gpointer value,
++                              gpointer data)
++{
++  MetaWaylandPointerClient *pointer_client = value;
++
++  meta_wayland_pointer_make_resources_inert (pointer_client);
++}
++
+ static gboolean
+ meta_wayland_pointer_client_is_empty (MetaWaylandPointerClient *pointer_client)
+ {
+@@ -155,8 +170,6 @@ MetaWaylandPointerClient *
+ meta_wayland_pointer_get_pointer_client (MetaWaylandPointer *pointer,
+                                          struct wl_client   *client)
+ {
+-  if (!pointer->pointer_clients)
+-    return NULL;
+   return g_hash_table_lookup (pointer->pointer_clients, client);
+ }
+ 
+@@ -501,10 +514,6 @@ meta_wayland_pointer_enable (MetaWaylandPointer *pointer)
+   MetaCursorTracker *cursor_tracker = meta_backend_get_cursor_tracker (backend);
+   ClutterSeat *clutter_seat;
+ 
+-  pointer->pointer_clients =
+-    g_hash_table_new_full (NULL, NULL, NULL,
+-                           (GDestroyNotify) meta_wayland_pointer_client_free);
+-
+   pointer->cursor_surface = NULL;
+ 
+   clutter_seat = clutter_backend_get_default_seat (clutter_get_default_backend ());
+@@ -534,6 +543,10 @@ meta_wayland_pointer_disable (MetaWaylandPointer *pointer)
+   ClutterBackend *clutter_backend = clutter_get_default_backend ();
+   ClutterSeat *clutter_seat = clutter_backend_get_default_seat (clutter_backend);
+ 
++  g_hash_table_foreach (pointer->pointer_clients,
++                        make_resources_inert_foreach,
++                        NULL);
++
+   g_signal_handlers_disconnect_by_func (cursor_tracker,
+                                         (gpointer) meta_wayland_pointer_on_cursor_changed,
+                                         pointer);
+@@ -557,7 +570,6 @@ meta_wayland_pointer_disable (MetaWaylandPointer *pointer)
+   meta_wayland_pointer_set_focus (pointer, NULL);
+   meta_wayland_pointer_set_current (pointer, NULL);
+ 
+-  g_clear_pointer (&pointer->pointer_clients, g_hash_table_unref);
+   pointer->cursor_surface = NULL;
+ }
+ 
+@@ -1373,11 +1385,28 @@ meta_wayland_pointer_init (MetaWaylandPointer *pointer)
+   pointer->default_grab.interface = &default_pointer_grab_interface;
+   pointer->default_grab.pointer = pointer;
+   pointer->grab = &pointer->default_grab;
++  pointer->pointer_clients =
++    g_hash_table_new_full (NULL, NULL, NULL,
++                           (GDestroyNotify) meta_wayland_pointer_client_free);
++}
++
++static void
++meta_wayland_pointer_finalize (GObject *object)
++{
++  MetaWaylandPointer *pointer = META_WAYLAND_POINTER (object);
++
++  g_clear_pointer (&pointer->pointer_clients, g_hash_table_unref);
++
++  G_OBJECT_CLASS (meta_wayland_pointer_parent_class)->finalize (object);
+ }
+ 
+ static void
+ meta_wayland_pointer_class_init (MetaWaylandPointerClass *klass)
+ {
++  GObjectClass *object_class = G_OBJECT_CLASS (klass);
++
++  object_class->finalize = meta_wayland_pointer_finalize;
++
+   signals[FOCUS_SURFACE_CHANGED] = g_signal_new ("focus-surface-changed",
+                                                  G_TYPE_FROM_CLASS (klass),
+                                                  G_SIGNAL_RUN_LAST,
+diff --git a/src/wayland/meta-wayland-seat.c b/src/wayland/meta-wayland-seat.c
+index 10dbc4e..3d35f67 100644
+--- a/src/wayland/meta-wayland-seat.c
++++ b/src/wayland/meta-wayland-seat.c
+@@ -46,8 +46,7 @@ seat_get_pointer (struct wl_client *client,
+   MetaWaylandSeat *seat = wl_resource_get_user_data (resource);
+   MetaWaylandPointer *pointer = seat->pointer;
+ 
+-  if (meta_wayland_seat_has_pointer (seat))
+-    meta_wayland_pointer_create_new_resource (pointer, client, resource, id);
++  meta_wayland_pointer_create_new_resource (pointer, client, resource, id);
+ }
+ 
+ static void
+@@ -58,8 +57,7 @@ seat_get_keyboard (struct wl_client *client,
+   MetaWaylandSeat *seat = wl_resource_get_user_data (resource);
+   MetaWaylandKeyboard *keyboard = seat->keyboard;
+ 
+-  if (meta_wayland_seat_has_keyboard (seat))
+-    meta_wayland_keyboard_create_new_resource (keyboard, client, resource, id);
++  meta_wayland_keyboard_create_new_resource (keyboard, client, resource, id);
+ }
+ 
+ static void
+@@ -70,8 +68,7 @@ seat_get_touch (struct wl_client *client,
+   MetaWaylandSeat *seat = wl_resource_get_user_data (resource);
+   MetaWaylandTouch *touch = seat->touch;
+ 
+-  if (meta_wayland_seat_has_touch (seat))
+-    meta_wayland_touch_create_new_resource (touch, client, resource, id);
++  meta_wayland_touch_create_new_resource (touch, client, resource, id);
+ }
+ 
+ static void
+diff --git a/src/wayland/meta-wayland-touch.c b/src/wayland/meta-wayland-touch.c
+index 9c2cfc9..795380f 100644
+--- a/src/wayland/meta-wayland-touch.c
++++ b/src/wayland/meta-wayland-touch.c
+@@ -602,16 +602,8 @@ meta_wayland_touch_create_new_resource (MetaWaylandTouch   *touch,
+                                         struct wl_resource *seat_resource,
+                                         uint32_t            id)
+ {
+-  MetaWaylandSeat *seat = wl_resource_get_user_data (seat_resource);
+   struct wl_resource *cr;
+ 
+-  if (!meta_wayland_seat_has_touch (seat))
+-    {
+-      wl_resource_post_error (seat_resource, WL_DISPLAY_ERROR_INVALID_METHOD,
+-                              "Cannot retrieve touch interface without touch capability");
+-      return;
+-    }
+-
+   cr = wl_resource_create (client, &wl_touch_interface, wl_resource_get_version (seat_resource), id);
+   wl_resource_set_implementation (cr, &touch_interface, touch, unbind_resource);
+   wl_list_insert (&touch->resource_list, wl_resource_get_link (cr));
