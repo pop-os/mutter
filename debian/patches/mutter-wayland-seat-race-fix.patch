@@ -1,3 +1,7 @@
+From: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
+Date: Wed, 3 Nov 2021 18:48:19 +0100
+Subject: mutter-wayland-seat-race-fix
+
 commit 20bb8bf502ae4afde96a35d4637382d893efc029
 Author: Olivier Fourdan <ofourdan@redhat.com>
 Date:   Tue Nov 28 10:54:08 2017 +0100
@@ -27,8 +31,14 @@ Bug-GNOME: https://gitlab.gnome.org/GNOME/mutter/-/issues/1797
 Bug-Ubuntu: https://launchpad.net/bugs/1948894
 Forwarded: yes
 Last-Update: 2021-11-01
+---
+ src/wayland/meta-wayland-pointer.c | 45 +++++++++++++++++++++++++++++++-------
+ src/wayland/meta-wayland-seat.c    |  9 +++-----
+ src/wayland/meta-wayland-touch.c   |  8 -------
+ 3 files changed, 40 insertions(+), 22 deletions(-)
+
 diff --git a/src/wayland/meta-wayland-pointer.c b/src/wayland/meta-wayland-pointer.c
-index 3132abfd2..abd779ad7 100644
+index 3132abf..abd779a 100644
 --- a/src/wayland/meta-wayland-pointer.c
 +++ b/src/wayland/meta-wayland-pointer.c
 @@ -109,7 +109,7 @@ meta_wayland_pointer_client_new (void)
@@ -135,7 +145,7 @@ index 3132abfd2..abd779ad7 100644
                                                   G_TYPE_FROM_CLASS (klass),
                                                   G_SIGNAL_RUN_LAST,
 diff --git a/src/wayland/meta-wayland-seat.c b/src/wayland/meta-wayland-seat.c
-index c6390dde7..efce6d6d6 100644
+index abc0b4d..25d5074 100644
 --- a/src/wayland/meta-wayland-seat.c
 +++ b/src/wayland/meta-wayland-seat.c
 @@ -46,8 +46,7 @@ seat_get_pointer (struct wl_client *client,
@@ -169,7 +179,7 @@ index c6390dde7..efce6d6d6 100644
  
  static void
 diff --git a/src/wayland/meta-wayland-touch.c b/src/wayland/meta-wayland-touch.c
-index 002ff16f7..15f0312eb 100644
+index 002ff16..15f0312 100644
 --- a/src/wayland/meta-wayland-touch.c
 +++ b/src/wayland/meta-wayland-touch.c
 @@ -521,16 +521,8 @@ meta_wayland_touch_create_new_resource (MetaWaylandTouch   *touch,

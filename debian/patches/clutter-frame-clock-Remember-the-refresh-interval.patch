@@ -21,7 +21,7 @@ Last-Update: 2021-10-07
  1 file changed, 16 insertions(+), 5 deletions(-)
 
 diff --git a/clutter/clutter/clutter-frame-clock.c b/clutter/clutter/clutter-frame-clock.c
-index 05e79e6626..ab52477e3e 100644
+index 05e79e6..ab52477 100644
 --- a/clutter/clutter/clutter-frame-clock.c
 +++ b/clutter/clutter/clutter-frame-clock.c
 @@ -63,6 +63,7 @@ struct _ClutterFrameClock

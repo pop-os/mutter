@@ -1,6 +1,7 @@
 From: Daniel van Vugt <daniel.van.vugt@canonical.com>
 Date: Thu, 15 Apr 2021 20:30:31 +0800
-Subject: clutter/frame-clock: Apply error diffusion (dithering) to dispatch times
+Subject: clutter/frame-clock: Apply error diffusion (dithering) to dispatch
+ times
 
 But only the dispatch times used when `last_presentation_time_us == 0`
 (Nvidia + Xorg).
@@ -23,7 +24,7 @@ Last-Update: 2021-10-07
  1 file changed, 14 insertions(+), 1 deletion(-)
 
 diff --git a/clutter/clutter/clutter-frame-clock.c b/clutter/clutter/clutter-frame-clock.c
-index ab52477e3e..40ab8ef2e2 100644
+index ab52477..40ab8ef 100644
 --- a/clutter/clutter/clutter-frame-clock.c
 +++ b/clutter/clutter/clutter-frame-clock.c
 @@ -72,6 +72,7 @@ struct _ClutterFrameClock
