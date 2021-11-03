@@ -1,4 +1,4 @@
-mutter (3.36.9-0ubuntu0.20.04.2) UNRELEASED; urgency=medium
+mutter (3.36.9-0ubuntu0.20.04.2) focal; urgency=medium
 
   [ Yuan-Chen Cheng ]
   * d/p/mutter-wayland-seat-race-fix.patch:
@@ -6,7 +6,7 @@ mutter (3.36.9-0ubuntu0.20.04.2) UNRELEASED; urgency=medium
       detach (cherry picked commits — LP: #1948894)
     - backported one chunk of above patch.
 
- --  Yuan-Chen Cheng <yc.cheng@canonical.com>  Mon, 01 Nov 2021 06:41:58 +0000
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 03 Nov 2021 20:10:34 +0100
 
 mutter (3.36.9-0ubuntu0.20.04.1) focal; urgency=medium
 
