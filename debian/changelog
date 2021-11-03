@@ -1,4 +1,4 @@
-mutter (40.5-1ubuntu3) UNRELEASED; urgency=medium
+mutter (40.5-1ubuntu3) jammy; urgency=medium
 
   [ Yuan-Chen Cheng ]
   * d/p/mutter-wayland-seat-race-fix.patch:
@@ -8,7 +8,7 @@ mutter (40.5-1ubuntu3) UNRELEASED; urgency=medium
   [ Marco Trevisan (Treviño) ]
   * debian/patches: Refresh
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 03 Nov 2021 18:53:55 +0100
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 03 Nov 2021 19:37:09 +0100
 
 mutter (40.5-1ubuntu2) impish; urgency=medium
 
