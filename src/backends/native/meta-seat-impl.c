@@ -34,7 +34,9 @@
 #include <math.h>
 
 #include "backends/meta-cursor-tracker-private.h"
+#include "backends/native/meta-backend-native-private.h"
 #include "backends/native/meta-barrier-native.h"
+#include "backends/native/meta-device-pool.h"
 #include "backends/native/meta-input-thread.h"
 #include "backends/native/meta-virtual-input-device-native.h"
 #include "clutter/clutter-mutter.h"
@@ -73,26 +75,6 @@ struct _MetaEventSource
   GPollFD event_poll_fd;
 };
 
-static MetaOpenDeviceCallback  device_open_callback;
-static MetaCloseDeviceCallback device_close_callback;
-static gpointer                device_callback_data;
-
-#ifdef CLUTTER_ENABLE_DEBUG
-static const char *device_type_str[] = {
-  "pointer",            /* CLUTTER_POINTER_DEVICE */
-  "keyboard",           /* CLUTTER_KEYBOARD_DEVICE */
-  "extension",          /* CLUTTER_EXTENSION_DEVICE */
-  "joystick",           /* CLUTTER_JOYSTICK_DEVICE */
-  "tablet",             /* CLUTTER_TABLET_DEVICE */
-  "touchpad",           /* CLUTTER_TOUCHPAD_DEVICE */
-  "touchscreen",        /* CLUTTER_TOUCHSCREEN_DEVICE */
-  "pen",                /* CLUTTER_PEN_DEVICE */
-  "eraser",             /* CLUTTER_ERASER_DEVICE */
-  "cursor",             /* CLUTTER_CURSOR_DEVICE */
-  "pad",                /* CLUTTER_PAD_DEVICE */
-};
-#endif /* CLUTTER_ENABLE_DEBUG */
-
 enum
 {
   PROP_0,
@@ -116,11 +98,17 @@ enum
 
 static guint signals[N_SIGNALS] = { 0 };
 
+typedef struct _MetaSeatImplPrivate
+{
+  GHashTable *device_files;
+} MetaSeatImplPrivate;
+
 static void meta_seat_impl_initable_iface_init (GInitableIface *iface);
 
 G_DEFINE_TYPE_WITH_CODE (MetaSeatImpl, meta_seat_impl, G_TYPE_OBJECT,
                          G_IMPLEMENT_INTERFACE (G_TYPE_INITABLE,
-                                                meta_seat_impl_initable_iface_init))
+                                                meta_seat_impl_initable_iface_init)
+                         G_ADD_PRIVATE (MetaSeatImpl))
 
 static void process_events (MetaSeatImpl *seat_impl);
 void meta_seat_impl_constrain_pointer (MetaSeatImpl       *seat_impl,
@@ -2565,31 +2553,35 @@ process_events (MetaSeatImpl *seat_impl)
 
 static int
 open_restricted (const char *path,
-                 int         flags,
+                 int         open_flags,
                  void       *user_data)
 {
+  MetaSeatImpl *seat_impl = user_data;
+  MetaSeatImplPrivate *priv = meta_seat_impl_get_instance_private (seat_impl);
+  MetaBackend *backend = meta_seat_native_get_backend (seat_impl->seat_native);
+  MetaDevicePool *device_pool =
+    meta_backend_native_get_device_pool (META_BACKEND_NATIVE (backend));
+  MetaDeviceFileFlags flags;
+  g_autoptr (GError) error = NULL;
+  MetaDeviceFile *device_file;
   int fd;
 
-  if (device_open_callback)
-    {
-      GError *error = NULL;
+  flags = META_DEVICE_FILE_FLAG_NONE;
+  if (!(open_flags & (O_RDWR | O_WRONLY)))
+    flags |= META_DEVICE_FILE_FLAG_READ_ONLY;
 
-      fd = device_open_callback (path, flags, device_callback_data, &error);
+  if (!g_str_has_prefix (path, "/sys/"))
+    flags |= META_DEVICE_FILE_FLAG_TAKE_CONTROL;
 
-      if (fd < 0)
-        {
-          g_warning ("Could not open device %s: %s", path, error->message);
-          g_error_free (error);
-        }
-    }
-  else
+  device_file = meta_device_pool_open (device_pool, path, flags, &error);
+  if (!device_file)
     {
-      fd = open (path, O_RDWR | O_NONBLOCK);
-      if (fd < 0)
-        {
-          g_warning ("Could not open device %s: %s", path, strerror (errno));
-        }
+      g_warning ("Could not open device %s: %s", path, error->message);
+      return -1;
     }
+
+  fd = meta_device_file_get_fd (device_file);
+  g_hash_table_insert (priv->device_files, GINT_TO_POINTER (fd), device_file);
 
   return fd;
 }
@@ -2598,10 +2590,10 @@ static void
 close_restricted (int   fd,
                   void *user_data)
 {
-  if (device_close_callback)
-    device_close_callback (fd, device_callback_data);
-  else
-    close (fd);
+  MetaSeatImpl *seat_impl = user_data;
+  MetaSeatImplPrivate *priv = meta_seat_impl_get_instance_private (seat_impl);
+
+  g_hash_table_remove (priv->device_files, GINT_TO_POINTER (fd));
 }
 
 static const struct libinput_interface libinput_interface = {
@@ -2709,9 +2701,15 @@ init_libinput (MetaSeatImpl  *seat_impl,
 static gpointer
 input_thread (MetaSeatImpl *seat_impl)
 {
+  MetaSeatImplPrivate *priv = meta_seat_impl_get_instance_private (seat_impl);
   struct xkb_keymap *xkb_keymap;
 
   g_main_context_push_thread_default (seat_impl->input_context);
+
+  priv->device_files =
+    g_hash_table_new_full (NULL, NULL,
+                           NULL,
+                           (GDestroyNotify) meta_device_file_release);
 
   if (!(seat_impl->flags & META_SEAT_NATIVE_FLAG_NO_LIBINPUT))
     {
@@ -2868,6 +2866,7 @@ static gboolean
 destroy_in_impl (GTask *task)
 {
   MetaSeatImpl *seat_impl = g_task_get_source_object (task);
+  MetaSeatImplPrivate *priv = meta_seat_impl_get_instance_private (seat_impl);
   gboolean numlock_active;
 
   g_slist_foreach (seat_impl->devices,
@@ -2891,6 +2890,8 @@ destroy_in_impl (GTask *task)
   g_clear_pointer (&seat_impl->xkb, xkb_state_unref);
 
   meta_seat_impl_clear_repeat_source (seat_impl);
+
+  g_clear_pointer (&priv->device_files, g_hash_table_destroy);
 
   g_main_loop_quit (seat_impl->input_loop);
   g_task_return_boolean (task, TRUE);
@@ -3143,31 +3144,6 @@ meta_seat_impl_init (MetaSeatImpl *seat_impl)
   g_cond_init (&seat_impl->init_cond);
 
   seat_impl->barrier_manager = meta_barrier_manager_native_new ();
-}
-
-/**
- * meta_seat_impl_set_device_callbacks: (skip)
- * @open_callback: the user replacement for open()
- * @close_callback: the user replacement for close()
- * @user_data: user data for @callback
- *
- * Through this function, the application can set a custom callback
- * to be invoked when Clutter is about to open an evdev device. It can do
- * so if special handling is needed, for example to circumvent permission
- * problems.
- *
- * Setting @callback to %NULL will reset the default behavior.
- *
- * For reliable effects, this function must be called before clutter_init().
- */
-void
-meta_seat_impl_set_device_callbacks (MetaOpenDeviceCallback  open_callback,
-                                     MetaCloseDeviceCallback close_callback,
-                                     gpointer                user_data)
-{
-  device_open_callback = open_callback;
-  device_close_callback = close_callback;
-  device_callback_data = user_data;
 }
 
 void

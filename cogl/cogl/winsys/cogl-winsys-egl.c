@@ -134,6 +134,16 @@ _cogl_winsys_renderer_disconnect (CoglRenderer *renderer)
   g_assert_not_reached ();
 }
 
+static void
+_cogl_winsys_renderer_bind_api (CoglRenderer *renderer)
+{
+  if (renderer->driver == COGL_DRIVER_GL ||
+      renderer->driver == COGL_DRIVER_GL3)
+    eglBindAPI (EGL_OPENGL_API);
+  else if (renderer->driver == COGL_DRIVER_GLES2)
+    eglBindAPI (EGL_OPENGL_ES_API);
+}
+
 /* Updates all the function pointers */
 static void
 check_egl_extensions (CoglRenderer *renderer)
@@ -364,11 +374,7 @@ try_create_context (CoglDisplay *display,
 
   g_return_val_if_fail (egl_display->egl_context == NULL, TRUE);
 
-  if (renderer->driver == COGL_DRIVER_GL ||
-      renderer->driver == COGL_DRIVER_GL3)
-    eglBindAPI (EGL_OPENGL_API);
-  else if (renderer->driver == COGL_DRIVER_GLES2)
-    eglBindAPI (EGL_OPENGL_ES_API);
+  cogl_renderer_bind_api (renderer);
 
   cogl_display_egl_determine_attributes (display,
                                          &display->onscreen_template->config,
@@ -498,18 +504,6 @@ _cogl_winsys_display_setup (CoglDisplay *display,
   egl_display = g_new0 (CoglDisplayEGL, 1);
   display->winsys = egl_display;
 
-#ifdef COGL_HAS_WAYLAND_EGL_SERVER_SUPPORT
-  if (display->wayland_compositor_display)
-    {
-      struct wl_display *wayland_display = display->wayland_compositor_display;
-      CoglRendererEGL *egl_renderer = display->renderer->winsys;
-
-      if (egl_renderer->pf_eglBindWaylandDisplay)
-	egl_renderer->pf_eglBindWaylandDisplay (egl_renderer->edpy,
-						wayland_display);
-    }
-#endif
-
   if (egl_renderer->platform_vtable->display_setup &&
       !egl_renderer->platform_vtable->display_setup (display, error))
     goto error;
@@ -632,6 +626,7 @@ static CoglWinsysVtable _cogl_winsys_vtable =
     .renderer_get_proc_address = _cogl_winsys_renderer_get_proc_address,
     .renderer_connect = _cogl_winsys_renderer_connect,
     .renderer_disconnect = _cogl_winsys_renderer_disconnect,
+    .renderer_bind_api = _cogl_winsys_renderer_bind_api,
     .display_setup = _cogl_winsys_display_setup,
     .display_destroy = _cogl_winsys_display_destroy,
     .context_init = _cogl_winsys_context_init,

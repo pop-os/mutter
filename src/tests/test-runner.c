@@ -24,20 +24,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "compositor/meta-plugin-manager.h"
-#include "core/main-private.h"
 #include "core/window-private.h"
-#include "meta/main.h"
+#include "meta-test/meta-context-test.h"
 #include "meta/util.h"
 #include "meta/window.h"
-#include "tests/test-utils.h"
+#include "tests/meta-test-utils.h"
 #include "ui/ui.h"
 #include "wayland/meta-wayland.h"
 #include "x11/meta-x11-display-private.h"
 
 typedef struct {
+  MetaContext *context;
   GHashTable *clients;
-  AsyncWaiter *waiter;
+  MetaAsyncWaiter *waiter;
   GString *warning_messages;
   GMainLoop *loop;
   gulong x11_display_opened_handler_id;
@@ -52,13 +51,17 @@ test_case_alarm_filter (MetaX11Display        *x11_display,
   GHashTableIter iter;
   gpointer key, value;
 
-  if (async_waiter_alarm_filter (x11_display, event, test->waiter))
+  if (meta_async_waiter_process_x11_event (test->waiter, x11_display, event))
     return TRUE;
 
   g_hash_table_iter_init (&iter, test->clients);
   while (g_hash_table_iter_next (&iter, &key, &value))
-    if (test_client_alarm_filter (x11_display, event, value))
-      return TRUE;
+    {
+      MetaTestClient *client = value;
+
+      if (meta_test_client_process_x11_event (client, x11_display, event))
+        return TRUE;
+    }
 
   return FALSE;
 }
@@ -69,18 +72,18 @@ on_x11_display_opened (MetaDisplay *display,
 {
   meta_x11_display_set_alarm_filter (display->x11_display,
                                      test_case_alarm_filter, test);
-  test->waiter = async_waiter_new ();
+  test->waiter = meta_async_waiter_new ();
 }
 
 static TestCase *
-test_case_new (void)
+test_case_new (MetaContext *context)
 {
   TestCase *test = g_new0 (TestCase, 1);
-  MetaDisplay *display = meta_get_display ();
+  MetaDisplay *display = meta_context_get_display (context);
 
-  if (meta_get_x11_display_policy () == META_DISPLAY_POLICY_MANDATORY)
+  if (!meta_is_wayland_compositor ())
     {
-      test_wait_for_x11_display ();
+      meta_context_test_wait_for_x11_display (META_CONTEXT_TEST (context));
       on_x11_display_opened (display, test);
     }
   else
@@ -94,6 +97,7 @@ test_case_new (void)
                             test);
     }
 
+  test->context = context;
   test->clients = g_hash_table_new (g_str_hash, g_str_equal);
   test->loop = g_main_loop_new (NULL, FALSE);
 
@@ -141,7 +145,7 @@ test_case_wait (TestCase *test,
    */
   g_hash_table_iter_init (&iter, test->clients);
   while (g_hash_table_iter_next (&iter, &key, &value))
-    if (!test_client_wait (value, error))
+    if (!meta_test_client_wait (value, error))
       return FALSE;
 
   /* Then wait until we've done any outstanding queued up work. */
@@ -152,7 +156,7 @@ test_case_wait (TestCase *test,
    * received back any X events we generated.
    */
   if (test->waiter)
-    async_waiter_set_and_wait (test->waiter);
+    meta_async_waiter_set_and_wait (test->waiter);
   return TRUE;
 }
 
@@ -170,30 +174,35 @@ test_case_sleep (TestCase  *test,
 #define BAD_COMMAND(...)                                                \
   G_STMT_START {                                                        \
       g_set_error (error,                                               \
-                   TEST_RUNNER_ERROR, TEST_RUNNER_ERROR_BAD_COMMAND,    \
+                   META_TEST_CLIENT_ERROR,                              \
+                   META_TEST_CLIENT_ERROR_BAD_COMMAND,                  \
                    __VA_ARGS__);                                        \
       return FALSE;                                                     \
   } G_STMT_END
 
-static TestClient *
+static MetaTestClient *
 test_case_lookup_client (TestCase *test,
                          char     *client_id,
                          GError  **error)
 {
-  TestClient *client = g_hash_table_lookup (test->clients, client_id);
+  MetaTestClient *client = g_hash_table_lookup (test->clients, client_id);
   if (!client)
-    g_set_error (error, TEST_RUNNER_ERROR, TEST_RUNNER_ERROR_BAD_COMMAND,
-                 "No such client %s", client_id);
+    {
+      g_set_error (error,
+                   META_TEST_CLIENT_ERROR,
+                   META_TEST_CLIENT_ERROR_BAD_COMMAND,
+                   "No such client %s", client_id);
+    }
 
   return client;
 }
 
 static gboolean
-test_case_parse_window_id (TestCase    *test,
-                           const char  *client_and_window_id,
-                           TestClient **client,
-                           const char **window_id,
-                           GError     **error)
+test_case_parse_window_id (TestCase        *test,
+                           const char      *client_and_window_id,
+                           MetaTestClient **client,
+                           const char     **window_id,
+                           GError         **error)
 {
   const char *slash = strchr (client_and_window_id, '/');
   char *tmp;
@@ -272,7 +281,9 @@ test_case_assert_stacking (TestCase *test,
 
   if (strcmp (expected_string->str, stack_string->str) != 0)
     {
-      g_set_error (error, TEST_RUNNER_ERROR, TEST_RUNNER_ERROR_ASSERTION_FAILED,
+      g_set_error (error,
+                   META_TEST_CLIENT_ERROR,
+                   META_TEST_CLIENT_ERROR_ASSERTION_FAILED,
                    "stacking: expected='%s', actual='%s'",
                    expected_string->str, stack_string->str);
     }
@@ -294,7 +305,9 @@ test_case_assert_focused (TestCase    *test,
     {
       if (g_strcmp0 (expected_window, "none") != 0)
         {
-          g_set_error (error, TEST_RUNNER_ERROR, TEST_RUNNER_ERROR_ASSERTION_FAILED,
+          g_set_error (error,
+                       META_TEST_CLIENT_ERROR,
+                       META_TEST_CLIENT_ERROR_ASSERTION_FAILED,
                        "focus: expected='%s', actual='none'", expected_window);
         }
     }
@@ -306,7 +319,9 @@ test_case_assert_focused (TestCase    *test,
         focused += 5;
 
       if (g_strcmp0 (focused, expected_window) != 0)
-        g_set_error (error, TEST_RUNNER_ERROR, TEST_RUNNER_ERROR_ASSERTION_FAILED,
+        g_set_error (error,
+                     META_TEST_CLIENT_ERROR,
+                     META_TEST_CLIENT_ERROR_ASSERTION_FAILED,
                      "focus: expected='%s', actual='%s'",
                      expected_window, focused);
     }
@@ -328,7 +343,9 @@ test_case_assert_size (TestCase    *test,
   if (frame_rect.width != expected_width ||
       frame_rect.height != expected_height)
     {
-      g_set_error (error, TEST_RUNNER_ERROR, TEST_RUNNER_ERROR_ASSERTION_FAILED,
+      g_set_error (error,
+                   META_TEST_CLIENT_ERROR,
+                   META_TEST_CLIENT_ERROR_ASSERTION_FAILED,
                    "Expected size %dx%d didn't match actual size %dx%d",
                    expected_width, expected_height,
                    frame_rect.width, frame_rect.height);
@@ -382,7 +399,9 @@ test_case_check_xserver_stacking (TestCase *test,
     }
 
   if (strcmp (x11_string->str, local_string->str) != 0)
-    g_set_error (error, TEST_RUNNER_ERROR, TEST_RUNNER_ERROR_ASSERTION_FAILED,
+    g_set_error (error,
+                 META_TEST_CLIENT_ERROR,
+                 META_TEST_CLIENT_ERROR_ASSERTION_FAILED,
                  "xserver stacking: x11='%s', local='%s'",
                  x11_string->str, local_string->str);
 
@@ -453,7 +472,7 @@ test_case_do (TestCase *test,
   if (strcmp (argv[0], "new_client") == 0)
     {
       MetaWindowClientType type;
-      TestClient *client;
+      MetaTestClient *client;
 
       if (argc != 3)
         BAD_COMMAND("usage: new_client <client-id> [wayland|x11]");
@@ -468,26 +487,26 @@ test_case_do (TestCase *test,
       if (g_hash_table_lookup (test->clients, argv[1]))
         BAD_COMMAND("client %s already exists", argv[1]);
 
-      client = test_client_new (argv[1], type, error);
+      client = meta_test_client_new (test->context, argv[1], type, error);
       if (!client)
         return FALSE;
 
-      g_hash_table_insert (test->clients, test_client_get_id (client), client);
+      g_hash_table_insert (test->clients, meta_test_client_get_id (client), client);
     }
   else if (strcmp (argv[0], "quit_client") == 0)
     {
       if (argc != 2)
         BAD_COMMAND("usage: quit_client <client-id>");
 
-      TestClient *client = test_case_lookup_client (test, argv[1], error);
+      MetaTestClient *client = test_case_lookup_client (test, argv[1], error);
       if (!client)
         return FALSE;
 
-      if (!test_client_quit (client, error))
+      if (!meta_test_client_quit (client, error))
         return FALSE;
 
-      g_hash_table_remove (test->clients, test_client_get_id (client));
-      test_client_destroy (client);
+      g_hash_table_remove (test->clients, meta_test_client_get_id (client));
+      meta_test_client_destroy (client);
     }
   else if (strcmp (argv[0], "create") == 0)
     {
@@ -496,18 +515,18 @@ test_case_do (TestCase *test,
             (argc == 3 && strcmp (argv[2], "csd") == 0)))
         BAD_COMMAND("usage: %s <client-id>/<window-id > [override|csd]", argv[0]);
 
-      TestClient *client;
+      MetaTestClient *client;
       const char *window_id;
       if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
         return FALSE;
 
-      if (!test_client_do (client, error,
-                           "create", window_id,
-                           argc == 3 ? argv[2] : NULL,
-                           NULL))
+      if (!meta_test_client_do (client, error,
+                                "create", window_id,
+                                argc == 3 ? argv[2] : NULL,
+                                NULL))
         return FALSE;
 
-      if (!test_client_wait (client, error))
+      if (!meta_test_client_wait (client, error))
         return FALSE;
     }
   else if (strcmp (argv[0], "set_parent") == 0 ||
@@ -517,15 +536,15 @@ test_case_do (TestCase *test,
         BAD_COMMAND("usage: %s <client-id>/<window-id> <parent-window-id>",
                     argv[0]);
 
-      TestClient *client;
+      MetaTestClient *client;
       const char *window_id;
       if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
         return FALSE;
 
-      if (!test_client_do (client, error,
-                           argv[0], window_id,
-                           argv[2],
-                           NULL))
+      if (!meta_test_client_do (client, error,
+                                argv[0], window_id,
+                                argv[2],
+                                NULL))
         return FALSE;
     }
   else if (strcmp (argv[0], "accept_focus") == 0)
@@ -536,15 +555,15 @@ test_case_do (TestCase *test,
         BAD_COMMAND("usage: %s <client-id>/<window-id> [true|false]",
                     argv[0]);
 
-      TestClient *client;
+      MetaTestClient *client;
       const char *window_id;
       if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
         return FALSE;
 
-      if (!test_client_do (client, error,
-                           argv[0], window_id,
-                           argv[2],
-                           NULL))
+      if (!meta_test_client_do (client, error,
+                                argv[0], window_id,
+                                argv[2],
+                                NULL))
         return FALSE;
     }
   else if (strcmp (argv[0], "can_take_focus") == 0)
@@ -555,15 +574,15 @@ test_case_do (TestCase *test,
         BAD_COMMAND("usage: %s <client-id>/<window-id> [true|false]",
                     argv[0]);
 
-      TestClient *client;
+      MetaTestClient *client;
       const char *window_id;
       if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
         return FALSE;
 
-      if (!test_client_do (client, error,
-                           argv[0], window_id,
-                           argv[2],
-                           NULL))
+      if (!meta_test_client_do (client, error,
+                                argv[0], window_id,
+                                argv[2],
+                                NULL))
         return FALSE;
     }
   else if (strcmp (argv[0], "accept_take_focus") == 0)
@@ -574,19 +593,20 @@ test_case_do (TestCase *test,
         BAD_COMMAND("usage: %s <client-id>/<window-id> [true|false]",
                     argv[0]);
 
-      TestClient *client;
+      MetaTestClient *client;
       const char *window_id;
       if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
         return FALSE;
 
-      if (!test_client_do (client, error,
-                           argv[0], window_id,
-                           argv[2],
-                           NULL))
+      if (!meta_test_client_do (client, error,
+                                argv[0], window_id,
+                                argv[2],
+                                NULL))
         return FALSE;
     }
   else if (strcmp (argv[0], "show") == 0)
     {
+      MetaWindow *window;
       gboolean show_async = FALSE;
 
       if (argc != 2 && argc != 3)
@@ -595,49 +615,51 @@ test_case_do (TestCase *test,
       if (argc == 3 && strcmp (argv[2], "async") == 0)
         show_async = TRUE;
 
-      TestClient *client;
+      MetaTestClient *client;
       const char *window_id;
       if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
         return FALSE;
 
-      if (!test_client_do (client, error, argv[0], window_id, NULL))
+      if (!meta_test_client_do (client, error, argv[0], window_id, NULL))
         return FALSE;
 
       if (!test_case_wait (test, error))
         return FALSE;
 
-      MetaWindow *window = test_client_find_window (client, window_id, error);
+      window = meta_test_client_find_window (client, window_id, error);
       if (!window)
         return FALSE;
 
       if (!show_async)
-        test_client_wait_for_window_shown (client, window);
+        meta_test_client_wait_for_window_shown (client, window);
     }
   else if (strcmp (argv[0], "resize") == 0)
     {
       if (argc != 4)
         BAD_COMMAND("usage: %s <client-id>/<window-id> width height", argv[0]);
 
-      TestClient *client;
+      MetaTestClient *client;
       const char *window_id;
       if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
         return FALSE;
 
-      if (!test_client_do (client, error, argv[0], window_id,
-                           argv[2], argv[3], NULL))
+      if (!meta_test_client_do (client, error, argv[0], window_id,
+                                argv[2], argv[3], NULL))
         return FALSE;
     }
   else if (strcmp (argv[0], "move") == 0)
     {
+      MetaWindow *window;
+
       if (argc != 4)
         BAD_COMMAND("usage: %s <client-id>/<window-id> x y", argv[0]);
 
-      TestClient *client;
+      MetaTestClient *client;
       const char *window_id;
       if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
         return FALSE;
 
-      MetaWindow *window = test_client_find_window (client, window_id, error);
+      window = meta_test_client_find_window (client, window_id, error);
       if (!window)
         return FALSE;
 
@@ -645,15 +667,17 @@ test_case_do (TestCase *test,
     }
   else if (strcmp (argv[0], "tile") == 0)
     {
+      MetaWindow *window;
+
       if (argc != 3)
         BAD_COMMAND("usage: %s <client-id>/<window-id> [right|left]", argv[0]);
 
-      TestClient *client;
+      MetaTestClient *client;
       const char *window_id;
       if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
         return FALSE;
 
-      MetaWindow *window = test_client_find_window (client, window_id, error);
+      window = meta_test_client_find_window (client, window_id, error);
       if (!window)
         return FALSE;
 
@@ -669,8 +693,8 @@ test_case_do (TestCase *test,
       else
         {
           g_set_error (error,
-                       TEST_RUNNER_ERROR,
-                       TEST_RUNNER_ERROR_ASSERTION_FAILED,
+                       META_TEST_CLIENT_ERROR,
+                       META_TEST_CLIENT_ERROR_ASSERTION_FAILED,
                        "Invalid tile mode '%s'", argv[2]);
           return FALSE;
         }
@@ -679,15 +703,17 @@ test_case_do (TestCase *test,
     }
   else if (strcmp (argv[0], "untile") == 0)
     {
+      MetaWindow *window;
+
       if (argc != 2)
         BAD_COMMAND("usage: %s <client-id>/<window-id>", argv[0]);
 
-      TestClient *client;
+      MetaTestClient *client;
       const char *window_id;
       if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
         return FALSE;
 
-      MetaWindow *window = test_client_find_window (client, window_id, error);
+      window = meta_test_client_find_window (client, window_id, error);
       if (!window)
         return FALSE;
 
@@ -710,25 +736,27 @@ test_case_do (TestCase *test,
       if (argc != 2)
         BAD_COMMAND("usage: %s <client-id>/<window-id>", argv[0]);
 
-      TestClient *client;
+      MetaTestClient *client;
       const char *window_id;
       if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
         return FALSE;
 
-      if (!test_client_do (client, error, argv[0], window_id, NULL))
+      if (!meta_test_client_do (client, error, argv[0], window_id, NULL))
         return FALSE;
     }
   else if (strcmp (argv[0], "local_activate") == 0)
     {
+      MetaWindow *window;
+
       if (argc != 2)
         BAD_COMMAND("usage: %s <client-id>/<window-id>", argv[0]);
 
-      TestClient *client;
+      MetaTestClient *client;
       const char *window_id;
       if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
         return FALSE;
 
-      MetaWindow *window = test_client_find_window (client, window_id, error);
+      window = meta_test_client_find_window (client, window_id, error);
       if (!window)
         return FALSE;
 
@@ -797,26 +825,28 @@ test_case_do (TestCase *test,
     }
   else if (strcmp (argv[0], "assert_size") == 0)
     {
+      MetaWindow *window;
+
       if (argc != 4)
         {
           BAD_COMMAND("usage: %s <client-id>/<window-id> <width> <height>",
                       argv[0]);
         }
 
-      TestClient *client;
+      MetaTestClient *client;
       const char *window_id;
       if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
         return FALSE;
 
-      MetaWindow *window = test_client_find_window (client, window_id, error);
+      window = meta_test_client_find_window (client, window_id, error);
       if (!window)
         return FALSE;
 
       if (meta_window_get_frame (window))
         {
           g_set_error (error,
-                       TEST_RUNNER_ERROR,
-                       TEST_RUNNER_ERROR_ASSERTION_FAILED,
+                       META_TEST_CLIENT_ERROR,
+                       META_TEST_CLIENT_ERROR_ASSERTION_FAILED,
                        "Can only assert size of CSD window");
           return FALSE;
         }
@@ -826,11 +856,11 @@ test_case_do (TestCase *test,
       g_autofree char *width_str = g_strdup_printf ("%d", width);
       g_autofree char *height_str = g_strdup_printf ("%d", height);
 
-      if (!test_client_do (client, error, argv[0],
-                           window_id,
-                           width_str,
-                           height_str,
-                           NULL))
+      if (!meta_test_client_do (client, error, argv[0],
+                                window_id,
+                                width_str,
+                                height_str,
+                                NULL))
         return FALSE;
 
       if (!test_case_assert_size (test, window,
@@ -840,18 +870,20 @@ test_case_do (TestCase *test,
     }
   else if (strcmp (argv[0], "assert_position") == 0)
     {
+      MetaWindow *window;
+
       if (argc != 4)
         {
           BAD_COMMAND("usage: %s <client-id>/<window-id> <x> <y>",
                       argv[0]);
         }
 
-      TestClient *client;
+      MetaTestClient *client;
       const char *window_id;
       if (!test_case_parse_window_id (test, argv[1], &client, &window_id, error))
         return FALSE;
 
-      MetaWindow *window = test_client_find_window (client, window_id, error);
+      window = meta_test_client_find_window (client, window_id, error);
       if (!window)
         return FALSE;
 
@@ -862,8 +894,8 @@ test_case_do (TestCase *test,
       if (frame_rect.x != x || frame_rect.y != y)
         {
           g_set_error (error,
-                       TEST_RUNNER_ERROR,
-                       TEST_RUNNER_ERROR_ASSERTION_FAILED,
+                       META_TEST_CLIENT_ERROR,
+                       META_TEST_CLIENT_ERROR_ASSERTION_FAILED,
                        "Expected window position (%d, %d) doesn't match (%d, %d)",
                        x, y, frame_rect.x, frame_rect.y);
           return FALSE;
@@ -892,7 +924,7 @@ test_case_destroy (TestCase *test,
   g_hash_table_iter_init (&iter, test->clients);
   while (g_hash_table_iter_next (&iter, &key, &value))
     {
-      if (!test_client_do (value, error, "destroy_all", NULL))
+      if (!meta_test_client_do (value, error, "destroy_all", NULL))
         return FALSE;
 
     }
@@ -905,9 +937,9 @@ test_case_destroy (TestCase *test,
 
   g_hash_table_iter_init (&iter, test->clients);
   while (g_hash_table_iter_next (&iter, &key, &value))
-    test_client_destroy (value);
+    meta_test_client_destroy (value);
 
-  g_clear_pointer (&test->waiter, async_waiter_destroy);
+  g_clear_pointer (&test->waiter, meta_async_waiter_destroy);
 
   display = meta_get_display ();
   g_clear_signal_handler (&test->x11_display_opened_handler_id, display);
@@ -923,10 +955,11 @@ test_case_destroy (TestCase *test,
 /**********************************************************************/
 
 static gboolean
-run_test (const char *filename,
-          int         index)
+run_test (MetaContext *context,
+          const char  *filename,
+          int          index)
 {
-  TestCase *test = test_case_new ();
+  TestCase *test = test_case_new (context);
   GError *error = NULL;
 
   GFile *file = g_file_new_for_path (filename);
@@ -1027,27 +1060,28 @@ run_test (const char *filename,
   return success;
 }
 
-typedef struct {
+typedef struct
+{
   int n_tests;
   char **tests;
 } RunTestsInfo;
 
-static gboolean
-run_tests (gpointer data)
+static int
+run_tests (MetaContext  *context,
+           RunTestsInfo *info)
 {
-  RunTestsInfo *info = data;
   int i;
   gboolean success = TRUE;
 
   g_print ("1..%d\n", info->n_tests);
 
   for (i = 0; i < info->n_tests; i++)
-    if (!run_test (info->tests[i], i + 1))
-      success = FALSE;
+    {
+      if (!run_test (context, info->tests[i], i + 1))
+        success = FALSE;
+    }
 
-  meta_quit (success ? 0 : 1);
-
-  return FALSE;
+  return success ? 0 : 1;
 }
 
 /**********************************************************************/
@@ -1121,35 +1155,27 @@ const GOptionEntry options[] = {
 int
 main (int argc, char **argv)
 {
-  GOptionContext *ctx;
-  GError *error = NULL;
+  g_autoptr (MetaContext) context = NULL;
+  GPtrArray *tests;
+  RunTestsInfo info;
 
-  /* First parse the arguments that are passed to us */
+  context = meta_create_test_context (META_CONTEXT_TEST_TYPE_NESTED,
+                                      META_CONTEXT_TEST_FLAG_TEST_CLIENT);
 
-  ctx = g_option_context_new (NULL);
-  g_option_context_add_main_entries (ctx, options, NULL);
+  meta_context_add_option_entries (context, options, NULL);
 
-  if (!g_option_context_parse (ctx,
-                               &argc, &argv, &error))
-    {
-      g_printerr ("%s", error->message);
-      return 1;
-    }
+  g_assert (meta_context_configure (context, &argc, &argv, NULL));
 
-  g_option_context_free (ctx);
-
-  test_init (&argc, &argv);
-
-  GPtrArray *tests = g_ptr_array_new ();
-
+  tests = g_ptr_array_new ();
   if (all_tests)
     {
       GFile *test_dir = g_file_new_for_path (MUTTER_PKGDATADIR "/tests");
+      g_autoptr (GError) error = NULL;
 
       if (!find_metatests_in_directory (test_dir, tests, &error))
         {
           g_printerr ("Error enumerating tests: %s\n", error->message);
-          return 1;
+          return EXIT_FAILURE;
         }
     }
   else
@@ -1168,31 +1194,9 @@ main (int argc, char **argv)
       g_free (curdir);
     }
 
-  /* Then initialize mutter with a different set of arguments */
-
-  char *fake_args[] = { NULL, (char *)"--wayland", (char *)"--nested" };
-  fake_args[0] = argv[0];
-  char **fake_argv = fake_args;
-  int fake_argc = G_N_ELEMENTS (fake_args);
-
-  ctx = meta_get_option_context ();
-  if (!g_option_context_parse (ctx, &fake_argc, &fake_argv, &error))
-    {
-      g_printerr ("mutter: %s\n", error->message);
-      exit (1);
-    }
-  g_option_context_free (ctx);
-
-  meta_plugin_manager_load (test_get_plugin_name ());
-
-  meta_init ();
-  meta_register_with_session ();
-
-  RunTestsInfo info;
-  info.tests = (char **)tests->pdata;
+  info.tests = (char **) tests->pdata;
   info.n_tests = tests->len;
+  g_signal_connect (context, "run-tests", G_CALLBACK (run_tests), &info);
 
-  g_idle_add (run_tests, &info);
-
-  return meta_run ();
+  return meta_context_test_run_tests (META_CONTEXT_TEST (context));
 }

@@ -30,16 +30,15 @@
 #include "backends/x11/cm/meta-backend-x11-cm.h"
 #include "backends/x11/cm/meta-renderer-x11-cm.h"
 #include "backends/x11/meta-backend-x11.h"
+#include "backends/x11/meta-clutter-backend-x11.h"
 #include "backends/x11/meta-seat-x11.h"
 #include "backends/x11/meta-stage-x11.h"
 #include "backends/x11/nested/meta-stage-x11-nested.h"
 #include "clutter/clutter-mutter.h"
-#include "clutter/x11/clutter-x11.h"
-#include "clutter/x11/clutter-backend-x11.h"
 #include "cogl/cogl-mutter.h"
 #include "cogl/cogl.h"
 #include "core/display-private.h"
-#include "meta/main.h"
+#include "meta/meta-context.h"
 #include "meta/meta-x11-errors.h"
 
 #define STAGE_X11_IS_MAPPED(s)  ((((MetaStageX11 *) (s))->wm_state & STAGE_X11_WITHDRAWN) == 0)
@@ -49,13 +48,13 @@ static ClutterStageWindowInterface *clutter_stage_window_parent_iface = NULL;
 static void
 clutter_stage_window_iface_init (ClutterStageWindowInterface *iface);
 
-static ClutterStageCogl *meta_x11_get_stage_window_from_window (Window win);
+static MetaStageImpl *meta_x11_get_stage_window_from_window (Window win);
 
 static GHashTable *clutter_stages_by_xid = NULL;
 
 G_DEFINE_TYPE_WITH_CODE (MetaStageX11,
                          meta_stage_x11,
-                         CLUTTER_TYPE_STAGE_COGL,
+                         META_TYPE_STAGE_IMPL,
                          G_IMPLEMENT_INTERFACE (CLUTTER_TYPE_STAGE_WINDOW,
                                                 clutter_stage_window_iface_init));
 
@@ -81,17 +80,17 @@ meta_stage_x11_fix_window_size (MetaStageX11 *stage_x11,
                                 int           new_width,
                                 int           new_height)
 {
-  ClutterStageCogl *stage_cogl = CLUTTER_STAGE_COGL (stage_x11);
+  MetaStageImpl *stage_impl = META_STAGE_IMPL (stage_x11);
 
   if (stage_x11->xwin != None)
     {
-      Display *xdisplay = clutter_x11_get_default_display ();
+      Display *xdisplay = meta_clutter_x11_get_default_display ();
       uint32_t min_width, min_height;
       XSizeHints *size_hints;
 
       size_hints = XAllocSizeHints();
 
-      clutter_stage_get_minimum_size (stage_cogl->wrapper,
+      clutter_stage_get_minimum_size (stage_impl->wrapper,
                                       &min_width,
                                       &min_height);
 
@@ -116,9 +115,10 @@ meta_stage_x11_fix_window_size (MetaStageX11 *stage_x11,
 static void
 meta_stage_x11_set_wm_protocols (MetaStageX11 *stage_x11)
 {
-  ClutterStageCogl *stage_cogl = CLUTTER_STAGE_COGL (stage_x11);
-  ClutterBackendX11 *backend_x11 = CLUTTER_BACKEND_X11 (stage_cogl->backend);
-  Display *xdisplay = clutter_x11_get_default_display ();
+  MetaStageImpl *stage_impl = META_STAGE_IMPL (stage_x11);
+  MetaClutterBackendX11 *backend_x11 =
+    META_CLUTTER_BACKEND_X11 (stage_impl->backend);
+  Display *xdisplay = meta_clutter_x11_get_default_display ();
   Atom protocols[2];
   int n = 0;
   
@@ -163,7 +163,7 @@ meta_stage_x11_resize (ClutterStageWindow *stage_window,
       if (width != stage_x11->xwin_width ||
           height != stage_x11->xwin_height)
         {
-          Display *xdisplay = clutter_x11_get_default_display ();
+          Display *xdisplay = meta_clutter_x11_get_default_display ();
 
           /* XXX: in this case we can rely on a subsequent
            * ConfigureNotify that will result in the stage
@@ -188,9 +188,10 @@ meta_stage_x11_resize (ClutterStageWindow *stage_window,
 static inline void
 set_wm_pid (MetaStageX11 *stage_x11)
 {
-  ClutterStageCogl *stage_cogl = CLUTTER_STAGE_COGL (stage_x11);
-  ClutterBackendX11 *backend_x11 = CLUTTER_BACKEND_X11 (stage_cogl->backend);
-  Display *xdisplay = clutter_x11_get_default_display ();
+  MetaStageImpl *stage_impl = META_STAGE_IMPL (stage_x11);
+  MetaClutterBackendX11 *backend_x11 =
+    META_CLUTTER_BACKEND_X11 (stage_impl->backend);
+  Display *xdisplay = meta_clutter_x11_get_default_display ();
   long pid;
 
   if (stage_x11->xwin == None)
@@ -214,9 +215,10 @@ set_wm_pid (MetaStageX11 *stage_x11)
 static inline void
 set_wm_title (MetaStageX11 *stage_x11)
 {
-  ClutterStageCogl *stage_cogl = CLUTTER_STAGE_COGL (stage_x11);
-  ClutterBackendX11 *backend_x11 = CLUTTER_BACKEND_X11 (stage_cogl->backend);
-  Display *xdisplay = clutter_x11_get_default_display ();
+  MetaStageImpl *stage_impl = META_STAGE_IMPL (stage_x11);
+  MetaClutterBackendX11 *backend_x11 =
+    META_CLUTTER_BACKEND_X11 (stage_impl->backend);
+  Display *xdisplay = meta_clutter_x11_get_default_display ();
 
   if (stage_x11->xwin == None)
     return;
@@ -292,14 +294,14 @@ static gboolean
 meta_stage_x11_realize (ClutterStageWindow *stage_window)
 {
   MetaStageX11 *stage_x11 = META_STAGE_X11 (stage_window);
-  ClutterStageCogl *stage_cogl = CLUTTER_STAGE_COGL (stage_window);
-  ClutterBackend *backend = CLUTTER_BACKEND (stage_cogl->backend);
+  MetaStageImpl *stage_impl = META_STAGE_IMPL (stage_window);
+  ClutterBackend *backend = CLUTTER_BACKEND (stage_impl->backend);
   MetaSeatX11 *seat_x11 = META_SEAT_X11 (clutter_backend_get_default_seat (backend));
-  Display *xdisplay = clutter_x11_get_default_display ();
+  Display *xdisplay = meta_clutter_x11_get_default_display ();
   float width, height;
   GError *error = NULL;
 
-  clutter_actor_get_size (CLUTTER_ACTOR (stage_cogl->wrapper), &width, &height);
+  clutter_actor_get_size (CLUTTER_ACTOR (stage_impl->wrapper), &width, &height);
 
   stage_x11->onscreen = create_onscreen (backend->cogl_context, width, height);
 
@@ -345,7 +347,7 @@ meta_stage_x11_realize (ClutterStageWindow *stage_window)
 
   /* we unconditionally select input events even with event retrieval
    * disabled because we need to guarantee that the Clutter internal
-   * state is maintained when calling clutter_x11_handle_event() without
+   * state is maintained when calling meta_clutter_x11_handle_event() without
    * requiring applications or embedding toolkits to select events
    * themselves. if we did that, we'd have to document the events to be
    * selected, and also update applications and embedding toolkits each
@@ -362,7 +364,7 @@ meta_stage_x11_realize (ClutterStageWindow *stage_window)
    */
   XSelectInput (xdisplay, stage_x11->xwin, META_STAGE_X11_EVENT_MASK);
 
-  meta_seat_x11_select_stage_events (seat_x11, stage_cogl->wrapper);
+  meta_seat_x11_select_stage_events (seat_x11, stage_impl->wrapper);
 
   meta_stage_x11_fix_window_size (stage_x11,
                                   stage_x11->xwin_width,
@@ -386,7 +388,7 @@ meta_stage_x11_set_title (ClutterStageWindow *stage_window,
 static inline void
 update_wm_hints (MetaStageX11 *stage_x11)
 {
-  Display *xdisplay = clutter_x11_get_default_display ();
+  Display *xdisplay = meta_clutter_x11_get_default_display ();
   XWMHints wm_hints;
 
   if (stage_x11->wm_state & STAGE_X11_WITHDRAWN)
@@ -423,11 +425,11 @@ meta_stage_x11_show (ClutterStageWindow *stage_window,
                      gboolean            do_raise)
 {
   MetaStageX11 *stage_x11 = META_STAGE_X11 (stage_window);
-  ClutterStageCogl *stage_cogl = CLUTTER_STAGE_COGL (stage_x11);
+  MetaStageImpl *stage_impl = META_STAGE_IMPL (stage_x11);
 
   if (stage_x11->xwin != None)
     {
-      Display *xdisplay = clutter_x11_get_default_display ();
+      Display *xdisplay = meta_clutter_x11_get_default_display ();
 
       if (do_raise)
         {
@@ -443,7 +445,7 @@ meta_stage_x11_show (ClutterStageWindow *stage_window,
 
       g_assert (STAGE_X11_IS_MAPPED (stage_x11));
 
-      clutter_actor_map (CLUTTER_ACTOR (stage_cogl->wrapper));
+      clutter_actor_map (CLUTTER_ACTOR (stage_impl->wrapper));
 
       XMapWindow (xdisplay, stage_x11->xwin);
     }
@@ -453,18 +455,18 @@ static void
 meta_stage_x11_hide (ClutterStageWindow *stage_window)
 {
   MetaStageX11 *stage_x11 = META_STAGE_X11 (stage_window);
-  ClutterStageCogl *stage_cogl = CLUTTER_STAGE_COGL (stage_x11);
+  MetaStageImpl *stage_impl = META_STAGE_IMPL (stage_x11);
 
   if (stage_x11->xwin != None)
     {
-      Display *xdisplay = clutter_x11_get_default_display ();
+      Display *xdisplay = meta_clutter_x11_get_default_display ();
 
       if (STAGE_X11_IS_MAPPED (stage_x11))
         set_stage_x11_state (stage_x11, 0, STAGE_X11_WITHDRAWN);
 
       g_assert (!STAGE_X11_IS_MAPPED (stage_x11));
 
-      clutter_actor_unmap (CLUTTER_ACTOR (stage_cogl->wrapper));
+      clutter_actor_unmap (CLUTTER_ACTOR (stage_impl->wrapper));
 
       XWithdrawWindow (xdisplay, stage_x11->xwin, 0);
     }
@@ -550,13 +552,13 @@ clutter_stage_window_iface_init (ClutterStageWindowInterface *iface)
 }
 
 static inline void
-set_user_time (ClutterBackendX11 *backend_x11,
-               MetaStageX11      *stage_x11,
-               long               timestamp)
+set_user_time (MetaClutterBackendX11 *backend_x11,
+               MetaStageX11          *stage_x11,
+               long                   timestamp)
 {
   if (timestamp != CLUTTER_CURRENT_TIME)
     {
-      Display *xdisplay = clutter_x11_get_default_display ();
+      Display *xdisplay = meta_clutter_x11_get_default_display ();
 
       XChangeProperty (xdisplay,
                        stage_x11->xwin,
@@ -568,9 +570,9 @@ set_user_time (ClutterBackendX11 *backend_x11,
 }
 
 static gboolean
-handle_wm_protocols_event (ClutterBackendX11 *backend_x11,
-                           MetaStageX11      *stage_x11,
-                           XEvent            *xevent)
+handle_wm_protocols_event (MetaClutterBackendX11 *backend_x11,
+                           MetaStageX11          *stage_x11,
+                           XEvent                *xevent)
 {
   Atom atom = (Atom) xevent->xclient.data.l[0];
 
@@ -585,7 +587,7 @@ handle_wm_protocols_event (ClutterBackendX11 *backend_x11,
            xevent->xany.window == stage_x11->xwin)
     {
       XClientMessageEvent xclient = xevent->xclient;
-      Display *xdisplay = clutter_x11_get_default_display ();
+      Display *xdisplay = meta_clutter_x11_get_default_display ();
 
       xclient.window = backend_x11->xwin_root;
       XSendEvent (xdisplay, xclient.window,
@@ -614,17 +616,19 @@ meta_stage_x11_translate_event (MetaStageX11 *stage_x11,
                                 XEvent       *xevent,
                                 ClutterEvent *event)
 {
-  ClutterStageCogl *stage_cogl;
+  MetaStageImpl *stage_impl;
   gboolean res = FALSE;
-  ClutterBackendX11 *backend_x11;
+  MetaClutterBackendX11 *clutter_backend_x11;
   ClutterStage *stage;
+  MetaBackend *backend;
 
-  stage_cogl = meta_x11_get_stage_window_from_window (xevent->xany.window);
-  if (stage_cogl == NULL)
+  stage_impl = meta_x11_get_stage_window_from_window (xevent->xany.window);
+  if (stage_impl == NULL)
     return FALSE;
 
-  stage = stage_cogl->wrapper;
-  backend_x11 = CLUTTER_BACKEND_X11 (stage_cogl->backend);
+  stage = stage_impl->wrapper;
+  backend = stage_x11->backend;
+  clutter_backend_x11 = META_CLUTTER_BACKEND_X11 (stage_impl->backend);
 
   switch (xevent->type)
     {
@@ -723,7 +727,6 @@ meta_stage_x11_translate_event (MetaStageX11 *stage_x11,
                */
               if (META_IS_BACKEND_X11_CM (stage_x11->backend))
                 {
-                  MetaBackend *backend = stage_x11->backend;
                   MetaRenderer *renderer = meta_backend_get_renderer (backend);
                   MetaRendererX11Cm *renderer_x11_cm =
                     META_RENDERER_X11_CM (renderer);
@@ -737,11 +740,11 @@ meta_stage_x11_translate_event (MetaStageX11 *stage_x11,
       break;
 
     case FocusIn:
-      meta_stage_set_active ((MetaStage *) stage_cogl->wrapper, TRUE);
+      meta_stage_set_active ((MetaStage *) stage_impl->wrapper, TRUE);
       break;
 
     case FocusOut:
-      meta_stage_set_active ((MetaStage *) stage_cogl->wrapper, FALSE);
+      meta_stage_set_active ((MetaStage *) stage_impl->wrapper, FALSE);
       break;
 
     case Expose:
@@ -771,7 +774,7 @@ meta_stage_x11_translate_event (MetaStageX11 *stage_x11,
 
       g_return_val_if_fail (META_IS_STAGE_X11_NESTED (stage_x11),
                             FALSE);
-      meta_quit (META_EXIT_SUCCESS);
+      meta_context_terminate (meta_backend_get_context (backend));
       res = FALSE;
       break;
 
@@ -779,13 +782,15 @@ meta_stage_x11_translate_event (MetaStageX11 *stage_x11,
       g_debug ("Client message for stage, win:0x%x",
                (unsigned int) xevent->xany.window);
 
-      if (xevent->xclient.message_type == backend_x11->atom_WM_PROTOCOLS)
+      if (xevent->xclient.message_type == clutter_backend_x11->atom_WM_PROTOCOLS)
         {
-          if (handle_wm_protocols_event (backend_x11, stage_x11, xevent))
+          if (handle_wm_protocols_event (clutter_backend_x11,
+                                         stage_x11,
+                                         xevent))
             {
               g_return_val_if_fail (META_IS_STAGE_X11_NESTED (stage_x11),
                                     FALSE);
-              meta_quit (META_EXIT_SUCCESS);
+              meta_context_terminate (meta_backend_get_context (backend));
               res = FALSE;
             }
         }
@@ -813,7 +818,7 @@ meta_x11_get_stage_window (ClutterStage *stage)
   return META_STAGE_X11 (impl)->xwin;
 }
 
-static ClutterStageCogl *
+static MetaStageImpl *
 meta_x11_get_stage_window_from_window (Window win)
 {
   if (clutter_stages_by_xid == NULL)
@@ -826,12 +831,12 @@ meta_x11_get_stage_window_from_window (Window win)
 ClutterStage *
 meta_x11_get_stage_from_window (Window win)
 {
-  ClutterStageCogl *stage_cogl;
+  MetaStageImpl *stage_impl;
 
-  stage_cogl = meta_x11_get_stage_window_from_window (win);
+  stage_impl = meta_x11_get_stage_window_from_window (win);
 
-  if (stage_cogl != NULL)
-    return stage_cogl->wrapper;
+  if (stage_impl != NULL)
+    return stage_impl->wrapper;
 
   return NULL;
 }
@@ -840,8 +845,9 @@ void
 meta_stage_x11_set_user_time (MetaStageX11 *stage_x11,
                               uint32_t      user_time)
 {
-  ClutterStageCogl *stage_cogl = CLUTTER_STAGE_COGL (stage_x11);
-  ClutterBackendX11 *backend_x11 = CLUTTER_BACKEND_X11 (stage_cogl->backend);
+  MetaStageImpl *stage_impl = META_STAGE_IMPL (stage_x11);
+  MetaClutterBackendX11 *backend_x11 =
+    META_CLUTTER_BACKEND_X11 (stage_impl->backend);
 
   set_user_time (backend_x11, stage_x11, user_time);
 }

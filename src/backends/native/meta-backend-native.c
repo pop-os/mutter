@@ -42,7 +42,7 @@
 #include <stdlib.h>
 
 #include "backends/meta-cursor-tracker-private.h"
-#include "backends/meta-idle-monitor-private.h"
+#include "backends/meta-idle-manager.h"
 #include "backends/meta-keymap-utils.h"
 #include "backends/meta-logical-monitor.h"
 #include "backends/meta-monitor-manager-private.h"
@@ -50,6 +50,7 @@
 #include "backends/meta-settings-private.h"
 #include "backends/meta-stage-private.h"
 #include "backends/native/meta-clutter-backend-native.h"
+#include "backends/native/meta-device-pool-private.h"
 #include "backends/native/meta-kms.h"
 #include "backends/native/meta-kms-device.h"
 #include "backends/native/meta-launcher.h"
@@ -81,6 +82,7 @@ struct _MetaBackendNative
   MetaBackend parent;
 
   MetaLauncher *launcher;
+  MetaDevicePool *device_pool;
   MetaUdev *udev;
   MetaKms *kms;
 
@@ -119,6 +121,7 @@ meta_backend_native_dispose (GObject *object)
 
   g_clear_object (&native->kms);
   g_clear_object (&native->udev);
+  g_clear_object (&native->device_pool);
   g_clear_pointer (&native->launcher, meta_launcher_free);
 }
 
@@ -133,7 +136,6 @@ meta_backend_native_create_default_seat (MetaBackend  *backend,
                                          GError      **error)
 {
   MetaBackendNative *backend_native = META_BACKEND_NATIVE (backend);
-  ClutterBackend *clutter_backend = meta_backend_get_clutter_backend (backend);
   const char *seat_id;
   MetaSeatNativeFlag flags;
 
@@ -145,7 +147,7 @@ meta_backend_native_create_default_seat (MetaBackend  *backend,
     flags = META_SEAT_NATIVE_FLAG_NONE;
 
   return CLUTTER_SEAT (g_object_new (META_TYPE_SEAT_NATIVE,
-                                     "backend", clutter_backend,
+                                     "backend", backend,
                                      "seat-id", seat_id,
                                      "flags", flags,
                                      NULL));
@@ -234,10 +236,6 @@ meta_backend_native_post_init (MetaBackend *backend)
 #endif
 
   update_viewports (backend);
-
-#ifdef HAVE_WAYLAND
-  meta_backend_init_wayland (backend);
-#endif
 }
 
 static MetaMonitorManager *
@@ -578,10 +576,7 @@ meta_backend_native_initable_init (GInitable     *initable,
         return FALSE;
     }
 
-#ifdef HAVE_WAYLAND
-  meta_backend_init_wayland_display (META_BACKEND (native));
-#endif
-
+  native->device_pool = meta_device_pool_new (native->launcher);
   native->udev = meta_udev_new (native);
 
   kms_flags = META_KMS_FLAG_NONE;
@@ -676,6 +671,12 @@ meta_backend_native_get_launcher (MetaBackendNative *native)
   return native->launcher;
 }
 
+MetaDevicePool *
+meta_backend_native_get_device_pool (MetaBackendNative *native)
+{
+  return native->device_pool;
+}
+
 MetaUdev *
 meta_backend_native_get_udev (MetaBackendNative *native)
 {
@@ -737,11 +738,11 @@ void meta_backend_native_resume (MetaBackendNative *native)
     meta_backend_get_monitor_manager (backend);
   MetaMonitorManagerNative *monitor_manager_native =
     META_MONITOR_MANAGER_NATIVE (monitor_manager);
-  MetaIdleMonitor *idle_monitor;
   ClutterBackend *clutter_backend = meta_backend_get_clutter_backend (backend);
   MetaSeatNative *seat =
     META_SEAT_NATIVE (clutter_backend_get_default_seat (clutter_backend));
   MetaRenderer *renderer = meta_backend_get_renderer (backend);
+  MetaIdleManager *idle_manager;
   MetaInputSettings *input_settings;
 
   COGL_TRACE_BEGIN_SCOPED (MetaBackendNativeResume,
@@ -757,8 +758,8 @@ void meta_backend_native_resume (MetaBackendNative *native)
 
   clutter_actor_queue_redraw (CLUTTER_ACTOR (stage));
 
-  idle_monitor = meta_idle_monitor_get_core ();
-  meta_idle_monitor_reset_idletime (idle_monitor);
+  idle_manager = meta_backend_get_idle_manager (backend);
+  meta_idle_manager_reset_idle_time (idle_manager);
 
   input_settings = meta_backend_get_input_settings (backend);
   meta_input_settings_maybe_restore_numlock_state (input_settings);

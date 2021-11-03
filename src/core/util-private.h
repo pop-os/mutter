@@ -36,11 +36,26 @@
 
 void     meta_set_verbose (gboolean setting);
 void     meta_set_debugging (gboolean setting);
+
+META_EXPORT_TEST
 void     meta_set_syncing (gboolean setting);
+
 void     meta_set_replace_current_wm (gboolean setting);
 void     meta_set_is_wayland_compositor (gboolean setting);
 
 char *   meta_generate_random_id (GRand *rand,
                                   int    length);
+
+void meta_init_debug_utils (void);
+
+#define META_POINT_IN_RECT(xcoord, ycoord, rect) \
+  ((xcoord) >= (rect).x &&                   \
+   (xcoord) <  ((rect).x + (rect).width) &&  \
+   (ycoord) >= (rect).y &&                   \
+   (ycoord) <  ((rect).y + (rect).height))
+
+void     meta_get_clutter_debug_flags (ClutterDebugFlag     *debug_flags,
+                                       ClutterDrawDebugFlag *draw_flags,
+                                       ClutterPickDebugFlag *pick_flags);
 
 #endif

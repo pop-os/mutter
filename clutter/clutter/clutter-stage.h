@@ -149,6 +149,9 @@ struct _ClutterFrameInfo
   ClutterFrameInfoFlag flags;
 
   unsigned int sequence;
+
+  int64_t gpu_rendering_duration_ns;
+  int64_t cpu_time_before_buffer_swap_us;
 };
 
 typedef struct _ClutterCapture
@@ -248,6 +251,13 @@ gboolean clutter_stage_paint_to_buffer (ClutterStage                 *stage,
                                         CoglPixelFormat               format,
                                         ClutterPaintFlag              paint_flags,
                                         GError                      **error);
+
+CLUTTER_EXPORT
+ClutterContent * clutter_stage_paint_to_content (ClutterStage                 *stage,
+                                                 const cairo_rectangle_int_t  *rect,
+                                                 float                         scale,
+                                                 ClutterPaintFlag              paint_flags,
+                                                 GError                      **error);
 
 CLUTTER_EXPORT
 ClutterStageView * clutter_stage_get_view_at (ClutterStage *stage,

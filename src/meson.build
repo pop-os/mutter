@@ -118,6 +118,12 @@ if have_wayland
   ]
 endif
 
+if have_libsystemd
+  mutter_pkg_private_deps += [
+    libsystemd_dep,
+  ]
+endif
+
 if have_native_backend
   mutter_pkg_private_deps += [
     libdrm_dep,
@@ -188,8 +194,8 @@ mutter_sources = [
   'backends/meta-gpu.c',
   'backends/meta-gpu.h',
   'backends/meta-idle-monitor.c',
-  'backends/meta-idle-monitor-dbus.c',
-  'backends/meta-idle-monitor-dbus.h',
+  'backends/meta-idle-manager.c',
+  'backends/meta-idle-manager.h',
   'backends/meta-idle-monitor-private.h',
   'backends/meta-input-device.c',
   'backends/meta-input-mapper.c',
@@ -233,7 +239,11 @@ mutter_sources = [
   'backends/meta-settings.c',
   'backends/meta-settings-private.h',
   'backends/meta-stage.c',
+  'backends/meta-stage-impl.c',
+  'backends/meta-stage-impl-private.h',
   'backends/meta-stage-private.h',
+  'backends/meta-stage-view.c',
+  'backends/meta-stage-view-private.h',
   'backends/meta-viewport-info.c',
   'backends/meta-viewport-info.h',
   'backends/meta-virtual-monitor.c',
@@ -358,8 +368,6 @@ mutter_sources = [
   'core/frame.h',
   'core/keybindings.c',
   'core/keybindings-private.h',
-  'core/main.c',
-  'core/main-private.h',
   'core/meta-accel-parse.c',
   'core/meta-accel-parse.h',
   'core/meta-anonymous-file.c',
@@ -371,6 +379,10 @@ mutter_sources = [
   'core/meta-close-dialog.c',
   'core/meta-close-dialog-default.c',
   'core/meta-close-dialog-default-private.h',
+  'core/meta-context-main.c',
+  'core/meta-context-main.h',
+  'core/meta-context-private.h',
+  'core/meta-context.c',
   'core/meta-fraction.c',
   'core/meta-fraction.h',
   'core/meta-gesture-tracker.c',
@@ -380,6 +392,7 @@ mutter_sources = [
   'core/meta-inhibit-shortcuts-dialog-default-private.h',
   'core/meta-launch-context.c',
   'core/meta-pad-action-mapper.c',
+  'core/meta-private-enums.h',
   'core/meta-selection.c',
   'core/meta-selection-source.c',
   'core/meta-selection-source-memory.c',
@@ -388,6 +401,7 @@ mutter_sources = [
   'core/meta-workspace-manager-private.h',
   'core/place.c',
   'core/place.h',
+  'core/prefs-private.h',
   'core/prefs.c',
   'core/restart.c',
   'core/stack.c',
@@ -513,6 +527,8 @@ if have_wayland
     'wayland/meta-pointer-lock-wayland.h',
     'wayland/meta-selection-source-wayland.c',
     'wayland/meta-selection-source-wayland-private.h',
+    'wayland/meta-wayland-activation.c',
+    'wayland/meta-wayland-activation.h',
     'wayland/meta-wayland-actor-surface.c',
     'wayland/meta-wayland-actor-surface.h',
     'wayland/meta-wayland-buffer.c',
@@ -661,6 +677,9 @@ if have_native_backend
     'backends/native/meta-crtc-virtual.h',
     'backends/native/meta-cursor-renderer-native.c',
     'backends/native/meta-cursor-renderer-native.h',
+    'backends/native/meta-device-pool-private.h',
+    'backends/native/meta-device-pool.c',
+    'backends/native/meta-device-pool.h',
     'backends/native/meta-drm-buffer-dumb.c',
     'backends/native/meta-drm-buffer-dumb.h',
     'backends/native/meta-drm-buffer-gbm.c',
@@ -811,7 +830,7 @@ if have_profiler
   if sysprof_dep.type_name() == 'pkgconfig'
     sysprof_dbus_interfaces_dir = join_paths(sysprof_dep.get_pkgconfig_variable('datadir'), 'dbus-1', 'interfaces')
   else
-    sysprof_dbus_interfaces_dir = join_paths(meson.source_root(), 'subprojects', 'sysprof', 'src')
+    sysprof_dbus_interfaces_dir = join_paths(mutter_srcdir, 'subprojects', 'sysprof', 'src')
   endif
 
   sysprof3_dbus_file = join_paths(sysprof_dbus_interfaces_dir, 'org.gnome.Sysprof3.Profiler.xml')
@@ -880,6 +899,7 @@ if have_wayland
     ['tablet', 'unstable', 'v2', ],
     ['text-input', 'unstable', 'v3', ],
     ['viewporter', 'stable', ],
+    ['xdg-activation', 'staging', 'v1', ],
     ['xdg-foreign', 'unstable', 'v1', ],
     ['xdg-output', 'unstable', 'v1', ],
     ['xdg-shell', 'unstable', 'v6', ],
@@ -903,6 +923,13 @@ if have_wayland
 
     if protocol_type == 'stable'
       output_base = protocol_name
+      input = join_paths(protocols_dir,
+                         '@0@/@1@/@2@.xml'.format(protocol_type,
+                         protocol_name,
+                         output_base))
+    elif protocol_type == 'staging'
+      protocol_version = p.get(2)
+      output_base = '@0@-@1@'.format(protocol_name, protocol_version)
       input = join_paths(protocols_dir,
                          '@0@/@1@/@2@.xml'.format(protocol_type,
                          protocol_name,

@@ -23,6 +23,7 @@
 #include <glib-object.h>
 
 typedef struct _MetaLauncher MetaLauncher;
+typedef struct _MetaDbusLogin1Session MetaDbusLogin1Session;
 
 MetaLauncher     *meta_launcher_new                     (GError       **error);
 void              meta_launcher_free                    (MetaLauncher  *self);
@@ -33,12 +34,7 @@ gboolean          meta_launcher_activate_vt             (MetaLauncher  *self,
 
 const char *      meta_launcher_get_seat_id             (MetaLauncher *launcher);
 
-int               meta_launcher_open_restricted         (MetaLauncher *launcher,
-                                                         const char   *path,
-                                                         GError      **error);
-
-void              meta_launcher_close_restricted        (MetaLauncher *launcher,
-                                                         int           fd);
+MetaDbusLogin1Session * meta_launcher_get_session_proxy (MetaLauncher *launcher);
 
 
 #endif /* META_LAUNCHER_H */

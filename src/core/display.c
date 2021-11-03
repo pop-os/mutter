@@ -43,15 +43,14 @@
 #include "backends/meta-backend-private.h"
 #include "backends/meta-cursor-sprite-xcursor.h"
 #include "backends/meta-cursor-tracker-private.h"
-#include "backends/meta-idle-monitor-dbus.h"
 #include "backends/meta-input-device-private.h"
 #include "backends/meta-input-mapper-private.h"
 #include "backends/meta-stage-private.h"
 #include "backends/x11/meta-backend-x11.h"
+#include "backends/x11/meta-clutter-backend-x11.h"
 #include "backends/x11/meta-event-x11.h"
 #include "backends/x11/cm/meta-backend-x11-cm.h"
 #include "backends/x11/nested/meta-backend-x11-nested.h"
-#include "clutter/x11/clutter-x11.h"
 #include "compositor/compositor-private.h"
 #include "compositor/meta-compositor-x11.h"
 #include "cogl/cogl.h"
@@ -61,7 +60,6 @@
 #include "core/events.h"
 #include "core/frame.h"
 #include "core/keybindings-private.h"
-#include "core/main-private.h"
 #include "core/meta-clipboard-manager.h"
 #include "core/meta-workspace-manager-private.h"
 #include "core/util-private.h"
@@ -123,7 +121,12 @@ typedef struct
   guint       ping_timeout_id;
 } MetaPingData;
 
-G_DEFINE_TYPE(MetaDisplay, meta_display, G_TYPE_OBJECT);
+typedef struct _MetaDisplayPrivate
+{
+  MetaContext *context;
+} MetaDisplayPrivate;
+
+G_DEFINE_TYPE_WITH_PRIVATE (MetaDisplay, meta_display, G_TYPE_OBJECT)
 
 /* Signals */
 enum
@@ -172,6 +175,8 @@ enum
 };
 
 static guint display_signals [LAST_SIGNAL] = { 0 };
+
+#define META_GRAB_OP_GET_BASE_TYPE(op) (op & 0x00FF)
 
 /*
  * The display we're managing.  This is a singleton object.  (Historically,
@@ -787,21 +792,12 @@ meta_display_shutdown_x11 (MetaDisplay *display)
   g_clear_object (&display->x11_display);
 }
 
-/**
- * meta_display_open:
- *
- * Opens a new display, sets it up, initialises all the X extensions
- * we will need, and adds it to the list of displays.
- *
- * Returns: %TRUE if the display was opened successfully, and %FALSE
- * otherwise-- that is, if the display doesn't exist or it already
- * has a window manager.
- */
-gboolean
-meta_display_open (void)
+MetaDisplay *
+meta_display_new (MetaContext  *context,
+                  GError      **error)
 {
-  GError *error = NULL;
   MetaDisplay *display;
+  MetaDisplayPrivate *priv;
   int i;
   guint32 timestamp;
   Window old_active_xwindow = None;
@@ -811,6 +807,9 @@ meta_display_open (void)
 
   g_assert (the_display == NULL);
   display = the_display = g_object_new (META_TYPE_DISPLAY, NULL);
+
+  priv = meta_display_get_instance_private (display);
+  priv->context = context;
 
   display->closing = 0;
   display->display_opening = TRUE;
@@ -890,7 +889,10 @@ meta_display_open (void)
 #ifdef HAVE_WAYLAND
   if (meta_is_wayland_compositor ())
     {
-      if (meta_get_x11_display_policy () == META_DISPLAY_POLICY_MANDATORY)
+      MetaX11DisplayPolicy x11_display_policy;
+
+      x11_display_policy = meta_context_get_x11_display_policy (context);
+      if (x11_display_policy == META_X11_DISPLAY_POLICY_MANDATORY)
         {
           meta_display_init_x11 (display, NULL,
                                  (GAsyncReadyCallback) on_x11_initialized,
@@ -902,8 +904,11 @@ meta_display_open (void)
   else
 #endif
     {
-      if (!meta_display_init_x11_display (display, &error))
-        g_error ("Failed to init X11 display: %s", error->message);
+      if (!meta_display_init_x11_display (display, error))
+        {
+          g_object_unref (display);
+          return NULL;
+        }
 
       timestamp = display->x11_display->timestamp;
     }
@@ -917,10 +922,10 @@ meta_display_open (void)
                           display->x11_display->atom__NET_ACTIVE_WINDOW,
                           &old_active_xwindow);
 
-  if (!meta_compositor_do_manage (display->compositor, &error))
+  if (!meta_compositor_do_manage (display->compositor, error))
     {
-      g_error ("Compositor failed to manage display: %s",
-               error->message);
+      g_object_unref (display);
+      return NULL;
     }
 
   if (display->x11_display)
@@ -956,14 +961,12 @@ meta_display_open (void)
       meta_display_unset_input_focus (display, timestamp);
     }
 
-  meta_idle_monitor_init_dbus ();
-
   display->sound_player = g_object_new (META_TYPE_SOUND_PLAYER, NULL);
 
   /* Done opening new display */
   display->display_opening = FALSE;
 
-  return TRUE;
+  return display;
 }
 
 static gint
@@ -1076,13 +1079,14 @@ meta_display_close (MetaDisplay *display,
                     guint32      timestamp)
 {
   g_assert (display != NULL);
-  g_assert (display == the_display);
 
   if (display->closing != 0)
     {
       /* The display's already been closed. */
       return;
     }
+
+  g_assert (display == the_display);
 
   display->closing += 1;
 
@@ -1134,10 +1138,7 @@ meta_display_close (MetaDisplay *display,
   g_clear_object (&display->selection);
   g_clear_object (&display->pad_action_mapper);
 
-  g_object_unref (display);
   the_display = NULL;
-
-  meta_quit (META_EXIT_SUCCESS);
 }
 
 /**
@@ -1403,17 +1404,41 @@ meta_display_sync_wayland_input_focus (MetaDisplay *display)
 #endif
 }
 
+static void
+meta_window_set_inactive_since (MetaWindow  *window,
+                                int64_t      inactive_since_us)
+{
+  GFile *file = NULL;
+  g_autoptr (GFileInfo) file_info = NULL;
+  g_autofree char *timestamp = NULL;
+
+  timestamp = g_strdup_printf ("%" G_GINT64_FORMAT, inactive_since_us);
+
+  file = meta_window_get_unit_cgroup (window);
+  if (!file)
+    return;
+
+  file_info = g_file_info_new ();
+  g_file_info_set_attribute_string (file_info,
+                                    "xattr::xdg.inactive-since", timestamp);
+
+  if (!g_file_set_attributes_from_info (file, file_info,
+                                        G_FILE_QUERY_INFO_NONE,
+                                        NULL, NULL))
+    return;
+}
+
 void
 meta_display_update_focus_window (MetaDisplay *display,
                                   MetaWindow  *window)
 {
+  MetaWindow *previous = NULL;
+
   if (display->focus_window == window)
     return;
 
   if (display->focus_window)
     {
-      MetaWindow *previous;
-
       meta_topic (META_DEBUG_FOCUS,
                   "%s is now the previous focus window due to being focused out or unmapped",
                   display->focus_window->desc);
@@ -1438,6 +1463,15 @@ meta_display_update_focus_window (MetaDisplay *display,
     }
   else
     meta_topic (META_DEBUG_FOCUS, "* Focus --> NULL");
+
+  if (!previous || !display->focus_window ||
+      !meta_window_unit_cgroup_equal (previous, display->focus_window))
+    {
+      if (previous)
+        meta_window_set_inactive_since (previous, g_get_monotonic_time ());
+      if (display->focus_window)
+        meta_window_set_inactive_since (display->focus_window, -1);
+    }
 
   if (meta_is_wayland_compositor ())
     meta_display_sync_wayland_input_focus (display);
@@ -2657,10 +2691,17 @@ prefs_changed_callback (MetaPreference pref,
 {
   MetaDisplay *display = data;
 
-  if (pref == META_PREF_CURSOR_THEME ||
-      pref == META_PREF_CURSOR_SIZE)
+  switch (pref)
     {
+    case META_PREF_DRAGGABLE_BORDER_WIDTH:
+      meta_display_queue_retheme_all_windows (display);
+      break;
+    case META_PREF_CURSOR_THEME:
+    case META_PREF_CURSOR_SIZE:
       meta_display_reload_cursor (display);
+      break;
+    default:
+      break;
     }
 }
 
@@ -2774,6 +2815,20 @@ meta_display_supports_extended_barriers (MetaDisplay *display)
     }
 
   return FALSE;
+}
+
+/**
+ * meta_display_get_context:
+ * @display: a #MetaDisplay
+ *
+ * Returns: (transfer none): the #MetaContext
+ */
+MetaContext *
+meta_display_get_context (MetaDisplay *display)
+{
+  MetaDisplayPrivate *priv = meta_display_get_instance_private (display);
+
+  return priv->context;
 }
 
 /**

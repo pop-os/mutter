@@ -55,6 +55,7 @@
 
 #include "backends/meta-cursor-renderer.h"
 #include "backends/meta-cursor-tracker-private.h"
+#include "backends/meta-idle-manager.h"
 #include "backends/meta-idle-monitor-private.h"
 #include "backends/meta-input-mapper-private.h"
 #include "backends/meta-input-settings-private.h"
@@ -65,8 +66,10 @@
 #include "backends/x11/meta-backend-x11.h"
 #include "clutter/clutter-mutter.h"
 #include "clutter/clutter-seat-private.h"
+#include "core/meta-context-private.h"
 #include "meta/main.h"
 #include "meta/meta-backend.h"
+#include "meta/meta-context.h"
 #include "meta/util.h"
 
 #ifdef HAVE_PROFILER
@@ -87,6 +90,17 @@
 #ifdef HAVE_WAYLAND
 #include "wayland/meta-wayland.h"
 #endif
+
+enum
+{
+  PROP_0,
+
+  PROP_CONTEXT,
+
+  N_PROPS
+};
+
+static GParamSpec *obj_props[N_PROPS];
 
 enum
 {
@@ -121,10 +135,13 @@ meta_get_backend (void)
 
 struct _MetaBackendPrivate
 {
+  MetaContext *context;
+
   MetaMonitorManager *monitor_manager;
   MetaOrientationManager *orientation_manager;
   MetaCursorTracker *cursor_tracker;
   MetaInputMapper *input_mapper;
+  MetaIdleManager *idle_manager;
   MetaRenderer *renderer;
 #ifdef HAVE_EGL
   MetaEgl *egl;
@@ -135,10 +152,6 @@ struct _MetaBackendPrivate
   MetaDbusSessionWatcher *dbus_session_watcher;
   MetaScreenCast *screen_cast;
   MetaRemoteDesktop *remote_desktop;
-#endif
-
-#ifdef HAVE_WAYLAND
-  MetaWaylandCompositor *wayland_compositor;
 #endif
 
 #ifdef HAVE_PROFILER
@@ -159,8 +172,6 @@ struct _MetaBackendPrivate
   gboolean is_pointer_position_initialized;
 
   guint device_update_idle_id;
-
-  GHashTable *device_monitors;
 
   ClutterInputDevice *current_device;
 
@@ -199,6 +210,8 @@ meta_backend_dispose (GObject *object)
   MetaBackend *backend = META_BACKEND (object);
   MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
 
+  _backend = NULL;
+
   g_clear_pointer (&priv->cursor_tracker, meta_cursor_tracker_destroy);
   g_clear_object (&priv->current_device);
   g_clear_object (&priv->monitor_manager);
@@ -233,8 +246,6 @@ meta_backend_dispose (GObject *object)
 
   g_clear_handle_id (&priv->device_update_idle_id, g_source_remove);
 
-  g_clear_pointer (&priv->device_monitors, g_hash_table_destroy);
-
   g_clear_object (&priv->settings);
 
 #ifdef HAVE_PROFILER
@@ -243,14 +254,15 @@ meta_backend_dispose (GObject *object)
 
   g_clear_pointer (&priv->default_seat, clutter_seat_destroy);
   g_clear_pointer (&priv->stage, clutter_actor_destroy);
-  g_clear_pointer (&priv->clutter_backend, clutter_backend_destroy);
+  g_clear_pointer (&priv->idle_manager, meta_idle_manager_free);
   g_clear_object (&priv->renderer);
+  g_clear_pointer (&priv->clutter_backend, clutter_backend_destroy);
   g_clear_list (&priv->gpus, g_object_unref);
 
   G_OBJECT_CLASS (meta_backend_parent_class)->dispose (object);
 }
 
-static void
+void
 meta_backend_destroy (MetaBackend *backend)
 {
   g_object_run_dispose (G_OBJECT (backend));
@@ -361,63 +373,6 @@ meta_backend_monitors_changed (MetaBackend *backend)
   update_cursors (backend);
 }
 
-void
-meta_backend_foreach_device_monitor (MetaBackend *backend,
-                                     GFunc        func,
-                                     gpointer     user_data)
-{
-  MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
-  GHashTableIter iter;
-  gpointer value;
-
-  g_hash_table_iter_init (&iter, priv->device_monitors);
-  while (g_hash_table_iter_next (&iter, NULL, &value))
-    {
-      MetaIdleMonitor *device_monitor = META_IDLE_MONITOR (value);
-
-      func (device_monitor, user_data);
-    }
-}
-
-static MetaIdleMonitor *
-meta_backend_create_idle_monitor (MetaBackend        *backend,
-                                  ClutterInputDevice *device)
-{
-  return g_object_new (META_TYPE_IDLE_MONITOR,
-                       "device", device,
-                       NULL);
-}
-
-static void
-create_device_monitor (MetaBackend        *backend,
-                       ClutterInputDevice *device)
-{
-  MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
-  MetaIdleMonitor *idle_monitor;
-
-  if (g_hash_table_contains (priv->device_monitors, device))
-    return;
-
-  idle_monitor = meta_backend_create_idle_monitor (backend, device);
-  g_hash_table_insert (priv->device_monitors, device, idle_monitor);
-}
-
-static void
-destroy_device_monitor (MetaBackend        *backend,
-                        ClutterInputDevice *device)
-{
-  MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
-
-  g_hash_table_remove (priv->device_monitors, device);
-}
-
-static void
-meta_backend_monitor_device (MetaBackend        *backend,
-                             ClutterInputDevice *device)
-{
-  create_device_monitor (backend, device);
-}
-
 static inline gboolean
 check_has_pointing_device (ClutterSeat *seat)
 {
@@ -454,8 +409,6 @@ on_device_added (ClutterSeat        *seat,
   MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
   ClutterInputDeviceType device_type;
 
-  create_device_monitor (backend, device);
-
   if (clutter_input_device_get_device_mode (device) ==
       CLUTTER_INPUT_MODE_LOGICAL)
     return;
@@ -484,8 +437,6 @@ on_device_removed (ClutterSeat        *seat,
 {
   MetaBackend *backend = META_BACKEND (user_data);
   MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
-
-  destroy_device_monitor (backend, device);
 
   if (clutter_input_device_get_device_mode (device) ==
       CLUTTER_INPUT_MODE_LOGICAL)
@@ -524,26 +475,6 @@ on_device_removed (ClutterSeat        *seat,
 
   if (priv->current_device == device)
     meta_backend_update_last_device (backend, NULL);
-}
-
-static void
-create_device_monitors (MetaBackend *backend,
-                        ClutterSeat *seat)
-{
-  GList *l, *devices;
-
-  create_device_monitor (backend, clutter_seat_get_pointer (seat));
-  create_device_monitor (backend, clutter_seat_get_keyboard (seat));
-
-  devices = clutter_seat_list_devices (seat);
-  for (l = devices; l; l = l->next)
-    {
-      ClutterInputDevice *device = l->data;
-
-      meta_backend_monitor_device (backend, device);
-    }
-
-  g_list_free (devices);
 }
 
 static void
@@ -617,10 +548,7 @@ meta_backend_real_post_init (MetaBackend *backend)
 
   meta_backend_sync_screen_size (backend);
 
-  priv->device_monitors =
-    g_hash_table_new_full (NULL, NULL, NULL, (GDestroyNotify) g_object_unref);
-
-  create_device_monitors (backend, seat);
+  priv->idle_manager = meta_idle_manager_new (backend);
 
   g_signal_connect_object (seat, "device-added",
                            G_CALLBACK (on_device_added), backend, 0);
@@ -740,7 +668,7 @@ upower_properties_changed (GDBusProxy *proxy,
   if (lid_is_closed)
     return;
 
-  meta_idle_monitor_reset_idletime (meta_idle_monitor_get_core ());
+  meta_idle_manager_reset_idle_time (priv->idle_manager);
 }
 
 static void
@@ -822,6 +750,8 @@ meta_backend_constructed (GObject *object)
   MetaBackendClass *backend_class =
    META_BACKEND_GET_CLASS (backend);
 
+  g_assert (priv->context);
+
 #ifdef HAVE_LIBWACOM
   priv->wacom_db = libwacom_database_new ();
   if (!priv->wacom_db)
@@ -844,6 +774,46 @@ meta_backend_constructed (GObject *object)
 }
 
 static void
+meta_backend_set_property (GObject      *object,
+                           guint         prop_id,
+                           const GValue *value,
+                           GParamSpec   *pspec)
+{
+  MetaBackend *backend = META_BACKEND (object);
+  MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
+
+  switch (prop_id)
+    {
+    case PROP_CONTEXT:
+      priv->context = g_value_get_object (value);
+      break;
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      break;
+    }
+}
+
+static void
+meta_backend_get_property (GObject    *object,
+                           guint       prop_id,
+                           GValue     *value,
+                           GParamSpec *pspec)
+{
+  MetaBackend *backend = META_BACKEND (object);
+  MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
+
+  switch (prop_id)
+    {
+    case PROP_CONTEXT:
+      g_value_set_object (value, priv->context);
+      break;
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      break;
+    }
+}
+
+static void
 meta_backend_class_init (MetaBackendClass *klass)
 {
   const gchar *mutter_stage_views;
@@ -851,6 +821,8 @@ meta_backend_class_init (MetaBackendClass *klass)
 
   object_class->dispose = meta_backend_dispose;
   object_class->constructed = meta_backend_constructed;
+  object_class->set_property = meta_backend_set_property;
+  object_class->get_property = meta_backend_get_property;
 
   klass->post_init = meta_backend_real_post_init;
   klass->grab_device = meta_backend_real_grab_device;
@@ -858,6 +830,16 @@ meta_backend_class_init (MetaBackendClass *klass)
   klass->select_stage_events = meta_backend_real_select_stage_events;
   klass->is_lid_closed = meta_backend_real_is_lid_closed;
   klass->create_cursor_tracker = meta_backend_real_create_cursor_tracker;
+
+  obj_props[PROP_CONTEXT] =
+    g_param_spec_object ("context",
+                         "context",
+                         "MetaContext",
+                         META_TYPE_CONTEXT,
+                         G_PARAM_READWRITE |
+                         G_PARAM_CONSTRUCT_ONLY |
+                         G_PARAM_STATIC_STRINGS);
+  g_object_class_install_properties (object_class, N_PROPS, obj_props);
 
   signals[KEYMAP_CHANGED] =
     g_signal_new ("keymap-changed",
@@ -935,12 +917,15 @@ prepare_for_sleep_cb (GDBusConnection *connection,
                       GVariant        *parameters,
                       gpointer         user_data)
 {
+  MetaBackend *backend = user_data;
+  MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
   gboolean suspending;
 
   g_variant_get (parameters, "(b)", &suspending);
   if (suspending)
     return;
-  meta_idle_monitor_reset_idletime (meta_idle_monitor_get_core ());
+
+  meta_idle_manager_reset_idle_time (priv->idle_manager);
 }
 
 static void
@@ -948,6 +933,7 @@ system_bus_gotten_cb (GObject      *object,
                       GAsyncResult *res,
                       gpointer      user_data)
 {
+  MetaBackend *backend = user_data;
   MetaBackendPrivate *priv;
   GDBusConnection *bus;
 
@@ -955,7 +941,7 @@ system_bus_gotten_cb (GObject      *object,
   if (!bus)
     return;
 
-  priv = meta_backend_get_instance_private (user_data);
+  priv = meta_backend_get_instance_private (backend);
   priv->system_bus = bus;
   priv->sleep_signal_id =
     g_dbus_connection_signal_subscribe (priv->system_bus,
@@ -966,35 +952,9 @@ system_bus_gotten_cb (GObject      *object,
                                         NULL,
                                         G_DBUS_SIGNAL_FLAGS_NONE,
                                         prepare_for_sleep_cb,
-                                        NULL,
+                                        backend,
                                         NULL);
 }
-
-#ifdef HAVE_WAYLAND
-MetaWaylandCompositor *
-meta_backend_get_wayland_compositor (MetaBackend *backend)
-{
-  MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
-
-  return priv->wayland_compositor;
-}
-
-void
-meta_backend_init_wayland_display (MetaBackend *backend)
-{
-  MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
-
-  priv->wayland_compositor = meta_wayland_compositor_new (backend);
-}
-
-void
-meta_backend_init_wayland (MetaBackend *backend)
-{
-  MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
-
-  meta_wayland_compositor_setup (priv->wayland_compositor);
-}
-#endif
 
 /* Mutter is responsible for pulling events off the X queue, so Clutter
  * doesn't need (and shouldn't) run its normal event source which polls
@@ -1170,7 +1130,32 @@ meta_backend_get_idle_monitor (MetaBackend        *backend,
 {
   MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
 
-  return g_hash_table_lookup (priv->device_monitors, device);
+  return meta_idle_manager_get_monitor (priv->idle_manager, device);
+}
+
+/**
+ * meta_backend_get_core_idle_monitor:
+ *
+ * Returns: (transfer none): the #MetaIdleMonitor that tracks server-global
+ * idle time for all devices.
+ */
+MetaIdleMonitor *
+meta_backend_get_core_idle_monitor (MetaBackend *backend)
+{
+  MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
+
+  return meta_idle_manager_get_core_monitor (priv->idle_manager);
+}
+
+/**
+ * meta_backend_get_idle_manager: (skip)
+ */
+MetaIdleManager *
+meta_backend_get_idle_manager (MetaBackend *backend)
+{
+  MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
+
+  return priv->idle_manager;
 }
 
 /**
@@ -1333,6 +1318,20 @@ meta_backend_grab_device (MetaBackend *backend,
                           uint32_t     timestamp)
 {
   return META_BACKEND_GET_CLASS (backend)->grab_device (backend, device_id, timestamp);
+}
+
+/**
+ * meta_backend_get_context:
+ * @backend: the #MetaBackend
+ *
+ * Returns: (transfer none): The #MetaContext
+ */
+MetaContext *
+meta_backend_get_context (MetaBackend *backend)
+{
+  MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
+
+  return priv->context;
 }
 
 /**
@@ -1512,34 +1511,6 @@ meta_backend_get_clutter_backend (MetaBackend *backend)
     }
 
   return priv->clutter_backend;
-}
-
-void
-meta_init_backend (GType         backend_gtype,
-                   unsigned int  n_properties,
-                   const char   *names[],
-                   const GValue *values)
-{
-  MetaBackend *backend;
-  GError *error = NULL;
-
-  /* meta_backend_init() above install the backend globally so
-   * so meta_get_backend() works even during initialization. */
-  backend = META_BACKEND (g_object_new_with_properties (backend_gtype,
-                                                        n_properties,
-                                                        names,
-                                                        values));
-  if (!g_initable_init (G_INITABLE (backend), NULL, &error))
-    {
-      g_warning ("Failed to create backend: %s", error->message);
-      meta_exit (META_EXIT_ERROR);
-    }
-}
-
-void
-meta_release_backend (void)
-{
-  g_clear_pointer (&_backend, meta_backend_destroy);
 }
 
 void

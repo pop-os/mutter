@@ -57,8 +57,6 @@ struct _MetaGpuKms
   uint32_t id;
   int fd;
 
-  clockid_t clock_id;
-
   gboolean resources_init_failed_before;
 };
 
@@ -106,12 +104,6 @@ meta_gpu_kms_get_kms_device (MetaGpuKms *gpu_kms)
   return gpu_kms->kms_device;
 }
 
-int
-meta_gpu_kms_get_fd (MetaGpuKms *gpu_kms)
-{
-  return gpu_kms->fd;
-}
-
 uint32_t
 meta_gpu_kms_get_id (MetaGpuKms *gpu_kms)
 {
@@ -122,12 +114,6 @@ const char *
 meta_gpu_kms_get_file_path (MetaGpuKms *gpu_kms)
 {
   return meta_kms_device_get_path (gpu_kms->kms_device);
-}
-
-gboolean
-meta_gpu_kms_is_clock_monotonic (MetaGpuKms *gpu_kms)
-{
-  return gpu_kms->clock_id == CLOCK_MONOTONIC;
 }
 
 gboolean
@@ -317,17 +303,6 @@ init_crtcs (MetaGpuKms *gpu_kms)
 }
 
 static void
-init_frame_clock (MetaGpuKms *gpu_kms)
-{
-  uint64_t uses_monotonic;
-
-  if (drmGetCap (gpu_kms->fd, DRM_CAP_TIMESTAMP_MONOTONIC, &uses_monotonic) != 0)
-    uses_monotonic = 0;
-
-  gpu_kms->clock_id = uses_monotonic ? CLOCK_MONOTONIC : CLOCK_REALTIME;
-}
-
-static void
 init_outputs (MetaGpuKms *gpu_kms)
 {
   MetaGpu *gpu = META_GPU (gpu_kms);
@@ -391,7 +366,6 @@ meta_gpu_kms_read_current (MetaGpu  *gpu,
   init_modes (gpu_kms);
   init_crtcs (gpu_kms);
   init_outputs (gpu_kms);
-  init_frame_clock (gpu_kms);
 
   return TRUE;
 }
@@ -419,16 +393,12 @@ meta_gpu_kms_new (MetaBackendNative  *backend_native,
                   GError            **error)
 {
   MetaGpuKms *gpu_kms;
-  int kms_fd;
-
-  kms_fd = meta_kms_device_leak_fd (kms_device);
 
   gpu_kms = g_object_new (META_TYPE_GPU_KMS,
                           "backend", backend_native,
                           NULL);
 
   gpu_kms->kms_device = kms_device;
-  gpu_kms->fd = kms_fd;
 
   meta_gpu_kms_read_current (META_GPU (gpu_kms), NULL);
 
@@ -440,7 +410,6 @@ meta_gpu_kms_init (MetaGpuKms *gpu_kms)
 {
   static uint32_t id = 0;
 
-  gpu_kms->fd = -1;
   gpu_kms->id = ++id;
 }
 

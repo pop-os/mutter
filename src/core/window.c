@@ -97,6 +97,10 @@
 #include "wayland/meta-window-xwayland.h"
 #endif
 
+#ifdef HAVE_LIBSYSTEMD
+#include <systemd/sd-login.h>
+#endif
+
 /* Windows that unmaximize to a size bigger than that fraction of the workarea
  * will be scaled down to that size (while maintaining aspect ratio).
  * Windows that cover an area greater then this size are automaximized on map.
@@ -251,6 +255,10 @@ prefs_changed_callback (MetaPreference pref,
       meta_window_recalc_features (window);
       meta_window_queue (window, META_QUEUE_MOVE_RESIZE);
     }
+  else if (pref == META_PREF_FOCUS_MODE)
+    {
+      meta_window_update_appears_focused (window);
+    }
 }
 
 static void
@@ -328,6 +336,9 @@ meta_window_finalize (GObject *object)
   if (window->transient_for)
     g_object_unref (window->transient_for);
 
+  if (window->cgroup_path)
+    g_object_unref (window->cgroup_path);
+
   g_free (window->sm_client_id);
   g_free (window->wm_client_machine);
   g_free (window->startup_id);
@@ -402,7 +413,7 @@ meta_window_get_property(GObject         *object,
       g_value_set_string (value, win->mutter_hints);
       break;
     case PROP_APPEARS_FOCUSED:
-      g_value_set_boolean (value, meta_window_appears_focused (win));
+      g_value_set_boolean (value, win->appears_focused);
       break;
     case PROP_WM_CLASS:
       g_value_set_string (value, win->res_class);
@@ -1153,6 +1164,9 @@ _meta_window_shared_new (MetaDisplay         *display,
 
   window->client_pid = 0;
 
+  window->has_valid_cgroup = TRUE;
+  window->cgroup_path = NULL;
+
   window->xtransient_for = None;
   window->xclient_leader = None;
 
@@ -1514,7 +1528,7 @@ meta_window_unmanage (MetaWindow  *window,
    * on what gets focused, maintaining sloppy focus
    * invariants.
    */
-  if (meta_window_appears_focused (window))
+  if (window->appears_focused)
     meta_window_propagate_focus_appearance (window, FALSE);
   if (window->has_focus)
     {
@@ -4911,6 +4925,9 @@ set_workspace_state (MetaWindow    *window,
         }
     }
 
+  if (!window->constructing)
+    meta_window_update_appears_focused (window);
+
   /* queue a move_resize since changing workspaces may change
    * the relevant struts
    */
@@ -5176,6 +5193,62 @@ meta_window_lower (MetaWindow  *window)
   meta_stack_lower (window->display->stack, window);
 }
 
+static gboolean
+lower_window_and_transients (MetaWindow *window,
+                             gpointer    user_data)
+{
+  MetaWorkspaceManager *workspace_manager = window->display->workspace_manager;
+
+  meta_window_lower (window);
+
+  meta_window_foreach_transient (window, lower_window_and_transients, NULL);
+
+  if (meta_prefs_get_raise_on_click ())
+    {
+      /* Move window to the back of the focusing workspace's MRU list.
+       * Do extra sanity checks to avoid possible race conditions.
+       * (Borrowed from window.c.)
+       */
+      if (workspace_manager->active_workspace &&
+          meta_window_located_on_workspace (window,
+                                            workspace_manager->active_workspace))
+        {
+          GList *link;
+          link = g_list_find (workspace_manager->active_workspace->mru_list,
+                              window);
+          g_assert (link);
+
+          workspace_manager->active_workspace->mru_list =
+            g_list_remove_link (workspace_manager->active_workspace->mru_list,
+                                link);
+          g_list_free (link);
+
+          workspace_manager->active_workspace->mru_list =
+            g_list_append (workspace_manager->active_workspace->mru_list,
+                           window);
+        }
+    }
+
+  return FALSE;
+}
+
+void
+meta_window_lower_with_transients (MetaWindow *window,
+                                   uint32_t    timestamp)
+{
+  MetaWorkspaceManager *workspace_manager = window->display->workspace_manager;
+
+  lower_window_and_transients (window, NULL);
+
+ /* Rather than try to figure that out whether we just lowered
+  * the focus window, assume that's always the case. (Typically,
+  * this will be invoked via keyboard action or by a mouse action;
+  * in either case the window or a modal child will have been focused.) */
+  meta_workspace_focus_default_window (workspace_manager->active_workspace,
+                                       NULL,
+                                       timestamp);
+}
+
 /*
  * Move window to the requested workspace; append controls whether new WS
  * should be created if one does not exist.
@@ -5210,9 +5283,26 @@ meta_window_change_workspace_by_index (MetaWindow *window,
     meta_window_change_workspace (window, workspace);
 }
 
-static void
-meta_window_appears_focused_changed (MetaWindow *window)
+void
+meta_window_update_appears_focused (MetaWindow *window)
 {
+  MetaWorkspaceManager *workspace_manager;
+  MetaWorkspace *workspace;
+  gboolean appears_focused;
+
+  workspace_manager = window->display->workspace_manager;
+  workspace = meta_window_get_workspace (window);
+
+  if (workspace && workspace != workspace_manager->active_workspace)
+    appears_focused = window == meta_workspace_get_default_focus_window (workspace);
+  else
+    appears_focused = window->has_focus || window->attached_focus_window;
+
+  if (window->appears_focused == appears_focused)
+    return;
+
+  window->appears_focused = appears_focused;
+
   set_net_wm_state (window);
   meta_window_frame_size_changed (window);
 
@@ -5292,7 +5382,7 @@ meta_window_propagate_focus_appearance (MetaWindow *window,
 
       if (child_focus_state_changed && !parent->has_focus)
         {
-          meta_window_appears_focused_changed (parent);
+          meta_window_update_appears_focused (parent);
         }
 
       child = parent;
@@ -5367,7 +5457,7 @@ meta_window_set_focused_internal (MetaWindow *window,
       g_signal_emit (window, window_signals[FOCUS], 0);
 
       if (!window->attached_focus_window)
-        meta_window_appears_focused_changed (window);
+        meta_window_update_appears_focused (window);
 
       meta_window_propagate_focus_appearance (window, TRUE);
     }
@@ -5380,7 +5470,7 @@ meta_window_set_focused_internal (MetaWindow *window,
       meta_window_propagate_focus_appearance (window, FALSE);
 
       if (!window->attached_focus_window)
-        meta_window_appears_focused_changed (window);
+        meta_window_update_appears_focused (window);
 
       /* Re-grab for click to focus and raise-on-click, if necessary */
       if (meta_prefs_get_focus_mode () == G_DESKTOP_FOCUS_MODE_CLICK ||
@@ -7305,7 +7395,7 @@ meta_window_get_frame (MetaWindow *window)
 gboolean
 meta_window_appears_focused (MetaWindow *window)
 {
-  return window->has_focus || (window->attached_focus_window != NULL);
+  return window->appears_focused;
 }
 
 gboolean
@@ -7654,6 +7744,75 @@ meta_window_get_pid (MetaWindow *window)
     window->client_pid = META_WINDOW_GET_CLASS (window)->get_client_pid (window);
 
   return window->client_pid;
+}
+
+/**
+ * meta_window_get_unit_cgroup:
+ * @window: a #MetaWindow
+ *
+ * Return value: a GFile for the cgroup path, or NULL.
+ */
+GFile *
+meta_window_get_unit_cgroup (MetaWindow *window)
+{
+#ifdef HAVE_LIBSYSTEMD
+  g_autofree char *contents = NULL;
+  g_autofree char *complete_path = NULL;
+  g_autofree char *unit_name = NULL;
+  g_autofree char *unit_path = NULL;
+  char *unit_end;
+  pid_t pid;
+
+  if (!window->has_valid_cgroup)
+    return NULL;
+
+  if (window->cgroup_path)
+    return window->cgroup_path;
+
+  pid = meta_window_get_pid (window);
+  if (pid < 1)
+    return NULL;
+
+  if (sd_pid_get_cgroup (pid, &contents) < 0)
+    {
+      window->has_valid_cgroup = FALSE;
+      return NULL;
+    }
+  g_strstrip (contents);
+
+  complete_path = g_strdup_printf ("%s%s", "/sys/fs/cgroup", contents);
+
+  if (sd_pid_get_user_unit (pid, &unit_name) < 0)
+    {
+      window->has_valid_cgroup = FALSE;
+      return NULL;
+    }
+  g_strstrip (unit_name);
+
+  unit_end = strstr (complete_path, unit_name) + strlen (unit_name);
+  *unit_end = '\0';
+
+  window->cgroup_path = g_file_new_for_path (complete_path);
+
+  return window->cgroup_path;
+#else
+  return NULL;
+#endif
+}
+
+gboolean
+meta_window_unit_cgroup_equal (MetaWindow *window1,
+                               MetaWindow *window2)
+{
+  GFile *window1_file, *window2_file;
+
+  window1_file = meta_window_get_unit_cgroup (window1);
+  window2_file = meta_window_get_unit_cgroup (window2);
+
+  if (!window1_file || !window2_file)
+    return FALSE;
+
+  return g_file_equal (window1_file, window2_file);
 }
 
 /**
@@ -8043,7 +8202,7 @@ meta_window_set_transient_for (MetaWindow *window,
       return;
     }
 
-  if (meta_window_appears_focused (window) && window->transient_for != NULL)
+  if (window->appears_focused && window->transient_for != NULL)
     meta_window_propagate_focus_appearance (window, FALSE);
 
   /* may now be a dialog */
@@ -8099,7 +8258,7 @@ meta_window_set_transient_for (MetaWindow *window,
   if (!window->constructing && !window->override_redirect)
     meta_window_queue (window, META_QUEUE_MOVE_RESIZE | META_QUEUE_CALC_SHOWING);
 
-  if (meta_window_appears_focused (window) && window->transient_for != NULL)
+  if (window->appears_focused && window->transient_for != NULL)
     meta_window_propagate_focus_appearance (window, TRUE);
 }
 

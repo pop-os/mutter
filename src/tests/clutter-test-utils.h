@@ -30,12 +30,8 @@
 #include "clutter/clutter-actor.h"
 #include "clutter/clutter-color.h"
 #include "clutter/clutter-private.h"
-#include "core/main-private.h"
 #include "meta/common.h"
-#include "meta/main.h"
-#include "backends/x11/nested/meta-backend-x11-nested.h"
-#include "wayland/meta-wayland.h"
-#include "wayland/meta-xwayland.h"
+#include "meta-test/meta-context-test.h"
 
 G_BEGIN_DECLS
 
@@ -98,13 +94,6 @@ main (int argc, char *argv[]) \
 CLUTTER_EXPORT
 void            clutter_test_init               (int            *argc,
                                                  char         ***argv);
-
-CLUTTER_EXPORT
-void            clutter_test_init_with_args     (int            *argc,
-                                                 char         ***argv,
-                                                 const char     *parameter_string,
-                                                 GOptionEntry   *entries,
-                                                 const char     *translation_domain);
 
 CLUTTER_EXPORT
 int             clutter_test_run                (void);

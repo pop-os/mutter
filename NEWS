@@ -1,63 +1,92 @@
-40.5
+41.0
 ====
-* Fix monitor screencast scanouts [Michel; !1914]
-* Fix middle-click emulation support on X11 [José; !2000]
-* Fixed crashes [Robert, Jonas; !1958, !1979, !1947]
+* Avoid race in wl_seat capabilities [Olivier; !77]
+* Expose option groups/entries to introspection [Corentin; !1976]
 
 Contributors:
-  Michel Dänzer, José Expósito, Robert Mader, Jonas Ådahl
+  Olivier Fourdan, Corentin Noël
 
 Translators:
-  Goran Vidović [hr], Balázs Úr [hu], Fran Dieguez [gl]
+  Daniel Șerbănescu [ro], Goran Vidović [hr], Luna Jernberg [sv],
+  eshagh shahidani [fa], Gwan-gyeong Mun [ko], Emin Tufan Çetin [tr],
+  Philipp Kiemle [de], Balázs Úr [hu], Piotr Drąg [pl], Nathan Follens [nl],
+  Jordi Mas [ca], Ask Hjorth Larsen [da]
 
-40.4
-====
-* Don't require a newly attached buffer to apply state [Christian, Jonas; !1795]
-* Fix upside-down Xshape surface with EGLstream [Robert; !1937]
-* Misc. bug fixes and cleanups [Jonas; !1942, !1912]
+41.rc
+=====
+* Add clutter_stage_paint_to_content() [Ivan; !1899]
+* Add meta_cursor_tracker_get_scale() [Ivan; !1967]
+* wayland: Make each wl_output correspond to one monitor [Jonas; !1712]
+* Expose 'inactive-since' timestamp to uresourced [Nishal; !1960]
+* Pass dirty rects to secondary GPU [Piotr; !1879]
+* Support commiting preedit string on focus loss [Carlos; !1940]
+* Improve auto-rotation support [Marco; !1233]
+* Add meta_window_actor_paint_to_content() [Robert; !1893]
+* Fixed crashes [Jonas, Ray, Robert; !1947, !1979, !1965, !1958]
+* Misc. bug fixes and cleanups [Florian, Carlos, Robert, Daniel, Erico, Dor;
+  !1957, !1924, !1970, !1971, !1972, !1973, !1974, !1977, !1978, !1975, !1886,
+  !1983, !1990, !1980]
 
 Contributors:
-  Robert Mader, Christian Rauch, Jonas Ådahl
+  Marco Trevisan (Treviño), Dor Askayo, Carlos Garnacho, Nishal Kulkarni,
+  Piotr Lopatka, Robert Mader, Ivan Molodetskikh, Florian Müllner, Erico Nunes,
+  Ray Strode, Daniel van Vugt, Jonas Ådahl
 
 Translators:
-  Marek Černocký [cs]
+  Asier Sarasua Garmendia [eu], Claude Paroz [fr], Jiri Grönroos [fi],
+  Baurzhan Muftakhidinov [kk], Aurimas Černius [lt]
 
-40.3
-====
-* Fix area screencasts when window is unredirected [Michel; #1707]
-* Fix mapping tablet to monitor [Christoph; #1712]
-* Fixed crash [Jonas; !1910]
-* Misc. bug fixes [Jonas, Carlos; !1911, !1920]
-
-Contributors:
-  Jonas Ådahl, Michel Dänzer, Carlos Garnacho, Christoph Trassl
-
-Translators:
-  Dušan Kazik [sk], Chao-Hsiung Liao [zh_TW]
-
-40.2.1
-======
-* Fixed crash [Jonas; !1895]
-
-Contributors:
-  Jonas Ådahl
-
-40.2
-====
+41.beta
+=======
 * Fix mouse position in remote desktop with fractional scaling [Pascal; !1867]
-* Fix fd leak [Carlos; !1875]
+* Manage idle monitors via MetaIdleManager [Jonas Å.; !1859]
 * Disable KMS modifiers on radeon driver [Carlos; !1872]
-* Fix adding virtual monitor to physical session [Jonas; !1891]
+* Fix fd leak [Carlos; !1870]
+* Fix adding virtual monitor to physical session [Jonas Å.; !1891]
 * Unbreak press-drag-release to pop up and select right click menus
   [Carlos; !1885]
-* Fix VKMS detection [Jonas; !1892]
-* Misc. bug fixes [Jonas, Daniel, Florian; !1876, !1873, !1890, !1884]
+* Fix VKMS detection [Jonas Å.; !1892]
+* Fix swipe cancellation [JoseExposito; !1857]
+* Add ClutterTextureContent [Robert; !1888]
+* Fix mapping tablet to monitor [Christoph; !1887]
+* Fix area screencasts when window is unredirected [Michel; !1902]
+* Don't require a newly attached buffer to apply state [Christian, Jonas; !1795]
+* Close unused mode setting and rendering devices [Jonas Å.; !1828]
+* Only support super+scroll on wayland [Florian; !1922]
+* Implement the xdg-activation protocol [Carlos; !1845]
+* Reduce input latency by computing max render time heuristically [Ivan; !1762]
+* Apply dithering to dispatch time when needed [Daniel; !1826]
+* Introduce MetaContext [Jonas Å.; !1861]
+* x11: Compute monitor scale per output [Marco; !336]
+* Shrink and optimize the rounded-background-clip shader [Daniel; !1860]
+* remote-desktop: Handle non-responding selection owners [Pascal; !1874]
+* Improve sysprof support [Jonas Å.; !1700]
+* Allow clients to delegate titlebar gestures to the compositor [Florian; !1944]
+* Fix upside-down Xshape surface with EGLstream [Robert; !1937]
+* Fix 'kms-modifiers' experimental setting [Robert; !1953]
+* Make default focus window on each workspace appear focused [Alexander; !850]
+* Plugged memory leaks [Jonas Å.; !1869]
+* Fixed crashes crash [Daniel, Jonas Å., Florian; !1883, !1895,
+  !1910, !1925, !1956]
+* Misc. bug fixes and cleanups [Jonas Å., Marco, Daniel, Florian, Georges,
+  Zander, Carlos, Robert; !1833, !1863, !1876, !1873, !1884, !1890, !1900,
+  !1912, !1916, !1911, !1920, !1865, !1927, !1923, !1929, !1100, !1932, !1931,
+  !1862, !1933, !1930, !1935, !1936, !1878, !1938, !1942, !1951, !522, !1941]
 
 Contributors:
-  Jonas Ådahl, Carlos Garnacho, Florian Müllner, Pascal Nowack, Daniel van Vugt
+  Marco Trevisan (Treviño), Zander Brown, Piotr Drąg, Michel Dänzer,
+  Carlos Garnacho, JoseExposito, Robert Mader, Alexander Mikhaylenko,
+  Ivan Molodetskikh, Florian Müllner, Georges Basile Stavracas Neto,
+  Pascal Nowack, Christian Rauch, Christoph Trassl, Daniel van Vugt, Jonas Ådahl
 
 Translators:
-  Pawan Chitrakar [ne], Charles Monzat [fr]
+  Pawan Chitrakar [ne], Charles Monzat [fr], Dušan Kazik [sk],
+  Quentin PAGÈS [oc], Alexey Rubtsov [ru], Alexander Shopov [bg],
+  Florentina Mușat [ro], Chao-Hsiung Liao [zh_TW], Yuri Chornoivan [uk],
+  Fran Dieguez [gl], Hugo Carvalho [pt], Rafael Fontenelle [pt_BR],
+  Fabio Tomat [fur], Kukuh Syafaat [id], Yaron Shahrabani [he],
+  Marek Černocký [cs], Matej Urbančič [sl], Boyuan Yang [zh_CN],
+  Daniel Mustieles [es]
 
 40.1
 ====

@@ -29,7 +29,6 @@
 
 #include "backends/meta-cursor-tracker-private.h"
 #include "clutter/clutter.h"
-#include "clutter/wayland/clutter-wayland-compositor.h"
 #include "cogl/cogl-wayland-server.h"
 #include "cogl/cogl.h"
 #include "compositor/meta-surface-actor-wayland.h"
@@ -1290,16 +1289,15 @@ static void
 surface_entered_output (MetaWaylandSurface *surface,
                         MetaWaylandOutput *wayland_output)
 {
-  GList *iter;
-  struct wl_resource *resource;
+  const GList *l;
 
   g_signal_connect (wayland_output, "output-destroyed",
                     G_CALLBACK (handle_output_destroyed),
                     surface);
 
-  for (iter = wayland_output->resources; iter != NULL; iter = iter->next)
+  for (l = meta_wayland_output_get_resources (wayland_output); l; l = l->next)
     {
-      resource = iter->data;
+      struct wl_resource *resource = l->data;
 
       if (wl_resource_get_client (resource) !=
           wl_resource_get_client (surface->resource))
@@ -1317,8 +1315,7 @@ static void
 surface_left_output (MetaWaylandSurface *surface,
                      MetaWaylandOutput *wayland_output)
 {
-  GList *iter;
-  struct wl_resource *resource;
+  const GList *l;
 
   g_signal_handlers_disconnect_by_func (wayland_output,
                                         G_CALLBACK (handle_output_destroyed),
@@ -1328,9 +1325,9 @@ surface_left_output (MetaWaylandSurface *surface,
                                         G_CALLBACK (handle_output_bound),
                                         surface);
 
-  for (iter = wayland_output->resources; iter != NULL; iter = iter->next)
+  for (l = meta_wayland_output_get_resources (wayland_output); l; l = l->next)
     {
-      resource = iter->data;
+      struct wl_resource *resource = l->data;
 
       if (wl_resource_get_client (resource) !=
           wl_resource_get_client (surface->resource))
@@ -1371,7 +1368,7 @@ update_surface_output_state (gpointer key, gpointer value, gpointer user_data)
 
   g_assert (surface->role);
 
-  logical_monitor = wayland_output->logical_monitor;
+  logical_monitor = meta_wayland_output_get_logical_monitor (wayland_output);
   if (!logical_monitor)
     {
       set_surface_is_on_output (surface, wayland_output, FALSE);

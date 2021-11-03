@@ -115,6 +115,10 @@ void meta_kms_update_set_crtc_gamma (MetaKmsUpdate  *update,
                                      const uint16_t *green,
                                      const uint16_t *blue);
 
+void meta_kms_plane_assignment_set_fb_damage (MetaKmsPlaneAssignment *plane_assignment,
+                                              const int              *rectangles,
+                                              int                     n_rectangles);
+
 MetaKmsPlaneAssignment * meta_kms_update_assign_plane (MetaKmsUpdate          *update,
                                                        MetaKmsCrtc            *crtc,
                                                        MetaKmsPlane           *plane,
@@ -156,6 +160,12 @@ static inline int16_t
 meta_fixed_16_to_int (MetaFixed16 fixed)
 {
   return fixed / 65536;
+}
+
+static inline double
+meta_fixed_16_to_double (MetaFixed16 fixed)
+{
+  return fixed / 65536.0;
 }
 
 static inline MetaRectangle

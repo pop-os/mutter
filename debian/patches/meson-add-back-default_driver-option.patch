@@ -44,10 +44,10 @@ index a3c61cf..c45614c 100644
    input: 'cogl-config.h.meson',
    output: 'cogl-config.h',
 diff --git a/meson.build b/meson.build
-index e337ac1..c2a7d3b 100644
+index 8aad0a1..ec40ec5 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -226,6 +226,8 @@ if have_wayland_eglstream
+@@ -231,6 +231,8 @@ if have_wayland_eglstream
    endif
  endif
  
@@ -56,19 +56,19 @@ index e337ac1..c2a7d3b 100644
  have_sm = get_option('sm')
  if have_sm
    sm_dep = dependency('sm')
-@@ -534,6 +536,7 @@ output = [
-   '        Wayland EGLStream........ ' + have_wayland_eglstream.to_string(),
-   '        Native Backend........... ' + have_native_backend.to_string(),
-   '        EGL Device............... ' + have_egl_device.to_string(),
-+  '        Default driver........... ' + default_driver,
-   '        Remote desktop........... ' + have_remote_desktop.to_string(),
-   '        gudev.................... ' + have_libgudev.to_string(),
-   '        Wacom.................... ' + have_libwacom.to_string(),
+@@ -553,6 +555,7 @@ summary('Wayland', have_wayland, section: 'Options')
+ summary('Wayland EGLStream', have_wayland_eglstream, section: 'Options')
+ summary('Native Backend', have_native_backend, section: 'Options')
+ summary('EGL Device', have_egl_device, section: 'Options')
++summary('Default driver', default_driver, section: 'Options')
+ summary('Remote desktop', have_remote_desktop, section: 'Options')
+ summary('gudev', have_libgudev, section: 'Options')
+ summary('Wacom', have_libwacom, section: 'Options')
 diff --git a/meson_options.txt b/meson_options.txt
-index 61d9cb4..0548dd5 100644
+index 6609e43..f1614f2 100644
 --- a/meson_options.txt
 +++ b/meson_options.txt
-@@ -176,3 +176,9 @@ option('xwayland_ignore_executables',
+@@ -182,3 +182,9 @@ option('xwayland_ignore_executables',
    value: 'gsd-xsettings,ibus-x11,pulseaudio,Xwayland',
    description: 'Comma delimited list of executable names to ignore when terminating Xwayland'
  )

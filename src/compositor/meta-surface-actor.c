@@ -373,31 +373,6 @@ meta_surface_actor_init (MetaSurfaceActor *self)
                                   CLUTTER_REQUEST_CONTENT_SIZE);
 }
 
-/**
- * meta_surface_actor_get_image:
- * @self: A #MetaSurfaceActor
- * @clip: (nullable): A clipping rectangle. The clip region is in
- * the same coordinate space as the contents preferred size.
- * For a shaped texture of a wl_surface, this means surface
- * coordinate space. If NULL, the whole content will be used.
- *
- * Get the image from the texture content. The resulting size of
- * the returned image may be different from the preferred size of
- * the shaped texture content.
- *
- * Returns: (nullable) (transfer full): a new cairo surface to be freed
- * with cairo_surface_destroy().
- */
-cairo_surface_t *
-meta_surface_actor_get_image (MetaSurfaceActor      *self,
-                              cairo_rectangle_int_t *clip)
-{
-  MetaSurfaceActorPrivate *priv =
-    meta_surface_actor_get_instance_private (self);
-
-  return meta_shaped_texture_get_image (priv->texture, clip);
-}
-
 MetaShapedTexture *
 meta_surface_actor_get_texture (MetaSurfaceActor *self)
 {
@@ -644,55 +619,4 @@ meta_surface_actor_is_frozen (MetaSurfaceActor *self)
     meta_surface_actor_get_instance_private (self);
 
   return priv->frozen;
-}
-
-void
-meta_surface_actor_set_transform (MetaSurfaceActor     *self,
-                                  MetaMonitorTransform  transform)
-{
-  MetaSurfaceActorPrivate *priv =
-    meta_surface_actor_get_instance_private (self);
-
-  meta_shaped_texture_set_transform (priv->texture, transform);
-}
-
-void
-meta_surface_actor_set_viewport_src_rect (MetaSurfaceActor *self,
-                                          graphene_rect_t  *src_rect)
-{
-  MetaSurfaceActorPrivate *priv =
-    meta_surface_actor_get_instance_private (self);
-
-  meta_shaped_texture_set_viewport_src_rect (priv->texture, src_rect);
-}
-
-void
-meta_surface_actor_reset_viewport_src_rect (MetaSurfaceActor *self)
-{
-  MetaSurfaceActorPrivate *priv =
-    meta_surface_actor_get_instance_private (self);
-
-  meta_shaped_texture_reset_viewport_src_rect (priv->texture);
-}
-
-void
-meta_surface_actor_set_viewport_dst_size (MetaSurfaceActor *self,
-                                          int               dst_width,
-                                          int               dst_height)
-{
-  MetaSurfaceActorPrivate *priv =
-    meta_surface_actor_get_instance_private (self);
-
-  meta_shaped_texture_set_viewport_dst_size (priv->texture,
-                                             dst_width,
-                                             dst_height);
-}
-
-void
-meta_surface_actor_reset_viewport_dst_size (MetaSurfaceActor *self)
-{
-  MetaSurfaceActorPrivate *priv =
-    meta_surface_actor_get_instance_private (self);
-
-  meta_shaped_texture_reset_viewport_dst_size (priv->texture);
 }

@@ -39,9 +39,6 @@ endif
 ifeq ($(DEB_HOST_ARCH),$(findstring $(DEB_HOST_ARCH),armel armhf))
 CONFFLAGS += \
 	-Ddefault_driver=gles2
-else
-CONFFLAGS += \
-	-Ddefault_driver=gl
 endif
 
 override_dh_auto_configure:
@@ -51,7 +48,10 @@ override_dh_auto_configure:
 # Use meson test directly as it allows us to use the timeout multiplier
 BUILDDIR=$(CURDIR)/obj-$(DEB_HOST_GNU_TYPE)
 TEST_COMMAND_BASE=env \
+	GIO_USE_VFS=local \
+	GIO_USE_VOLUME_MONITOR=unix \
 	GSETTINGS_SCHEMA_DIR=$(BUILDDIR)/data \
+	GVFS_DISABLE_FUSE=1 \
 	dbus-run-session -- xvfb-run -s '+iglx -noreset' -a \
 	dh_auto_test -- -C $(BUILDDIR) --no-rebuild --verbose --timeout-multiplier 6 \
 	           --no-stdsplit --print-errorlogs
@@ -68,10 +68,10 @@ ifeq ($(filter nocheck,$(DEB_BUILD_OPTIONS)),)
 	glib-compile-schemas $(BUILDDIR)/data
 ifneq (,$(filter hurd-i386 kfreebsd-i386 kfreebsd-amd64,$(DEB_HOST_ARCH)))
 	-$(TEST_COMMAND)
-	-$(TEST_COMMAND_FLAKY)
+	-$(TEST_COMMAND_FLAKY) --logbase flaky-tests
 else ifeq (,$(filter mips mips64el mipsel riscv64 alpha hppa powerpc sparc64 x32,$(DEB_HOST_ARCH)))
 	$(TEST_COMMAND)
-	-$(TEST_COMMAND_FLAKY)
+	-$(TEST_COMMAND_FLAKY) --logbase flaky-tests
 endif
 endif
 

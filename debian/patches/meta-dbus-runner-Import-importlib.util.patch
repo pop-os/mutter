@@ -1,0 +1,25 @@
+From: Simon McVittie <smcv@debian.org>
+Date: Tue, 21 Sep 2021 09:29:15 +0100
+Subject: meta-dbus-runner: Import importlib.util
+
+This is a workaround for dbusmock assuming it has been imported
+(see https://bugs.debian.org/994806).
+
+Forwarded: no
+---
+ src/tests/meta-dbus-runner.py | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/tests/meta-dbus-runner.py b/src/tests/meta-dbus-runner.py
+index 2dbf315..845a3f0 100755
+--- a/src/tests/meta-dbus-runner.py
++++ b/src/tests/meta-dbus-runner.py
+@@ -4,6 +4,8 @@ import dbus
+ import sys
+ import os
+ import fcntl
++import importlib
++import importlib.util
+ import subprocess
+ from collections import OrderedDict
+ from dbusmock import DBusTestCase

@@ -118,11 +118,11 @@ get_property (ClutterInputDevice *device,
 
   device_id = meta_input_device_x11_get_device_id (device);
 
-  clutter_x11_trap_x_errors ();
+  meta_clutter_x11_trap_x_errors ();
   rc = XIGetProperty (xdisplay, device_id, property_atom,
                       0, 10, False, type, &type_ret, &format_ret,
                       &nitems_ret, &bytes_after_ret, &data_ret);
-  clutter_x11_untrap_x_errors ();
+  meta_clutter_x11_untrap_x_errors ();
 
   if (rc == Success && type_ret == type && format_ret == format && nitems_ret >= nitems)
     {
@@ -848,7 +848,7 @@ meta_input_settings_x11_set_mouse_middle_click_emulation (MetaInputSettings  *se
   if (!is_mouse (settings, device))
     return;
 
-  change_property (device, "libinput Middle Emulation Enabled",
+  change_property (device, "libinput Middle Click Emulation Enabled",
                    XA_INTEGER, 8, &value, 1);
 }
 
@@ -862,7 +862,7 @@ meta_input_settings_x11_set_touchpad_middle_click_emulation (MetaInputSettings  
   if (!meta_input_settings_x11_is_touchpad_device (settings, device))
     return;
 
-  change_property (device, "libinput Middle Emulation Enabled",
+  change_property (device, "libinput Middle Click Emulation Enabled",
                    XA_INTEGER, 8, &value, 1);
 }
 
@@ -876,7 +876,7 @@ meta_input_settings_x11_set_trackball_middle_click_emulation (MetaInputSettings 
   if (!meta_input_settings_x11_is_trackball_device (settings, device))
     return;
 
-  change_property (device, "libinput Middle Emulation Enabled",
+  change_property (device, "libinput Middle Click Emulation Enabled",
                    XA_INTEGER, 8, &value, 1);
 }
 

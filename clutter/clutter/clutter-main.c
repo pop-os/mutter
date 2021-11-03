@@ -53,7 +53,6 @@
 
 #include "clutter-actor-private.h"
 #include "clutter-backend-private.h"
-#include "clutter-config.h"
 #include "clutter-debug.h"
 #include "clutter-event-private.h"
 #include "clutter-feature.h"
@@ -95,6 +94,11 @@ guint clutter_debug_flags       = 0;
 guint clutter_paint_debug_flags = 0;
 guint clutter_pick_debug_flags  = 0;
 
+/* A constant added to heuristic max render time to account for variations
+ * in the estimates.
+ */
+int clutter_max_render_time_constant_us = 2000;
+
 #ifdef CLUTTER_ENABLE_DEBUG
 static const GDebugKey clutter_debug_keys[] = {
   { "misc", CLUTTER_DEBUG_MISC },
@@ -112,6 +116,8 @@ static const GDebugKey clutter_debug_keys[] = {
   { "layout", CLUTTER_DEBUG_LAYOUT },
   { "clipping", CLUTTER_DEBUG_CLIPPING },
   { "oob-transforms", CLUTTER_DEBUG_OOB_TRANSFORMS },
+  { "frame-timings", CLUTTER_DEBUG_FRAME_TIMINGS },
+  { "detailed-trace", CLUTTER_DEBUG_DETAILED_TRACE },
 };
 #endif /* CLUTTER_ENABLE_DEBUG */
 
@@ -129,6 +135,8 @@ static const GDebugKey clutter_paint_debug_keys[] = {
   { "continuous-redraw", CLUTTER_DEBUG_CONTINUOUS_REDRAW },
   { "paint-deform-tiles", CLUTTER_DEBUG_PAINT_DEFORM_TILES },
   { "damage-region", CLUTTER_DEBUG_PAINT_DAMAGE_REGION },
+  { "disable-dynamic-max-render-time", CLUTTER_DEBUG_DISABLE_DYNAMIC_MAX_RENDER_TIME },
+  { "max-render-time", CLUTTER_DEBUG_PAINT_MAX_RENDER_TIME },
 };
 
 gboolean
@@ -855,99 +863,6 @@ clutter_get_option_group_without_init (void)
  * allow the common case of argc=NULL, argv=NULL to work.
  */
 
-/**
- * clutter_init_with_args:
- * @argc: (inout): a pointer to the number of command line arguments
- * @argv: (array length=argc) (inout) (allow-none): a pointer to the array
- *   of command line arguments
- * @parameter_string: (allow-none): a string which is displayed in the
- *   first line of <option>--help</option> output, after
- *   <literal><replaceable>programname</replaceable> [OPTION...]</literal>
- * @entries: (array) (allow-none): a %NULL terminated array of
- *   #GOptionEntry<!-- -->s describing the options of your program
- * @translation_domain: (allow-none): a translation domain to use for
- *   translating the <option>--help</option> output for the options in
- *   @entries with gettext(), or %NULL
- * @error: (allow-none): a return location for a #GError
- *
- * This function does the same work as clutter_init(). Additionally,
- * it allows you to add your own command line options, and it
- * automatically generates nicely formatted <option>--help</option>
- * output. Note that your program will be terminated after writing
- * out the help output. Also note that, in case of error, the
- * error message will be placed inside @error instead of being
- * printed on the display.
- *
- * Just like clutter_init(), if this function returns an error code then
- * any subsequent call to any other Clutter API will result in undefined
- * behaviour - including segmentation faults.
- *
- * Return value: %CLUTTER_INIT_SUCCESS if Clutter has been successfully
- *   initialised, or other values or #ClutterInitError in case of
- *   error.
- *
- * Since: 0.2
- */
-ClutterInitError
-clutter_init_with_args (int            *argc,
-                        char         ***argv,
-                        const char     *parameter_string,
-                        GOptionEntry   *entries,
-                        const char     *translation_domain,
-                        GError        **error)
-{
-  GOptionContext *context;
-  GOptionGroup *group;
-  gboolean res;
-  ClutterMainContext *ctx;
-
-  if (clutter_is_initialized)
-    return CLUTTER_INIT_SUCCESS;
-
-  clutter_base_init ();
-
-  ctx = _clutter_context_get_default ();
-
-  if (!ctx->defer_display_setup)
-    {
-#if 0
-      if (argc && *argc > 0 && *argv)
-	g_set_prgname ((*argv)[0]);
-#endif
-
-      context = g_option_context_new (parameter_string);
-
-      group = clutter_get_option_group ();
-      g_option_context_add_group (context, group);
-
-      group = cogl_get_option_group ();
-      g_option_context_add_group (context, group);
-
-      if (entries)
-	g_option_context_add_main_entries (context, entries, translation_domain);
-
-      res = g_option_context_parse (context, argc, argv, error);
-      g_option_context_free (context);
-
-      /* if res is FALSE, the error is filled for
-       * us by g_option_context_parse()
-       */
-      if (!res)
-	{
-	  /* if there has been an error in the initialization, the
-	   * error id will be preserved inside the GError code
-	   */
-	  if (error && *error)
-	    return (*error)->code;
-	  else
-	    return CLUTTER_INIT_ERROR_INTERNAL;
-	}
-
-      return CLUTTER_INIT_SUCCESS;
-    }
-  else
-    return clutter_init_real (error);
-}
 
 static gboolean
 clutter_parse_args (int      *argc,
@@ -999,9 +914,7 @@ clutter_parse_args (int      *argc,
  * This function will not abort in case of errors during
  * initialization; clutter_init() will print out the error message on
  * stderr, and will return an error code. It is up to the application
- * code to handle this case. If you need to display the error message
- * yourself, you can use clutter_init_with_args(), which takes a #GError
- * pointer.
+ * code to handle this case.
  *
  * If this function fails, and returns an error code, any subsequent
  * Clutter API will have undefined behaviour - including segmentation
@@ -2271,6 +2184,25 @@ clutter_remove_debug_flags (ClutterDebugFlag     debug_flags,
   clutter_debug_flags &= ~debug_flags;
   clutter_paint_debug_flags &= ~draw_flags;
   clutter_pick_debug_flags &= ~pick_flags;
+}
+
+void
+clutter_debug_set_max_render_time_constant (int max_render_time_constant_us)
+{
+  clutter_max_render_time_constant_us = max_render_time_constant_us;
+}
+
+void
+clutter_get_debug_flags (ClutterDebugFlag     *debug_flags,
+                         ClutterDrawDebugFlag *draw_flags,
+                         ClutterPickDebugFlag *pick_flags)
+{
+  if (debug_flags)
+    *debug_flags = clutter_debug_flags;
+  if (draw_flags)
+    *draw_flags = clutter_paint_debug_flags;
+  if (pick_flags)
+    *pick_flags = clutter_pick_debug_flags;
 }
 
 void

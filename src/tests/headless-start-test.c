@@ -22,52 +22,9 @@
 #include "backends/meta-monitor-manager-private.h"
 #include "backends/meta-crtc.h"
 #include "backends/meta-output.h"
-#include "compositor/meta-plugin-manager.h"
 #include "core/display-private.h"
-#include "core/main-private.h"
-#include "meta/main.h"
-#include "tests/meta-backend-test.h"
+#include "meta-test/meta-context-test.h"
 #include "tests/meta-monitor-manager-test.h"
-#include "tests/test-utils.h"
-#include "wayland/meta-wayland.h"
-
-#define FRAME_WARNING "Frame has assigned frame counter but no frame drawn time"
-
-static gboolean
-run_tests (gpointer data)
-{
-  MetaBackend *backend = meta_get_backend ();
-  MetaSettings *settings = meta_backend_get_settings (backend);
-  gboolean ret;
-
-  g_test_log_set_fatal_handler (NULL, NULL);
-
-  meta_settings_override_experimental_features (settings);
-
-  meta_settings_enable_experimental_feature (
-    settings,
-    META_EXPERIMENTAL_FEATURE_SCALE_MONITOR_FRAMEBUFFER);
-
-  ret = g_test_run ();
-
-  meta_quit (ret != 0);
-
-  return FALSE;
-}
-
-static gboolean
-ignore_frame_counter_warning (const gchar    *log_domain,
-                              GLogLevelFlags  log_level,
-                              const gchar    *message,
-                              gpointer        user_data)
-{
-  if ((log_level & G_LOG_LEVEL_WARNING) &&
-      g_strcmp0 (log_domain, "mutter") == 0 &&
-      g_str_has_suffix (message, FRAME_WARNING))
-    return FALSE;
-
-  return TRUE;
-}
 
 static void
 meta_test_headless_start (void)
@@ -197,7 +154,7 @@ create_headless_test_setup (void)
 }
 
 static void
-init_tests (int argc, char **argv)
+init_tests (void)
 {
   meta_monitor_manager_test_init_test_setup (create_headless_test_setup);
 
@@ -211,21 +168,13 @@ init_tests (int argc, char **argv)
 int
 main (int argc, char *argv[])
 {
-  test_init (&argc, &argv);
-  init_tests (argc, argv);
+  g_autoptr (MetaContext) context = NULL;
 
-  meta_plugin_manager_load (test_get_plugin_name ());
+  context = meta_create_test_context (META_CONTEXT_TEST_TYPE_NESTED,
+                                      META_CONTEXT_TEST_FLAG_NO_X11);
+  g_assert (meta_context_configure (context, &argc, &argv, NULL));
 
-  meta_override_compositor_configuration (META_COMPOSITOR_TYPE_WAYLAND,
-                                          META_TYPE_BACKEND_TEST,
-                                          NULL);
+  init_tests ();
 
-  meta_init ();
-  meta_register_with_session ();
-
-  g_test_log_set_fatal_handler (ignore_frame_counter_warning, NULL);
-
-  g_idle_add (run_tests, NULL);
-
-  return meta_run ();
+  return meta_context_test_run_tests (META_CONTEXT_TEST (context));
 }
