@@ -5,7 +5,10 @@ mutter (40.5-1ubuntu3) UNRELEASED; urgency=medium
     - Fix Xwayland crash Xwayland crash in gdm as screen off and touchscreen
       detach (cherry picked commits — LP: #1948894)
 
- -- Yuan-Chen Cheng <yc.cheng@canonical.com>  Mon, 01 Nov 2021 09:59:16 +0800
+  [ Marco Trevisan (Treviño) ]
+  * debian/patches: Refresh
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 03 Nov 2021 18:53:55 +0100
 
 mutter (40.5-1ubuntu2) impish; urgency=medium
 
