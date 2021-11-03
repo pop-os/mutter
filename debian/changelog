@@ -1,9 +1,9 @@
-mutter (40.5-1ubuntu3~21.10.1) UNRELEASED; urgency=medium
+mutter (40.5-1ubuntu3~21.10.1) impish; urgency=medium
 
   * Backport to impish
   * debian: Update vcs references for impish branching
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 03 Nov 2021 19:54:38 +0100
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 03 Nov 2021 19:57:15 +0100
 
 mutter (40.5-1ubuntu3) jammy; urgency=medium
 
