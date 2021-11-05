@@ -7,12 +7,14 @@ some of the comments with g_test_message() so that the log from a failed
 test gives us a better idea of how far we got.
 
 Signed-off-by: Simon McVittie <smcv@debian.org>
+Forwarded: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2049
+Applied-upstream: 42, commit:838d5656c347d040892347babea26c71400caed6
 ---
  src/tests/monitor-unit-tests.c | 45 ++++++++++++++++++++++++------------------
  1 file changed, 26 insertions(+), 19 deletions(-)
 
 diff --git a/src/tests/monitor-unit-tests.c b/src/tests/monitor-unit-tests.c
-index 1aa81c8..2a5859c 100644
+index 46bbe36..11b1adb 100644
 --- a/src/tests/monitor-unit-tests.c
 +++ b/src/tests/monitor-unit-tests.c
 @@ -2853,8 +2853,7 @@ meta_test_monitor_lid_closed_with_hotplugged_external (void)
@@ -85,7 +87,7 @@ index 1aa81c8..2a5859c 100644
    wait_for_orientation (orientation_manager, META_ORIENTATION_NORMAL, NULL);
 @@ -3878,6 +3873,7 @@ meta_test_monitor_orientation_initial_rotated (void)
    MetaOrientation orientation;
-   guint times_signalled = 0;
+   unsigned int times_signalled = 0;
  
 +  g_test_message ("%s", G_STRFUNC);
    orientation_mock = meta_sensors_proxy_mock_get ();
@@ -93,7 +95,7 @@ index 1aa81c8..2a5859c 100644
    orientation = META_ORIENTATION_LEFT_UP;
 @@ -3984,6 +3980,7 @@ meta_test_monitor_orientation_initial_rotated_no_touch_mode (void)
    MetaOrientation orientation;
-   guint times_signalled = 0;
+   unsigned int times_signalled = 0;
  
 +  g_test_message ("%s", G_STRFUNC);
    orientation_mock = meta_sensors_proxy_mock_get ();
@@ -152,7 +154,7 @@ index 1aa81c8..2a5859c 100644
  
 @@ -4371,6 +4375,7 @@ meta_test_monitor_orientation_changes (void)
    MetaOrientation i;
-   guint times_signalled = 0;
+   unsigned int times_signalled = 0;
  
 +  g_test_message ("%s", G_STRFUNC);
    orientation_mock = meta_sensors_proxy_mock_get ();
@@ -168,7 +170,7 @@ index 1aa81c8..2a5859c 100644
    for (i = META_N_ORIENTATIONS - 1; i > META_ORIENTATION_UNDEFINED; i--)
 @@ -4594,6 +4600,7 @@ meta_test_monitor_orientation_changes_with_hotplugging (void)
    MetaOrientation i;
-   guint times_signalled = 0;
+   unsigned int times_signalled = 0;
  
 +  g_test_message ("%s", G_STRFUNC);
    orientation_mock = meta_sensors_proxy_mock_get ();

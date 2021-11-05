@@ -3,16 +3,18 @@ Date: Sun, 10 Oct 2021 13:43:52 +0100
 Subject: tests: Add additional debug in wait_for_orientation()
 
 Signed-off-by: Simon McVittie <smcv@debian.org>
+Forwarded: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2049
+Applied-upstream: 42, commit:7c6fe21daf2d11b8c3caeee3d0a83150302ca4a2
 ---
- src/tests/orientation-manager-unit-tests.c | 17 +++++++++++++++++
- 1 file changed, 17 insertions(+)
+ src/tests/orientation-manager-unit-tests.c | 25 +++++++++++++++++++++++++
+ 1 file changed, 25 insertions(+)
 
 diff --git a/src/tests/orientation-manager-unit-tests.c b/src/tests/orientation-manager-unit-tests.c
-index 999b0a3..6bf93b6 100644
+index 77d6322..85d9a6e 100644
 --- a/src/tests/orientation-manager-unit-tests.c
 +++ b/src/tests/orientation-manager-unit-tests.c
-@@ -61,6 +61,9 @@ on_orientation_changed (gpointer data,
- 
+@@ -59,6 +59,9 @@ on_orientation_changed (WaitForOrientation     *wfo,
+ {
    wfo->orientation = meta_orientation_manager_get_orientation (orientation_manager);
    wfo->times_signalled++;
 +
@@ -21,19 +23,21 @@ index 999b0a3..6bf93b6 100644
  }
  
  static gboolean
-@@ -83,6 +86,9 @@ wait_for_orientation (MetaOrientationManager *orientation_manager,
-   WaitForOrientation wfo = { orientation, META_ORIENTATION_UNDEFINED, 0, 0, 0 };
+@@ -83,6 +86,11 @@ wait_for_orientation (MetaOrientationManager *orientation_manager,
+   };
  
    wfo.orientation = meta_orientation_manager_get_orientation (orientation_manager);
-+  g_test_message ("%s: Waiting for orientation to change from %d: %s to %d: %s...",
-+                  G_STRFUNC, wfo.orientation, orientation_to_string (wfo.orientation),
++  g_test_message ("%s: Waiting for orientation to change from "
++                  "%d: %s to %d: %s...",
++                  G_STRFUNC, wfo.orientation,
++                  orientation_to_string (wfo.orientation),
 +                  orientation, orientation_to_string (orientation));
  
    /* This timeout can be relatively generous because we don't expect to
     * reach it: if we do, that's a test failure. */
-@@ -102,6 +108,9 @@ wait_for_orientation (MetaOrientationManager *orientation_manager,
-              orientation_to_string (orientation),
-              wfo.times_signalled);
+@@ -104,6 +112,9 @@ wait_for_orientation (MetaOrientationManager *orientation_manager,
+                wfo.times_signalled);
+     }
  
 +  g_test_message ("%s: Orientation is now %d: %s",
 +                  G_STRFUNC, orientation, orientation_to_string (orientation));
@@ -41,24 +45,30 @@ index 999b0a3..6bf93b6 100644
    g_clear_handle_id (&wfo.timeout_id, g_source_remove);
    g_signal_handler_disconnect (orientation_manager, wfo.connection_id);
  
-@@ -119,6 +128,8 @@ wait_for_possible_orientation_change (MetaOrientationManager *orientation_manage
-   WaitForOrientation wfo = { META_ORIENTATION_UNDEFINED, META_ORIENTATION_UNDEFINED, 0, 0, 0 };
+@@ -123,6 +134,9 @@ wait_for_possible_orientation_change (MetaOrientationManager *orientation_manage
+   };
  
    wfo.orientation = meta_orientation_manager_get_orientation (orientation_manager);
 +  g_test_message ("%s: Waiting for orientation to maybe change from %d: %s...",
-+                  G_STRFUNC, wfo.orientation, orientation_to_string (wfo.orientation));
++                  G_STRFUNC, wfo.orientation,
++                  orientation_to_string (wfo.orientation));
  
    /* This can't be as long as the timeout for wait_for_orientation(),
     * because in the usual case we expect to reach this timeout: we're
-@@ -133,6 +144,12 @@ wait_for_possible_orientation_change (MetaOrientationManager *orientation_manage
+@@ -137,6 +151,17 @@ wait_for_possible_orientation_change (MetaOrientationManager *orientation_manage
    while (wfo.times_signalled == 0 && wfo.timeout_id != 0)
      g_main_context_iteration (NULL, TRUE);
  
 +  if (wfo.timeout_id == 0)
-+    g_test_message ("%s: Orientation didn't change", G_STRFUNC);
++    {
++      g_test_message ("%s: Orientation didn't change", G_STRFUNC);
++    }
 +  else
-+    g_test_message ("%s: Orientation is now %d: %s",
-+                    G_STRFUNC, wfo.orientation, orientation_to_string (wfo.orientation));
++    {
++      g_test_message ("%s: Orientation is now %d: %s",
++                      G_STRFUNC, wfo.orientation,
++                      orientation_to_string (wfo.orientation));
++    }
 +
    g_clear_handle_id (&wfo.timeout_id, g_source_remove);
    g_signal_handler_disconnect (orientation_manager, wfo.connection_id);
