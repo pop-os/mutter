@@ -181,6 +181,7 @@ struct _MetaBackendPrivate
   guint upower_watch_id;
   GDBusProxy *upower_proxy;
   gboolean lid_is_closed;
+  gboolean on_battery;
 
   guint sleep_signal_id;
   GCancellable *cancellable;
@@ -647,28 +648,48 @@ upower_properties_changed (GDBusProxy *proxy,
   MetaBackend *backend = user_data;
   MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
   GVariant *v;
-  gboolean lid_is_closed;
+  gboolean reset_idle_time = FALSE;
 
   v = g_variant_lookup_value (changed_properties,
                               "LidIsClosed",
                               G_VARIANT_TYPE_BOOLEAN);
-  if (!v)
-    return;
+  if (v)
+    {
+      gboolean lid_is_closed;
 
-  lid_is_closed = g_variant_get_boolean (v);
-  g_variant_unref (v);
+      lid_is_closed = g_variant_get_boolean (v);
+      g_variant_unref (v);
 
-  if (lid_is_closed == priv->lid_is_closed)
-    return;
+      if (lid_is_closed != priv->lid_is_closed)
+        {
+          priv->lid_is_closed = lid_is_closed;
+          g_signal_emit (backend, signals[LID_IS_CLOSED_CHANGED], 0,
+                         priv->lid_is_closed);
 
-  priv->lid_is_closed = lid_is_closed;
-  g_signal_emit (backend, signals[LID_IS_CLOSED_CHANGED], 0,
-                 priv->lid_is_closed);
+          if (lid_is_closed)
+            reset_idle_time = TRUE;
+        }
+    }
 
-  if (lid_is_closed)
-    return;
+  v = g_variant_lookup_value (changed_properties,
+                              "OnBattery",
+                              G_VARIANT_TYPE_BOOLEAN);
+  if (v)
+    {
+      gboolean on_battery;
 
-  meta_idle_manager_reset_idle_time (priv->idle_manager);
+      on_battery = g_variant_get_boolean (v);
+      g_variant_unref (v);
+
+      if (on_battery != priv->on_battery)
+        {
+          priv->on_battery = on_battery;
+          reset_idle_time = TRUE;
+        }
+    }
+
+  if (reset_idle_time)
+    meta_idle_manager_reset_idle_time (priv->idle_manager);
 }
 
 static void
@@ -699,15 +720,23 @@ upower_ready_cb (GObject      *source_object,
                     G_CALLBACK (upower_properties_changed), backend);
 
   v = g_dbus_proxy_get_cached_property (proxy, "LidIsClosed");
-  if (!v)
-    return;
-  priv->lid_is_closed = g_variant_get_boolean (v);
-  g_variant_unref (v);
-
-  if (priv->lid_is_closed)
+  if (v)
     {
-      g_signal_emit (backend, signals[LID_IS_CLOSED_CHANGED], 0,
-                     priv->lid_is_closed);
+      priv->lid_is_closed = g_variant_get_boolean (v);
+      g_variant_unref (v);
+
+      if (priv->lid_is_closed)
+        {
+          g_signal_emit (backend, signals[LID_IS_CLOSED_CHANGED], 0,
+                         priv->lid_is_closed);
+        }
+    }
+
+  v = g_dbus_proxy_get_cached_property (proxy, "OnBattery");
+  if (v)
+    {
+      priv->on_battery = g_variant_get_boolean (v);
+      g_variant_unref (v);
     }
 }
 

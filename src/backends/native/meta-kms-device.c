@@ -20,6 +20,8 @@
 
 #include "config.h"
 
+#include "backends/native/meta-kms-connector.h"
+#include "backends/native/meta-kms-crtc.h"
 #include "backends/native/meta-kms-device-private.h"
 #include "backends/native/meta-kms-device.h"
 
@@ -133,6 +135,48 @@ meta_kms_device_get_connectors (MetaKmsDevice *device)
   return device->connectors;
 }
 
+MetaKmsCrtc *
+meta_kms_device_find_crtc_in_impl (MetaKmsDevice *device,
+                                   uint32_t       crtc_id)
+{
+  MetaKmsImplDevice *impl_device = meta_kms_device_get_impl_device (device);
+  GList *l;
+
+  meta_assert_in_kms_impl (device->kms);
+  meta_assert_is_waiting_for_kms_impl_task (device->kms);
+
+  for (l = meta_kms_impl_device_peek_crtcs (impl_device); l; l = l->next)
+    {
+      MetaKmsCrtc *crtc = META_KMS_CRTC (l->data);
+
+      if (meta_kms_crtc_get_id (crtc) == crtc_id)
+        return crtc;
+    }
+
+  return NULL;
+}
+
+MetaKmsConnector *
+meta_kms_device_find_connector_in_impl (MetaKmsDevice *device,
+                                        uint32_t       connector_id)
+{
+  MetaKmsImplDevice *impl_device = meta_kms_device_get_impl_device (device);
+  GList *l;
+
+  meta_assert_in_kms_impl (device->kms);
+  meta_assert_is_waiting_for_kms_impl_task (device->kms);
+
+  for (l = meta_kms_impl_device_peek_connectors (impl_device); l; l = l->next)
+    {
+      MetaKmsConnector *connector = META_KMS_CONNECTOR (l->data);
+
+      if (meta_kms_connector_get_id (connector) == connector_id)
+        return connector;
+    }
+
+  return NULL;
+}
+
 GList *
 meta_kms_device_get_crtcs (MetaKmsDevice *device)
 {
@@ -186,15 +230,22 @@ meta_kms_device_get_fallback_modes (MetaKmsDevice *device)
   return device->fallback_modes;
 }
 
-void
-meta_kms_device_update_states_in_impl (MetaKmsDevice *device)
+MetaKmsUpdateChanges
+meta_kms_device_update_states_in_impl (MetaKmsDevice *device,
+                                       uint32_t       crtc_id,
+                                       uint32_t       connector_id)
 {
   MetaKmsImplDevice *impl_device = meta_kms_device_get_impl_device (device);
+  MetaKmsUpdateChanges changes;
 
   meta_assert_in_kms_impl (device->kms);
   meta_assert_is_waiting_for_kms_impl_task (device->kms);
 
-  meta_kms_impl_device_update_states (impl_device);
+  changes = meta_kms_impl_device_update_states (impl_device, crtc_id,
+                                                connector_id);
+
+  if (changes == META_KMS_UPDATE_CHANGE_NONE)
+    return changes;
 
   g_list_free (device->crtcs);
   device->crtcs = meta_kms_impl_device_copy_crtcs (impl_device);
@@ -204,6 +255,8 @@ meta_kms_device_update_states_in_impl (MetaKmsDevice *device)
 
   g_list_free (device->planes);
   device->planes = meta_kms_impl_device_copy_planes (impl_device);
+
+  return changes;
 }
 
 void

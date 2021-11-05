@@ -2849,37 +2849,41 @@ clutter_stage_maybe_finish_queue_redraws (ClutterStage *stage)
     {
       ClutterActor *redraw_actor = key;
       QueueRedrawEntry *entry = value;
-      ClutterPaintVolume old_actor_pv, new_actor_pv;
 
       g_hash_table_iter_steal (&iter);
 
-      _clutter_paint_volume_init_static (&old_actor_pv, NULL);
-      _clutter_paint_volume_init_static (&new_actor_pv, NULL);
+      if (clutter_actor_is_mapped (redraw_actor))
+        {
+          ClutterPaintVolume old_actor_pv, new_actor_pv;
 
-      if (entry->has_clip)
-        {
-          add_to_stage_clip (stage, &entry->clip);
-        }
-      else if (clutter_actor_get_redraw_clip (redraw_actor,
-                                              &old_actor_pv,
-                                              &new_actor_pv))
-        {
-          /* Add both the old paint volume of the actor (which is
-           * currently visible on the screen) and the new paint volume
-           * (which will be visible on the screen after this redraw)
-           * to the redraw clip.
-           * The former we do to ensure the old texture on the screen
-           * will be fully painted over in case the actor was moved.
-           */
-          add_to_stage_clip (stage, &old_actor_pv);
-          add_to_stage_clip (stage, &new_actor_pv);
-        }
-      else
-        {
-          /* If there's no clip we can use, we have to trigger an
-           * unclipped full stage redraw.
-           */
-          add_to_stage_clip (stage, NULL);
+          _clutter_paint_volume_init_static (&old_actor_pv, NULL);
+          _clutter_paint_volume_init_static (&new_actor_pv, NULL);
+
+          if (entry->has_clip)
+            {
+              add_to_stage_clip (stage, &entry->clip);
+            }
+          else if (clutter_actor_get_redraw_clip (redraw_actor,
+                                                  &old_actor_pv,
+                                                  &new_actor_pv))
+            {
+              /* Add both the old paint volume of the actor (which is
+               * currently visible on the screen) and the new paint volume
+               * (which will be visible on the screen after this redraw)
+               * to the redraw clip.
+               * The former we do to ensure the old texture on the screen
+               * will be fully painted over in case the actor was moved.
+               */
+              add_to_stage_clip (stage, &old_actor_pv);
+              add_to_stage_clip (stage, &new_actor_pv);
+            }
+          else
+            {
+              /* If there's no clip we can use, we have to trigger an
+               * unclipped full stage redraw.
+               */
+              add_to_stage_clip (stage, NULL);
+            }
         }
 
       g_object_unref (redraw_actor);
@@ -3199,7 +3203,7 @@ clutter_stage_paint_to_framebuffer (ClutterStage                *stage,
  * @stage: a #ClutterStage actor
  * @rect: a #cairo_rectangle_int_t
  * @scale: the scale
- * @data: (inout) (array) (element-type guint8): a pointer to the data
+ * @data: (array) (element-type guint8): a pointer to the data
  * @stride: stride of the image surface
  * @format: the pixel format
  * @paint_flags: the #ClutterPaintFlag
@@ -3368,44 +3372,6 @@ clutter_stage_capture_view_into (ClutterStage          *stage,
                                             bitmap);
 
   cogl_object_unref (bitmap);
-}
-
-void
-clutter_stage_capture_into (ClutterStage          *stage,
-                            cairo_rectangle_int_t *rect,
-                            float                  scale,
-                            uint8_t               *data,
-                            int                    stride)
-{
-  ClutterStagePrivate *priv = stage->priv;
-  GList *l;
-  int bpp = 4;
-
-  for (l = _clutter_stage_window_get_views (priv->impl); l; l = l->next)
-    {
-      ClutterStageView *view = l->data;
-      cairo_rectangle_int_t view_layout;
-      cairo_region_t *region;
-      cairo_rectangle_int_t capture_rect;
-      int x_offset, y_offset;
-
-      clutter_stage_view_get_layout (view, &view_layout);
-      region = cairo_region_create_rectangle (&view_layout);
-      cairo_region_intersect_rectangle (region, rect);
-
-      cairo_region_get_extents (region, &capture_rect);
-      cairo_region_destroy (region);
-
-      x_offset = roundf ((capture_rect.x - rect->x) * scale);
-      y_offset = roundf ((capture_rect.y - rect->y) * scale);
-
-      clutter_stage_capture_view_into (stage, view,
-                                       &capture_rect,
-                                       (data +
-                                        (x_offset * bpp) +
-                                        (y_offset * stride)),
-                                       stride);
-    }
 }
 
 /**
