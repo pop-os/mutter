@@ -1,10 +1,16 @@
-mutter (41.1-1) UNRELEASED; urgency=medium
+mutter (41.1-1) unstable; urgency=medium
 
+  * Team upload
   * New upstream release
   * Drop a patch that came from upstream
   * Update Lintian overrides
+  * Replace patches for #995929 with the version that was applied upstream
+  * Remove workaround for #994806
+  * d/libmutter-9-0.symbols: Ignore removal of clutter_stage_capture_into.
+    Nothing else in Debian references this symbol, except for forks of
+    the mutter codebase.
 
- -- Simon McVittie <smcv@debian.org>  Fri, 05 Nov 2021 14:31:55 +0000
+ -- Simon McVittie <smcv@debian.org>  Fri, 05 Nov 2021 16:40:11 +0000
 
 mutter (41.0-5) unstable; urgency=medium
 
