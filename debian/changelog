@@ -1,8 +1,10 @@
 mutter (41.1-1) UNRELEASED; urgency=medium
 
   * New upstream release
+  * Drop a patch that came from upstream
+  * Update Lintian overrides
 
- -- Simon McVittie <smcv@debian.org>  Fri, 05 Nov 2021 14:24:25 +0000
+ -- Simon McVittie <smcv@debian.org>  Fri, 05 Nov 2021 14:31:55 +0000
 
 mutter (41.0-5) unstable; urgency=medium
 
