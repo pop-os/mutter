@@ -208,7 +208,7 @@ on_uevent (GUdevClient *client,
     g_signal_emit (udev, signals[DEVICE_REMOVED], 0, device);
 
   if (g_udev_device_get_property_as_boolean (device, "HOTPLUG"))
-    g_signal_emit (udev, signals[HOTPLUG], 0);
+    g_signal_emit (udev, signals[HOTPLUG], 0, device);
 }
 
 MetaUdev *
@@ -220,6 +220,18 @@ meta_udev_new (MetaBackendNative *backend_native)
   udev->backend_native = backend_native;
 
   return udev;
+}
+
+void
+meta_udev_pause (MetaUdev *udev)
+{
+  g_signal_handler_block (udev->gudev_client, udev->uevent_handler_id);
+}
+
+void
+meta_udev_resume (MetaUdev *udev)
+{
+  g_signal_handler_unblock (udev->gudev_client, udev->uevent_handler_id);
 }
 
 static void
@@ -256,7 +268,8 @@ meta_udev_class_init (MetaUdevClass *klass)
                   G_TYPE_FROM_CLASS (object_class),
                   G_SIGNAL_RUN_LAST,
                   0, NULL, NULL, NULL,
-                  G_TYPE_NONE, 0);
+                  G_TYPE_NONE, 1,
+                  G_UDEV_TYPE_DEVICE);
   signals[DEVICE_ADDED] =
     g_signal_new ("device-added",
                   G_TYPE_FROM_CLASS (object_class),
