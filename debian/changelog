@@ -1,3 +1,9 @@
+mutter (40.5-1ubuntu3~21.10.1pop0) impish; urgency=medium
+
+  * Pop!_OS patches
+
+ -- Jeremy Soller <jeremy@system76.com>  Wed, 24 Nov 2021 07:28:18 -0700
+
 mutter (40.5-1ubuntu3~21.10.1) impish; urgency=medium
 
   * Backport to impish
