@@ -26,6 +26,7 @@ CONFFLAGS = \
 	-Dwayland_eglstream=true
 else
 CONFFLAGS = \
+	-Dsystemd=false \
 	-Dudev=false \
 	-Dlibwacom=false \
 	-Dwayland=false \
