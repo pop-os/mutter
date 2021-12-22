@@ -735,7 +735,9 @@ secondary_gpu_get_next_dumb_buffer (MetaOnscreenNativeSecondaryGpuState *seconda
 
 static gboolean
 copy_shared_framebuffer_primary_gpu (CoglOnscreen                        *onscreen,
-                                     MetaOnscreenNativeSecondaryGpuState *secondary_gpu_state)
+                                     MetaOnscreenNativeSecondaryGpuState *secondary_gpu_state,
+                                     const int                           *rectangles,
+                                     int                                  n_rectangles)
 {
   CoglFramebuffer *framebuffer = COGL_FRAMEBUFFER (onscreen);
   MetaOnscreenNative *onscreen_native = META_ONSCREEN_NATIVE (onscreen);
@@ -802,14 +804,37 @@ copy_shared_framebuffer_primary_gpu (CoglOnscreen                        *onscre
                   error->message);
       return FALSE;
     }
+  /* Limit the number of individual copies to 16 */
+#define MAX_RECTS 16
 
-  if (!cogl_blit_framebuffer (framebuffer, COGL_FRAMEBUFFER (dmabuf_fb),
-                              0, 0, 0, 0,
-                              width, height,
-                              &error))
+  if (n_rectangles == 0 || n_rectangles > MAX_RECTS)
     {
-      g_object_unref (dmabuf_fb);
-      return FALSE;
+      if (!cogl_blit_framebuffer (framebuffer, COGL_FRAMEBUFFER (dmabuf_fb),
+                                  0, 0, 0, 0,
+                                  width, height,
+                                  &error))
+        {
+          g_object_unref (dmabuf_fb);
+          return FALSE;
+        }
+    }
+  else
+    {
+      int i;
+
+      for (i = 0; i < n_rectangles; ++i)
+        {
+          if (!cogl_blit_framebuffer (framebuffer, COGL_FRAMEBUFFER (dmabuf_fb),
+                                      rectangles[i * 4], rectangles[i * 4 + 1],
+                                      rectangles[i * 4], rectangles[i * 4 + 1],
+                                      rectangles[i * 4 + 2],
+                                      rectangles[i * 4 + 3],
+                                      &error))
+            {
+              g_object_unref (dmabuf_fb);
+              return FALSE;
+            }
+        }
     }
 
   g_object_unref (dmabuf_fb);
@@ -872,13 +897,14 @@ copy_shared_framebuffer_cpu (CoglOnscreen                        *onscreen,
 
   cogl_object_unref (dumb_bitmap);
 
-  g_clear_object (&secondary_gpu_state->gbm.next_fb);
-  secondary_gpu_state->gbm.next_fb = buffer;
+  g_set_object (&secondary_gpu_state->gbm.next_fb, buffer);
   secondary_gpu_state->cpu.current_dumb_fb = buffer_dumb;
 }
 
 static void
-update_secondary_gpu_state_pre_swap_buffers (CoglOnscreen *onscreen)
+update_secondary_gpu_state_pre_swap_buffers (CoglOnscreen *onscreen,
+                                             const int    *rectangles,
+                                             int           n_rectangles)
 {
   MetaOnscreenNative *onscreen_native = META_ONSCREEN_NATIVE (onscreen);
   MetaOnscreenNativeSecondaryGpuState *secondary_gpu_state;
@@ -908,7 +934,9 @@ update_secondary_gpu_state_pre_swap_buffers (CoglOnscreen *onscreen)
           G_GNUC_FALLTHROUGH;
         case META_SHARED_FRAMEBUFFER_COPY_MODE_PRIMARY:
           if (!copy_shared_framebuffer_primary_gpu (onscreen,
-                                                    secondary_gpu_state))
+                                                    secondary_gpu_state,
+                                                    rectangles,
+                                                    n_rectangles))
             {
               if (!secondary_gpu_state->noted_primary_gpu_copy_failed)
                 {
@@ -1029,7 +1057,9 @@ meta_onscreen_native_swap_buffers_with_damage (CoglOnscreen  *onscreen,
   COGL_TRACE_BEGIN_SCOPED (MetaRendererNativeSwapBuffers,
                            "Onscreen (swap-buffers)");
 
-  update_secondary_gpu_state_pre_swap_buffers (onscreen);
+  update_secondary_gpu_state_pre_swap_buffers (onscreen,
+                                               rectangles,
+                                               n_rectangles);
 
   parent_class = COGL_ONSCREEN_CLASS (meta_onscreen_native_parent_class);
   parent_class->swap_buffers_with_damage (onscreen,
