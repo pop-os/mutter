@@ -1,12 +1,19 @@
 mutter (41.2-1) UNRELEASED; urgency=medium
 
+  [ Simon McVittie ]
+  * New upstream release
+  * d/patches: Drop patches that were applied upstream
+  * d/patches: Update to upstream gnome-41 branch commit 41.2-3-g5d0c26631
+    - wayland: Check keyboard serials for activation
+    - Sync refresh rate to the correct monitor for maximized/full-screen
+      apps in a multi-monitor layout
+    - Add a debug environment variable to disable hardware cursors for
+      faulty hardware and drivers
+
   [ Laurent Bigonville ]
   * debian/rules: Disable systemd support on non-linux architectures
 
-  [ Simon McVittie ]
-  * New upstream release
-
- -- Simon McVittie <smcv@debian.org>  Wed, 22 Dec 2021 10:34:24 +0000
+ -- Simon McVittie <smcv@debian.org>  Wed, 22 Dec 2021 10:54:05 +0000
 
 mutter (41.1-1) unstable; urgency=medium
 
