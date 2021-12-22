@@ -1,3 +1,14 @@
+mutter (41.2-2) unstable; urgency=medium
+
+  * Team upload
+  * d/p/Consistently-pass-timestamp-as-uint64-when-creating-MetaS.patch:
+    Add proposed patch to fix FTBFS on 32-bit architectures
+  * d/patches: Update to 41.2-6-g7b64c159a
+    - Surface damage viewport improvements
+  * Update patch metadata with upstream status
+
+ -- Simon McVittie <smcv@debian.org>  Wed, 22 Dec 2021 19:47:37 +0000
+
 mutter (41.2-1) unstable; urgency=medium
 
   * Team upload
