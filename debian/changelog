@@ -1,4 +1,6 @@
-mutter (41.2-1) UNRELEASED; urgency=medium
+mutter (41.2-1) unstable; urgency=medium
+
+  * Team upload
 
   [ Simon McVittie ]
   * New upstream release
@@ -13,7 +15,7 @@ mutter (41.2-1) UNRELEASED; urgency=medium
   [ Laurent Bigonville ]
   * debian/rules: Disable systemd support on non-linux architectures
 
- -- Simon McVittie <smcv@debian.org>  Wed, 22 Dec 2021 10:54:05 +0000
+ -- Simon McVittie <smcv@debian.org>  Wed, 22 Dec 2021 10:57:19 +0000
 
 mutter (41.1-1) unstable; urgency=medium
 
