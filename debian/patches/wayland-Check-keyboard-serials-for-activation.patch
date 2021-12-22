@@ -1,0 +1,108 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Thu, 9 Dec 2021 12:47:04 +0100
+Subject: wayland: Check keyboard serials for activation
+
+We are using internal API that has the benefit of checking that the
+focus surface still matches, but has the drawback that it does not
+check the MetaWaylandKeyboard state.
+
+In order to fix this, look for keyboard focus and serial matches
+specifically when triggering activation.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2148>
+
+(cherry picked from commit d2998a8e4142c1e5294a887eb134d0ac41445d6a)
+
+Origin: upstream, 41.3, commit:99b0b78ea01e032df50256d939d3c332bb11e6d2
+---
+ src/wayland/meta-wayland-activation.c | 31 +++++++++++++++++++++++++------
+ src/wayland/meta-wayland-keyboard.c   | 12 ++++++++++++
+ src/wayland/meta-wayland-keyboard.h   |  3 +++
+ 3 files changed, 40 insertions(+), 6 deletions(-)
+
+diff --git a/src/wayland/meta-wayland-activation.c b/src/wayland/meta-wayland-activation.c
+index 1983566..d30fbd3 100644
+--- a/src/wayland/meta-wayland-activation.c
++++ b/src/wayland/meta-wayland-activation.c
+@@ -259,6 +259,30 @@ activation_get_activation_token (struct wl_client   *client,
+                                                      id);
+ }
+ 
++static gboolean
++token_can_activate (MetaXdgActivationToken *token)
++{
++  MetaWaylandSeat *seat;
++
++  if (!token->seat)
++    return FALSE;
++  if (!token->surface)
++    return FALSE;
++
++  seat = token->seat;
++
++  if (seat->keyboard &&
++      meta_wayland_keyboard_can_grab_surface (seat->keyboard,
++                                              token->surface,
++                                              token->serial))
++    return TRUE;
++
++  return meta_wayland_seat_get_grab_info (seat,
++                                          token->surface,
++                                          token->serial,
++                                          FALSE, NULL, NULL);
++}
++
+ static void
+ activation_activate (struct wl_client   *client,
+                      struct wl_resource *resource,
+@@ -278,12 +302,7 @@ activation_activate (struct wl_client   *client,
+   if (!token)
+     return;
+ 
+-  if (token->seat &&
+-      token->surface &&
+-      meta_wayland_seat_get_grab_info (token->seat,
+-                                       token->surface,
+-                                       token->serial,
+-                                       FALSE, NULL, NULL))
++  if (token_can_activate (token))
+     {
+       uint32_t timestamp;
+       int32_t workspace_idx;
+diff --git a/src/wayland/meta-wayland-keyboard.c b/src/wayland/meta-wayland-keyboard.c
+index 836939c..114802e 100644
+--- a/src/wayland/meta-wayland-keyboard.c
++++ b/src/wayland/meta-wayland-keyboard.c
+@@ -816,6 +816,18 @@ meta_wayland_keyboard_create_new_resource (MetaWaylandKeyboard *keyboard,
+     }
+ }
+ 
++gboolean
++meta_wayland_keyboard_can_grab_surface (MetaWaylandKeyboard *keyboard,
++                                        MetaWaylandSurface  *surface,
++                                        uint32_t             serial)
++{
++  if (keyboard->focus_surface != surface)
++    return FALSE;
++
++  return (keyboard->focus_serial == serial ||
++          meta_wayland_keyboard_can_popup (keyboard, serial));
++}
++
+ gboolean
+ meta_wayland_keyboard_can_popup (MetaWaylandKeyboard *keyboard,
+                                  uint32_t             serial)
+diff --git a/src/wayland/meta-wayland-keyboard.h b/src/wayland/meta-wayland-keyboard.h
+index ac57d76..6cce803 100644
+--- a/src/wayland/meta-wayland-keyboard.h
++++ b/src/wayland/meta-wayland-keyboard.h
+@@ -130,6 +130,9 @@ void meta_wayland_keyboard_create_new_resource (MetaWaylandKeyboard *keyboard,
+                                                 struct wl_resource  *seat_resource,
+                                                 uint32_t id);
+ 
++gboolean meta_wayland_keyboard_can_grab_surface (MetaWaylandKeyboard *keyboard,
++                                                 MetaWaylandSurface  *surface,
++                                                 uint32_t             serial);
+ gboolean meta_wayland_keyboard_can_popup (MetaWaylandKeyboard *keyboard,
+                                           uint32_t             serial);
+ 

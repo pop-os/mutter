@@ -1,3 +1,6 @@
+wayland-Check-keyboard-serials-for-activation.patch
+surface-actor-Fix-unobscurred_fraction-calculation.patch
+cursor-renderer-native-Add-a-means-to-disable-HW-cursors.patch
 tests-Don-t-use-TestEnvironment.patch
 tests-Don-t-continue-if-setup-commands-fail.patch
 theme-use-gtk_render_icon_suface-to-paint-button-icon.patch
