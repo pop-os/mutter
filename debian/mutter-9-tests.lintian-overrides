@@ -1,2 +1,0 @@
-# These RUNPATHs are needed to find mutter's private cogl fork
-mutter-9-tests: custom-library-search-path usr/libexec/installed-tests/mutter-*/cogl/conform/test-conformance RUNPATH usr/lib/*/mutter-*
