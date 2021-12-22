@@ -3,6 +3,7 @@ Date: Fri, 30 Mar 2018 15:17:39 -0600
 Subject: theme: load icons as Gtk does with fallback and RTL support
 
 Forwarded: yes, https://gitlab.gnome.org/GNOME/mutter/merge_requests/62
+Applied-upstream: no
 ---
  src/ui/theme.c | 32 ++++++++++++++++++++++++++------
  1 file changed, 26 insertions(+), 6 deletions(-)

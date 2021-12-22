@@ -9,6 +9,7 @@ Expose this functionality in meson as well
 
 Origin: https://gitlab.gnome.org/GNOME/mutter/merge_requests/392
 Forwarded: yes
+Applied-upstream: no
 ---
  cogl/cogl-config.h.meson | 3 +++
  cogl/meson.build         | 4 ++++
