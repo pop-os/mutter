@@ -46,9 +46,11 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "backends/meta-cursor-tracker-private.h"
 #include "backends/meta-gles3.h"
 #include "backends/meta-logical-monitor.h"
 #include "backends/native/meta-backend-native-private.h"
+#include "backends/native/meta-cursor-renderer-native.h"
 #include "backends/native/meta-cogl-utils.h"
 #include "backends/native/meta-crtc-kms.h"
 #include "backends/native/meta-crtc-virtual.h"
@@ -85,6 +87,8 @@ struct _MetaRendererNative
   gboolean pending_mode_set;
 
   GList *kept_alive_onscreens;
+  GList *lingering_onscreens;
+  guint release_unused_gpus_idle_id;
 
   GList *power_save_page_flip_onscreens;
   guint power_save_page_flip_source_id;
@@ -121,6 +125,11 @@ meta_renderer_native_gpu_data_free (MetaRendererNativeGpuData *renderer_gpu_data
 {
   MetaRendererNative *renderer_native = renderer_gpu_data->renderer_native;
   MetaEgl *egl = meta_renderer_native_get_egl (renderer_native);
+  MetaRenderer *renderer = META_RENDERER (renderer_gpu_data->renderer_native);
+  MetaBackend *backend = meta_renderer_get_backend (renderer);
+  MetaCursorRenderer *cursor_renderer;
+  MetaGpuKms *gpu_kms;
+  GList *l;
 
   if (renderer_gpu_data->secondary.egl_context != EGL_NO_CONTEXT)
     {
@@ -130,11 +139,33 @@ meta_renderer_native_gpu_data_free (MetaRendererNativeGpuData *renderer_gpu_data
                                 NULL);
     }
 
+  cursor_renderer = meta_backend_get_cursor_renderer (backend);
+  gpu_kms = renderer_gpu_data->gpu_kms;
+  if (cursor_renderer && gpu_kms)
+    {
+      MetaCursorRendererNative *cursor_renderer_native =
+        META_CURSOR_RENDERER_NATIVE (cursor_renderer);
+      MetaCursorTracker *cursor_tracker =
+        meta_backend_get_cursor_tracker (backend);
+      GList *cursor_sprites =
+        meta_cursor_tracker_peek_cursor_sprites (cursor_tracker);
+
+      for (l = cursor_sprites; l; l = l->next)
+        {
+          MetaCursorSprite *cursor_sprite = META_CURSOR_SPRITE (l->data);
+
+          meta_cursor_renderer_native_invalidate_gpu_state (cursor_renderer_native,
+                                                            cursor_sprite,
+                                                            gpu_kms);
+        }
+    }
+
   if (renderer_gpu_data->egl_display != EGL_NO_DISPLAY)
     meta_egl_terminate (egl, renderer_gpu_data->egl_display, NULL);
 
   g_clear_pointer (&renderer_gpu_data->gbm.device, gbm_device_destroy);
   g_clear_pointer (&renderer_gpu_data->device_file, meta_device_file_release);
+
   g_free (renderer_gpu_data);
 }
 
@@ -634,13 +665,6 @@ meta_renderer_native_queue_power_save_page_flip (MetaRendererNative *renderer_na
                     g_object_ref (onscreen));
 }
 
-static void
-clear_kept_alive_onscreens (MetaRendererNative *renderer_native)
-{
-  g_clear_list (&renderer_native->kept_alive_onscreens,
-                g_object_unref);
-}
-
 static gboolean
 is_gpu_unused (gpointer key,
                gpointer value,
@@ -674,9 +698,68 @@ free_unused_gpu_datas (MetaRendererNative *renderer_native)
       g_hash_table_add (used_gpus, gpu);
     }
 
+  for (l = renderer_native->lingering_onscreens; l; l = l->next)
+    {
+      MetaOnscreenNative *onscreen_native = META_ONSCREEN_NATIVE (l->data);
+      MetaCrtc *crtc = meta_onscreen_native_get_crtc (onscreen_native);
+
+      g_hash_table_add (used_gpus, meta_crtc_get_gpu (crtc));
+    }
+
   g_hash_table_foreach_remove (renderer_native->gpu_datas,
                                is_gpu_unused,
                                used_gpus);
+}
+
+static gboolean
+release_unused_gpus_idle (gpointer user_data)
+{
+  MetaRendererNative *renderer_native = META_RENDERER_NATIVE (user_data);
+
+  renderer_native->release_unused_gpus_idle_id = 0;
+  free_unused_gpu_datas (renderer_native);
+
+  return G_SOURCE_REMOVE;
+}
+
+static void
+old_onscreen_freed (gpointer  user_data,
+                    GObject  *freed_onscreen)
+{
+  MetaRendererNative *renderer_native = META_RENDERER_NATIVE (user_data);
+
+  renderer_native->lingering_onscreens =
+    g_list_remove (renderer_native->lingering_onscreens, freed_onscreen);
+
+  if (!renderer_native->release_unused_gpus_idle_id)
+    {
+      renderer_native->release_unused_gpus_idle_id =
+        g_idle_add (release_unused_gpus_idle, renderer_native);
+    }
+}
+
+static void
+clear_kept_alive_onscreens (MetaRendererNative *renderer_native)
+{
+  GList *l;
+
+  for (l = renderer_native->kept_alive_onscreens; l; l = l->next)
+    {
+      CoglOnscreen *onscreen;
+
+      if (!COGL_IS_ONSCREEN (l->data))
+        continue;
+
+      onscreen = COGL_ONSCREEN (l->data);
+      g_object_weak_ref (G_OBJECT (onscreen),
+                         old_onscreen_freed,
+                         renderer_native);
+      renderer_native->lingering_onscreens =
+        g_list_prepend (renderer_native->lingering_onscreens, onscreen);
+    }
+
+  g_clear_list (&renderer_native->kept_alive_onscreens,
+                g_object_unref);
 }
 
 void
@@ -1282,6 +1365,7 @@ meta_renderer_native_rebuild_views (MetaRenderer *renderer)
     META_RENDERER_CLASS (meta_renderer_native_parent_class);
 
   meta_kms_discard_pending_page_flips (kms);
+  meta_kms_discard_pending_updates (kms);
 
   keep_current_onscreens_alive (renderer);
 
@@ -1588,6 +1672,7 @@ init_gbm_egl_display (MetaRendererNative  *renderer_native,
 
 static MetaRendererNativeGpuData *
 create_renderer_gpu_data_gbm (MetaRendererNative  *renderer_native,
+                              MetaGpuKms          *gpu_kms,
                               MetaDeviceFile      *device_file,
                               GError             **error)
 {
@@ -1607,6 +1692,7 @@ create_renderer_gpu_data_gbm (MetaRendererNative  *renderer_native,
   renderer_gpu_data = meta_create_renderer_native_gpu_data ();
   renderer_gpu_data->device_file = meta_device_file_acquire (device_file);
   renderer_gpu_data->renderer_native = renderer_native;
+  renderer_gpu_data->gpu_kms = gpu_kms;
   renderer_gpu_data->gbm.device = gbm_device;
   renderer_gpu_data->mode = META_RENDERER_NATIVE_MODE_GBM;
 
@@ -1813,6 +1899,7 @@ count_drm_devices (MetaRendererNative *renderer_native)
 
 static MetaRendererNativeGpuData *
 create_renderer_gpu_data_egl_device (MetaRendererNative  *renderer_native,
+                                     MetaGpuKms          *gpu_kms,
                                      MetaDeviceFile      *device_file,
                                      GError             **error)
 {
@@ -1873,6 +1960,7 @@ create_renderer_gpu_data_egl_device (MetaRendererNative  *renderer_native,
   renderer_gpu_data->egl.device = egl_device;
   renderer_gpu_data->mode = META_RENDERER_NATIVE_MODE_EGL_DEVICE;
   renderer_gpu_data->egl_display = egl_display;
+  renderer_gpu_data->gpu_kms = gpu_kms;
 
   return renderer_gpu_data;
 }
@@ -1911,6 +1999,7 @@ meta_renderer_native_create_renderer_gpu_data (MetaRendererNative  *renderer_nat
     return NULL;
 
   gbm_renderer_gpu_data = create_renderer_gpu_data_gbm (renderer_native,
+                                                        gpu_kms,
                                                         device_file,
                                                         &gbm_error);
   if (gbm_renderer_gpu_data)
@@ -1922,6 +2011,7 @@ meta_renderer_native_create_renderer_gpu_data (MetaRendererNative  *renderer_nat
 #ifdef HAVE_EGL_DEVICE
   egl_stream_renderer_gpu_data =
     create_renderer_gpu_data_egl_device (renderer_native,
+                                         gpu_kms,
                                          device_file,
                                          &egl_device_error);
   if (egl_stream_renderer_gpu_data)
@@ -2235,14 +2325,16 @@ meta_renderer_native_finalize (GObject *object)
 {
   MetaRendererNative *renderer_native = META_RENDERER_NATIVE (object);
 
-  clear_kept_alive_onscreens (renderer_native);
-
   g_clear_list (&renderer_native->power_save_page_flip_onscreens,
                 g_object_unref);
   g_clear_handle_id (&renderer_native->power_save_page_flip_source_id,
                      g_source_remove);
 
   g_list_free (renderer_native->pending_mode_set_views);
+
+  g_clear_handle_id (&renderer_native->release_unused_gpus_idle_id,
+                     g_source_remove);
+  clear_kept_alive_onscreens (renderer_native);
 
   g_hash_table_destroy (renderer_native->gpu_datas);
   g_clear_object (&renderer_native->gles3);

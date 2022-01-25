@@ -1,3 +1,20 @@
+mutter (41.3-1) unstable; urgency=medium
+
+  * New upstream release:
+    - Check keyboard serials for activation
+    - Fix mixed up refresh rates in multi-monitor setups (LP: #1788535)
+    - Allow disabling HW cursors
+    - Improve damage handling (LP: #1872870)
+    - Consider xrandr flags for advertised modes
+    - Ensure constraints after client resize
+    - window-group: Disable culling when rendinging clone to offscreen buffer
+    - Fix workspace switch animation in default plugin
+    - Fix unfullscreening of window that were mapped fullscreen
+    - Fix DMA-BUF screencasts with unredirected fullscreen windows
+    - Fix orientation changes on devices with 90°
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 25 Jan 2022 03:26:38 +0100
+
 mutter (41.2-2) unstable; urgency=medium
 
   * Team upload

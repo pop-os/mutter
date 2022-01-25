@@ -1,2 +1,0 @@
-# Needed to find mutter's private fork of clutter/cogl
-custom-library-search-path usr/lib/*/libmutter-*.so.* RUNPATH usr/lib/*/mutter-*
