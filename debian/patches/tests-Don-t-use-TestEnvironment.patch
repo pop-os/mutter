@@ -11,6 +11,7 @@ is cleared.
 
 Signed-off-by: Simon McVittie <smcv@debian.org>
 Forwarded: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2009
+Applied-upstream: 42.0, commit:7af1043865ad9f50ed3cb5ffa46c8dfbff4a1029
 ---
  cogl/tests/conform/mutter-cogl.test.in | 6 ++++--
  src/tests/mutter-all.test.in           | 7 +++++--

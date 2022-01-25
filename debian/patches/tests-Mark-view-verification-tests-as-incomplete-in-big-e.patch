@@ -7,7 +7,8 @@ Saved pixmaps are invalid in big-endian architectures, so let's disable
 the tests for now, checking only the basic metadata but not comparing
 the contents.
 
-Bug-GNOME: https://gitlab.gnome.org/GNOME/mutter/-/issues/1850
+Bug: https://gitlab.gnome.org/GNOME/mutter/-/issues/1850
+Applied-upstream: no, this is a workaround
 ---
  src/tests/meta-ref-test.c   | 5 +++++
  src/tests/ref-test-sanity.c | 5 +++++

@@ -9,6 +9,7 @@ Expose this functionality in meson as well
 
 Origin: https://gitlab.gnome.org/GNOME/mutter/merge_requests/392
 Forwarded: yes
+Applied-upstream: no
 ---
  cogl/cogl-config.h.meson | 3 +++
  cogl/meson.build         | 4 ++++
@@ -44,7 +45,7 @@ index a3c61cf..c45614c 100644
    input: 'cogl-config.h.meson',
    output: 'cogl-config.h',
 diff --git a/meson.build b/meson.build
-index 8aad0a1..ec40ec5 100644
+index 645fa1d..8b47d5b 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -231,6 +231,8 @@ if have_wayland_eglstream
@@ -56,7 +57,7 @@ index 8aad0a1..ec40ec5 100644
  have_sm = get_option('sm')
  if have_sm
    sm_dep = dependency('sm')
-@@ -553,6 +555,7 @@ summary('Wayland', have_wayland, section: 'Options')
+@@ -556,6 +558,7 @@ summary('Wayland', have_wayland, section: 'Options')
  summary('Wayland EGLStream', have_wayland_eglstream, section: 'Options')
  summary('Native Backend', have_native_backend, section: 'Options')
  summary('EGL Device', have_egl_device, section: 'Options')

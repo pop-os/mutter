@@ -1,0 +1,36 @@
+From: Olivier Fourdan <ofourdan@redhat.com>
+Date: Fri, 10 Dec 2021 10:57:29 +0100
+Subject: cursor-renderer/native: Add a means to disable HW cursors
+
+When dealing with a faulty hardware or bugs in the driver, it might be
+interesting to force the use of software cursors for debugging purposes.
+
+Add a debug environment variable MUTTER_DEBUG_DISABLE_HW_CURSORS to
+disable hardware cursors and force using software cursors.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2150>
+
+(cherry picked from commit 56939abd2f1691eea9edf85cb715ebf275944e7e)
+
+Bug: https://gitlab.gnome.org/GNOME/mutter/-/issues/2046
+Origin: upstream, 41.3, commit:5d0c26631b3f0d163a89bc914f02cba385558be2
+---
+ src/backends/native/meta-cursor-renderer-native.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/backends/native/meta-cursor-renderer-native.c b/src/backends/native/meta-cursor-renderer-native.c
+index 3143d25..d9e4a7e 100644
+--- a/src/backends/native/meta-cursor-renderer-native.c
++++ b/src/backends/native/meta-cursor-renderer-native.c
+@@ -1864,7 +1864,10 @@ meta_cursor_renderer_native_new (MetaBackend        *backend,
+ 
+   priv->backend = backend;
+ 
+-  init_hw_cursor_support (cursor_renderer_native);
++  if (g_strcmp0 (getenv ("MUTTER_DEBUG_DISABLE_HW_CURSORS"), "1"))
++    init_hw_cursor_support (cursor_renderer_native);
++  else
++    g_message ("Disabling hardware cursors because MUTTER_DEBUG_DISABLE_HW_CURSORS is set");
+ 
+   return cursor_renderer_native;
+ }

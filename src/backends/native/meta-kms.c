@@ -29,6 +29,8 @@
 #include "backends/native/meta-udev.h"
 #include "cogl/cogl.h"
 
+#include "meta-private-enum-types.h"
+
 /**
  * SECTION:kms
  * @short description: KMS abstraction
@@ -563,17 +565,53 @@ meta_kms_is_waiting_for_impl_task (MetaKms *kms)
   return kms->waiting_for_impl_task;
 }
 
-static void
-meta_kms_update_states_in_impl (MetaKms *kms)
+typedef struct _UpdateStatesData
 {
+  const char *device_path;
+  uint32_t crtc_id;
+  uint32_t connector_id;
+} UpdateStatesData;
+
+static MetaKmsUpdateChanges
+meta_kms_update_states_in_impl (MetaKms          *kms,
+                                UpdateStatesData *update_data)
+{
+  MetaKmsUpdateChanges changes = META_KMS_UPDATE_CHANGE_NONE;
+  GList *l;
+
   COGL_TRACE_BEGIN_SCOPED (MetaKmsUpdateStates,
                            "KMS (update states)");
 
   meta_assert_in_kms_impl (kms);
 
-  g_list_foreach (kms->devices,
-                  (GFunc) meta_kms_device_update_states_in_impl,
-                  NULL);
+  if (!kms->devices)
+    return META_KMS_UPDATE_CHANGE_NO_DEVICES;
+
+  for (l = kms->devices; l; l = l->next)
+    {
+      MetaKmsDevice *kms_device = META_KMS_DEVICE (l->data);
+      const char *kms_device_path = meta_kms_device_get_path (kms_device);
+
+      if (update_data->device_path &&
+          g_strcmp0 (kms_device_path, update_data->device_path) != 0)
+        continue;
+
+      if (update_data->crtc_id > 0 &&
+          !meta_kms_device_find_crtc_in_impl (kms_device, update_data->crtc_id))
+        continue;
+
+      if (update_data->connector_id > 0 &&
+          !meta_kms_device_find_connector_in_impl (kms_device,
+                                                   update_data->connector_id))
+        continue;
+
+      changes |=
+        meta_kms_device_update_states_in_impl (kms_device,
+                                               update_data->crtc_id,
+                                               update_data->connector_id);
+    }
+
+  return changes;
 }
 
 static gpointer
@@ -581,45 +619,58 @@ update_states_in_impl (MetaKmsImpl  *impl,
                        gpointer      user_data,
                        GError      **error)
 {
+  UpdateStatesData *data = user_data;
   MetaKms *kms = meta_kms_impl_get_kms (impl);
 
-  meta_kms_update_states_in_impl (kms);
-
-  return GINT_TO_POINTER (TRUE);
+  return GUINT_TO_POINTER (meta_kms_update_states_in_impl (kms, data));
 }
 
-static gboolean
-meta_kms_update_states_sync (MetaKms  *kms,
-                             GError  **error)
+static MetaKmsUpdateChanges
+meta_kms_update_states_sync (MetaKms     *kms,
+                             GUdevDevice *udev_device)
 {
+  UpdateStatesData data = {};
   gpointer ret;
 
-  ret = meta_kms_run_impl_task_sync (kms, update_states_in_impl, NULL, error);
-  return GPOINTER_TO_INT (ret);
+  if (udev_device)
+    {
+      data.device_path = g_udev_device_get_device_file (udev_device);
+      data.crtc_id =
+        CLAMP (g_udev_device_get_property_as_int (udev_device, "CRTC"),
+               0, UINT32_MAX);
+      data.connector_id =
+        CLAMP (g_udev_device_get_property_as_int (udev_device, "CONNECTOR"),
+               0, UINT32_MAX);
+    }
+
+  ret = meta_kms_run_impl_task_sync (kms, update_states_in_impl, &data, NULL);
+
+  return GPOINTER_TO_UINT (ret);
 }
 
 static void
-handle_hotplug_event (MetaKms *kms)
+handle_hotplug_event (MetaKms              *kms,
+                      GUdevDevice          *udev_device,
+                      MetaKmsUpdateChanges  changes)
 {
-  g_autoptr (GError) error = NULL;
+  changes |= meta_kms_update_states_sync (kms, udev_device);
 
-  if (!meta_kms_update_states_sync (kms, &error))
-    g_warning ("Updating KMS state failed: %s", error->message);
-
-  g_signal_emit (kms, signals[RESOURCES_CHANGED], 0);
+  if (changes != META_KMS_UPDATE_CHANGE_NONE)
+    g_signal_emit (kms, signals[RESOURCES_CHANGED], 0, changes);
 }
 
 void
 meta_kms_resume (MetaKms *kms)
 {
-  handle_hotplug_event (kms);
+  handle_hotplug_event (kms, NULL, META_KMS_UPDATE_CHANGE_FULL);
 }
 
 static void
-on_udev_hotplug (MetaUdev *udev,
-                 MetaKms  *kms)
+on_udev_hotplug (MetaUdev    *udev,
+                 GUdevDevice *udev_device,
+                 MetaKms     *kms)
 {
-  handle_hotplug_event (kms);
+  handle_hotplug_event (kms, udev_device, META_KMS_UPDATE_CHANGE_NONE);
 }
 
 static void
@@ -627,7 +678,7 @@ on_udev_device_removed (MetaUdev    *udev,
                         GUdevDevice *device,
                         MetaKms     *kms)
 {
-  handle_hotplug_event (kms);
+  handle_hotplug_event (kms, NULL, META_KMS_UPDATE_CHANGE_NONE);
 }
 
 MetaBackend *
@@ -750,5 +801,6 @@ meta_kms_class_init (MetaKmsClass *klass)
                   G_SIGNAL_RUN_LAST,
                   0,
                   NULL, NULL, NULL,
-                  G_TYPE_NONE, 0);
+                  G_TYPE_NONE, 1,
+                  META_TYPE_KMS_UPDATE_CHANGES);
 }

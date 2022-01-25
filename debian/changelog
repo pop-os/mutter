@@ -1,3 +1,47 @@
+mutter (41.2-2) unstable; urgency=medium
+
+  * Team upload
+  * d/p/Consistently-pass-timestamp-as-uint64-when-creating-MetaS.patch:
+    Add proposed patch to fix FTBFS on 32-bit architectures
+  * d/patches: Update to 41.2-6-g7b64c159a
+    - Surface damage viewport improvements
+  * Update patch metadata with upstream status
+
+ -- Simon McVittie <smcv@debian.org>  Wed, 22 Dec 2021 19:47:37 +0000
+
+mutter (41.2-1) unstable; urgency=medium
+
+  * Team upload
+
+  [ Simon McVittie ]
+  * New upstream release
+  * d/patches: Drop patches that were applied upstream
+  * d/patches: Update to upstream gnome-41 branch commit 41.2-3-g5d0c26631
+    - wayland: Check keyboard serials for activation
+    - Sync refresh rate to the correct monitor for maximized/full-screen
+      apps in a multi-monitor layout
+    - Add a debug environment variable to disable hardware cursors for
+      faulty hardware and drivers
+
+  [ Laurent Bigonville ]
+  * debian/rules: Disable systemd support on non-linux architectures
+
+ -- Simon McVittie <smcv@debian.org>  Wed, 22 Dec 2021 10:57:19 +0000
+
+mutter (41.1-1) unstable; urgency=medium
+
+  * Team upload
+  * New upstream release
+  * Drop a patch that came from upstream
+  * Update Lintian overrides
+  * Replace patches for #995929 with the version that was applied upstream
+  * Remove workaround for #994806
+  * d/libmutter-9-0.symbols: Ignore removal of clutter_stage_capture_into.
+    Nothing else in Debian references this symbol, except for forks of
+    the mutter codebase.
+
+ -- Simon McVittie <smcv@debian.org>  Fri, 05 Nov 2021 16:40:11 +0000
+
 mutter (41.0-5) unstable; urgency=medium
 
   * Team upload

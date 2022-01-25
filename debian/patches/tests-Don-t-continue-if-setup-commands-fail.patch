@@ -8,6 +8,7 @@ of a setup command such as cd by carrying on regardless.
 
 Signed-off-by: Simon McVittie <smcv@debian.org>
 Forwarded: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2009
+Applied-upstream: 42.0, commit:a49c98d8d82174de3e2c5f1f978c30cee946cb8f
 ---
  cogl/tests/conform/mutter-cogl.test.in | 2 +-
  src/tests/mutter-all.test.in           | 2 +-

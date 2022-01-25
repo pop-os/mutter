@@ -596,39 +596,15 @@ send_xdg_output_events (struct wl_resource *resource,
                         gboolean            need_all_events,
                         gboolean           *pending_done_event)
 {
-  MetaRectangle new_layout;
-  MetaRectangle old_layout;
+  MetaRectangle layout;
   MetaLogicalMonitor *logical_monitor;
-  MetaLogicalMonitor *old_logical_monitor;
-  gboolean need_done;
   int version;
 
-  need_done = FALSE;
   logical_monitor = meta_monitor_get_logical_monitor (monitor);
-  old_logical_monitor =
-    meta_monitor_get_logical_monitor (wayland_output->monitor);
-  old_layout = meta_logical_monitor_get_layout (old_logical_monitor);
-  new_layout = meta_logical_monitor_get_layout (logical_monitor);
+  layout = meta_logical_monitor_get_layout (logical_monitor);
 
-  if (need_all_events ||
-      old_layout.x != new_layout.x ||
-      old_layout.y != new_layout.y)
-    {
-      zxdg_output_v1_send_logical_position (resource,
-                                            new_layout.x,
-                                            new_layout.y);
-      need_done = TRUE;
-    }
-
-  if (need_all_events ||
-      old_layout.width != new_layout.width ||
-      old_layout.height != new_layout.height)
-    {
-      zxdg_output_v1_send_logical_size (resource,
-                                        new_layout.width,
-                                        new_layout.height);
-      need_done = TRUE;
-    }
+  zxdg_output_v1_send_logical_position (resource, layout.x, layout.y);
+  zxdg_output_v1_send_logical_size (resource, layout.width, layout.height);
 
   version = wl_resource_get_version (resource);
 
@@ -648,7 +624,7 @@ send_xdg_output_events (struct wl_resource *resource,
       zxdg_output_v1_send_description (resource, description);
     }
 
-  if (pending_done_event && need_done)
+  if (pending_done_event)
     *pending_done_event = TRUE;
 }
 
@@ -669,24 +645,25 @@ meta_xdg_output_manager_get_xdg_output (struct wl_client   *client,
                                             id);
 
   wayland_output = wl_resource_get_user_data (output);
-  if (!wayland_output)
-    return;
-
   wl_resource_set_implementation (xdg_output_resource,
                                   &meta_xdg_output_interface,
                                   wayland_output, meta_xdg_output_destructor);
+
+  if (!wayland_output)
+    goto done;
 
   wayland_output->xdg_output_resources =
     g_list_prepend (wayland_output->xdg_output_resources, xdg_output_resource);
 
   if (!wayland_output->monitor)
-    return;
+    goto done;
 
   send_xdg_output_events (xdg_output_resource,
                           wayland_output,
                           wayland_output->monitor,
                           TRUE, NULL);
 
+done:
   xdg_output_version = wl_resource_get_version (xdg_output_resource);
   wl_output_version = wl_resource_get_version (output);
 

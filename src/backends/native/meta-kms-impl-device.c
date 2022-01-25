@@ -36,7 +36,6 @@
 #include "backends/native/meta-kms-plane-private.h"
 #include "backends/native/meta-kms-plane.h"
 #include "backends/native/meta-kms-private.h"
-#include "backends/native/meta-kms-update-private.h"
 
 #include "meta-default-modes.h"
 #include "meta-private-enum-types.h"
@@ -390,13 +389,14 @@ find_existing_connector (MetaKmsImplDevice *impl_device,
   return NULL;
 }
 
-static void
+static MetaKmsUpdateChanges
 update_connectors (MetaKmsImplDevice *impl_device,
                    drmModeRes        *drm_resources)
 {
   MetaKmsImplDevicePrivate *priv =
     meta_kms_impl_device_get_instance_private (impl_device);
-  GList *connectors = NULL;
+  g_autolist (MetaKmsConnector) connectors = NULL;
+  gboolean added_connector = FALSE;
   unsigned int i;
   int fd;
 
@@ -413,17 +413,29 @@ update_connectors (MetaKmsImplDevice *impl_device,
 
       connector = find_existing_connector (impl_device, drm_connector);
       if (connector)
-        connector = g_object_ref (connector);
+        {
+          connector = g_object_ref (connector);
+        }
       else
-        connector = meta_kms_connector_new (impl_device, drm_connector,
-                                            drm_resources);
+        {
+          connector = meta_kms_connector_new (impl_device, drm_connector,
+                                              drm_resources);
+          added_connector = TRUE;
+        }
+
       drmModeFreeConnector (drm_connector);
 
       connectors = g_list_prepend (connectors, connector);
     }
 
+  if (!added_connector &&
+      g_list_length (connectors) == g_list_length (priv->connectors))
+    return META_KMS_UPDATE_CHANGE_NONE;
+
   g_list_free_full (priv->connectors, g_object_unref);
-  priv->connectors = g_list_reverse (connectors);
+  priv->connectors = g_list_reverse (g_steal_pointer (&connectors));
+
+  return META_KMS_UPDATE_CHANGE_FULL;
 }
 
 static MetaKmsPlaneType
@@ -690,14 +702,18 @@ clear_latched_fd_hold (MetaKmsImplDevice *impl_device)
     }
 }
 
-void
-meta_kms_impl_device_update_states (MetaKmsImplDevice *impl_device)
+MetaKmsUpdateChanges
+meta_kms_impl_device_update_states (MetaKmsImplDevice *impl_device,
+                                    uint32_t           crtc_id,
+                                    uint32_t           connector_id)
 {
   MetaKmsImplDevicePrivate *priv =
     meta_kms_impl_device_get_instance_private (impl_device);
   g_autoptr (GError) error = NULL;
   int fd;
   drmModeRes *drm_resources;
+  MetaKmsUpdateChanges changes;
+  GList *l;
 
   meta_assert_in_kms_impl (meta_kms_impl_get_kms (priv->impl));
 
@@ -720,20 +736,40 @@ meta_kms_impl_device_update_states (MetaKmsImplDevice *impl_device)
       goto err;
     }
 
-  update_connectors (impl_device, drm_resources);
+  changes = update_connectors (impl_device, drm_resources);
 
-  g_list_foreach (priv->crtcs, (GFunc) meta_kms_crtc_update_state,
-                  NULL);
-  g_list_foreach (priv->connectors, (GFunc) meta_kms_connector_update_state,
-                  drm_resources);
+  for (l = priv->crtcs; l; l = l->next)
+    {
+      MetaKmsCrtc *crtc = META_KMS_CRTC (l->data);
+
+      if (crtc_id > 0 &&
+          meta_kms_crtc_get_id (crtc) != crtc_id)
+        continue;
+
+      changes |= meta_kms_crtc_update_state (crtc);
+    }
+
+  for (l = priv->connectors; l; l = l->next)
+    {
+      MetaKmsConnector *connector = META_KMS_CONNECTOR (l->data);
+
+      if (connector_id > 0 &&
+          meta_kms_connector_get_id (connector) != connector_id)
+        continue;
+
+      changes |= meta_kms_connector_update_state (connector, drm_resources);
+    }
+
   drmModeFreeResources (drm_resources);
 
-  return;
+  return changes;
 
 err:
   g_clear_list (&priv->planes, g_object_unref);
   g_clear_list (&priv->crtcs, g_object_unref);
   g_clear_list (&priv->connectors, g_object_unref);
+
+  return META_KMS_UPDATE_CHANGE_FULL;
 }
 
 void

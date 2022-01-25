@@ -2853,8 +2853,7 @@ meta_test_monitor_lid_closed_with_hotplugged_external (void)
                       check_monitor_configuration (&test_case.expect));
   check_monitor_test_clients_state ();
 
-  /* External monitor connected */
-
+  g_test_message ("External monitor connected");
   test_case.setup.n_outputs = 2;
   test_case.expect.n_outputs = 2;
   test_case.expect.n_monitors = 2;
@@ -2870,8 +2869,7 @@ meta_test_monitor_lid_closed_with_hotplugged_external (void)
                       check_monitor_configuration (&test_case.expect));
   check_monitor_test_clients_state ();
 
-  /* Lid closed */
-
+  g_test_message ("Lid closed");
   test_case.expect.monitors[0].current_mode = -1;
   test_case.expect.logical_monitors[0].monitors[0] = 1,
   test_case.expect.n_logical_monitors = 1;
@@ -2895,8 +2893,7 @@ meta_test_monitor_lid_closed_with_hotplugged_external (void)
    *  4) Open lid
    */
 
-  /* Lid opened */
-
+  g_test_message ("Lid opened");
   test_case.expect.monitors[0].current_mode = 0;
   test_case.expect.logical_monitors[0].monitors[0] = 0,
   test_case.expect.logical_monitors[1].monitors[0] = 1,
@@ -2913,8 +2910,7 @@ meta_test_monitor_lid_closed_with_hotplugged_external (void)
                       check_monitor_configuration (&test_case.expect));
   check_monitor_test_clients_state ();
 
-  /* External monitor disconnected */
-
+  g_test_message ("External monitor disconnected");
   test_case.setup.n_outputs = 1;
   test_case.expect.n_outputs = 1;
   test_case.expect.n_monitors = 1;
@@ -2929,8 +2925,7 @@ meta_test_monitor_lid_closed_with_hotplugged_external (void)
                       check_monitor_configuration (&test_case.expect));
   check_monitor_test_clients_state ();
 
-  /* Lid closed */
-
+  g_test_message ("Lid closed");
   test_case.expect.logical_monitors[0].monitors[0] = 0,
   test_case.expect.n_logical_monitors = 1;
   test_case.expect.screen_width = 1024;
@@ -2943,8 +2938,7 @@ meta_test_monitor_lid_closed_with_hotplugged_external (void)
                       check_monitor_configuration (&test_case.expect));
   check_monitor_test_clients_state ();
 
-  /* Lid opened */
-
+  g_test_message ("Lid opened");
   test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
   meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), FALSE);
@@ -3556,9 +3550,10 @@ meta_sensors_proxy_reset (MetaSensorsProxyMock *proxy)
   MetaOrientationManager *orientation_manager =
     meta_backend_get_orientation_manager (backend);
 
+  g_test_message ("Resetting proxy");
   meta_sensors_proxy_mock_set_orientation (proxy,
                                            META_ORIENTATION_NORMAL);
-  wait_for_orientation_changes (orientation_manager);
+  wait_for_orientation (orientation_manager, META_ORIENTATION_NORMAL, NULL);
   g_object_unref (proxy);
 }
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (MetaSensorsProxyAutoResetMock,
@@ -3876,16 +3871,15 @@ meta_test_monitor_orientation_initial_rotated (void)
   g_autoptr (MetaSensorsProxyAutoResetMock) orientation_mock = NULL;
   g_autoptr (ClutterAutoRemoveInputDevice) touch_device = NULL;
   MetaOrientation orientation;
+  unsigned int times_signalled = 0;
 
+  g_test_message ("%s", G_STRFUNC);
   orientation_mock = meta_sensors_proxy_mock_get ();
   touch_device = meta_test_add_touch_device (backend);
   orientation = META_ORIENTATION_LEFT_UP;
   meta_sensors_proxy_mock_set_orientation (orientation_mock, orientation);
-  wait_for_orientation_changes (orientation_manager);
-  g_assert_cmpuint (
-    meta_orientation_manager_get_orientation (orientation_manager),
-    ==,
-    orientation);
+  wait_for_orientation (orientation_manager, orientation, &times_signalled);
+  g_assert_cmpuint (times_signalled, <=, 1);
 
   test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
@@ -3984,15 +3978,14 @@ meta_test_monitor_orientation_initial_rotated_no_touch_mode (void)
     meta_backend_get_orientation_manager (backend);
   g_autoptr (MetaSensorsProxyAutoResetMock) orientation_mock = NULL;
   MetaOrientation orientation;
+  unsigned int times_signalled = 0;
 
+  g_test_message ("%s", G_STRFUNC);
   orientation_mock = meta_sensors_proxy_mock_get ();
   orientation = META_ORIENTATION_LEFT_UP;
   meta_sensors_proxy_mock_set_orientation (orientation_mock, orientation);
-  wait_for_orientation_changes (orientation_manager);
-  g_assert_cmpuint (
-    meta_orientation_manager_get_orientation (orientation_manager),
-    ==,
-    orientation);
+  wait_for_orientation (orientation_manager, orientation, &times_signalled);
+  g_assert_cmpuint (times_signalled, <=, 1);
 
   test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NO_STORED);
@@ -4094,6 +4087,7 @@ meta_test_monitor_orientation_initial_stored_rotated (void)
   g_autoptr (MetaSensorsProxyAutoResetMock) orientation_mock = NULL;
   g_autoptr (ClutterAutoRemoveInputDevice) touch_device = NULL;
   MetaOrientation orientation;
+  unsigned int times_signalled = 0;
 
   if (!meta_is_stage_views_enabled ())
     {
@@ -4101,15 +4095,13 @@ meta_test_monitor_orientation_initial_stored_rotated (void)
       return;
     }
 
+  g_test_message ("%s", G_STRFUNC);
   orientation_mock = meta_sensors_proxy_mock_get ();
   touch_device = meta_test_add_touch_device (backend);
   orientation = META_ORIENTATION_RIGHT_UP;
   meta_sensors_proxy_mock_set_orientation (orientation_mock, orientation);
-  wait_for_orientation_changes (orientation_manager);
-  g_assert_cmpuint (
-    meta_orientation_manager_get_orientation (orientation_manager),
-    ==,
-    orientation);
+  wait_for_orientation (orientation_manager, orientation, &times_signalled);
+  g_assert_cmpuint (times_signalled, <=, 1);
 
   test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
@@ -4121,6 +4113,7 @@ meta_test_monitor_orientation_initial_stored_rotated (void)
                       check_monitor_configuration_per_orientation (
                         &test_case.expect, 0, orientation, 960, 540));
 
+  g_test_message ("Closing lid");
   meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), TRUE);
   meta_monitor_manager_lid_is_closed_changed (monitor_manager);
 
@@ -4129,13 +4122,11 @@ meta_test_monitor_orientation_initial_stored_rotated (void)
                       check_monitor_configuration_per_orientation (
                         &test_case.expect, 0, orientation, 960, 540));
 
+  g_test_message ("Rotating to left-up");
   orientation = META_ORIENTATION_LEFT_UP;
   meta_sensors_proxy_mock_set_orientation (orientation_mock, orientation);
-  wait_for_orientation_changes (orientation_manager);
-  g_assert_cmpuint (
-    meta_orientation_manager_get_orientation (orientation_manager),
-    ==,
-    orientation);
+  wait_for_orientation (orientation_manager, orientation, &times_signalled);
+  g_assert_cmpuint (times_signalled, <=, 1);
 
   meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), FALSE);
   meta_monitor_manager_lid_is_closed_changed (monitor_manager);
@@ -4146,15 +4137,14 @@ meta_test_monitor_orientation_initial_stored_rotated (void)
                         &test_case.expect, 0, orientation, 960, 540));
 
   /* When no touch device is available, the orientation change is ignored */
+  g_test_message ("Removing touch device");
   meta_backend_test_remove_device (META_BACKEND_TEST (backend), touch_device);
 
+  g_test_message ("Rotating to right-up");
   orientation = META_ORIENTATION_RIGHT_UP;
   meta_sensors_proxy_mock_set_orientation (orientation_mock, orientation);
-  wait_for_orientation_changes (orientation_manager);
-  g_assert_cmpuint (
-    meta_orientation_manager_get_orientation (orientation_manager),
-    ==,
-    orientation);
+  wait_for_orientation (orientation_manager, orientation, &times_signalled);
+  g_assert_cmpuint (times_signalled, <=, 1);
 
   META_TEST_LOG_CALL ("Checking configuration per orientation",
                       check_monitor_configuration_per_orientation (
@@ -4252,6 +4242,7 @@ meta_test_monitor_orientation_initial_stored_rotated_no_touch (void)
     meta_backend_get_orientation_manager (backend);
   g_autoptr (MetaSensorsProxyAutoResetMock) orientation_mock = NULL;
   MetaOrientation orientation;
+  unsigned int times_signalled = 0;
 
   if (!meta_is_stage_views_enabled ())
     {
@@ -4259,14 +4250,12 @@ meta_test_monitor_orientation_initial_stored_rotated_no_touch (void)
       return;
     }
 
+  g_test_message ("%s", G_STRFUNC);
   orientation_mock = meta_sensors_proxy_mock_get ();
   orientation = META_ORIENTATION_RIGHT_UP;
   meta_sensors_proxy_mock_set_orientation (orientation_mock, orientation);
-  wait_for_orientation_changes (orientation_manager);
-  g_assert_cmpuint (
-    meta_orientation_manager_get_orientation (orientation_manager),
-    ==,
-    orientation);
+  wait_for_orientation (orientation_manager, orientation, &times_signalled);
+  g_assert_cmpuint (times_signalled, <=, 1);
 
   test_setup = create_monitor_test_setup (&test_case.setup,
                                           MONITOR_TEST_FLAG_NONE);
@@ -4279,6 +4268,7 @@ meta_test_monitor_orientation_initial_stored_rotated_no_touch (void)
                         &test_case.expect, 0, META_ORIENTATION_NORMAL,
                         960, 540));
 
+  g_test_message ("Closing lid");
   meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), TRUE);
   meta_monitor_manager_lid_is_closed_changed (monitor_manager);
 
@@ -4383,7 +4373,9 @@ meta_test_monitor_orientation_changes (void)
   g_autoptr (MetaMonitorsConfig) initial_config = NULL;
   g_autoptr (MetaMonitorsConfig) previous_config = NULL;
   MetaOrientation i;
+  unsigned int times_signalled = 0;
 
+  g_test_message ("%s", G_STRFUNC);
   orientation_mock = meta_sensors_proxy_mock_get ();
   touch_device = meta_test_add_touch_device (backend);
   test_setup = create_monitor_test_setup (&test_case.setup,
@@ -4406,10 +4398,8 @@ meta_test_monitor_orientation_changes (void)
       MetaMonitorsConfig *previous;
 
       meta_sensors_proxy_mock_set_orientation (orientation_mock, i);
-      wait_for_orientation_changes (orientation_manager);
-      g_assert_cmpuint (
-        meta_orientation_manager_get_orientation (orientation_manager),
-        ==, i);
+      wait_for_orientation (orientation_manager, i, &times_signalled);
+      g_assert_cmpuint (times_signalled, <=, 1);
 
       META_TEST_LOG_CALL ("Checking configuration per orientation",
                           check_monitor_configuration_per_orientation (
@@ -4435,7 +4425,9 @@ meta_test_monitor_orientation_changes (void)
 
   meta_sensors_proxy_mock_set_orientation (orientation_mock,
                                            META_ORIENTATION_NORMAL);
-  wait_for_orientation_changes (orientation_manager);
+  wait_for_orientation (orientation_manager, META_ORIENTATION_NORMAL,
+                        &times_signalled);
+  g_assert_cmpuint (times_signalled, ==, 0);
   META_TEST_LOG_CALL ("Checking configuration per orientation",
                       check_monitor_configuration_per_orientation (
                         &test_case.expect, 0, META_ORIENTATION_NORMAL,
@@ -4445,6 +4437,7 @@ meta_test_monitor_orientation_changes (void)
             initial_config);
 
   /* When no touch device is available, the orientation changes are ignored */
+  g_test_message ("Removing touch device");
   meta_backend_test_remove_device (META_BACKEND_TEST (backend), touch_device);
 
   for (i = META_N_ORIENTATIONS - 1; i > META_ORIENTATION_UNDEFINED; i--)
@@ -4453,10 +4446,8 @@ meta_test_monitor_orientation_changes (void)
       MetaMonitorsConfig *previous;
 
       meta_sensors_proxy_mock_set_orientation (orientation_mock, i);
-      wait_for_orientation_changes (orientation_manager);
-      g_assert_cmpuint (
-        meta_orientation_manager_get_orientation (orientation_manager),
-        ==, i);
+      wait_for_orientation (orientation_manager, i, &times_signalled);
+      g_assert_cmpuint (times_signalled, <=, 1);
 
       META_TEST_LOG_CALL ("Checking configuration per orientation",
                           check_monitor_configuration_per_orientation (
@@ -4607,7 +4598,9 @@ meta_test_monitor_orientation_changes_with_hotplugging (void)
   g_autoptr (ClutterAutoRemoveInputDevice) touch_device = NULL;
   g_autoptr (MetaSensorsProxyAutoResetMock) orientation_mock = NULL;
   MetaOrientation i;
+  unsigned int times_signalled = 0;
 
+  g_test_message ("%s", G_STRFUNC);
   orientation_mock = meta_sensors_proxy_mock_get ();
   touch_device = meta_test_add_touch_device (backend);
 
@@ -4630,10 +4623,8 @@ meta_test_monitor_orientation_changes_with_hotplugging (void)
   for (i = META_N_ORIENTATIONS - 1; i > META_ORIENTATION_UNDEFINED; i--)
     {
       meta_sensors_proxy_mock_set_orientation (orientation_mock, i);
-      wait_for_orientation_changes (orientation_manager);
-      g_assert_cmpuint (
-        meta_orientation_manager_get_orientation (orientation_manager),
-        ==, i);
+      wait_for_orientation (orientation_manager, i, &times_signalled);
+      g_assert_cmpuint (times_signalled, <=, 1);
 
       META_TEST_LOG_CALL ("Checking configuration per orientation",
                           check_monitor_configuration_per_orientation (
@@ -4642,10 +4633,12 @@ meta_test_monitor_orientation_changes_with_hotplugging (void)
 
   meta_sensors_proxy_mock_set_orientation (orientation_mock,
                                            META_ORIENTATION_NORMAL);
-  wait_for_orientation_changes (orientation_manager);
+  wait_for_orientation (orientation_manager, META_ORIENTATION_NORMAL,
+                        &times_signalled);
+  g_assert_cmpuint (times_signalled, <=, 1);
   check_monitor_configuration (&test_case.expect);
 
-  /* External monitor connected */
+  g_test_message ("External monitor connected");
   test_case.setup.n_outputs = 2;
   test_case.expect.n_outputs = 2;
   test_case.expect.n_monitors = 2;
@@ -4663,10 +4656,8 @@ meta_test_monitor_orientation_changes_with_hotplugging (void)
   for (i = META_N_ORIENTATIONS - 1; i > META_ORIENTATION_UNDEFINED; i--)
     {
       meta_sensors_proxy_mock_set_orientation (orientation_mock, i);
-      wait_for_orientation_changes (orientation_manager);
-      g_assert_cmpuint (
-        meta_orientation_manager_get_orientation (orientation_manager),
-        ==, i);
+      wait_for_orientation (orientation_manager, i, &times_signalled);
+      g_assert_cmpuint (times_signalled, <=, 1);
 
       META_TEST_LOG_CALL ("Checking configuration per orientation",
                           check_monitor_configuration_per_orientation (
@@ -4675,10 +4666,12 @@ meta_test_monitor_orientation_changes_with_hotplugging (void)
 
   meta_sensors_proxy_mock_set_orientation (orientation_mock,
                                            META_ORIENTATION_NORMAL);
-  wait_for_orientation_changes (orientation_manager);
+  wait_for_orientation (orientation_manager, META_ORIENTATION_NORMAL,
+                        &times_signalled);
+  g_assert_cmpuint (times_signalled, <=, 1);
   check_monitor_configuration (&test_case.expect);
 
-  /* Lid closed */
+  g_test_message ("Lid closed");
   test_case.expect.monitors[0].current_mode = -1;
   test_case.expect.logical_monitors[0].monitors[0] = 1,
   test_case.expect.n_logical_monitors = 1;
@@ -4695,13 +4688,16 @@ meta_test_monitor_orientation_changes_with_hotplugging (void)
   for (i = META_N_ORIENTATIONS - 1; i > META_ORIENTATION_UNDEFINED; i--)
     {
       meta_sensors_proxy_mock_set_orientation (orientation_mock, i);
-      wait_for_orientation_changes (orientation_manager);
+      wait_for_orientation (orientation_manager, i, &times_signalled);
+      g_assert_cmpuint (times_signalled, <=, 1);
       check_monitor_configuration (&test_case.expect);
     }
 
   meta_sensors_proxy_mock_set_orientation (orientation_mock,
                                            META_ORIENTATION_NORMAL);
-  wait_for_orientation_changes (orientation_manager);
+  wait_for_orientation (orientation_manager, META_ORIENTATION_NORMAL,
+                        &times_signalled);
+  g_assert_cmpuint (times_signalled, <=, 1);
 
   /*
    * The second part of this test emulate the following at each device rotation:
@@ -4712,7 +4708,7 @@ meta_test_monitor_orientation_changes_with_hotplugging (void)
    *  2) Disconnect external monitor
    */
 
-  /* Lid opened */
+  g_test_message ("Lid opened");
   test_case.expect.monitors[0].current_mode = 0;
   test_case.expect.logical_monitors[0].monitors[0] = 0,
   test_case.expect.logical_monitors[1].monitors[0] = 1,
@@ -4729,7 +4725,7 @@ meta_test_monitor_orientation_changes_with_hotplugging (void)
 
   for (i = META_N_ORIENTATIONS - 1; i > META_ORIENTATION_UNDEFINED; i--)
     {
-      /* Closing lid */
+      g_test_message ("Closing lid");
       test_case.expect.monitors[0].current_mode = -1;
       test_case.expect.logical_monitors[0].monitors[0] = 1,
       test_case.expect.n_logical_monitors = 1;
@@ -4744,10 +4740,11 @@ meta_test_monitor_orientation_changes_with_hotplugging (void)
 
       /* Change orientation */
       meta_sensors_proxy_mock_set_orientation (orientation_mock, i);
-      wait_for_orientation_changes (orientation_manager);
+      wait_for_orientation (orientation_manager, i, &times_signalled);
+      g_assert_cmpuint (times_signalled, <=, 1);
       check_monitor_configuration (&test_case.expect);
 
-      /* Open the lid */
+      g_test_message ("Opening lid");
       test_case.expect.monitors[0].current_mode = 0;
       test_case.expect.logical_monitors[0].monitors[0] = 0,
       test_case.expect.logical_monitors[1].monitors[0] = 1,
@@ -4760,12 +4757,17 @@ meta_test_monitor_orientation_changes_with_hotplugging (void)
       meta_backend_test_set_is_lid_closed (META_BACKEND_TEST (backend), FALSE);
       emulate_hotplug (test_setup);
 
-      wait_for_orientation_changes (orientation_manager);
+      /* We don't actually expect the orientation to change here, so we
+       * just wait for a moment (so that if the orientation *did* change,
+       * mutter has had a chance to process it), and then continue. */
+      wait_for_possible_orientation_change (orientation_manager, &times_signalled);
+      g_assert_cmpuint (times_signalled, ==, 0);
+
       META_TEST_LOG_CALL ("Checking configuration per orientation",
                           check_monitor_configuration_per_orientation (
                             &test_case.expect, 0, i, 1024, 768));
 
-      /* External monitor disconnected */
+      g_test_message ("External monitor disconnected");
       test_case.setup.n_outputs = 1;
       test_case.expect.n_outputs = 1;
       test_case.expect.n_monitors = 1;
@@ -4779,7 +4781,7 @@ meta_test_monitor_orientation_changes_with_hotplugging (void)
                           check_monitor_configuration_per_orientation (
                             &test_case.expect, 0, i, 1024, 768));
 
-      /* External monitor connected */
+      g_test_message ("External monitor connected");
       test_case.setup.n_outputs = 2;
       test_case.expect.n_outputs = 2;
       test_case.expect.n_monitors = 2;
@@ -4797,7 +4799,9 @@ meta_test_monitor_orientation_changes_with_hotplugging (void)
 
   meta_sensors_proxy_mock_set_orientation (orientation_mock,
                                            META_ORIENTATION_NORMAL);
-  wait_for_orientation_changes (orientation_manager);
+  wait_for_orientation (orientation_manager, META_ORIENTATION_NORMAL,
+                        &times_signalled);
+  g_assert_cmpuint (times_signalled, <=, 1);
 }
 
 static void

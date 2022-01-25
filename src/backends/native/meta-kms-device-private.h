@@ -21,10 +21,13 @@
 #define META_KMS_DEVICE_PRIVATE_H
 
 #include "backends/native/meta-kms-types.h"
+#include "backends/native/meta-kms-update-private.h"
 
 MetaKmsImplDevice * meta_kms_device_get_impl_device (MetaKmsDevice *device);
 
-void meta_kms_device_update_states_in_impl (MetaKmsDevice *device);
+MetaKmsUpdateChanges meta_kms_device_update_states_in_impl (MetaKmsDevice *device,
+                                                            uint32_t       crtc_id,
+                                                            uint32_t       connector_id);
 
 void meta_kms_device_predict_states_in_impl (MetaKmsDevice *device,
                                              MetaKmsUpdate *update);
@@ -32,5 +35,11 @@ void meta_kms_device_predict_states_in_impl (MetaKmsDevice *device,
 void meta_kms_device_add_fake_plane_in_impl (MetaKmsDevice    *device,
                                              MetaKmsPlaneType  plane_type,
                                              MetaKmsCrtc      *crtc);
+
+MetaKmsCrtc * meta_kms_device_find_crtc_in_impl (MetaKmsDevice *device,
+                                                 uint32_t       crtc_id);
+
+MetaKmsConnector * meta_kms_device_find_connector_in_impl (MetaKmsDevice *device,
+                                                           uint32_t       connector_id);
 
 #endif /* META_KMS_DEVICE_PRIVATE_H */

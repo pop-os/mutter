@@ -40,12 +40,8 @@
 #include "backends/native/meta-monitor-manager-native.h"
 
 #include <drm.h>
-#include <errno.h>
-#include <gudev/gudev.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
 #include <unistd.h>
 
 #include "backends/meta-backend-private.h"
@@ -64,6 +60,8 @@
 #include "clutter/clutter.h"
 #include "meta/main.h"
 #include "meta/meta-x11-errors.h"
+
+#include "meta-dbus-display-config.h"
 
 enum
 {
@@ -508,9 +506,18 @@ handle_hotplug_event (MetaMonitorManager *manager)
 }
 
 static void
-on_kms_resources_changed (MetaKms            *kms,
-                          MetaMonitorManager *manager)
+on_kms_resources_changed (MetaKms              *kms,
+                          MetaKmsUpdateChanges  changes,
+                          MetaMonitorManager   *manager)
 {
+  g_assert (changes != META_KMS_UPDATE_CHANGE_NONE);
+
+  if (changes == META_KMS_UPDATE_CHANGE_GAMMA)
+    {
+      meta_dbus_display_config_emit_monitors_changed (manager->display_config);
+      return;
+    }
+
   handle_hotplug_event (manager);
 }
 

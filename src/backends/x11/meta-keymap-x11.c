@@ -471,11 +471,6 @@ meta_keymap_x11_replace_keycode (MetaKeymapX11 *keymap_x11,
           XkbChangeTypesOfKey (xkb, keycode, 0, XkbGroup1Mask, NULL, &changes);
         }
 
-      changes.changed = XkbKeySymsMask | XkbKeyTypesMask;
-      changes.first_key_sym = keycode;
-      changes.num_key_syms = 1;
-      changes.first_type = 0;
-      changes.num_types = xkb->map->num_types;
       XkbChangeMap (xdisplay, xkb, &changes);
 
       XFlush (xdisplay);
@@ -705,19 +700,51 @@ meta_keymap_x11_get_is_modifier (MetaKeymapX11 *keymap,
 }
 
 static gboolean
-meta_keymap_x11_get_entries_for_keyval (MetaKeymapX11     *keymap_x11,
-                                        uint32_t           keyval,
-                                        ClutterKeymapKey **keys,
-                                        int               *n_keys)
+matches_group (XkbDescRec *xkb,
+               uint32_t    keycode,
+               uint32_t    group,
+               uint32_t    target_group)
+{
+  unsigned char group_info = XkbKeyGroupInfo (xkb, keycode);
+  unsigned char action = XkbOutOfRangeGroupAction (group_info);
+  unsigned char num_groups = XkbNumGroups (group_info);
+
+  if (num_groups == 0)
+    return FALSE;
+
+  if (target_group >= num_groups)
+    {
+      switch (action)
+        {
+        case XkbRedirectIntoRange:
+          target_group = XkbOutOfRangeGroupNumber (group_info);
+          if (target_group >= num_groups)
+            target_group = 0;
+          break;
+
+        case XkbClampIntoRange:
+          target_group = num_groups - 1;
+          break;
+
+        default:
+          target_group %= num_groups;
+          break;
+        }
+    }
+
+  return group == target_group;
+}
+
+static gboolean
+meta_keymap_x11_get_entry_for_keyval (MetaKeymapX11     *keymap_x11,
+                                      uint32_t           keyval,
+                                      uint32_t           target_group,
+                                      ClutterKeymapKey  *key)
 {
   if (keymap_x11->use_xkb)
     {
       XkbDescRec *xkb = get_xkb (keymap_x11);
-      GArray *retval;
-      int keycode;
-
-      keycode = keymap_x11->min_keycode;
-      retval = g_array_new (FALSE, FALSE, sizeof (ClutterKeymapKey));
+      int keycode = keymap_x11->min_keycode;
 
       while (keycode <= keymap_x11->max_keycode)
         {
@@ -738,18 +765,17 @@ meta_keymap_x11_get_entries_for_keyval (MetaKeymapX11     *keymap_x11,
             {
               g_assert (i == (group * max_shift_levels + level));
 
-              if (entry[i] == keyval)
+              if (entry[i] == keyval &&
+                  matches_group (xkb, keycode, group, target_group))
                 {
-                  ClutterKeymapKey key;
-
-                  key.keycode = keycode;
-                  key.group = group;
-                  key.level = level;
-
-                  g_array_append_val (retval, key);
+                  key->keycode = keycode;
+                  key->group = group;
+                  key->level = level;
 
                   g_assert (XkbKeySymEntry (xkb, keycode, level, group) ==
                             keyval);
+
+                  return TRUE;
                 }
 
               ++level;
@@ -766,20 +792,7 @@ meta_keymap_x11_get_entries_for_keyval (MetaKeymapX11     *keymap_x11,
           ++keycode;
         }
 
-      if (retval->len > 0)
-        {
-          *keys = (ClutterKeymapKey*) retval->data;
-          *n_keys = retval->len;
-        }
-      else
-        {
-          *keys = NULL;
-          *n_keys = 0;
-        }
-
-      g_array_free (retval, retval->len > 0 ? FALSE : TRUE);
-
-      return *n_keys > 0;
+      return FALSE;
     }
   else
     {
@@ -902,48 +915,20 @@ meta_keymap_x11_keycode_for_keyval (MetaKeymapX11 *keymap_x11,
                                     uint32_t      *keycode_out,
                                     uint32_t      *level_out)
 {
-  ClutterKeymapKey *keys;
-  int i, n_keys, group;
-  gboolean found = FALSE;
+  ClutterKeymapKey key;
+  int group;
 
   g_return_val_if_fail (keycode_out != NULL, FALSE);
   g_return_val_if_fail (level_out != NULL, FALSE);
 
   group = meta_keymap_x11_get_current_group (keymap_x11);
 
-  if (!meta_keymap_x11_get_entries_for_keyval (keymap_x11, keyval, &keys, &n_keys))
-    return FALSE;
-
-  for (i = 0; i < n_keys && !found; i++)
+  if (meta_keymap_x11_get_entry_for_keyval (keymap_x11, keyval, group, &key))
     {
-      if (keys[i].group == group)
-        {
-          *keycode_out = keys[i].keycode;
-          *level_out = keys[i].level;
-          found = TRUE;
-        }
+      *keycode_out = key.keycode;
+      *level_out = key.level;
+      return TRUE;
     }
 
-  if (!found)
-    {
-      GHashTableIter iter;
-      gpointer key, value;
-
-      g_hash_table_iter_init (&iter, keymap_x11->reserved_keycodes);
-      while (!found && g_hash_table_iter_next (&iter, &key, &value))
-        {
-          uint32_t reserved_keycode = GPOINTER_TO_UINT (key);
-          uint32_t reserved_keysym = GPOINTER_TO_UINT (value);
-
-          if (keyval == reserved_keysym)
-            {
-              *keycode_out = reserved_keycode;
-              *level_out = 0;
-              found = TRUE;
-            }
-        }
-    }
-
-  g_free (keys);
-  return found;
+  return FALSE;
 }

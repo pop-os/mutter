@@ -1773,7 +1773,6 @@ libmutter-clutter-9.so.0 libmutter-9-0 #MINVER#
  clutter_snap_constraint_set_offset@Base 3.29.4
  clutter_snap_constraint_set_source@Base 3.29.4
  clutter_snap_edge_get_type@Base 3.29.4
- clutter_stage_capture_into@Base 3.29.4
  clutter_stage_capture_view_into@Base 40.0
  clutter_stage_clear_stage_views@Base 3.37.91
  clutter_stage_ensure_viewport@Base 3.29.4
