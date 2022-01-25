@@ -1,3 +1,21 @@
+mutter (41.3-1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge with debian, includes these upstream changes:
+    - window: Don't change workspaces of unmanaged windows (LP: #1933996)
+    - backend: Reset idletime when unplugging the power cable (LP: #1945121)
+    - clutter/text: Invalidate actor paint volume when it has changed
+      (LP: #1882291)
+    - backends/native: Ensure pointer is onscreen in input thread (LP: #1933186)
+    - OSK Enter, space and backspace keys don't work when typing in Greek
+      (LP: #1820523)
+    - window: Don't change workspaces of unmanaged windows (LP: #1932328)
+  * Remainig changes with debian:
+    - debian/gbp.conf: update upstream branch to point to ubuntu/master
+    - debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+      + X11: Add support for fractional scaling using Randr
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 25 Jan 2022 03:48:07 +0100
+
 mutter (41.3-1) unstable; urgency=medium
 
   * New upstream release:
