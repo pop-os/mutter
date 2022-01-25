@@ -1,4 +1,4 @@
-mutter (41.3-1) UNRELEASED; urgency=medium
+mutter (41.3-1) unstable; urgency=medium
 
   * New upstream release:
     - Check keyboard serials for activation
@@ -13,7 +13,7 @@ mutter (41.3-1) UNRELEASED; urgency=medium
     - Fix DMA-BUF screencasts with unredirected fullscreen windows
     - Fix orientation changes on devices with 90°
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 25 Jan 2022 03:09:22 +0100
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 25 Jan 2022 03:26:38 +0100
 
 mutter (41.2-2) unstable; urgency=medium
 
