@@ -1,4 +1,4 @@
-mutter (41.3-1ubuntu1) UNRELEASED; urgency=medium
+mutter (41.3-1ubuntu1) jammy; urgency=medium
 
   * Merge with debian, includes these upstream changes:
     - window: Don't change workspaces of unmanaged windows (LP: #1933996)
@@ -14,7 +14,7 @@ mutter (41.3-1ubuntu1) UNRELEASED; urgency=medium
     - debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
       + X11: Add support for fractional scaling using Randr
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 25 Jan 2022 03:48:07 +0100
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Tue, 25 Jan 2022 04:07:12 +0100
 
 mutter (41.3-1) unstable; urgency=medium
 
