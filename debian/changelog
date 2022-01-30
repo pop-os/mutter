@@ -1,13 +1,21 @@
+mutter (41.3-2) UNRELEASED; urgency=medium
+
+  * Adjust previous changelog entry to mention Launchpad bug 1872870
+    against the correct bullet point
+
+ -- Simon McVittie <smcv@debian.org>  Sun, 30 Jan 2022 16:31:37 +0000
+
 mutter (41.3-1) unstable; urgency=medium
 
   * New upstream release:
     - Check keyboard serials for activation
     - Fix mixed up refresh rates in multi-monitor setups (LP: #1788535)
     - Allow disabling HW cursors
-    - Improve damage handling (LP: #1872870)
+    - Improve damage handling
     - Consider xrandr flags for advertised modes
     - Ensure constraints after client resize
-    - window-group: Disable culling when rendinging clone to offscreen buffer
+    - window-group: Disable culling when rendering clone to offscreen buffer
+      (LP: #1872870)
     - Fix workspace switch animation in default plugin
     - Fix unfullscreening of window that were mapped fullscreen
     - Fix DMA-BUF screencasts with unredirected fullscreen windows
