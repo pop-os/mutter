@@ -1,9 +1,20 @@
-mutter (41.3-2) UNRELEASED; urgency=medium
+mutter (41.3-2) unstable; urgency=medium
 
+  * Team upload
+
+  [ Simon McVittie ]
   * Adjust previous changelog entry to mention Launchpad bug 1872870
     against the correct bullet point
+  * d/control.in: Build-depend on sysprof as well as
+    libsysprof-capture-4-dev.
+    The D-Bus interfaces are currently in sysprof, although arguably they
+    should move to a -dev package.
 
- -- Simon McVittie <smcv@debian.org>  Sun, 30 Jan 2022 16:31:37 +0000
+  [ Marco Trevisan (Treviño) ]
+  * debian/control: Depend on xvfb even on nocheck, as it's checked during
+    configuration
+
+ -- Simon McVittie <smcv@debian.org>  Mon, 07 Feb 2022 18:55:58 +0000
 
 mutter (41.3-1) unstable; urgency=medium
 
