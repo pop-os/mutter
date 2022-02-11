@@ -1,3 +1,9 @@
+mutter (41.3-3) unstable; urgency=medium
+
+  * Build-Depend on xcvt instead of xserver-xorg-core (Closes: #1005299)
+
+ -- Jeremy Bicha <jeremy.bicha@canonical.com>  Fri, 11 Feb 2022 07:48:31 -0500
+
 mutter (41.3-2) unstable; urgency=medium
 
   * Team upload
