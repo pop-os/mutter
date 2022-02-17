@@ -1,3 +1,56 @@
+mutter (41.3-3ubuntu1) jammy; urgency=low
+
+  * Merge from Debian unstable. Remaining changes:
+    - debian/gbp.conf: update upstream branch to point to ubuntu/master
+    - debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+      + X11: Add support for fractional scaling using Randr
+    - Add glibc-tools, needed to fix build with newer glibc
+
+ -- Gianfranco Costamagna <locutusofborg@debian.org>  Thu, 17 Feb 2022 20:46:41 +0100
+
+mutter (41.3-3) unstable; urgency=medium
+
+  * Build-Depend on xcvt instead of xserver-xorg-core (Closes: #1005299)
+
+ -- Jeremy Bicha <jeremy.bicha@canonical.com>  Fri, 11 Feb 2022 07:48:31 -0500
+
+mutter (41.3-2) unstable; urgency=medium
+
+  * Team upload
+
+  [ Simon McVittie ]
+  * Adjust previous changelog entry to mention Launchpad bug 1872870
+    against the correct bullet point
+  * d/control.in: Build-depend on sysprof as well as
+    libsysprof-capture-4-dev.
+    The D-Bus interfaces are currently in sysprof, although arguably they
+    should move to a -dev package.
+
+  [ Marco Trevisan (Treviño) ]
+  * debian/control: Depend on xvfb even on nocheck, as it's checked during
+    configuration
+
+ -- Simon McVittie <smcv@debian.org>  Mon, 07 Feb 2022 18:55:58 +0000
+
+mutter (41.3-1ubuntu5) jammy; urgency=medium
+
+  * Revert catchsegv patch, now we have glibc-tools providing it
+
+ -- Gianfranco Costamagna <locutusofborg@debian.org>  Mon, 07 Feb 2022 15:50:43 +0100
+
+mutter (41.3-1ubuntu4) jammy; urgency=medium
+
+  * Drop catchsegv meson check. The binary has been removed from glibc
+  * Depend on sysprof, needed during build
+
+ -- Gianfranco Costamagna <locutusofborg@debian.org>  Mon, 07 Feb 2022 09:20:40 +0100
+
+mutter (41.3-1ubuntu2) jammy; urgency=medium
+
+  * Rebuild against against libwacom9.
+
+ -- Gianfranco Costamagna <locutusofborg@debian.org>  Sun, 06 Feb 2022 22:45:43 +0100
+
 mutter (41.3-1ubuntu1) jammy; urgency=medium
 
   * Merge with debian, includes these upstream changes:
@@ -22,10 +75,11 @@ mutter (41.3-1) unstable; urgency=medium
     - Check keyboard serials for activation
     - Fix mixed up refresh rates in multi-monitor setups (LP: #1788535)
     - Allow disabling HW cursors
-    - Improve damage handling (LP: #1872870)
+    - Improve damage handling
     - Consider xrandr flags for advertised modes
     - Ensure constraints after client resize
-    - window-group: Disable culling when rendinging clone to offscreen buffer
+    - window-group: Disable culling when rendering clone to offscreen buffer
+      (LP: #1872870)
     - Fix workspace switch animation in default plugin
     - Fix unfullscreening of window that were mapped fullscreen
     - Fix DMA-BUF screencasts with unredirected fullscreen windows
@@ -4856,3 +4910,4 @@ metacity (2.3.34-1) unstable; urgency=low
   * Initial Release. (Closes: #107181)
 
  -- Thom May <thom@debian.org>  Sun, 10 Feb 2002 12:03:22 +0000
+
