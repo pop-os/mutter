@@ -1,3 +1,9 @@
+mutter (42~alpha-1) UNRELEASED; urgency=medium
+
+  * New upstream release
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 18 Feb 2022 01:43:50 +0100
+
 mutter (41.3-3) unstable; urgency=medium
 
   * Build-Depend on xcvt instead of xserver-xorg-core (Closes: #1005299)
