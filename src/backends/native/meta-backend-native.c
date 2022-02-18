@@ -38,7 +38,6 @@
 #include "backends/native/meta-backend-native-private.h"
 #include "backends/native/meta-input-thread.h"
 
-#include <sched.h>
 #include <stdlib.h>
 
 #include "backends/meta-cursor-tracker-private.h"
@@ -61,6 +60,7 @@
 #include "cogl/cogl.h"
 #include "core/meta-border.h"
 #include "meta/main.h"
+#include "meta-dbus-rtkit1.h"
 
 #ifdef HAVE_REMOTE_DESKTOP
 #include "backends/meta-screen-cast.h"
@@ -117,7 +117,7 @@ meta_backend_native_dispose (GObject *object)
 static ClutterBackend *
 meta_backend_native_create_clutter_backend (MetaBackend *backend)
 {
-  return g_object_new (META_TYPE_CLUTTER_BACKEND_NATIVE, NULL);
+  return CLUTTER_BACKEND (meta_clutter_backend_native_new (backend));
 }
 
 static ClutterSeat *
@@ -130,7 +130,7 @@ meta_backend_native_create_default_seat (MetaBackend  *backend,
 
   seat_id = meta_backend_native_get_seat_id (backend_native);
 
-  if (meta_backend_native_is_headless (backend_native))
+  if (meta_backend_is_headless (backend))
     flags = META_SEAT_NATIVE_FLAG_NO_LIBINPUT;
   else
     flags = META_SEAT_NATIVE_FLAG_NONE;
@@ -209,15 +209,36 @@ meta_backend_native_post_init (MetaBackend *backend)
   if (meta_settings_is_experimental_feature_enabled (settings,
                                                      META_EXPERIMENTAL_FEATURE_RT_SCHEDULER))
     {
-      int retval;
-      struct sched_param sp = {
-        .sched_priority = sched_get_priority_min (SCHED_RR)
-      };
+      g_autoptr (MetaDbusRealtimeKit1) rtkit_proxy = NULL;
+      g_autoptr (GError) error = NULL;
 
-      retval = sched_setscheduler (0, SCHED_RR | SCHED_RESET_ON_FORK, &sp);
+      rtkit_proxy =
+        meta_dbus_realtime_kit1_proxy_new_for_bus_sync (G_BUS_TYPE_SYSTEM,
+                                                        G_DBUS_PROXY_FLAGS_DO_NOT_LOAD_PROPERTIES |
+                                                        G_DBUS_PROXY_FLAGS_DO_NOT_CONNECT_SIGNALS |
+                                                        G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+                                                        "org.freedesktop.RealtimeKit1",
+                                                        "/org/freedesktop/RealtimeKit1",
+                                                        NULL,
+                                                        &error);
 
-      if (retval != 0)
-        g_warning ("Failed to set RT scheduler: %m");
+      if (rtkit_proxy)
+        {
+          uint32_t priority;
+
+          priority = sched_get_priority_min (SCHED_RR);
+          meta_dbus_realtime_kit1_call_make_thread_realtime_sync (rtkit_proxy,
+                                                                  gettid (),
+                                                                  priority,
+                                                                  NULL,
+                                                                  &error);
+        }
+
+      if (error)
+        {
+          g_dbus_error_strip_remote_error (error);
+          g_message ("Failed to set RT scheduler: %s", error->message);
+        }
     }
 
 #ifdef HAVE_REMOTE_DESKTOP
@@ -357,10 +378,10 @@ meta_backend_native_get_seat_id (MetaBackendNative *backend_native)
     return meta_launcher_get_seat_id (backend_native->launcher);
 }
 
-gboolean
-meta_backend_native_is_headless (MetaBackendNative *backend_native)
+static gboolean
+meta_backend_native_is_headless (MetaBackend *backend)
 {
-  return backend_native->is_headless;
+  return META_BACKEND_NATIVE (backend)->is_headless;
 }
 
 static void
@@ -625,6 +646,8 @@ meta_backend_native_class_init (MetaBackendNativeClass *klass)
   backend_class->update_screen_size = meta_backend_native_update_screen_size;
 
   backend_class->set_pointer_constraint = meta_backend_native_set_pointer_constraint;
+
+  backend_class->is_headless = meta_backend_native_is_headless;
 
   obj_props[PROP_HEADLESS] =
     g_param_spec_boolean ("headless",

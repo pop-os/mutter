@@ -45,10 +45,7 @@ typedef struct _EstimateQueue
   int next_index;
 } EstimateQueue;
 
-/* When heuristic render time is off,
- * wait 2ms after vblank before starting to draw next frame.
- */
-#define SYNC_DELAY_FALLBACK_US ms2us (2)
+#define SYNC_DELAY_FALLBACK_FRACTION 0.875
 
 typedef struct _ClutterFrameListener
 {
@@ -314,13 +311,12 @@ clutter_frame_clock_compute_max_render_time_us (ClutterFrameClock *frame_clock)
   int64_t max_render_time_us;
   int i;
 
-  refresh_interval_us =
-    (int64_t) (0.5 + G_USEC_PER_SEC / frame_clock->refresh_rate);
+  refresh_interval_us = frame_clock->refresh_interval_us;
 
   if (!frame_clock->got_measurements_last_frame ||
       G_UNLIKELY (clutter_paint_debug_flags &
                   CLUTTER_DEBUG_DISABLE_DYNAMIC_MAX_RENDER_TIME))
-    return refresh_interval_us - SYNC_DELAY_FALLBACK_US;
+    return refresh_interval_us * SYNC_DELAY_FALLBACK_FRACTION;
 
   for (i = 0; i < ESTIMATE_QUEUE_LENGTH; ++i)
     {
@@ -646,13 +642,14 @@ clutter_frame_clock_dispatch (ClutterFrameClock *frame_clock,
   COGL_TRACE_END (ClutterFrameClockEvents);
 
   COGL_TRACE_BEGIN (ClutterFrameClockTimelines, "Frame Clock (timelines)");
+  if (frame_clock->is_next_presentation_time_valid)
+    time_us = frame_clock->next_presentation_time_us;
   advance_timelines (frame_clock, time_us);
   COGL_TRACE_END (ClutterFrameClockTimelines);
 
   COGL_TRACE_BEGIN (ClutterFrameClockFrame, "Frame Clock (frame)");
   result = frame_clock->listener.iface->frame (frame_clock,
                                                frame_count,
-                                               time_us,
                                                frame_clock->listener.user_data);
   COGL_TRACE_END (ClutterFrameClockFrame);
 

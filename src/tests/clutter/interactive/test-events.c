@@ -263,19 +263,17 @@ input_cb (ClutterActor *actor,
       break;
     case CLUTTER_BUTTON_PRESS:
       clutter_event_get_position (event, &position);
-      g_print ("[%s] BUTTON PRESS (button:%i, click count:%i coords:%.02f,%.02f device:%s/%s, state:%s)",
+      g_print ("[%s] BUTTON PRESS (button:%i, coords:%.02f,%.02f device:%s/%s, state:%s)",
                clutter_actor_get_name (source_actor),
                clutter_event_get_button (event),
-               clutter_event_get_click_count (event),
                position.x, position.y,
                device_name, source_name, state);
       break;
     case CLUTTER_BUTTON_RELEASE:
       clutter_event_get_position (event, &position);
-      g_print ("[%s] BUTTON RELEASE (button:%i, click count:%i coords:%.02f,%.02f device:%s/%s state:%s)",
+      g_print ("[%s] BUTTON RELEASE (button:%i, coords:%.02f,%.02f device:%s/%s state:%s)",
                clutter_actor_get_name (source_actor),
                clutter_event_get_button (event),
-               clutter_event_get_click_count (event),
                position.x, position.y,
                device_name, source_name, state);
 
@@ -343,6 +341,9 @@ input_cb (ClutterActor *actor,
       break;
     case CLUTTER_TOUCHPAD_SWIPE:
       g_print ("[%s] TOUCHPAD SWIPE", clutter_actor_get_name (source_actor));
+      break;
+    case CLUTTER_TOUCHPAD_HOLD:
+      g_print ("[%s] TOUCHPAD HOLD", clutter_actor_get_name (source_actor));
       break;
     case CLUTTER_PROXIMITY_IN:
       g_print ("[%s] PROXIMITY IN", clutter_actor_get_name (source_actor));

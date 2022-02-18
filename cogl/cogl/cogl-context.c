@@ -146,6 +146,7 @@ cogl_context_new (CoglDisplay *display,
       CoglRenderer *renderer = cogl_renderer_new ();
       if (!cogl_renderer_connect (renderer, error))
         {
+          cogl_object_unref (renderer);
           g_free (context);
           return NULL;
         }
@@ -223,8 +224,6 @@ cogl_context_new (CoglDisplay *display,
   context->current_clip_stack_valid = FALSE;
   context->current_clip_stack = NULL;
 
-  context->legacy_backface_culling_enabled = FALSE;
-
   graphene_matrix_init_identity (&context->identity_matrix);
   graphene_matrix_init_identity (&context->y_flip_matrix);
   graphene_matrix_scale (&context->y_flip_matrix, 1, -1, 1);
@@ -275,8 +274,6 @@ cogl_context_new (CoglDisplay *display,
   context->depth_writing_enabled_cache = TRUE;
   context->depth_range_near_cache = 0;
   context->depth_range_far_cache = 1;
-
-  context->legacy_depth_test_enabled = FALSE;
 
   context->pipeline_cache = _cogl_pipeline_cache_new ();
 

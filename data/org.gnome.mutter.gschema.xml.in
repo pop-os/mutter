@@ -1,4 +1,13 @@
 <schemalist>
+
+  <flags id="org.gnome.mutter.MetaExperimentalFeature">
+    <value nick="scale-monitor-framebuffer" value="1"/>
+    <value nick="kms-modifiers" value="2"/>
+    <value nick="rt-scheduler" value="4"/>
+    <value nick="dma-buf-screen-sharing" value="8"/>
+    <value nick="autoclose-xwayland" value="16"/>
+  </flags>
+
   <schema id="org.gnome.mutter" path="/org/gnome/mutter/"
           gettext-domain="@GETTEXT_DOMAIN@">
 
@@ -102,7 +111,8 @@
       </description>
     </key>
 
-    <key name="experimental-features" type="as">
+    <key name="experimental-features"
+        flags='org.gnome.mutter.MetaExperimentalFeature'>
       <default>[]</default>
       <summary>Enable experimental features</summary>
       <description>
@@ -121,12 +131,15 @@
                                         to manage HiDPI monitors. Does not
                                         require a restart.
 
-        • “rt-scheduler”              — makes mutter request a low priority
-                                        real-time scheduling. The executable
-                                        or user must have CAP_SYS_NICE.
-                                        Requires a restart.
+        • “kms-modifiers”             — makes mutter always allocate scanout
+                                        buffers with explicit modifiers, if
+                                        supported by the driver. Requires a
+                                        restart.
 
-        • “dma-buf-screen-sharing"    — enables DMA buffered screen sharing. This
+        • “rt-scheduler”              — makes mutter request a low priority
+                                        real-time scheduling. Requires a restart.
+
+        • “dma-buf-screen-sharing”    — enables DMA buffered screen sharing. This
                                         is already enabled by default when using
                                         the i915 driver, but disabled for 
                                         everything else. Requires a restart.

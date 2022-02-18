@@ -39,10 +39,20 @@ struct _MetaDrmBufferClass
 {
   GObjectClass parent_class;
 
+  int (* export_fd) (MetaDrmBuffer  *buffer,
+                     GError        **error);
+
+  gboolean (* ensure_fb_id) (MetaDrmBuffer  *buffer,
+                             GError        **error);
+
   int (* get_width) (MetaDrmBuffer *buffer);
   int (* get_height) (MetaDrmBuffer *buffer);
   int (* get_stride) (MetaDrmBuffer *buffer);
+  int (* get_bpp) (MetaDrmBuffer *buffer);
   uint32_t (* get_format) (MetaDrmBuffer *buffer);
+  int (* get_offset) (MetaDrmBuffer *buffer,
+                      int            plane);
+  uint32_t (* get_modifier) (MetaDrmBuffer *buffer);
 
   gboolean (* fill_timings) (MetaDrmBuffer  *buffer,
                              CoglFrameInfo  *info,
@@ -51,14 +61,8 @@ struct _MetaDrmBufferClass
 
 MetaDeviceFile * meta_drm_buffer_get_device_file (MetaDrmBuffer *buffer);
 
-gboolean meta_drm_buffer_ensure_fb_id (MetaDrmBuffer        *buffer,
-                                       gboolean              use_modifiers,
-                                       const MetaDrmFbArgs  *fb_args,
-                                       GError              **error);
-
-gboolean meta_drm_buffer_ensure_fb_in_impl (MetaDrmBuffer        *buffer,
-                                            gboolean              use_modifiers,
-                                            const MetaDrmFbArgs  *fb_args,
-                                            GError              **error);
+gboolean meta_drm_buffer_do_ensure_fb_id (MetaDrmBuffer        *buffer,
+                                          const MetaDrmFbArgs  *fb_args,
+                                          GError              **error);
 
 #endif /* META_DRM_BUFFER_PRIVATE_H */

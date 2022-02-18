@@ -216,8 +216,8 @@ handle_xdg_toplevel_configure (void                *data,
 }
 
 static void
-handle_xdg_toplevel_close(void                *data,
-                          struct xdg_toplevel *xdg_toplevel)
+handle_xdg_toplevel_close (void                *data,
+                           struct xdg_toplevel *xdg_toplevel)
 {
   g_assert_not_reached ();
 }
@@ -236,7 +236,7 @@ handle_frame_callback (void               *data,
     {
     case STATE_WAIT_FOR_FRAME_1:
       reset_surface ();
-      test_driver_sync_point (test_driver, 1);
+      test_driver_sync_point (test_driver, 1, NULL);
       break;
     case STATE_WAIT_FOR_FRAME_2:
       exit (EXIT_SUCCESS);
@@ -371,7 +371,7 @@ main (int    argc,
 
   wl_display_roundtrip (display);
 
-  // g_assert_nonnull (test_driver);
+  g_assert_nonnull (test_driver);
 
   surface = wl_compositor_create_surface (compositor);
   xdg_surface = xdg_wm_base_get_xdg_surface (xdg_wm_base, surface);
@@ -391,11 +391,11 @@ main (int    argc,
   state = STATE_WAIT_FOR_CONFIGURE_1;
 
   /* set minimum and maximum size and commit */
-  xdg_toplevel_set_min_size(xdg_toplevel, 700, 500);
-  xdg_toplevel_set_max_size(xdg_toplevel, 700, 500);
+  xdg_toplevel_set_min_size (xdg_toplevel, 700, 500);
+  xdg_toplevel_set_max_size (xdg_toplevel, 700, 500);
   wl_surface_commit (surface);
 
-  test_driver_sync_point (test_driver, 0);
+  test_driver_sync_point (test_driver, 0, NULL);
 
   running = TRUE;
   while (running)

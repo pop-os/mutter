@@ -889,7 +889,11 @@ meta_display_new (MetaContext  *context,
 #ifdef HAVE_WAYLAND
   if (meta_is_wayland_compositor ())
     {
+      MetaWaylandCompositor *wayland_compositor =
+        meta_wayland_compositor_get_default ();
       MetaX11DisplayPolicy x11_display_policy;
+
+      meta_wayland_compositor_init_display (wayland_compositor, display);
 
       x11_display_policy = meta_context_get_x11_display_policy (context);
       if (x11_display_policy == META_X11_DISPLAY_POLICY_MANDATORY)
@@ -1725,11 +1729,9 @@ static void
 manage_root_cursor_sprite_scale (MetaDisplay             *display,
                                  MetaCursorSpriteXcursor *sprite_xcursor)
 {
-  g_signal_connect_object (sprite_xcursor,
-                           "prepare-at",
-                           G_CALLBACK (root_cursor_prepare_at),
-                           display,
-                           0);
+  meta_cursor_sprite_set_prepare_func (META_CURSOR_SPRITE (sprite_xcursor),
+                                       (MetaCursorPrepareFunc) root_cursor_prepare_at,
+                                       display);
 }
 
 void
@@ -2142,6 +2144,7 @@ meta_display_ping_timeout (gpointer data)
   MetaDisplay *display = window->display;
 
   meta_window_set_alive (window, FALSE);
+  meta_window_show_close_dialog (window);
 
   ping_data->ping_timeout_id = 0;
 
@@ -2231,6 +2234,8 @@ meta_display_ping_window (MetaWindow *window,
               serial, window->desc);
 
   META_WINDOW_GET_CLASS (window)->ping (window, serial);
+
+  window->events_during_ping = 0;
 }
 
 /**
@@ -2382,6 +2387,31 @@ mru_cmp (gconstpointer a,
     return 1;
   else
     return 0;
+}
+
+/**
+ * meta_display_list_all_windows:
+ * @display: a #MetaDisplay
+ *
+ * List all windows, including override-redirect ones. The windows are
+ * in no particular order.
+ *
+ * Returns: (transfer container) (element-type Meta.Window): List of windows
+ */
+GList *
+meta_display_list_all_windows (MetaDisplay *display)
+{
+  GList *all_windows = NULL;
+  g_autoptr (GSList) windows = NULL;
+  GSList *l;
+
+  windows = meta_display_list_windows (display,
+                                       META_LIST_INCLUDE_OVERRIDE_REDIRECT);
+
+  /* Yay for mixing GList and GSList in the API */
+  for (l = windows; l; l = l->next)
+    all_windows = g_list_prepend (all_windows, l->data);
+  return all_windows;
 }
 
 /**

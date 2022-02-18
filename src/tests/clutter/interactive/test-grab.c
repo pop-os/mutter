@@ -41,8 +41,7 @@ debug_event_cb (ClutterActor *actor,
       printf("[%s] LEAVE", source);
       break;
     case CLUTTER_BUTTON_PRESS:
-      printf("[%s] BUTTON PRESS (click count:%i)", 
-	     source, event->button.click_count);
+      printf("[%s] BUTTON PRESS", source);
       break;
     case CLUTTER_BUTTON_RELEASE:
       printf("[%s] BUTTON RELEASE", source);
@@ -67,6 +66,9 @@ debug_event_cb (ClutterActor *actor,
       break;
     case CLUTTER_TOUCHPAD_SWIPE:
       g_print ("[%s] TOUCHPAD SWIPE", source);
+      break;
+    case CLUTTER_TOUCHPAD_HOLD:
+      g_print ("[%s] TOUCHPAD HOLD", source);
       break;
     case CLUTTER_PROXIMITY_IN:
       g_print ("[%s] PROXIMITY IN", source);

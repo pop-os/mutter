@@ -30,6 +30,7 @@
 #include "clutter/clutter.h"
 #include "meta/meta-dnd.h"
 #include "meta/meta-idle-monitor.h"
+#include "meta/meta-monitor-manager.h"
 #include "meta/meta-remote-access-controller.h"
 
 #define META_TYPE_BACKEND (meta_backend_get_type ())
@@ -65,10 +66,16 @@ META_EXPORT
 MetaIdleMonitor * meta_backend_get_core_idle_monitor (MetaBackend *backend);
 
 META_EXPORT
+MetaMonitorManager * meta_backend_get_monitor_manager (MetaBackend *backend);
+
+META_EXPORT
 MetaRemoteAccessController * meta_backend_get_remote_access_controller (MetaBackend *backend);
 
 META_EXPORT
 gboolean meta_backend_is_rendering_hardware_accelerated (MetaBackend *backend);
+
+META_EXPORT
+gboolean meta_backend_is_headless (MetaBackend *backend);
 
 META_EXPORT
 void meta_clutter_init (void);

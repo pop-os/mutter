@@ -19,6 +19,8 @@
 
 #include <gio/gio.h>
 
+#include "backends/meta-virtual-monitor.h"
+#include "compositor/meta-window-actor-private.h"
 #include "core/display-private.h"
 #include "core/window-private.h"
 #include "meta-test/meta-context-test.h"
@@ -33,7 +35,10 @@ typedef struct _WaylandTestClient
   GMainLoop *main_loop;
 } WaylandTestClient;
 
+static MetaContext *test_context;
 static MetaWaylandTestDriver *test_driver;
+static MetaVirtualMonitor *virtual_monitor;
+static ClutterVirtualInputDevice *virtual_pointer;
 
 static char *
 get_test_client_path (const char *test_client_name)
@@ -182,6 +187,187 @@ subsurface_invalid_xdg_shell_actions (void)
   g_test_assert_expected_messages ();
 }
 
+static void
+on_after_paint (ClutterStage     *stage,
+                ClutterStageView *view,
+                gboolean         *was_painted)
+{
+  *was_painted = TRUE;
+}
+
+static void
+wait_for_paint (ClutterActor *stage)
+{
+  gboolean was_painted = FALSE;
+  gulong was_painted_id;
+
+  was_painted_id = g_signal_connect (CLUTTER_STAGE (stage),
+                                     "after-paint",
+                                     G_CALLBACK (on_after_paint),
+                                     &was_painted);
+
+  while (!was_painted)
+    g_main_context_iteration (NULL, TRUE);
+
+  g_signal_handler_disconnect (stage, was_painted_id);
+}
+
+static gboolean
+on_effects_completed_idle (gpointer user_data)
+{
+  MetaWindowActor *actor = user_data;
+  MetaBackend *backend = meta_context_get_backend (test_context);
+  ClutterActor *stage = meta_backend_get_stage (backend);
+  MetaWindow *window = meta_window_actor_get_meta_window (actor);
+  MetaRectangle buffer_rect;
+
+  /* Move the window to a known position and perform a mouse click, allowing a
+   * popup to be mapped. */
+
+  meta_window_move_frame (window, FALSE, 0, 0);
+
+  clutter_actor_queue_redraw (stage);
+  clutter_stage_schedule_update (CLUTTER_STAGE (stage));
+
+  wait_for_paint (stage);
+
+  meta_window_get_buffer_rect (window, &buffer_rect);
+  clutter_virtual_input_device_notify_absolute_motion (virtual_pointer,
+                                                       CLUTTER_CURRENT_TIME,
+                                                       buffer_rect.x + 10,
+                                                       buffer_rect.y + 10);
+
+  clutter_virtual_input_device_notify_button (virtual_pointer,
+                                              CLUTTER_CURRENT_TIME,
+                                              CLUTTER_BUTTON_PRIMARY,
+                                              CLUTTER_BUTTON_STATE_PRESSED);
+  clutter_virtual_input_device_notify_button (virtual_pointer,
+                                              CLUTTER_CURRENT_TIME,
+                                              CLUTTER_BUTTON_PRIMARY,
+                                              CLUTTER_BUTTON_STATE_RELEASED);
+
+  return G_SOURCE_REMOVE;
+}
+
+static void
+on_effects_completed (MetaWindowActor *actor)
+{
+  g_idle_add (on_effects_completed_idle, actor);
+}
+
+static void
+on_window_added (MetaStack  *stack,
+                 MetaWindow *window)
+{
+  MetaWindowActor *actor = meta_window_actor_from_window (window);
+
+  g_assert_nonnull (actor);
+
+  if (g_strcmp0 (meta_window_get_title (window),
+                 "subsurface-parent-unmapped") != 0)
+    return;
+
+  g_signal_connect (actor, "effects-completed",
+                    G_CALLBACK (on_effects_completed),
+                    NULL);
+}
+
+static void
+on_window_actor_destroyed (MetaWindowActor       *actor,
+                           MetaWaylandTestDriver *test_driver)
+{
+  meta_wayland_test_driver_emit_sync_event (test_driver, 0);
+}
+
+static void
+on_unmap_sync_point (MetaWaylandTestDriver *test_driver,
+                     unsigned int           sequence,
+                     struct wl_resource    *surface_resource,
+                     struct wl_client      *wl_client)
+{
+  if (sequence == 0)
+    {
+      /* Dismiss popup by clicking outside. */
+
+      clutter_virtual_input_device_notify_absolute_motion (virtual_pointer,
+                                                           CLUTTER_CURRENT_TIME,
+                                                           390, 390);
+
+      clutter_virtual_input_device_notify_button (virtual_pointer,
+                                                  CLUTTER_CURRENT_TIME,
+                                                  CLUTTER_BUTTON_PRIMARY,
+                                                  CLUTTER_BUTTON_STATE_PRESSED);
+      clutter_virtual_input_device_notify_button (virtual_pointer,
+                                                  CLUTTER_CURRENT_TIME,
+                                                  CLUTTER_BUTTON_PRIMARY,
+                                                  CLUTTER_BUTTON_STATE_RELEASED);
+
+      MetaWaylandSurface *surface = wl_resource_get_user_data (surface_resource);
+      ClutterActor *actor = CLUTTER_ACTOR (meta_wayland_surface_get_actor (surface));
+      MetaWindowActor *window_actor = meta_window_actor_from_actor (actor);
+      g_signal_connect (window_actor, "destroy",
+                        G_CALLBACK (on_window_actor_destroyed),
+                        test_driver);
+    }
+  else if (sequence == 1)
+    {
+      MetaWaylandSurface *surface = wl_resource_get_user_data (surface_resource);
+      ClutterActor *actor = CLUTTER_ACTOR (meta_wayland_surface_get_actor (surface));
+      MetaWindowActor *window_actor = meta_window_actor_from_actor (actor);
+      MetaWindow *window = meta_window_actor_get_meta_window (window_actor);
+      MetaRectangle buffer_rect;
+
+      /* Click inside the window to allow mapping a popup. */
+
+      meta_window_get_buffer_rect (window, &buffer_rect);
+      clutter_virtual_input_device_notify_absolute_motion (virtual_pointer,
+                                                           CLUTTER_CURRENT_TIME,
+                                                           buffer_rect.x + 10,
+                                                           buffer_rect.y + 10);
+
+      clutter_virtual_input_device_notify_button (virtual_pointer,
+                                                  CLUTTER_CURRENT_TIME,
+                                                  CLUTTER_BUTTON_PRIMARY,
+                                                  CLUTTER_BUTTON_STATE_PRESSED);
+      clutter_virtual_input_device_notify_button (virtual_pointer,
+                                                  CLUTTER_CURRENT_TIME,
+                                                  CLUTTER_BUTTON_PRIMARY,
+                                                  CLUTTER_BUTTON_STATE_RELEASED);
+    }
+}
+
+static void
+subsurface_parent_unmapped (void)
+{
+  MetaBackend *backend = meta_context_get_backend (test_context);
+  MetaDisplay *display = meta_context_get_display (test_context);
+  WaylandTestClient *wayland_test_client;
+  ClutterSeat *seat;
+  gulong window_added_id;
+  gulong sync_point_id;
+
+  seat = meta_backend_get_default_seat (backend);
+  virtual_pointer = clutter_seat_create_virtual_device (seat,
+                                                        CLUTTER_POINTER_DEVICE);
+
+  wayland_test_client = wayland_test_client_new ("subsurface-parent-unmapped");
+
+  window_added_id =
+    g_signal_connect (display->stack, "window-added",
+                      G_CALLBACK (on_window_added),
+                      virtual_pointer);
+  sync_point_id =
+    g_signal_connect (test_driver, "sync-point",
+                      G_CALLBACK (on_unmap_sync_point),
+                      NULL);
+
+  wayland_test_client_finish (wayland_test_client);
+
+  g_clear_object (&virtual_pointer);
+  g_signal_handler_disconnect (test_driver, sync_point_id);
+  g_signal_handler_disconnect (display->stack, window_added_id);
+}
+
 typedef enum _ApplyLimitState
 {
   APPLY_LIMIT_STATE_INIT,
@@ -199,6 +385,7 @@ typedef struct _ApplyLimitData
 static void
 on_sync_point (MetaWaylandTestDriver *test_driver,
                unsigned int           sequence,
+               struct wl_resource    *surface_resource,
                struct wl_client      *wl_client,
                ApplyLimitData        *data)
 {
@@ -237,14 +424,17 @@ static void
 toplevel_apply_limits (void)
 {
   ApplyLimitData data = {};
+  gulong handler_id;
 
   data.loop = g_main_loop_new (NULL, FALSE);
   data.wayland_test_client = wayland_test_client_new ("xdg-apply-limits");
-  g_signal_connect (test_driver, "sync-point", G_CALLBACK (on_sync_point), &data);
+  handler_id = g_signal_connect (test_driver, "sync-point",
+                                 G_CALLBACK (on_sync_point), &data);
   g_main_loop_run (data.loop);
   g_assert_cmpint (data.state, ==, APPLY_LIMIT_STATE_FINISH);
   wayland_test_client_finish (data.wayland_test_client);
   g_test_assert_expected_messages ();
+  g_signal_handler_disconnect (test_driver, handler_id);
 }
 
 static void
@@ -259,18 +449,37 @@ toplevel_activation (void)
 }
 
 static void
-pre_run_wayland_tests (void)
+on_before_tests (void)
 {
-  MetaWaylandCompositor *compositor;
-
-  compositor = meta_wayland_compositor_get_default ();
-  g_assert_nonnull (compositor);
+  MetaBackend *backend = meta_context_get_backend (test_context);
+  MetaMonitorManager *monitor_manager = meta_backend_get_monitor_manager (backend);
+  MetaWaylandCompositor *compositor =
+    meta_context_get_wayland_compositor (test_context);
+  g_autoptr (MetaVirtualMonitorInfo) monitor_info = NULL;
+  g_autoptr (GError) error = NULL;
 
   test_driver = meta_wayland_test_driver_new (compositor);
+
+  monitor_info = meta_virtual_monitor_info_new (400, 400, 60.0,
+                                                "MetaTestVendor",
+                                                "MetaVirtualMonitor",
+                                                "0x1234");
+  virtual_monitor = meta_monitor_manager_create_virtual_monitor (monitor_manager,
+                                                                 monitor_info,
+                                                                 &error);
+  if (!virtual_monitor)
+    g_error ("Failed to create virtual monitor: %s", error->message);
+  meta_monitor_manager_reload (monitor_manager);
 }
 
 static void
-init_wayland_tests (void)
+on_after_tests (void)
+{
+  g_clear_object (&virtual_monitor);
+}
+
+static void
+init_tests (void)
 {
   g_test_add_func ("/wayland/subsurface/remap-toplevel",
                    subsurface_remap_toplevel);
@@ -280,6 +489,8 @@ init_wayland_tests (void)
                    subsurface_invalid_subsurfaces);
   g_test_add_func ("/wayland/subsurface/invalid-xdg-shell-actions",
                    subsurface_invalid_xdg_shell_actions);
+  g_test_add_func ("/wayland/subsurface/parent-unmapped",
+                   subsurface_parent_unmapped);
   g_test_add_func ("/wayland/toplevel/apply-limits",
                    toplevel_apply_limits);
   g_test_add_func ("/wayland/toplevel/activation",
@@ -287,18 +498,23 @@ init_wayland_tests (void)
 }
 
 int
-main (int argc, char *argv[])
+main (int   argc,
+      char *argv[])
 {
   g_autoptr (MetaContext) context = NULL;
 
-  context = meta_create_test_context (META_CONTEXT_TEST_TYPE_NESTED,
-                                      META_CONTEXT_TEST_FLAG_TEST_CLIENT);
+  context = meta_create_test_context (META_CONTEXT_TEST_TYPE_HEADLESS,
+                                      META_CONTEXT_TEST_FLAG_NO_X11);
   g_assert (meta_context_configure (context, &argc, &argv, NULL));
 
-  init_wayland_tests ();
+  test_context = context;
+
+  init_tests ();
 
   g_signal_connect (context, "before-tests",
-                    G_CALLBACK (pre_run_wayland_tests), NULL);
+                    G_CALLBACK (on_before_tests), NULL);
+  g_signal_connect (context, "after-tests",
+                    G_CALLBACK (on_after_tests), NULL);
 
   return meta_context_test_run_tests (META_CONTEXT_TEST (context));
 }

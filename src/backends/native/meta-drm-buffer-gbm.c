@@ -58,6 +58,24 @@ meta_drm_buffer_gbm_get_bo (MetaDrmBufferGbm *buffer_gbm)
 }
 
 static int
+meta_drm_buffer_gbm_export_fd (MetaDrmBuffer  *buffer,
+                               GError        **error)
+{
+  MetaDrmBufferGbm *buffer_gbm = META_DRM_BUFFER_GBM (buffer);
+  int fd;
+
+  fd = gbm_bo_get_fd (buffer_gbm->bo);
+  if (fd == -1)
+    {
+      g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                   "Failed to export buffer fd: %s", g_strerror (errno));
+      return -1;
+    }
+
+  return fd;
+}
+
+static int
 meta_drm_buffer_gbm_get_width (MetaDrmBuffer *buffer)
 {
   MetaDrmBufferGbm *buffer_gbm = META_DRM_BUFFER_GBM (buffer);
@@ -81,6 +99,14 @@ meta_drm_buffer_gbm_get_stride (MetaDrmBuffer *buffer)
   return gbm_bo_get_stride (buffer_gbm->bo);
 }
 
+static int
+meta_drm_buffer_gbm_get_bpp (MetaDrmBuffer *buffer)
+{
+  MetaDrmBufferGbm *buffer_gbm = META_DRM_BUFFER_GBM (buffer);
+
+  return gbm_bo_get_bpp (buffer_gbm->bo);
+}
+
 static uint32_t
 meta_drm_buffer_gbm_get_format (MetaDrmBuffer *buffer)
 {
@@ -89,13 +115,30 @@ meta_drm_buffer_gbm_get_format (MetaDrmBuffer *buffer)
   return gbm_bo_get_format (buffer_gbm->bo);
 }
 
-static gboolean
-init_fb_id (MetaDrmBufferGbm  *buffer_gbm,
-            struct gbm_bo     *bo,
-            gboolean           use_modifiers,
-            GError           **error)
+static int
+meta_drm_buffer_gbm_get_offset (MetaDrmBuffer *buffer,
+                                int            plane)
 {
+  MetaDrmBufferGbm *buffer_gbm = META_DRM_BUFFER_GBM (buffer);
+
+  return gbm_bo_get_offset (buffer_gbm->bo, plane);
+}
+
+static uint32_t
+meta_drm_buffer_gbm_get_modifier (MetaDrmBuffer *buffer)
+{
+  MetaDrmBufferGbm *buffer_gbm = META_DRM_BUFFER_GBM (buffer);
+
+  return gbm_bo_get_modifier (buffer_gbm->bo);
+}
+
+static gboolean
+meta_drm_buffer_gbm_ensure_fb_id (MetaDrmBuffer  *buffer,
+                                  GError        **error)
+{
+  MetaDrmBufferGbm *buffer_gbm = META_DRM_BUFFER_GBM (buffer);
   MetaDrmFbArgs fb_args = { 0, };
+  struct gbm_bo *bo = buffer_gbm->bo;
 
   if (gbm_bo_get_handle_for_plane (bo, 0).s32 == -1)
     {
@@ -122,8 +165,8 @@ init_fb_id (MetaDrmBufferGbm  *buffer_gbm,
   fb_args.height = gbm_bo_get_height (bo);
   fb_args.format = gbm_bo_get_format (bo);
 
-  if (!meta_drm_buffer_ensure_fb_id (META_DRM_BUFFER (buffer_gbm),
-                                     use_modifiers, &fb_args, error))
+  if (!meta_drm_buffer_do_ensure_fb_id (META_DRM_BUFFER (buffer_gbm),
+                                        &fb_args, error))
     return FALSE;
 
   return TRUE;
@@ -131,7 +174,6 @@ init_fb_id (MetaDrmBufferGbm  *buffer_gbm,
 
 static gboolean
 lock_front_buffer (MetaDrmBufferGbm  *buffer_gbm,
-                   gboolean           use_modifiers,
                    GError           **error)
 {
   buffer_gbm->bo = gbm_surface_lock_front_buffer (buffer_gbm->surface);
@@ -144,23 +186,24 @@ lock_front_buffer (MetaDrmBufferGbm  *buffer_gbm,
       return FALSE;
     }
 
-  return init_fb_id (buffer_gbm, buffer_gbm->bo, use_modifiers, error);
+  return meta_drm_buffer_gbm_ensure_fb_id (META_DRM_BUFFER (buffer_gbm), error);
 }
 
 MetaDrmBufferGbm *
 meta_drm_buffer_gbm_new_lock_front (MetaDeviceFile      *device_file,
                                     struct gbm_surface  *gbm_surface,
-                                    gboolean             use_modifiers,
+                                    MetaDrmBufferFlags   flags,
                                     GError             **error)
 {
   MetaDrmBufferGbm *buffer_gbm;
 
   buffer_gbm = g_object_new (META_TYPE_DRM_BUFFER_GBM,
                              "device-file", device_file,
+                             "flags", flags,
                              NULL);
   buffer_gbm->surface = gbm_surface;
 
-  if (!lock_front_buffer (buffer_gbm, use_modifiers, error))
+  if (!lock_front_buffer (buffer_gbm, error))
     {
       g_object_unref (buffer_gbm);
       return NULL;
@@ -170,23 +213,17 @@ meta_drm_buffer_gbm_new_lock_front (MetaDeviceFile      *device_file,
 }
 
 MetaDrmBufferGbm *
-meta_drm_buffer_gbm_new_take (MetaDeviceFile  *device_file,
-                              struct gbm_bo   *bo,
-                              gboolean         use_modifiers,
-                              GError         **error)
+meta_drm_buffer_gbm_new_take (MetaDeviceFile      *device_file,
+                              struct gbm_bo       *bo,
+                              MetaDrmBufferFlags   flags,
+                              GError             **error)
 {
   MetaDrmBufferGbm *buffer_gbm;
 
   buffer_gbm = g_object_new (META_TYPE_DRM_BUFFER_GBM,
                              "device-file", device_file,
+                             "flags", flags,
                              NULL);
-
-  if (!init_fb_id (buffer_gbm, bo, use_modifiers, error))
-    {
-      g_object_unref (buffer_gbm);
-      return NULL;
-    }
-
   buffer_gbm->bo = bo;
 
   return buffer_gbm;
@@ -466,9 +503,14 @@ meta_drm_buffer_gbm_class_init (MetaDrmBufferGbmClass *klass)
 
   object_class->finalize = meta_drm_buffer_gbm_finalize;
 
+  buffer_class->export_fd = meta_drm_buffer_gbm_export_fd;
+  buffer_class->ensure_fb_id = meta_drm_buffer_gbm_ensure_fb_id;
   buffer_class->get_width = meta_drm_buffer_gbm_get_width;
   buffer_class->get_height = meta_drm_buffer_gbm_get_height;
   buffer_class->get_stride = meta_drm_buffer_gbm_get_stride;
+  buffer_class->get_bpp = meta_drm_buffer_gbm_get_bpp;
   buffer_class->get_format = meta_drm_buffer_gbm_get_format;
+  buffer_class->get_offset = meta_drm_buffer_gbm_get_offset;
+  buffer_class->get_modifier = meta_drm_buffer_gbm_get_modifier;
   buffer_class->fill_timings = meta_drm_buffer_gbm_fill_timings;
 }

@@ -30,7 +30,6 @@
 
 #include "backends/meta-backend-private.h"
 #include "backends/meta-logical-monitor.h"
-#include "cogl/cogl-wayland-server.h"
 #include "compositor/meta-shaped-texture-private.h"
 #include "compositor/region-utils.h"
 #include "wayland/meta-wayland-buffer.h"
@@ -80,8 +79,7 @@ meta_surface_actor_wayland_try_acquire_scanout (MetaSurfaceActorWayland *self,
     return NULL;
 
   surface = meta_surface_actor_wayland_get_surface (self);
-  if (!surface)
-    return NULL;
+  g_return_val_if_fail (surface, NULL);
 
   scanout = meta_wayland_surface_try_acquire_scanout (surface, onscreen);
   if (!scanout)

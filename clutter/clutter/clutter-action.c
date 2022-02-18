@@ -44,18 +44,63 @@
 #include "clutter-build-config.h"
 
 #include "clutter-action.h"
-
+#include "clutter-action-private.h"
 #include "clutter-debug.h"
 #include "clutter-private.h"
 
-G_DEFINE_ABSTRACT_TYPE (ClutterAction, clutter_action, CLUTTER_TYPE_ACTOR_META);
+typedef struct _ClutterActionPrivate ClutterActionPrivate;
+
+struct _ClutterActionPrivate
+{
+  ClutterEventPhase phase;
+};
+
+G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE (ClutterAction, clutter_action,
+                                     CLUTTER_TYPE_ACTOR_META)
+
+static gboolean
+clutter_action_handle_event_default (ClutterAction      *action,
+                                     const ClutterEvent *event)
+{
+  return FALSE;
+}
 
 static void
 clutter_action_class_init (ClutterActionClass *klass)
 {
+  klass->handle_event = clutter_action_handle_event_default;
 }
 
 static void
 clutter_action_init (ClutterAction *self)
 {
+}
+
+void
+clutter_action_set_phase (ClutterAction     *action,
+                          ClutterEventPhase  phase)
+{
+  ClutterActionPrivate *priv;
+
+  priv = clutter_action_get_instance_private (action);
+  priv->phase = phase;
+}
+
+ClutterEventPhase
+clutter_action_get_phase (ClutterAction *action)
+{
+  ClutterActionPrivate *priv;
+
+  g_return_val_if_fail (CLUTTER_IS_ACTION (action), CLUTTER_PHASE_CAPTURE);
+
+  priv = clutter_action_get_instance_private (action);
+
+  return priv->phase;
+}
+
+gboolean
+clutter_action_handle_event (ClutterAction      *action,
+                             const ClutterEvent *event)
+{
+  return CLUTTER_ACTION_GET_CLASS (action)->handle_event (action, event);
 }

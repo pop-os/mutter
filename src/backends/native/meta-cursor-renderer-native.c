@@ -1074,9 +1074,13 @@ meta_cursor_renderer_native_update_cursor (MetaCursorRenderer *renderer,
 
   if (cursor_sprite)
     {
-      meta_cursor_sprite_realize_texture (cursor_sprite);
+      gboolean realized;
+
+      realized = meta_cursor_sprite_realize_texture (cursor_sprite);
       gpus = calculate_cursor_sprite_gpus (renderer, cursor_sprite);
-      realize_cursor_sprite (renderer, cursor_sprite, gpus);
+
+      if (realized)
+        realize_cursor_sprite (renderer, cursor_sprite, gpus);
     }
 
   maybe_schedule_cursor_sprite_animation_frame (native, cursor_sprite);
@@ -1257,6 +1261,7 @@ load_cursor_sprite_gbm_buffer_for_gpu (MetaCursorRendererNative *native,
       uint8_t buf[4 * cursor_width * cursor_height];
       uint i;
       g_autoptr (GError) error = NULL;
+      MetaDrmBufferFlags flags;
       MetaDrmBufferGbm *buffer_gbm;
 
       device_file = meta_device_pool_open (device_pool,
@@ -1290,7 +1295,9 @@ load_cursor_sprite_gbm_buffer_for_gpu (MetaCursorRendererNative *native,
           return;
         }
 
-      buffer_gbm = meta_drm_buffer_gbm_new_take (device_file, bo, FALSE, &error);
+      flags = META_DRM_BUFFER_FLAG_DISABLE_MODIFIERS;
+      buffer_gbm = meta_drm_buffer_gbm_new_take (device_file, bo, flags,
+                                                 &error);
       if (!buffer_gbm)
         {
           meta_warning ("Failed to create DRM buffer wrapper: %s",
@@ -1584,6 +1591,7 @@ realize_cursor_sprite_from_wl_buffer_for_gpu (MetaCursorRenderer      *renderer,
       struct gbm_device *gbm_device;
       struct gbm_bo *bo;
       g_autoptr (GError) error = NULL;
+      MetaDrmBufferFlags flags;
       MetaDrmBufferGbm *buffer_gbm;
 
       device_file = meta_device_pool_open (device_pool,
@@ -1630,7 +1638,9 @@ realize_cursor_sprite_from_wl_buffer_for_gpu (MetaCursorRenderer      *renderer,
 
       unset_can_preprocess (cursor_sprite);
 
-      buffer_gbm = meta_drm_buffer_gbm_new_take (device_file, bo, FALSE, &error);
+      flags = META_DRM_BUFFER_FLAG_DISABLE_MODIFIERS;
+      buffer_gbm = meta_drm_buffer_gbm_new_take (device_file, bo, flags,
+                                                 &error);
       if (!buffer_gbm)
         {
           meta_warning ("Failed to create DRM buffer wrapper: %s",

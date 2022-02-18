@@ -52,22 +52,6 @@ CLUTTER_DEPRECATED_FOR(clutter_actor_remove_child)
 void            clutter_container_remove_actor                  (ClutterContainer *container,
                                                                  ClutterActor     *actor);
 
-CLUTTER_DEPRECATED_FOR(clutter_actor_get_children)
-GList *         clutter_container_get_children                  (ClutterContainer *container);
-
-CLUTTER_DEPRECATED_FOR(clutter_actor_set_child_above_sibling)
-void            clutter_container_raise_child                   (ClutterContainer *container,
-                                                                 ClutterActor     *actor,
-                                                                 ClutterActor     *sibling);
-
-CLUTTER_DEPRECATED_FOR(clutter_actor_set_child_below_sibling)
-void            clutter_container_lower_child                   (ClutterContainer *container,
-                                                                 ClutterActor     *actor,
-                                                                 ClutterActor     *sibling);
-
-CLUTTER_DEPRECATED
-void            clutter_container_sort_depth_order              (ClutterContainer *container);
-
 G_END_DECLS
 
 #endif /* __CLUTTER_CONTAINER_DEPRECATED_H__ */

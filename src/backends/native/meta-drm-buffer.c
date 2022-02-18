@@ -31,6 +31,8 @@
 #include "backends/native/meta-device-pool.h"
 #include "backends/native/meta-kms-utils.h"
 
+#include "meta-private-enum-types.h"
+
 #define INVALID_FB_ID 0U
 
 enum
@@ -38,6 +40,7 @@ enum
   PROP_0,
 
   PROP_DEVICE_FILE,
+  PROP_FLAGS,
 
   N_PROPS
 };
@@ -47,6 +50,8 @@ static GParamSpec *obj_props[N_PROPS];
 typedef struct _MetaDrmBufferPrivate
 {
   MetaDeviceFile *device_file;
+  MetaDrmBufferFlags flags;
+
   uint32_t fb_id;
 } MetaDrmBufferPrivate;
 
@@ -62,10 +67,21 @@ meta_drm_buffer_get_device_file (MetaDrmBuffer *buffer)
 }
 
 gboolean
-meta_drm_buffer_ensure_fb_id (MetaDrmBuffer        *buffer,
-                              gboolean              use_modifiers,
-                              const MetaDrmFbArgs  *fb_args,
-                              GError              **error)
+meta_drm_buffer_ensure_fb_id (MetaDrmBuffer  *buffer,
+                              GError        **error)
+{
+  MetaDrmBufferPrivate *priv = meta_drm_buffer_get_instance_private (buffer);
+
+  if (priv->fb_id)
+    return TRUE;
+
+  return META_DRM_BUFFER_GET_CLASS (buffer)->ensure_fb_id (buffer, error);
+}
+
+gboolean
+meta_drm_buffer_do_ensure_fb_id (MetaDrmBuffer        *buffer,
+                                 const MetaDrmFbArgs  *fb_args,
+                                 GError              **error)
 {
   MetaDrmBufferPrivate *priv = meta_drm_buffer_get_instance_private (buffer);
   int fd;
@@ -74,7 +90,8 @@ meta_drm_buffer_ensure_fb_id (MetaDrmBuffer        *buffer,
 
   fd = meta_device_file_get_fd (priv->device_file);
 
-  if (use_modifiers && fb_args->modifiers[0] != DRM_FORMAT_MOD_INVALID)
+  if (!(priv->flags & META_DRM_BUFFER_FLAG_DISABLE_MODIFIERS) &&
+      fb_args->modifiers[0] != DRM_FORMAT_MOD_INVALID)
     {
       if (drmModeAddFB2WithModifiers (fd,
                                       fb_args->width,
@@ -153,6 +170,13 @@ meta_drm_buffer_release_fb_id (MetaDrmBuffer *buffer)
   priv->fb_id = 0;
 }
 
+int
+meta_drm_buffer_export_fd (MetaDrmBuffer  *buffer,
+                           GError        **error)
+{
+  return META_DRM_BUFFER_GET_CLASS (buffer)->export_fd (buffer, error);
+}
+
 uint32_t
 meta_drm_buffer_get_fb_id (MetaDrmBuffer *buffer)
 {
@@ -179,10 +203,29 @@ meta_drm_buffer_get_stride (MetaDrmBuffer *buffer)
   return META_DRM_BUFFER_GET_CLASS (buffer)->get_stride (buffer);
 }
 
+int
+meta_drm_buffer_get_bpp (MetaDrmBuffer *buffer)
+{
+  return META_DRM_BUFFER_GET_CLASS (buffer)->get_bpp (buffer);
+}
+
 uint32_t
 meta_drm_buffer_get_format (MetaDrmBuffer *buffer)
 {
   return META_DRM_BUFFER_GET_CLASS (buffer)->get_format (buffer);
+}
+
+int
+meta_drm_buffer_get_offset (MetaDrmBuffer *buffer,
+                            int            plane)
+{
+  return META_DRM_BUFFER_GET_CLASS (buffer)->get_offset (buffer, plane);
+}
+
+uint32_t
+meta_drm_buffer_get_modifier (MetaDrmBuffer *buffer)
+{
+  return META_DRM_BUFFER_GET_CLASS (buffer)->get_modifier (buffer);
 }
 
 gboolean
@@ -220,6 +263,9 @@ meta_drm_buffer_get_property (GObject    *object,
     case PROP_DEVICE_FILE:
       g_value_set_pointer (value, priv->device_file);
       break;
+    case PROP_FLAGS:
+      g_value_set_flags (value, priv->flags);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -239,6 +285,9 @@ meta_drm_buffer_set_property (GObject      *object,
     {
     case PROP_DEVICE_FILE:
       priv->device_file = g_value_get_pointer (value);
+      break;
+    case PROP_FLAGS:
+      priv->flags = g_value_get_flags (value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -292,5 +341,14 @@ meta_drm_buffer_class_init (MetaDrmBufferClass *klass)
                           G_PARAM_READWRITE |
                           G_PARAM_CONSTRUCT_ONLY |
                           G_PARAM_STATIC_STRINGS);
+  obj_props[PROP_FLAGS] =
+    g_param_spec_flags ("flags",
+                        "flags",
+                        "MetaDrmBufferFlags",
+                        META_TYPE_DRM_BUFFER_FLAGS,
+                        META_DRM_BUFFER_FLAG_NONE,
+                        G_PARAM_READWRITE |
+                        G_PARAM_CONSTRUCT_ONLY |
+                        G_PARAM_STATIC_STRINGS);
   g_object_class_install_properties (object_class, N_PROPS, obj_props);
 }

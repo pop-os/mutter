@@ -86,6 +86,8 @@ struct _MetaWaylandCompositor
 
   struct wl_display *wayland_display;
   char *display_name;
+  GSource *source;
+
   GHashTable *outputs;
   GList *frame_callback_surfaces;
 
@@ -98,6 +100,7 @@ struct _MetaWaylandCompositor
   GHashTable *scheduled_surface_associations;
 
   MetaWaylandPresentationTime presentation_time;
+  MetaWaylandDmaBufManager *dma_buf_manager;
 };
 
 #define META_TYPE_WAYLAND_COMPOSITOR (meta_wayland_compositor_get_type ())

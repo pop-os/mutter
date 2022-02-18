@@ -353,8 +353,7 @@ clutter_backend_real_create_context (ClutterBackend  *backend,
       if (internal_error != NULL)
         g_propagate_error (error, internal_error);
       else
-        g_set_error_literal (error, CLUTTER_INIT_ERROR,
-                             CLUTTER_INIT_ERROR_BACKEND,
+        g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED,
                              "Unable to initialize the Clutter backend: no available drivers found.");
 
       return FALSE;
@@ -364,53 +363,6 @@ clutter_backend_real_create_context (ClutterBackend  *backend,
   g_source_attach (backend->cogl_source, NULL);
 
   return TRUE;
-}
-
-static ClutterFeatureFlags
-clutter_backend_real_get_features (ClutterBackend *backend)
-{
-  ClutterFeatureFlags flags = 0;
-
-  if (cogl_clutter_winsys_has_feature (COGL_WINSYS_FEATURE_MULTIPLE_ONSCREEN))
-    {
-      CLUTTER_NOTE (BACKEND, "Cogl supports multiple onscreen framebuffers");
-      flags |= CLUTTER_FEATURE_STAGE_MULTIPLE;
-    }
-  else
-    {
-      CLUTTER_NOTE (BACKEND, "Cogl only supports one onscreen framebuffer");
-      flags |= CLUTTER_FEATURE_STAGE_STATIC;
-    }
-
-  if (cogl_clutter_winsys_has_feature (COGL_WINSYS_FEATURE_SWAP_BUFFERS_EVENT))
-    {
-      CLUTTER_NOTE (BACKEND, "Cogl supports swap buffers complete events");
-      flags |= CLUTTER_FEATURE_SWAP_EVENTS;
-    }
-
-  return flags;
-}
-
-static ClutterBackend * (* custom_backend_func) (void);
-
-void
-clutter_set_custom_backend_func (ClutterBackend *(* func) (void))
-{
-  custom_backend_func = func;
-}
-
-ClutterBackend *
-_clutter_create_backend (void)
-{
-  ClutterBackend *retval;
-
-  g_return_val_if_fail (custom_backend_func, NULL);
-
-  retval = custom_backend_func ();
-  if (!retval)
-    g_error ("Failed to create custom backend.");
-
-  return retval;
 }
 
 static void
@@ -475,7 +427,6 @@ clutter_backend_class_init (ClutterBackendClass *klass)
   klass->font_changed = clutter_backend_real_font_changed;
 
   klass->create_context = clutter_backend_real_create_context;
-  klass->get_features = clutter_backend_real_get_features;
 }
 
 static void
@@ -489,45 +440,17 @@ clutter_backend_init (ClutterBackend *self)
   self->fallback_resource_scale = 1.f;
 }
 
-void
-_clutter_backend_add_options (ClutterBackend *backend,
-                              GOptionGroup   *group)
-{
-  ClutterBackendClass *klass;
-
-  g_assert (CLUTTER_IS_BACKEND (backend));
-
-  klass = CLUTTER_BACKEND_GET_CLASS (backend);
-  if (klass->add_options)
-    klass->add_options (backend, group);
-}
-
 gboolean
-_clutter_backend_pre_parse (ClutterBackend  *backend,
-                            GError         **error)
+_clutter_backend_finish_init (ClutterBackend  *backend,
+                              GError         **error)
 {
   ClutterBackendClass *klass;
 
   g_assert (CLUTTER_IS_BACKEND (backend));
 
   klass = CLUTTER_BACKEND_GET_CLASS (backend);
-  if (klass->pre_parse)
-    return klass->pre_parse (backend, error);
-
-  return TRUE;
-}
-
-gboolean
-_clutter_backend_post_parse (ClutterBackend  *backend,
-                             GError         **error)
-{
-  ClutterBackendClass *klass;
-
-  g_assert (CLUTTER_IS_BACKEND (backend));
-
-  klass = CLUTTER_BACKEND_GET_CLASS (backend);
-  if (klass->post_parse)
-    return klass->post_parse (backend, error);
+  if (klass->finish_init)
+    return klass->finish_init (backend, error);
 
   return TRUE;
 }
@@ -570,46 +493,6 @@ _clutter_backend_create_context (ClutterBackend  *backend,
   klass = CLUTTER_BACKEND_GET_CLASS (backend);
 
   return klass->create_context (backend, error);
-}
-
-ClutterFeatureFlags
-_clutter_backend_get_features (ClutterBackend *backend)
-{
-  ClutterBackendClass *klass;
-  GError *error;
-
-  g_assert (CLUTTER_IS_BACKEND (backend));
-
-  klass = CLUTTER_BACKEND_GET_CLASS (backend);
-
-  /* we need to have a context here; so we create the
-   * GL context first and the ask for features. if the
-   * context already exists this should be a no-op
-   */
-  error = NULL;
-  if (klass->create_context != NULL)
-    {
-      gboolean res;
-
-      res = klass->create_context (backend, &error);
-      if (!res)
-        {
-          if (error)
-            {
-              g_critical ("Unable to create a context: %s", error->message);
-              g_error_free (error);
-            }
-          else
-            g_critical ("Unable to create a context: unknown error");
-
-          return 0;
-        }
-    }
-
-  if (klass->get_features)
-    return klass->get_features (backend);
-  
-  return 0;
 }
 
 gfloat

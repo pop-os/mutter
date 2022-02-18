@@ -162,7 +162,7 @@ struct _MetaBackendPrivate
   WacomDeviceDatabase *wacom_db;
 #endif
 
-  ClutterBackend *clutter_backend;
+  ClutterContext *clutter_context;
   ClutterSeat *default_seat;
   ClutterActor *stage;
 
@@ -257,7 +257,7 @@ meta_backend_dispose (GObject *object)
   g_clear_pointer (&priv->stage, clutter_actor_destroy);
   g_clear_pointer (&priv->idle_manager, meta_idle_manager_free);
   g_clear_object (&priv->renderer);
-  g_clear_pointer (&priv->clutter_backend, clutter_backend_destroy);
+  g_clear_pointer (&priv->clutter_context, clutter_context_free);
   g_clear_list (&priv->gpus, g_object_unref);
 
   G_OBJECT_CLASS (meta_backend_parent_class)->dispose (object);
@@ -633,10 +633,22 @@ meta_backend_real_create_cursor_tracker (MetaBackend *backend)
                        NULL);
 }
 
+static gboolean
+meta_backend_real_is_headless (MetaBackend *backend)
+{
+  return FALSE;
+}
+
 gboolean
 meta_backend_is_lid_closed (MetaBackend *backend)
 {
   return META_BACKEND_GET_CLASS (backend)->is_lid_closed (backend);
+}
+
+gboolean
+meta_backend_is_headless (MetaBackend *backend)
+{
+  return META_BACKEND_GET_CLASS (backend)->is_headless (backend);
 }
 
 static void
@@ -859,6 +871,7 @@ meta_backend_class_init (MetaBackendClass *klass)
   klass->select_stage_events = meta_backend_real_select_stage_events;
   klass->is_lid_closed = meta_backend_real_is_lid_closed;
   klass->create_cursor_tracker = meta_backend_real_create_cursor_tracker;
+  klass->is_headless = meta_backend_real_is_headless;
 
   obj_props[PROP_CONTEXT] =
     g_param_spec_object ("context",
@@ -1037,11 +1050,11 @@ static GSourceFuncs clutter_source_funcs = {
 };
 
 static ClutterBackend *
-meta_get_clutter_backend (void)
+meta_clutter_backend_constructor (gpointer user_data)
 {
-  MetaBackend *backend = meta_get_backend ();
+  MetaBackend *backend = META_BACKEND (user_data);
 
-  return meta_backend_get_clutter_backend (backend);
+  return META_BACKEND_GET_CLASS (backend)->create_clutter_backend (backend);
 }
 
 static ClutterSeat *
@@ -1059,14 +1072,11 @@ init_clutter (MetaBackend  *backend,
   MetaBackendSource *backend_source;
   GSource *source;
 
-  clutter_set_custom_backend_func (meta_get_clutter_backend);
-
-  if (clutter_init (NULL, NULL) != CLUTTER_INIT_SUCCESS)
-    {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Unable to initialize Clutter");
-      return FALSE;
-    }
+  priv->clutter_context = clutter_context_new (meta_clutter_backend_constructor,
+                                               backend,
+                                               error);
+  if (!priv->clutter_context)
+    return FALSE;
 
   priv->default_seat = meta_backend_create_default_seat (backend, error);
   if (!priv->default_seat)
@@ -1188,7 +1198,9 @@ meta_backend_get_idle_manager (MetaBackend *backend)
 }
 
 /**
- * meta_backend_get_monitor_manager: (skip)
+ * meta_backend_get_monitor_manager:
+ *
+ * Returns: (transfer none): A #MetaMonitorManager
  */
 MetaMonitorManager *
 meta_backend_get_monitor_manager (MetaBackend *backend)
@@ -1533,14 +1545,13 @@ ClutterBackend *
 meta_backend_get_clutter_backend (MetaBackend *backend)
 {
   MetaBackendPrivate *priv = meta_backend_get_instance_private (backend);
+  ClutterContext *clutter_context;
 
-  if (!priv->clutter_backend)
-    {
-      priv->clutter_backend =
-        META_BACKEND_GET_CLASS (backend)->create_clutter_backend (backend);
-    }
+  clutter_context = priv->clutter_context;
+  if (!clutter_context)
+    return NULL;
 
-  return priv->clutter_backend;
+  return clutter_context_get_backend (clutter_context);
 }
 
 void

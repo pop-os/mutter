@@ -400,6 +400,13 @@ set_gnome_env (const char *name,
     }
 }
 
+void
+meta_wayland_compositor_init_display (MetaWaylandCompositor *compositor,
+                                      MetaDisplay           *display)
+{
+  meta_xwayland_init_display (&compositor->xwayland_manager, display);
+}
+
 static void meta_wayland_log_func (const char *, va_list) G_GNUC_PRINTF (1, 0);
 
 static void
@@ -430,10 +437,13 @@ meta_wayland_compositor_finalize (GObject *object)
 {
   MetaWaylandCompositor *compositor = META_WAYLAND_COMPOSITOR (object);
 
+  g_clear_object (&compositor->dma_buf_manager);
+
   g_clear_pointer (&compositor->seat, meta_wayland_seat_free);
 
   g_clear_pointer (&compositor->display_name, g_free);
   g_clear_pointer (&compositor->wayland_display, wl_display_destroy);
+  g_clear_pointer (&compositor->source, g_source_destroy);
 
   G_OBJECT_CLASS (meta_wayland_compositor_parent_class)->finalize (object);
 }
@@ -518,6 +528,29 @@ meta_wayland_init_egl (MetaWaylandCompositor *compositor)
     g_warning ("Failed to bind Wayland display: %s", error->message);
 }
 
+static void
+init_dma_buf_support (MetaWaylandCompositor *compositor)
+{
+  g_autoptr (GError) error = NULL;
+
+  compositor->dma_buf_manager = meta_wayland_dma_buf_manager_new (compositor,
+                                                                  &error);
+  if (!compositor->dma_buf_manager)
+    {
+      if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED))
+        {
+          meta_topic (META_DEBUG_WAYLAND,
+                      "Wayland DMA buffer protocol support not enabled: %s",
+                      error->message);
+        }
+      else
+        {
+          g_warning ("Wayland DMA buffer protocol support not enabled: %s",
+                     error->message);
+        }
+    }
+}
+
 MetaWaylandCompositor *
 meta_wayland_compositor_new (MetaContext *context)
 {
@@ -540,6 +573,8 @@ meta_wayland_compositor_new (MetaContext *context)
    */
   g_source_set_priority (wayland_event_source, GDK_PRIORITY_EVENTS + 1);
   g_source_attach (wayland_event_source, NULL);
+  compositor->source = wayland_event_source;
+  g_source_unref (wayland_event_source);
 
   g_signal_connect (stage, "after-update",
                     G_CALLBACK (on_after_update), compositor);
@@ -547,9 +582,9 @@ meta_wayland_compositor_new (MetaContext *context)
                     G_CALLBACK (on_presented), compositor);
 
   if (!wl_global_create (compositor->wayland_display,
-			 &wl_compositor_interface,
-			 META_WL_COMPOSITOR_VERSION,
-			 compositor, compositor_bind))
+                         &wl_compositor_interface,
+                         META_WL_COMPOSITOR_VERSION,
+                         compositor, compositor_bind))
     g_error ("Failed to register the global wl_compositor");
 
   meta_wayland_init_egl (compositor);
@@ -567,11 +602,10 @@ meta_wayland_compositor_new (MetaContext *context)
   meta_wayland_relative_pointer_init (compositor);
   meta_wayland_pointer_constraints_init (compositor);
   meta_wayland_xdg_foreign_init (compositor);
-  meta_wayland_dma_buf_init (compositor);
+  init_dma_buf_support (compositor);
   meta_wayland_keyboard_shortcuts_inhibit_init (compositor);
   meta_wayland_surface_inhibit_shortcuts_dialog_init ();
   meta_wayland_text_input_init (compositor);
-  meta_wayland_gtk_text_input_init (compositor);
   meta_wayland_init_presentation_time (compositor);
   meta_wayland_activation_init (compositor);
 
@@ -582,24 +616,24 @@ meta_wayland_compositor_new (MetaContext *context)
                                   compositor);
 
 #ifdef HAVE_WAYLAND_EGLSTREAM
-    {
-      gboolean should_enable_eglstream_controller = TRUE;
+  {
+    gboolean should_enable_eglstream_controller = TRUE;
 #if defined(HAVE_EGL_DEVICE) && defined(HAVE_NATIVE_BACKEND)
-      MetaRenderer *renderer = meta_backend_get_renderer (backend);
+    MetaRenderer *renderer = meta_backend_get_renderer (backend);
 
-      if (META_IS_RENDERER_NATIVE (renderer))
-        {
-          MetaRendererNative *renderer_native = META_RENDERER_NATIVE (renderer);
+    if (META_IS_RENDERER_NATIVE (renderer))
+      {
+        MetaRendererNative *renderer_native = META_RENDERER_NATIVE (renderer);
 
-          if (meta_renderer_native_get_mode (renderer_native) ==
-              META_RENDERER_NATIVE_MODE_GBM)
-            should_enable_eglstream_controller = FALSE;
-        }
+        if (meta_renderer_native_get_mode (renderer_native) ==
+            META_RENDERER_NATIVE_MODE_GBM)
+          should_enable_eglstream_controller = FALSE;
+      }
 #endif /* defined(HAVE_EGL_DEVICE) && defined(HAVE_NATIVE_BACKEND) */
 
-      if (should_enable_eglstream_controller)
-        meta_wayland_eglstream_controller_init (compositor);
-    }
+    if (should_enable_eglstream_controller)
+      meta_wayland_eglstream_controller_init (compositor);
+  }
 #endif /* HAVE_WAYLAND_EGLSTREAM */
 
   x11_display_policy =

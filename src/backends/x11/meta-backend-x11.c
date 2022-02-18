@@ -620,7 +620,7 @@ meta_backend_x11_post_init (MetaBackend *backend)
 static ClutterBackend *
 meta_backend_x11_create_clutter_backend (MetaBackend *backend)
 {
-  return g_object_new (META_TYPE_CLUTTER_BACKEND_X11, NULL);
+  return CLUTTER_BACKEND (meta_clutter_backend_x11_new (backend));
 }
 
 static ClutterSeat *
@@ -867,7 +867,6 @@ meta_backend_x11_initable_init (GInitable    *initable,
 
   priv->xdisplay = xdisplay;
   priv->xcb = XGetXCBConnection (priv->xdisplay);
-  meta_clutter_x11_set_display (xdisplay);
 
   init_xkb_state (x11);
 
