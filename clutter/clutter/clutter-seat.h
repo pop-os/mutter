@@ -29,7 +29,6 @@
 
 #include "clutter/clutter-types.h"
 #include "clutter/clutter-keymap.h"
-#include "clutter/clutter-virtual-input-device.h"
 
 #define CLUTTER_TYPE_SEAT (clutter_seat_get_type ())
 
@@ -96,6 +95,11 @@ struct _ClutterSeatClass
                             ClutterEventSequence *sequence,
                             graphene_point_t     *coords,
                             ClutterModifierType  *modifiers);
+
+  ClutterGrabState (* grab) (ClutterSeat *seat,
+                             uint32_t     time);
+  void (* ungrab) (ClutterSeat *seat,
+                   uint32_t     time);
 
   /* Virtual devices */
   ClutterVirtualInputDevice * (* create_virtual_device) (ClutterSeat            *seat,

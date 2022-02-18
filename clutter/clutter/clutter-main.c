@@ -683,7 +683,9 @@ emit_event_chain (ClutterEvent *event)
       return;
     }
 
-  _clutter_actor_handle_event (event->any.source, event);
+  _clutter_actor_handle_event (event->any.source,
+                               clutter_stage_get_grab_actor (event->any.stage),
+                               event);
 }
 
 /*
@@ -692,73 +694,13 @@ emit_event_chain (ClutterEvent *event)
  */
 
 static inline void
-emit_pointer_event (ClutterEvent       *event,
-                    ClutterInputDevice *device)
+emit_event (ClutterEvent *event)
 {
-  if (device != NULL && device->pointer_grab_actor != NULL)
-    clutter_actor_event (device->pointer_grab_actor, event, FALSE);
-  else
-    emit_event_chain (event);
-}
+  if (event->type == CLUTTER_KEY_PRESS ||
+      event->type == CLUTTER_KEY_RELEASE)
+    cally_snoop_key_event ((ClutterKeyEvent *) event);
 
-static inline void
-emit_crossing_event (ClutterEvent       *event,
-                     ClutterInputDevice *device)
-{
-  ClutterEventSequence *sequence = clutter_event_get_event_sequence (event);
-  ClutterActor *grab_actor = NULL;
-
-  if (sequence)
-    {
-      if (device->sequence_grab_actors != NULL)
-        grab_actor = g_hash_table_lookup (device->sequence_grab_actors, sequence);
-    }
-  else
-    {
-      if (device != NULL && device->pointer_grab_actor != NULL)
-        grab_actor = device->pointer_grab_actor;
-    }
-
-  if (grab_actor != NULL)
-    clutter_actor_event (grab_actor, event, FALSE);
-  else
-    emit_event_chain (event);
-}
-
-static inline void
-emit_touch_event (ClutterEvent       *event,
-                  ClutterInputDevice *device)
-{
-  ClutterActor *grab_actor = NULL;
-
-  if (device->sequence_grab_actors != NULL)
-    {
-      grab_actor = g_hash_table_lookup (device->sequence_grab_actors,
-                                        event->touch.sequence);
-    }
-
-  if (grab_actor != NULL)
-    {
-      /* per-device sequence grab */
-      clutter_actor_event (grab_actor, event, FALSE);
-    }
-  else
-    {
-      /* no grab, time to capture and bubble */
-      emit_event_chain (event);
-    }
-}
-
-static inline void
-process_key_event (ClutterEvent       *event,
-                   ClutterInputDevice *device)
-{
-  cally_snoop_key_event ((ClutterKeyEvent *) event);
-
-  if (device != NULL && device->keyboard_grab_actor != NULL)
-    clutter_actor_event (device->keyboard_grab_actor, event, FALSE);
-  else
-    emit_event_chain (event);
+  emit_event_chain (event);
 }
 
 static ClutterActor *
@@ -950,12 +892,12 @@ _clutter_process_event_details (ClutterActor        *stage,
                 }
             }
 
-          process_key_event (event, device);
+          emit_event (event);
         }
         break;
 
       case CLUTTER_ENTER:
-        emit_crossing_event (event, device);
+        emit_event (event);
         break;
 
       case CLUTTER_LEAVE:
@@ -975,10 +917,10 @@ _clutter_process_event_details (ClutterActor        *stage,
             crossing->crossing.source =
               clutter_stage_get_device_actor (CLUTTER_STAGE (stage), device, NULL);
 
-            emit_crossing_event (crossing, device);
+            emit_event (crossing);
             clutter_event_free (crossing);
           }
-        emit_crossing_event (event, device);
+        emit_event (event);
         break;
 
       case CLUTTER_MOTION:
@@ -993,30 +935,6 @@ _clutter_process_event_details (ClutterActor        *stage,
                 _clutter_input_pointer_a11y_on_motion_event (device, x, y);
               }
           }
-        /* only the stage gets motion events if they are enabled */
-        if (!clutter_stage_get_motion_events_enabled (CLUTTER_STAGE (stage)) &&
-            event->any.source == NULL)
-          {
-            /* Only stage gets motion events */
-            event->any.source = stage;
-
-            if (device != NULL && device->pointer_grab_actor != NULL)
-              {
-                clutter_actor_event (device->pointer_grab_actor,
-                                     event,
-                                     FALSE);
-                break;
-              }
-
-            /* Trigger handlers on stage in both capture .. */
-            if (!clutter_actor_event (stage, event, TRUE))
-              {
-                /* and bubbling phase */
-                clutter_actor_event (stage, event, FALSE);
-              }
-            break;
-          }
-
         G_GNUC_FALLTHROUGH;
       case CLUTTER_BUTTON_PRESS:
       case CLUTTER_BUTTON_RELEASE:
@@ -1045,43 +963,11 @@ _clutter_process_event_details (ClutterActor        *stage,
                         x, y,
                         event->any.source);
 
-          emit_pointer_event (event, device);
+          emit_event (event);
           break;
         }
 
       case CLUTTER_TOUCH_UPDATE:
-        /* only the stage gets motion events if they are enabled */
-        if (!clutter_stage_get_motion_events_enabled (CLUTTER_STAGE (stage)) &&
-            event->any.source == NULL)
-          {
-            ClutterActor *grab_actor = NULL;
-
-            /* Only stage gets motion events */
-            event->any.source = stage;
-
-            /* global grabs */
-            if (device->sequence_grab_actors != NULL)
-              {
-                grab_actor = g_hash_table_lookup (device->sequence_grab_actors,
-                                                  event->touch.sequence);
-              }
-
-            if (grab_actor != NULL)
-              {
-                clutter_actor_event (grab_actor, event, FALSE);
-                break;
-              }
-
-            /* Trigger handlers on stage in both capture .. */
-            if (!clutter_actor_event (stage, event, TRUE))
-              {
-                /* and bubbling phase */
-                clutter_actor_event (stage, event, FALSE);
-              }
-            break;
-          }
-
-        G_GNUC_FALLTHROUGH;
       case CLUTTER_TOUCH_BEGIN:
       case CLUTTER_TOUCH_CANCEL:
       case CLUTTER_TOUCH_END:
@@ -1095,7 +981,7 @@ _clutter_process_event_details (ClutterActor        *stage,
                         x, y,
                         event->any.source);
 
-          emit_touch_event (event, device);
+          emit_event (event);
 
           if (event->type == CLUTTER_TOUCH_END ||
               event->type == CLUTTER_TOUCH_CANCEL)

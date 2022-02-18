@@ -26,7 +26,7 @@
  * @short_description: A display-agnostic abstraction for a window.
  *
  * #MetaWindow is the core abstraction in Mutter of a window. It has the
- * properties you'd expect, such as a title, an icon, whether it's fullscreen,
+ * properties you'd expect, such as a title, whether it's fullscreen,
  * has decorations, etc.
  *
  * Since a lot of different kinds of windows exist, each window also a
@@ -109,8 +109,6 @@
 
 #define SNAP_SECURITY_LABEL_PREFIX "snap."
 
-static int destroying_windows_disallowed = 0;
-
 /* Each window has a "stamp" which is a non-recycled 64-bit ID. They
  * start after the end of the XID space so that, for stacking
  * we can keep a guint64 that represents one or the other
@@ -131,9 +129,8 @@ static void     meta_window_save_rect         (MetaWindow    *window);
 static void     ensure_mru_position_after (MetaWindow *window,
                                            MetaWindow *after_this_one);
 
-static void meta_window_move_resize_now (MetaWindow  *window);
-
-static void meta_window_unqueue (MetaWindow *window, guint queuebits);
+static void meta_window_unqueue (MetaWindow    *window,
+                                 MetaQueueType  queuebits);
 
 static void     update_move           (MetaWindow              *window,
                                        MetaEdgeResistanceFlags  flags,
@@ -161,9 +158,6 @@ static void unminimize_window_and_all_transient_parents (MetaWindow *window);
 
 static void meta_window_propagate_focus_appearance (MetaWindow *window,
                                                     gboolean    focused);
-static void meta_window_update_icon_now (MetaWindow *window,
-                                         gboolean    force);
-
 static void set_workspace_state (MetaWindow    *window,
                                  gboolean       on_all_workspaces,
                                  MetaWorkspace *workspace);
@@ -172,18 +166,12 @@ static MetaWindow * meta_window_find_tile_match (MetaWindow   *window,
                                                  MetaTileMode  mode);
 static void update_edge_constraints (MetaWindow *window);
 
-/* Idle handlers for the three queues (run with meta_later_add()). The
- * "data" parameter in each case will be a GINT_TO_POINTER of the
- * index into the queue arrays to use.
- *
- * TODO: Possibly there is still some code duplication among these, which we
- * need to sort out at some point.
- */
-static gboolean idle_calc_showing (gpointer data);
-static gboolean idle_move_resize (gpointer data);
-static gboolean idle_update_icon (gpointer data);
+typedef struct _MetaWindowPrivate
+{
+  MetaQueueType queued_types;
+} MetaWindowPrivate;
 
-G_DEFINE_ABSTRACT_TYPE (MetaWindow, meta_window, G_TYPE_OBJECT);
+G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE (MetaWindow, meta_window, G_TYPE_OBJECT)
 
 enum
 {
@@ -293,16 +281,6 @@ meta_window_real_get_default_skip_hints (MetaWindow *window,
   *skip_pager_out = FALSE;
 }
 
-static gboolean
-meta_window_real_update_icon (MetaWindow       *window,
-                              cairo_surface_t **icon,
-                              cairo_surface_t **mini_icon)
-{
-  *icon = NULL;
-  *mini_icon = NULL;
-  return FALSE;
-}
-
 static pid_t
 meta_window_real_get_client_pid (MetaWindow *window)
 {
@@ -313,12 +291,6 @@ static void
 meta_window_finalize (GObject *object)
 {
   MetaWindow *window = META_WINDOW (object);
-
-  if (window->icon)
-    cairo_surface_destroy (window->icon);
-
-  if (window->mini_icon)
-    cairo_surface_destroy (window->mini_icon);
 
   if (window->frame_bounds)
     cairo_region_destroy (window->frame_bounds);
@@ -373,10 +345,10 @@ meta_window_get_property(GObject         *object,
       g_value_set_string (value, win->title);
       break;
     case PROP_ICON:
-      g_value_set_pointer (value, win->icon);
+      g_value_set_pointer (value, meta_window_get_icon (win));
       break;
     case PROP_MINI_ICON:
-      g_value_set_pointer (value, win->mini_icon);
+      g_value_set_pointer (value, meta_window_get_mini_icon (win));
       break;
     case PROP_DECORATED:
       g_value_set_boolean (value, win->decorated);
@@ -479,7 +451,6 @@ meta_window_class_init (MetaWindowClass *klass)
   klass->current_workspace_changed = meta_window_real_current_workspace_changed;
   klass->update_struts = meta_window_real_update_struts;
   klass->get_default_skip_hints = meta_window_real_get_default_skip_hints;
-  klass->update_icon = meta_window_real_update_icon;
   klass->get_client_pid = meta_window_real_get_client_pid;
 
   obj_props[PROP_TITLE] =
@@ -1068,8 +1039,6 @@ _meta_window_shared_new (MetaDisplay         *display,
   window->xvisual = attrs->visual;
 
   window->title = NULL;
-  window->icon = NULL;
-  window->mini_icon = NULL;
 
   window->frame = NULL;
   window->has_focus = FALSE;
@@ -1105,7 +1074,6 @@ _meta_window_shared_new (MetaDisplay         *display,
   window->placed = ((window->mapped && !window->hidden) || window->override_redirect);
   window->denied_focus_and_not_transient = FALSE;
   window->unmanaging = FALSE;
-  window->is_in_queues = 0;
   window->keys_grabbed = FALSE;
   window->grab_on_frame = FALSE;
   window->all_keys_grabbed = FALSE;
@@ -1217,9 +1185,6 @@ _meta_window_shared_new (MetaDisplay         *display,
   window->id = meta_display_generate_window_id (display);
 
   meta_window_manage (window);
-
-  if (!window->override_redirect)
-    meta_window_update_icon_now (window, TRUE);
 
   if (window->initially_iconic)
     {
@@ -1483,10 +1448,6 @@ meta_window_unmanage (MetaWindow  *window,
   meta_compositor_remove_window (window->display->compositor, window);
   window->known_to_compositor = FALSE;
 
-  if (destroying_windows_disallowed > 0)
-    meta_bug ("Tried to destroy window %s while destruction was not allowed",
-              window->desc);
-
   meta_display_unregister_stamp (window->display, window->stamp);
 
   if (meta_prefs_get_attach_modal_dialogs ())
@@ -1578,9 +1539,9 @@ meta_window_unmanage (MetaWindow  *window,
   if (window->maximized_horizontally || window->maximized_vertically)
     unmaximize_window_before_freeing (window);
 
-  meta_window_unqueue (window, META_QUEUE_CALC_SHOWING |
-                               META_QUEUE_MOVE_RESIZE |
-                               META_QUEUE_UPDATE_ICON);
+  meta_window_unqueue (window,
+                       (META_QUEUE_CALC_SHOWING |
+                        META_QUEUE_MOVE_RESIZE));
 
   set_workspace_state (window, FALSE, NULL);
 
@@ -1799,316 +1760,65 @@ implement_showing (MetaWindow *window,
     sync_client_window_mapped (window);
 }
 
-static void
-meta_window_calc_showing (MetaWindow  *window)
+void
+meta_window_update_visibility (MetaWindow  *window)
 {
   implement_showing (window, meta_window_should_be_showing (window));
 }
 
-static guint queue_later[NUMBER_OF_QUEUES] = {0, 0, 0};
-static GSList *queue_pending[NUMBER_OF_QUEUES] = {NULL, NULL, NULL};
-
-static int
-stackcmp (gconstpointer a, gconstpointer b)
+void
+meta_window_clear_queued (MetaWindow *window)
 {
-  MetaWindow *aw = (gpointer) a;
-  MetaWindow *bw = (gpointer) b;
+  MetaWindowPrivate *priv = meta_window_get_instance_private (window);
 
-  return meta_stack_windows_cmp (aw->display->stack,
-                                 aw, bw);
+  priv->queued_types &= ~META_QUEUE_CALC_SHOWING;
 }
-
-static gboolean
-idle_calc_showing (gpointer data)
-{
-  MetaDisplay *display = meta_get_display ();
-  GSList *tmp;
-  GSList *copy;
-  GSList *should_show;
-  GSList *should_hide;
-  GSList *unplaced;
-  GSList *displays;
-  guint queue_index = GPOINTER_TO_INT (data);
-
-  COGL_TRACE_BEGIN_SCOPED (MetaWindowCalcShowing, "Window: Calc showing");
-
-  g_return_val_if_fail (queue_pending[queue_index] != NULL, FALSE);
-
-  meta_topic (META_DEBUG_WINDOW_STATE,
-              "Clearing the calc_showing queue");
-
-  /* Work with a copy, for reentrancy. The allowed reentrancy isn't
-   * complete; destroying a window while we're in here would result in
-   * badness. But it's OK to queue/unqueue calc_showings.
-   */
-  copy = g_slist_copy (queue_pending[queue_index]);
-  g_slist_free (queue_pending[queue_index]);
-  queue_pending[queue_index] = NULL;
-  queue_later[queue_index] = 0;
-
-  destroying_windows_disallowed += 1;
-
-  /* We map windows from top to bottom and unmap from bottom to
-   * top, to avoid extra expose events. The exception is
-   * for unplaced windows, which have to be mapped from bottom to
-   * top so placement works.
-   */
-  should_show = NULL;
-  should_hide = NULL;
-  unplaced = NULL;
-  displays = NULL;
-
-  COGL_TRACE_BEGIN (MetaWindowCalcShowingCalc, "Window: Calc showing (calc)");
-
-  tmp = copy;
-  while (tmp != NULL)
-    {
-      MetaWindow *window;
-
-      window = tmp->data;
-
-      if (!window->placed)
-        unplaced = g_slist_prepend (unplaced, window);
-      else if (meta_window_should_be_showing (window))
-        should_show = g_slist_prepend (should_show, window);
-      else
-        should_hide = g_slist_prepend (should_hide, window);
-
-      tmp = tmp->next;
-    }
-
-  /* bottom to top */
-  unplaced = g_slist_sort (unplaced, stackcmp);
-  should_hide = g_slist_sort (should_hide, stackcmp);
-  /* top to bottom */
-  should_show = g_slist_sort (should_show, stackcmp);
-  should_show = g_slist_reverse (should_show);
-
-  COGL_TRACE_END (MetaWindowCalcShowingCalc);
-
-  COGL_TRACE_BEGIN (MetaWindowCalcShowingUnplaced,
-                    "Window: Calc showing (calc unplaced)");
-
-  tmp = unplaced;
-  while (tmp != NULL)
-    {
-      MetaWindow *window;
-
-      window = tmp->data;
-
-      meta_window_calc_showing (window);
-
-      tmp = tmp->next;
-    }
-
-  COGL_TRACE_END (MetaWindowCalcShowingUnplaced);
-
-  meta_stack_freeze (display->stack);
-
-  COGL_TRACE_BEGIN (MetaWindowCalcShowingShow, "Window: Calc showing (show)");
-  tmp = should_show;
-  while (tmp != NULL)
-    {
-      MetaWindow *window;
-
-      window = tmp->data;
-
-      implement_showing (window, TRUE);
-
-      tmp = tmp->next;
-    }
-  COGL_TRACE_END (MetaWindowCalcShowingShow);
-
-  COGL_TRACE_BEGIN (MetaWindowCalcShowingHide, "Window: Calc showing (hide)");
-  tmp = should_hide;
-  while (tmp != NULL)
-    {
-      MetaWindow *window;
-
-      window = tmp->data;
-
-      implement_showing (window, FALSE);
-
-      tmp = tmp->next;
-    }
-  COGL_TRACE_END (MetaWindowCalcShowingHide);
-
-  COGL_TRACE_BEGIN (MetaWindowCalcShowingSync,
-                    "Window: Calc showing (sync stack)");
-  meta_stack_thaw (display->stack);
-  COGL_TRACE_END (MetaWindowCalcShowingSync);
-
-  tmp = copy;
-  while (tmp != NULL)
-    {
-      MetaWindow *window;
-
-      window = tmp->data;
-
-      /* important to set this here for reentrancy -
-       * if we queue a window again while it's in "copy",
-       * then queue_calc_showing will just return since
-       * we are still in the calc_showing queue
-       */
-      window->is_in_queues &= ~META_QUEUE_CALC_SHOWING;
-
-      tmp = tmp->next;
-    }
-
-  if (meta_prefs_get_focus_mode () != G_DESKTOP_FOCUS_MODE_CLICK)
-    {
-      /* When display->mouse_mode is false, we want to ignore
-       * EnterNotify events unless they come from mouse motion.  To do
-       * that, we set a sentinel property on the root window if we're
-       * not in mouse_mode.
-       */
-      tmp = should_show;
-      while (tmp != NULL)
-        {
-          MetaWindow *window = tmp->data;
-          MetaDisplay *display = window->display;
-
-          if (display->x11_display && !display->mouse_mode)
-            meta_x11_display_increment_focus_sentinel (display->x11_display);
-
-          tmp = tmp->next;
-        }
-    }
-
-  g_slist_free (copy);
-
-  g_slist_free (unplaced);
-  g_slist_free (should_show);
-  g_slist_free (should_hide);
-  g_slist_free (displays);
-
-  destroying_windows_disallowed -= 1;
-
-  return FALSE;
-}
-
-#ifdef WITH_VERBOSE_MODE
-static const gchar* meta_window_queue_names[NUMBER_OF_QUEUES] =
-  {"calc_showing", "move_resize", "update_icon"};
-#endif
 
 static void
-meta_window_unqueue (MetaWindow *window, guint queuebits)
+meta_window_unqueue (MetaWindow    *window,
+                     MetaQueueType  queue_types)
 {
-  gint queuenum;
+  MetaWindowPrivate *priv = meta_window_get_instance_private (window);
 
-  for (queuenum=0; queuenum<NUMBER_OF_QUEUES; queuenum++)
-    {
-      if ((queuebits & 1<<queuenum) /* they have asked to unqueue */
-          &&
-          (window->is_in_queues & 1<<queuenum)) /* it's in the queue */
-        {
+  queue_types &= priv->queued_types;
 
-          meta_topic (META_DEBUG_WINDOW_STATE,
-              "Removing %s from the %s queue",
-              window->desc,
-              meta_window_queue_names[queuenum]);
+  if (!queue_types)
+    return;
 
-          /* Note that window may not actually be in the queue
-           * because it may have been in "copy" inside the idle handler
-           */
-          queue_pending[queuenum] = g_slist_remove (queue_pending[queuenum], window);
-          window->is_in_queues &= ~(1<<queuenum);
-
-          /* Okay, so maybe we've used up all the entries in the queue.
-           * In that case, we should kill the function that deals with
-           * the queue, because there's nothing left for it to do.
-           */
-          if (queue_pending[queuenum] == NULL && queue_later[queuenum] != 0)
-            {
-              meta_later_remove (queue_later[queuenum]);
-              queue_later[queuenum] = 0;
-            }
-        }
-    }
+  meta_display_unqueue_window (window->display, window, queue_types);
+  priv->queued_types &= ~queue_types;
 }
 
 static void
 meta_window_flush_calc_showing (MetaWindow *window)
 {
-  if (window->is_in_queues & META_QUEUE_CALC_SHOWING)
+  MetaWindowPrivate *priv = meta_window_get_instance_private (window);
+
+  if (priv->queued_types & META_QUEUE_CALC_SHOWING)
     {
       meta_window_unqueue (window, META_QUEUE_CALC_SHOWING);
-      meta_window_calc_showing (window);
+      meta_window_update_visibility (window);
     }
 }
 
 void
-meta_window_queue (MetaWindow *window, guint queuebits)
+meta_window_queue (MetaWindow   *window,
+                   MetaQueueType queue_types)
 {
-  guint queuenum;
+  MetaWindowPrivate *priv = meta_window_get_instance_private (window);
 
-  /* Easier to debug by checking here rather than in the idle */
-  g_return_if_fail (!window->override_redirect || (queuebits & META_QUEUE_MOVE_RESIZE) == 0);
+  g_return_if_fail (!window->override_redirect ||
+                    (queue_types & META_QUEUE_MOVE_RESIZE) == 0);
 
-  for (queuenum=0; queuenum<NUMBER_OF_QUEUES; queuenum++)
-    {
-      if (queuebits & 1<<queuenum)
-        {
-          /* Data which varies between queues.
-           * Yes, these do look a lot like associative arrays:
-           * I seem to be turning into a Perl programmer.
-           */
+  if (window->unmanaging)
+    return;
 
-          const MetaLaterType window_queue_later_when[NUMBER_OF_QUEUES] =
-            {
-              META_LATER_CALC_SHOWING, /* CALC_SHOWING */
-              META_LATER_RESIZE,        /* MOVE_RESIZE */
-              META_LATER_BEFORE_REDRAW  /* UPDATE_ICON */
-            };
+  queue_types &= ~priv->queued_types;
+  if (!queue_types)
+    return;
 
-          const GSourceFunc window_queue_later_handler[NUMBER_OF_QUEUES] =
-            {
-              idle_calc_showing,
-              idle_move_resize,
-              idle_update_icon,
-            };
-
-          /* If we're about to drop the window, there's no point in putting
-           * it on a queue.
-           */
-          if (window->unmanaging)
-            break;
-
-          /* If the window already claims to be in that queue, there's no
-           * point putting it in the queue.
-           */
-          if (window->is_in_queues & 1<<queuenum)
-            break;
-
-          meta_topic (META_DEBUG_WINDOW_STATE,
-              "Putting %s in the %s queue",
-              window->desc,
-              meta_window_queue_names[queuenum]);
-
-          /* So, mark it as being in this queue. */
-          window->is_in_queues |= 1<<queuenum;
-
-          /* There's not a lot of point putting things into a queue if
-           * nobody's on the other end pulling them out. Therefore,
-           * let's check to see whether an idle handler exists to do
-           * that. If not, we'll create one.
-           */
-
-          if (queue_later[queuenum] == 0)
-            queue_later[queuenum] = meta_later_add
-              (
-                window_queue_later_when[queuenum],
-                window_queue_later_handler[queuenum],
-                GUINT_TO_POINTER(queuenum),
-                NULL
-              );
-
-          /* And now we actually put it on the queue. */
-          queue_pending[queuenum] = g_slist_prepend (queue_pending[queuenum],
-                                                     window);
-      }
-  }
+  priv->queued_types |= queue_types;
+  meta_display_queue_window (window->display, window, queue_types);
 }
 
 static gboolean
@@ -4142,7 +3852,7 @@ meta_window_move_resize_internal (MetaWindow          *window,
     }
 
   /* If we did placement, then we need to save the position that the window
-   * was placed at to make sure that meta_window_move_resize_now places the
+   * was placed at to make sure that meta_window_update_layout() places the
    * window correctly.
    */
   if (did_placement)
@@ -4419,54 +4129,14 @@ meta_window_resize_frame_with_gravity (MetaWindow *window,
   meta_window_move_resize_internal (window, flags, gravity, rect);
 }
 
-static void
-meta_window_move_resize_now (MetaWindow  *window)
+void
+meta_window_update_layout (MetaWindow *window)
 {
   meta_window_move_resize_frame (window, FALSE,
                                  window->unconstrained_rect.x,
                                  window->unconstrained_rect.y,
                                  window->unconstrained_rect.width,
                                  window->unconstrained_rect.height);
-}
-
-static gboolean
-idle_move_resize (gpointer data)
-{
-  GSList *tmp;
-  GSList *copy;
-  guint queue_index = GPOINTER_TO_INT (data);
-
-  meta_topic (META_DEBUG_GEOMETRY, "Clearing the move_resize queue");
-
-  /* Work with a copy, for reentrancy. The allowed reentrancy isn't
-   * complete; destroying a window while we're in here would result in
-   * badness. But it's OK to queue/unqueue move_resizes.
-   */
-  copy = g_slist_copy (queue_pending[queue_index]);
-  g_slist_free (queue_pending[queue_index]);
-  queue_pending[queue_index] = NULL;
-  queue_later[queue_index] = 0;
-
-  destroying_windows_disallowed += 1;
-
-  tmp = copy;
-  while (tmp != NULL)
-    {
-      MetaWindow *window;
-
-      window = tmp->data;
-
-      /* As a side effect, sets window->move_resize_queued = FALSE */
-      meta_window_move_resize_now (window);
-
-      tmp = tmp->next;
-    }
-
-  g_slist_free (copy);
-
-  destroying_windows_disallowed -= 1;
-
-  return FALSE;
 }
 
 void
@@ -5551,85 +5221,26 @@ meta_window_set_icon_geometry (MetaWindow    *window,
     }
 }
 
-static void
-redraw_icon (MetaWindow *window)
+cairo_surface_t *
+meta_window_get_icon (MetaWindow *window)
 {
-  /* We could probably be smart and just redraw the icon here,
-   * instead of the whole frame.
-   */
-  if (window->frame)
-    meta_frame_queue_draw (window->frame);
+  MetaWindowClass *klass = META_WINDOW_GET_CLASS (window);
+
+  if (klass->get_icon)
+    return klass->get_icon (window);
+  else
+    return NULL;
 }
 
-static void
-meta_window_update_icon_now (MetaWindow *window,
-                             gboolean    force)
+cairo_surface_t *
+meta_window_get_mini_icon (MetaWindow *window)
 {
-  gboolean changed;
-  cairo_surface_t *icon = NULL;
-  cairo_surface_t *mini_icon;
+  MetaWindowClass *klass = META_WINDOW_GET_CLASS (window);
 
-  g_return_if_fail (!window->override_redirect);
-
-  changed = META_WINDOW_GET_CLASS (window)->update_icon (window, &icon, &mini_icon);
-
-  if (changed || force)
-    {
-      if (window->icon)
-        cairo_surface_destroy (window->icon);
-      window->icon = icon;
-
-      if (window->mini_icon)
-        cairo_surface_destroy (window->mini_icon);
-      window->mini_icon = mini_icon;
-
-      g_object_freeze_notify (G_OBJECT (window));
-      g_object_notify_by_pspec (G_OBJECT (window), obj_props[PROP_ICON]);
-      g_object_notify_by_pspec (G_OBJECT (window), obj_props[PROP_MINI_ICON]);
-      g_object_thaw_notify (G_OBJECT (window));
-
-      redraw_icon (window);
-    }
-}
-
-static gboolean
-idle_update_icon (gpointer data)
-{
-  GSList *tmp;
-  GSList *copy;
-  guint queue_index = GPOINTER_TO_INT (data);
-
-  meta_topic (META_DEBUG_GEOMETRY, "Clearing the update_icon queue");
-
-  /* Work with a copy, for reentrancy. The allowed reentrancy isn't
-   * complete; destroying a window while we're in here would result in
-   * badness. But it's OK to queue/unqueue update_icons.
-   */
-  copy = g_slist_copy (queue_pending[queue_index]);
-  g_slist_free (queue_pending[queue_index]);
-  queue_pending[queue_index] = NULL;
-  queue_later[queue_index] = 0;
-
-  destroying_windows_disallowed += 1;
-
-  tmp = copy;
-  while (tmp != NULL)
-    {
-      MetaWindow *window;
-
-      window = tmp->data;
-
-      meta_window_update_icon_now (window, FALSE);
-      window->is_in_queues &= ~META_QUEUE_UPDATE_ICON;
-
-      tmp = tmp->next;
-    }
-
-  g_slist_free (copy);
-
-  destroying_windows_disallowed -= 1;
-
-  return FALSE;
+  if (klass->get_mini_icon)
+    return klass->get_mini_icon (window);
+  else
+    return NULL;
 }
 
 GList*

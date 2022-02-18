@@ -801,6 +801,7 @@ struct _ClutterActorPrivate
   gulong layout_changed_id;
 
   GList *stage_views;
+  GList *grabs;
 
   /* bitfields: KEEP AT THE END */
 
@@ -1634,6 +1635,25 @@ maybe_unset_key_focus (ClutterActor *self)
 }
 
 static void
+clutter_actor_clear_grabs (ClutterActor *self)
+{
+  ClutterActorPrivate *priv = self->priv;
+  ClutterActor *stage;
+
+  if (!priv->grabs)
+    return;
+
+  stage = _clutter_actor_get_stage_internal (self);
+  g_assert (stage != NULL);
+
+  /* Undo every grab that the actor may hold, priv->grabs
+   * will be updated internally in clutter_stage_unlink_grab().
+   */
+  while (priv->grabs)
+    clutter_stage_unlink_grab (CLUTTER_STAGE (stage), priv->grabs->data);
+}
+
+static void
 clutter_actor_real_unmap (ClutterActor *self)
 {
   ClutterActorPrivate *priv = self->priv;
@@ -1678,6 +1698,8 @@ clutter_actor_real_unmap (ClutterActor *self)
   /* relinquish keyboard focus if we were unmapped while owning it */
   if (!CLUTTER_ACTOR_IS_TOPLEVEL (self))
     maybe_unset_key_focus (self);
+
+  clutter_actor_clear_grabs (self);
 }
 
 /**
@@ -5586,6 +5608,8 @@ clutter_actor_finalize (GObject *object)
                 _clutter_actor_get_debug_name ((ClutterActor *) object),
                 g_type_name (G_OBJECT_TYPE (object)));
 
+  /* No new grabs should have happened after unmapping */
+  g_assert (priv->grabs == NULL);
   g_free (priv->name);
 
   g_free (priv->debug_name);
@@ -12388,6 +12412,12 @@ clutter_actor_event (ClutterActor       *actor,
  handled:
   g_object_unref (actor);
 
+  if (event->type == CLUTTER_ENTER || event->type == CLUTTER_LEAVE)
+    {
+      g_warn_if_fail (retval == CLUTTER_EVENT_PROPAGATE);
+      return CLUTTER_EVENT_PROPAGATE;
+    }
+
   return retval;
 }
 
@@ -15808,7 +15838,7 @@ clutter_actor_get_real_resource_scale (ClutterActor *self)
       guessed_scale = clutter_backend_get_fallback_resource_scale (backend);
     }
 
-  g_assert (guessed_scale >= 1.f);
+  g_assert (guessed_scale >= 0.5);
 
   /* Always return this value until we compute the correct one later.
    * If our guess turns out to be wrong, we'll emit "resource-scale-changed"
@@ -18992,19 +19022,13 @@ clutter_actor_get_content_repeat (ClutterActor *self)
 
 void
 _clutter_actor_handle_event (ClutterActor       *self,
+                             ClutterActor       *root,
                              const ClutterEvent *event)
 {
   GPtrArray *event_tree;
   ClutterActor *iter;
-  gboolean is_key_event;
+  gboolean in_root = FALSE;
   gint i = 0;
-
-  /* XXX - for historical reasons that are now lost in the mists of time,
-   * key events are delivered regardless of whether an actor is set as
-   * reactive; this should be changed for 2.0.
-   */
-  is_key_event = event->type == CLUTTER_KEY_PRESS ||
-                 event->type == CLUTTER_KEY_RELEASE;
 
   event_tree = g_ptr_array_sized_new (64);
   g_ptr_array_set_free_func (event_tree, (GDestroyNotify) g_object_unref);
@@ -19016,8 +19040,7 @@ _clutter_actor_handle_event (ClutterActor       *self,
       ClutterActor *parent = iter->priv->parent;
 
       if (CLUTTER_ACTOR_IS_REACTIVE (iter) || /* an actor must be reactive */
-          parent == NULL ||                       /* unless it's the stage */
-          is_key_event)                          /* or this is a key event */
+          parent == NULL)                     /* unless it's the stage */
         {
           /* keep a reference on the actor, so that it remains valid
            * for the duration of the signal emission
@@ -19025,7 +19048,24 @@ _clutter_actor_handle_event (ClutterActor       *self,
           g_ptr_array_add (event_tree, g_object_ref (iter));
         }
 
+      if (iter == root)
+        {
+          in_root = TRUE;
+          break;
+        }
+
       iter = parent;
+    }
+
+  /* The grab root conceptually extends infinitely in all
+   * directions, so it handles the events that fall outside of
+   * the actor.
+   */
+  if (root && !in_root)
+    {
+      if (!clutter_actor_event (root, event, TRUE))
+        clutter_actor_event (root, event, FALSE);
+      goto done;
     }
 
   /* Capture: from top-level downwards */
@@ -19659,4 +19699,22 @@ clutter_actor_get_redraw_clip (ClutterActor       *self,
   _clutter_paint_volume_set_from_volume (dst_new_pv, paint_volume);
 
   return TRUE;
+}
+
+void
+clutter_actor_attach_grab (ClutterActor *self,
+                           ClutterGrab  *grab)
+{
+  ClutterActorPrivate *priv = self->priv;
+
+  priv->grabs = g_list_prepend (priv->grabs, grab);
+}
+
+void
+clutter_actor_detach_grab (ClutterActor *self,
+                           ClutterGrab  *grab)
+{
+  ClutterActorPrivate *priv = self->priv;
+
+  priv->grabs = g_list_remove (priv->grabs, grab);
 }

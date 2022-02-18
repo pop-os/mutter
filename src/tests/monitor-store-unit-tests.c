@@ -25,7 +25,8 @@
 #include "backends/meta-monitor-config-store.h"
 #include "backends/meta-monitor-config-manager.h"
 #include "backends/meta-monitor-manager-private.h"
-#include "tests/monitor-test-utils.h"
+#include "tests/meta-monitor-test-utils.h"
+#include "tests/unit-tests.h"
 
 #define MAX_N_MONITORS 10
 #define MAX_N_LOGICAL_MONITORS 10
@@ -257,7 +258,7 @@ meta_test_monitor_store_single (void)
     .n_configurations = 1
   };
 
-  set_custom_monitor_config ("single.xml");
+  meta_set_custom_monitor_config (test_context, "single.xml");
 
   check_monitor_store_configurations (&expect);
 }
@@ -326,7 +327,7 @@ meta_test_monitor_store_vertical (void)
     .n_configurations = 1
   };
 
-  set_custom_monitor_config ("vertical.xml");
+  meta_set_custom_monitor_config (test_context, "vertical.xml");
 
   check_monitor_store_configurations (&expect);
 }
@@ -395,7 +396,7 @@ meta_test_monitor_store_primary (void)
     .n_configurations = 1
   };
 
-  set_custom_monitor_config ("primary.xml");
+  meta_set_custom_monitor_config (test_context, "primary.xml");
 
   check_monitor_store_configurations (&expect);
 }
@@ -440,7 +441,7 @@ meta_test_monitor_store_underscanning (void)
     .n_configurations = 1
   };
 
-  set_custom_monitor_config ("underscanning.xml");
+  meta_set_custom_monitor_config (test_context, "underscanning.xml");
 
   check_monitor_store_configurations (&expect);
 }
@@ -490,7 +491,7 @@ meta_test_monitor_store_scale (void)
       return;
     }
 
-  set_custom_monitor_config ("scale.xml");
+  meta_set_custom_monitor_config (test_context, "scale.xml");
 
   check_monitor_store_configurations (&expect);
 }
@@ -540,7 +541,7 @@ meta_test_monitor_store_fractional_scale (void)
       return;
     }
 
-  set_custom_monitor_config ("fractional-scale.xml");
+  meta_set_custom_monitor_config (test_context, "fractional-scale.xml");
 
   check_monitor_store_configurations (&expect);
 }
@@ -590,7 +591,7 @@ meta_test_monitor_store_high_precision_fractional_scale (void)
       return;
     }
 
-  set_custom_monitor_config ("high-precision-fractional-scale.xml");
+  meta_set_custom_monitor_config (test_context, "high-precision-fractional-scale.xml");
 
   check_monitor_store_configurations (&expect);
 }
@@ -644,7 +645,7 @@ meta_test_monitor_store_mirrored (void)
     .n_configurations = 1
   };
 
-  set_custom_monitor_config ("mirrored.xml");
+  meta_set_custom_monitor_config (test_context, "mirrored.xml");
 
   check_monitor_store_configurations (&expect);
 }
@@ -715,7 +716,7 @@ meta_test_monitor_store_first_rotated (void)
     .n_configurations = 1
   };
 
-  set_custom_monitor_config ("first-rotated.xml");
+  meta_set_custom_monitor_config (test_context, "first-rotated.xml");
 
   check_monitor_store_configurations (&expect);
 }
@@ -786,7 +787,7 @@ meta_test_monitor_store_second_rotated (void)
     .n_configurations = 1
   };
 
-  set_custom_monitor_config ("second-rotated.xml");
+  meta_set_custom_monitor_config (test_context, "second-rotated.xml");
 
   check_monitor_store_configurations (&expect);
 }
@@ -831,9 +832,174 @@ meta_test_monitor_store_interlaced (void)
     .n_configurations = 1
   };
 
-  set_custom_monitor_config ("interlaced.xml");
+  meta_set_custom_monitor_config (test_context, "interlaced.xml");
 
   check_monitor_store_configurations (&expect);
+}
+
+static void
+meta_test_monitor_store_unknown_elements (void)
+{
+  MonitorStoreTestExpect expect = {
+    .configurations = {
+      {
+        .logical_monitors = {
+          {
+            .layout = {
+              .x = 0,
+              .y = 0,
+              .width = 1920,
+              .height = 1080
+            },
+            .scale = 1,
+            .is_primary = TRUE,
+            .is_presentation = FALSE,
+            .monitors = {
+              {
+                .connector = "DP-1",
+                .vendor = "MetaProduct's Inc.",
+                .product = "MetaMonitor",
+                .serial = "0x123456",
+                .mode = {
+                  .width = 1920,
+                  .height = 1080,
+                  .refresh_rate = 60.000495910644531
+                }
+              }
+            },
+            .n_monitors = 1,
+          }
+        },
+        .n_logical_monitors = 1
+      }
+    },
+    .n_configurations = 1
+  };
+
+  g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_WARNING,
+                         "Unknown element <unknownundermonitors> "
+                         "under <monitors>, ignoring");
+  g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_WARNING,
+                         "Unknown element <unknownunderconfiguration> "
+                         "under <configuration>, ignoring");
+  g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_WARNING,
+                         "Unknown element <unknownunderlogicalmonitor> "
+                         "under <logicalmonitor>, ignoring");
+  meta_set_custom_monitor_config (test_context, "unknown-elements.xml");
+  g_test_assert_expected_messages ();
+
+  check_monitor_store_configurations (&expect);
+}
+
+static void
+meta_test_monitor_store_policy_not_allowed (void)
+{
+  g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_WARNING,
+                         "*Policy can only be defined in system level "
+                         "configurations*");
+  meta_set_custom_monitor_config (test_context, "policy.xml");
+  g_test_assert_expected_messages ();
+}
+
+static void
+meta_test_monitor_store_policy (void)
+{
+  MetaBackend *backend = meta_get_backend ();
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
+  MetaMonitorConfigManager *config_manager = monitor_manager->config_manager;
+  MetaMonitorConfigStore *config_store =
+    meta_monitor_config_manager_get_store (config_manager);
+  GList *stores_policy;
+
+  meta_set_custom_monitor_system_config (test_context, "policy.xml");
+  stores_policy = meta_monitor_config_store_get_stores_policy (config_store);
+  g_assert_cmpuint (g_list_length (stores_policy), ==, 1);
+  g_assert_cmpint (GPOINTER_TO_INT (stores_policy->data),
+                   ==,
+                   META_CONFIG_STORE_SYSTEM);
+}
+
+static void
+meta_test_monitor_store_policy_empty (void)
+{
+  g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_WARNING,
+                         "*Invalid store*");
+  meta_set_custom_monitor_system_config (test_context, "policy-empty.xml");
+  g_test_assert_expected_messages ();
+}
+
+static void
+meta_test_monitor_store_policy_duplicate (void)
+{
+  g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_WARNING,
+                         "*Multiple identical stores*");
+  meta_set_custom_monitor_system_config (test_context, "policy-duplicate.xml");
+  g_test_assert_expected_messages ();
+}
+
+static void
+meta_test_monitor_store_policy_invalid (void)
+{
+  g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_WARNING,
+                         "*Invalid store*");
+  meta_set_custom_monitor_system_config (test_context, "policy-invalid.xml");
+  g_test_assert_expected_messages ();
+}
+
+static void
+meta_test_monitor_store_policy_multiple (void)
+{
+  g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_WARNING,
+                         "*Multiple stores elements under policy*");
+  meta_set_custom_monitor_system_config (test_context, "policy-multiple.xml");
+  g_test_assert_expected_messages ();
+}
+
+static void
+meta_test_monitor_store_policy_dbus (void)
+{
+  MetaBackend *backend = meta_context_get_backend (test_context);
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
+  MetaMonitorConfigManager *config_manager =
+    meta_monitor_manager_get_config_manager (monitor_manager);
+  MetaMonitorConfigStore *config_store =
+    meta_monitor_config_manager_get_store (config_manager);
+  const MetaMonitorConfigPolicy *policy;
+
+  policy = meta_monitor_config_store_get_policy (config_store);
+  g_assert_nonnull (policy);
+  g_assert_cmpint (policy->enable_dbus, ==, TRUE);
+
+  meta_set_custom_monitor_system_config (test_context, "policy-dbus.xml");
+
+  policy = meta_monitor_config_store_get_policy (config_store);
+  g_assert_nonnull (policy);
+  g_assert_cmpint (policy->enable_dbus, ==, FALSE);
+}
+
+static void
+meta_test_monitor_store_policy_dbus_invalid (void)
+{
+  MetaBackend *backend = meta_context_get_backend (test_context);
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
+  MetaMonitorConfigManager *config_manager =
+    meta_monitor_manager_get_config_manager (monitor_manager);
+  MetaMonitorConfigStore *config_store =
+    meta_monitor_config_manager_get_store (config_manager);
+  const MetaMonitorConfigPolicy *policy;
+
+  g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_WARNING,
+                         "*Multiple dbus elements under policy*");
+  meta_set_custom_monitor_system_config (test_context,
+                                         "policy-dbus-invalid.xml");
+  g_test_assert_expected_messages ();
+
+  policy = meta_monitor_config_store_get_policy (config_store);
+  g_assert_nonnull (policy);
+  g_assert_cmpint (policy->enable_dbus, ==, FALSE);
 }
 
 void
@@ -861,4 +1027,22 @@ init_monitor_store_tests (void)
                    meta_test_monitor_store_second_rotated);
   g_test_add_func ("/backends/monitor-store/interlaced",
                    meta_test_monitor_store_interlaced);
+  g_test_add_func ("/backends/monitor-store/unknown-elements",
+                   meta_test_monitor_store_unknown_elements);
+  g_test_add_func ("/backends/monitor-store/policy-not-allowed",
+                   meta_test_monitor_store_policy_not_allowed);
+  g_test_add_func ("/backends/monitor-store/policy",
+                   meta_test_monitor_store_policy);
+  g_test_add_func ("/backends/monitor-store/policy-empty",
+                   meta_test_monitor_store_policy_empty);
+  g_test_add_func ("/backends/monitor-store/policy-duplicate",
+                   meta_test_monitor_store_policy_duplicate);
+  g_test_add_func ("/backends/monitor-store/policy-invalid",
+                   meta_test_monitor_store_policy_invalid);
+  g_test_add_func ("/backends/monitor-store/policy-multiple",
+                   meta_test_monitor_store_policy_multiple);
+  g_test_add_func ("/backends/monitor-store/dbus",
+                   meta_test_monitor_store_policy_dbus);
+  g_test_add_func ("/backends/monitor-store/dbus-invalid",
+                   meta_test_monitor_store_policy_dbus_invalid);
 }

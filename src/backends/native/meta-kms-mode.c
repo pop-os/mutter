@@ -30,6 +30,18 @@ struct _MetaKmsMode
   drmModeModeInfo drm_mode;
 };
 
+int
+meta_kms_mode_get_width (MetaKmsMode *mode)
+{
+  return mode->drm_mode.hdisplay;
+}
+
+int
+meta_kms_mode_get_height (MetaKmsMode *mode)
+{
+  return mode->drm_mode.vdisplay;
+}
+
 uint32_t
 meta_kms_mode_create_blob_id (MetaKmsMode  *mode,
                               GError      **error)
@@ -119,6 +131,17 @@ meta_kms_mode_hash (MetaKmsMode *mode)
   hash ^= drm_mode->flags ^ drm_mode->type;
 
   return hash;
+}
+
+MetaKmsMode *
+meta_kms_mode_clone (MetaKmsMode *mode)
+{
+  MetaKmsMode *new_mode;
+
+  new_mode = g_new0 (MetaKmsMode, 1);
+  *new_mode = *mode;
+
+  return new_mode;
 }
 
 void

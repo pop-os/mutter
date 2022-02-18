@@ -1,5 +1,5 @@
 project('mutter', 'c',
-  version: '42.alpha',
+  version: '42.beta',
   meson_version: '>= 0.53.0',
   license: 'GPLv2+'
 )
@@ -25,10 +25,9 @@ cairo_req = '>= 1.10.0'
 pangocairo_req = '>= 1.20'
 gsettings_desktop_schemas_req = '>= 40.alpha'
 json_glib_req = '>= 0.12.0'
-upower_glib_req = '>= 0.99.0'
 xcomposite_req = '>= 0.4'
 xkbcommon_req = '>= 0.4.3'
-xfixes_req = '>= 3'
+xfixes_req = '>= 6'
 xi_req = '>= 1.7.4'
 xrandr_req = '>= 1.5.0'
 libstartup_notification_req = '>= 0.7'
@@ -49,7 +48,7 @@ libinput_req = '>= 1.19.0'
 gbm_req = '>= 17.3'
 
 # screen cast version requirements
-libpipewire_req = '>= 0.3.21'
+libpipewire_req = '>= 0.3.33'
 
 # profiler requirements
 sysprof_req = '>= 3.37.2'
@@ -57,6 +56,7 @@ sysprof_req = '>= 3.37.2'
 gnome = import('gnome')
 pkg = import('pkgconfig')
 i18n  = import('i18n')
+fs = import('fs')
 cc = meson.get_compiler('c')
 
 prefix = get_option('prefix')
@@ -264,11 +264,19 @@ if have_introspection
   ]
 endif
 
+have_documentation = get_option('docs')
+if have_documentation
+  gidocgen_dep = dependency('gi-docgen', version: '>= 2021.1',
+                            fallback: ['gi-docgen', 'dummy_dep'])
+endif
+
 have_tests = get_option('tests')
 have_core_tests = false
 have_cogl_tests = false
 have_clutter_tests = false
 have_native_tests = false
+have_kvm_tests = false
+have_tty_tests = false
 have_installed_tests = false
 
 if have_tests
@@ -285,6 +293,21 @@ if have_tests
     endif
     if not have_remote_desktop
       error('Native tests require remote desktop')
+    endif
+  endif
+  have_kvm_tests = get_option('kvm_tests')
+  if have_kvm_tests
+    if not have_native_backend
+      error('KVM tests need the native backend tests')
+    endif
+    if host_machine.cpu_family() != 'x86_64'
+      error('KVM tests are only supported on x86_64')
+    endif
+  endif
+  have_tty_tests = get_option('tty_tests')
+  if have_tty_tests
+    if not have_native_backend
+      error('TTY tests need the native backend tests')
     endif
   endif
 
@@ -433,6 +456,7 @@ endif
 
 have_xwayland_initfd = false
 have_xwayland_listenfd = false
+have_xwayland_terminate_delay = false
 if have_wayland
   xwayland_dep = dependency('xwayland', required: false)
 
@@ -485,6 +509,15 @@ if have_wayland
   if (have_xwayland_listenfd)
     cdata.set('HAVE_XWAYLAND_LISTENFD', 1)
   endif
+
+  # For Xwayland -listenfd usage
+  if xwayland_dep.found()
+    have_xwayland_terminate_delay = xwayland_dep.get_pkgconfig_variable('have_terminate_delay') == 'true'
+  endif
+
+  if (have_xwayland_terminate_delay)
+    cdata.set('HAVE_XWAYLAND_TERMINATE_DELAY', 1)
+  endif
 endif
 
 have_xsetioerrorexithandler = false
@@ -512,10 +545,6 @@ xwayland_grab_default_access_rules = get_option('xwayland_grab_default_access_ru
 cdata.set_quoted('XWAYLAND_GRAB_DEFAULT_ACCESS_RULES',
                  xwayland_grab_default_access_rules)
 
-xwayland_ignore_executables = get_option('xwayland_ignore_executables')
-cdata.set_quoted('XWAYLAND_IGNORE_EXECUTABLES',
-                 xwayland_ignore_executables)
-
 cdata.set_quoted('MUTTER_PLUGIN_DIR', join_paths(pkglibdir, 'plugins'))
 cdata.set_quoted('MUTTER_LOCALEDIR', localedir)
 cdata.set_quoted('MUTTER_LIBEXECDIR', libexecdir)
@@ -535,6 +564,9 @@ subdir('data')
 subdir('src')
 subdir('po')
 subdir('doc/man')
+if have_documentation
+  subdir('doc/reference')
+endif
 
 meson.add_install_script('meson/meson-postinstall.sh')
 meson.add_dist_script('meson/check-version.py', meson.project_version(), 'NEWS')
@@ -561,10 +593,12 @@ summary('Wacom', have_libwacom, section: 'Options')
 summary('SM', have_sm, section: 'Options')
 summary('Startup notification', have_startup_notification, section: 'Options')
 summary('Introspection', have_introspection, section: 'Options')
+summary('Documentation', have_documentation, section: 'Options')
 summary('Profiler', have_profiler, section: 'Options')
 summary('Xwayland initfd', have_xwayland_initfd, section: 'Options')
 summary('Xwayland listenfd', have_xwayland_listenfd, section: 'Options')
 summary('Safe X11 I/O errors', have_xsetioerrorexithandler, section: 'Options')
+summary('Xwayland terminate delay', have_xwayland_terminate_delay, section: 'Options')
 
 summary('Enabled', have_tests, section: 'Tests')
 summary('Core tests', have_core_tests, section: 'Tests')

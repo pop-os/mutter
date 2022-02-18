@@ -29,6 +29,7 @@
 #endif
 
 #include <clutter/clutter-actor.h>
+#include <clutter/clutter-grab.h>
 #include <clutter/clutter-types.h>
 #include <clutter/clutter-stage-view.h>
 
@@ -183,29 +184,10 @@ void            clutter_stage_get_minimum_size                  (ClutterStage   
                                                                  guint                 *width,
                                                                  guint                 *height);
 CLUTTER_EXPORT
-void            clutter_stage_set_use_alpha                     (ClutterStage          *stage,
-                                                                 gboolean               use_alpha);
-CLUTTER_EXPORT
-gboolean        clutter_stage_get_use_alpha                     (ClutterStage          *stage);
-
-CLUTTER_EXPORT
 void            clutter_stage_set_key_focus                     (ClutterStage          *stage,
                                                                  ClutterActor          *actor);
 CLUTTER_EXPORT
 ClutterActor *  clutter_stage_get_key_focus                     (ClutterStage          *stage);
-CLUTTER_EXPORT
-void            clutter_stage_set_throttle_motion_events        (ClutterStage          *stage,
-                                                                 gboolean               throttle);
-CLUTTER_EXPORT
-gboolean        clutter_stage_get_throttle_motion_events        (ClutterStage          *stage);
-CLUTTER_EXPORT
-void            clutter_stage_set_motion_events_enabled         (ClutterStage          *stage,
-                                                                 gboolean               enabled);
-CLUTTER_EXPORT
-gboolean        clutter_stage_get_motion_events_enabled         (ClutterStage          *stage);
-CLUTTER_EXPORT
-gboolean        clutter_stage_event                             (ClutterStage          *stage,
-                                                                 ClutterEvent          *event);
 
 CLUTTER_EXPORT
 ClutterActor *  clutter_stage_get_actor_at_pos                  (ClutterStage          *stage,
@@ -268,6 +250,13 @@ CLUTTER_EXPORT
 ClutterActor * clutter_stage_get_device_actor (ClutterStage         *stage,
                                                ClutterInputDevice   *device,
                                                ClutterEventSequence *sequence);
+
+CLUTTER_EXPORT
+ClutterGrab * clutter_stage_grab (ClutterStage *stage,
+                                  ClutterActor *actor);
+
+CLUTTER_EXPORT
+ClutterActor * clutter_stage_get_grab_actor (ClutterStage *stage);
 
 G_END_DECLS
 

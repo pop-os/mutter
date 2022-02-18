@@ -197,6 +197,7 @@ struct _MetaDisplay
 
   /* Opening the display */
   unsigned int display_opening : 1;
+  unsigned int grabbed_in_clutter : 1;
 
   /* Closing down the display */
   int closing;
@@ -430,5 +431,13 @@ gboolean meta_display_init_x11_finish (MetaDisplay   *display,
                                        GError       **error);
 
 void     meta_display_shutdown_x11 (MetaDisplay  *display);
+
+void meta_display_queue_window (MetaDisplay   *display,
+                                MetaWindow    *window,
+                                MetaQueueType  queue_types);
+
+void meta_display_unqueue_window (MetaDisplay   *display,
+                                  MetaWindow    *window,
+                                  MetaQueueType  queue_types);
 
 #endif

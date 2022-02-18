@@ -24,6 +24,7 @@
 #include <X11/Xlib.h>
 #include <X11/extensions/sync.h>
 
+#include "backends/meta-backend-types.h"
 #include "meta/window.h"
 
 #define META_TEST_CLIENT_ERROR meta_test_client_error_quark ()
@@ -74,9 +75,18 @@ gboolean meta_test_client_wait (MetaTestClient  *client,
                                 GError         **error);
 
 META_EXPORT
+gboolean meta_test_client_dov (MetaTestClient  *client,
+                               GError         **error,
+                               va_list          vap);
+
+META_EXPORT
 gboolean meta_test_client_do (MetaTestClient  *client,
                               GError         **error,
                               ...) G_GNUC_NULL_TERMINATED;
+
+META_EXPORT
+MetaWindow * meta_find_window_from_title (MetaContext *context,
+                                          const char  *title);
 
 META_EXPORT
 MetaWindow * meta_test_client_find_window (MetaTestClient  *client,
@@ -102,5 +112,19 @@ void meta_test_client_destroy (MetaTestClient *client);
 
 META_EXPORT
 const char * meta_test_get_plugin_name (void);
+
+META_EXPORT
+void meta_set_custom_monitor_config_full (MetaBackend            *backend,
+                                          const char             *filename,
+                                          MetaMonitorsConfigFlag  configs_flags);
+
+META_EXPORT
+void meta_wait_for_paint (MetaContext *context);
+
+META_EXPORT
+MetaVirtualMonitor * meta_create_test_monitor (MetaContext *context,
+                                               int          width,
+                                               int          height,
+                                               float        refresh_rate);
 
 #endif /* TEST_UTILS_H */

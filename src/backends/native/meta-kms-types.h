@@ -69,8 +69,16 @@ typedef enum _MetaKmsUpdateChanges
   META_KMS_UPDATE_CHANGE_NONE = 0,
   META_KMS_UPDATE_CHANGE_GAMMA = 1 << 0,
   META_KMS_UPDATE_CHANGE_NO_DEVICES = 1 << 1,
+  META_KMS_UPDATE_CHANGE_PRIVACY_SCREEN = 1 << 2,
   META_KMS_UPDATE_CHANGE_FULL = -1,
 } MetaKmsUpdateChanges;
+
+typedef enum _MetaKmsUpdateFlag
+{
+  META_KMS_UPDATE_FLAG_NONE = 0,
+  META_KMS_UPDATE_FLAG_PRESERVE_ON_ERROR = 1 << 0,
+  META_KMS_UPDATE_FLAG_TEST_ONLY = 1 << 1,
+} MetaKmsUpdateFlag;
 
 typedef enum _MetaKmsPlaneType MetaKmsPlaneType;
 

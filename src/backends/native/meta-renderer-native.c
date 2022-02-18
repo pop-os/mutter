@@ -58,6 +58,7 @@
 #include "backends/native/meta-kms-device.h"
 #include "backends/native/meta-kms.h"
 #include "backends/native/meta-onscreen-native.h"
+#include "backends/native/meta-output-kms.h"
 #include "backends/native/meta-render-device-gbm.h"
 #include "backends/native/meta-render-device-surfaceless.h"
 #include "backends/native/meta-renderer-native-private.h"
@@ -970,6 +971,27 @@ meta_renderer_native_create_dma_buf (CoglRenderer  *cogl_renderer,
 }
 
 static gboolean
+meta_renderer_native_is_dma_buf_supported (CoglRenderer *cogl_renderer)
+{
+  CoglRendererEGL *cogl_renderer_egl = cogl_renderer->winsys;
+  MetaRendererNativeGpuData *renderer_gpu_data = cogl_renderer_egl->platform;
+  MetaRenderDevice *render_device = renderer_gpu_data->render_device;
+
+  switch (renderer_gpu_data->mode)
+    {
+    case META_RENDERER_NATIVE_MODE_GBM:
+      return meta_render_device_is_hardware_accelerated (render_device);
+    case META_RENDERER_NATIVE_MODE_SURFACELESS:
+#ifdef HAVE_EGL_DEVICE
+    case META_RENDERER_NATIVE_MODE_EGL_DEVICE:
+#endif
+      return FALSE;
+    }
+
+  g_assert_not_reached ();
+}
+
+static gboolean
 meta_renderer_native_init_egl_context (CoglContext *cogl_context,
                                        GError     **error)
 {
@@ -1113,6 +1135,8 @@ get_native_cogl_winsys_vtable (CoglRenderer *cogl_renderer)
       vtable.renderer_connect = meta_renderer_native_connect;
       vtable.renderer_disconnect = meta_renderer_native_disconnect;
       vtable.renderer_create_dma_buf = meta_renderer_native_create_dma_buf;
+      vtable.renderer_is_dma_buf_supported =
+        meta_renderer_native_is_dma_buf_supported;
 
       vtable_inited = TRUE;
     }
