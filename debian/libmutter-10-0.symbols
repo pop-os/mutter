@@ -1417,9 +1417,12 @@ libmutter-clutter-10.so.0 libmutter-10-0 #MINVER#
  clutter_frame_clock_schedule_update@Base 3.37.91
  clutter_frame_clock_schedule_update_now@Base 3.37.91
  clutter_frame_clock_uninhibit@Base 3.37.91
+ clutter_frame_get_hints@Base 42~beta-0ubuntu1
  clutter_frame_has_result@Base 40.0
+ clutter_frame_hint_get_type@Base 42~beta-0ubuntu1
  clutter_frame_info_flag_get_type@Base 40.0
  clutter_frame_result_get_type@Base 3.37.91
+ clutter_frame_set_hint@Base 42~beta-0ubuntu1
  clutter_frame_set_result@Base 40.0
  clutter_gesture_action_cancel@Base 3.29.4
  clutter_gesture_action_get_device@Base 3.29.4
@@ -2440,6 +2443,7 @@ libmutter-cogl-10.so.0 libmutter-10-0 #MINVER#
  cogl_onscreen_add_dirty_callback@Base 3.29.4
  cogl_onscreen_add_frame_callback@Base 3.29.4
  cogl_onscreen_add_frame_info@Base 40.0
+ cogl_onscreen_count_pending_frames@Base 42~beta-0ubuntu1
  cogl_onscreen_direct_scanout@Base 3.37.91
  cogl_onscreen_dirty_closure_get_gtype@Base 3.29.4
  cogl_onscreen_egl_get_egl_surface@Base 40.0

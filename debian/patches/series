@@ -4,6 +4,7 @@ meson-add-back-default_driver-option.patch
 tests-Mark-view-verification-tests-as-incomplete-in-big-e.patch
 Consistently-pass-timestamp-as-uint64-when-creating-MetaS.patch
 x11-Add-support-for-fractional-scaling-using-Randr.patch
+Support-Dynamic-triple-double-buffering.patch
 debian/tests-Tag-unstable-tests-as-flaky.patch
 debian/tests-Do-not-run-screencast-tests.patch
 debian/meson-Do-not-mark-CI-test-tools-as-required.patch
