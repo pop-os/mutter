@@ -1,8 +1,8 @@
-mutter (42~alpha-1) UNRELEASED; urgency=medium
+mutter (42~beta-1) UNRELEASED; urgency=medium
 
   * New upstream release
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 18 Feb 2022 01:43:50 +0100
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 18 Feb 2022 01:51:51 +0100
 
 mutter (41.3-3) unstable; urgency=medium
 
