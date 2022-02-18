@@ -36,29 +36,6 @@ G_BEGIN_DECLS
 #include <cogl/cogl-texture.h>
 
 /**
- * cogl_texture_new_with_size:
- * @width: width of texture in pixels.
- * @height: height of texture in pixels.
- * @flags: Optional flags for the texture, or %COGL_TEXTURE_NONE
- * @internal_format: the #CoglPixelFormat to use for the GPU storage of the
- *    texture.
- *
- * Creates a new #CoglTexture with the specified dimensions and pixel format.
- *
- * Return value: (transfer full): A newly created #CoglTexture or %NULL on failure
- *
- * Since: 0.8
- * Deprecated: 1.18: Use specific constructors such as
- *                   cogl_texture_2d_new_with_size()
- */
-COGL_DEPRECATED_FOR (cogl_texture_2d_new_with_size__OR__cogl_texture_2d_sliced_new_with_size)
-COGL_EXPORT CoglTexture *
-cogl_texture_new_with_size (unsigned int width,
-                            unsigned int height,
-                            CoglTextureFlags flags,
-                            CoglPixelFormat internal_format);
-
-/**
  * cogl_texture_new_from_file:
  * @filename: the file to load
  * @flags: Optional flags for the texture, or %COGL_TEXTURE_NONE
@@ -146,38 +123,6 @@ COGL_EXPORT CoglTexture *
 cogl_texture_new_from_bitmap (CoglBitmap *bitmap,
                               CoglTextureFlags flags,
                               CoglPixelFormat internal_format);
-
-/**
- * cogl_texture_new_from_sub_texture:
- * @full_texture: a #CoglTexture pointer
- * @sub_x: X coordinate of the top-left of the subregion
- * @sub_y: Y coordinate of the top-left of the subregion
- * @sub_width: Width in pixels of the subregion
- * @sub_height: Height in pixels of the subregion
- *
- * Creates a new texture which represents a subregion of another
- * texture. The GL resources will be shared so that no new texture
- * data is actually allocated.
- *
- * Sub textures have undefined behaviour texture coordinates outside
- * of the range [0,1] are used.
- *
- * The sub texture will keep a reference to the full texture so you do
- * not need to keep one separately if you only want to use the sub
- * texture.
- *
- * Return value: (transfer full): A newly created #CoglTexture or
- *               %NULL on failure
- * Since: 1.2
- * Deprecated: 1.18: Use cogl_sub_texture_new()
- */
-COGL_DEPRECATED_FOR (cogl_sub_texture_new)
-COGL_EXPORT CoglTexture *
-cogl_texture_new_from_sub_texture (CoglTexture *full_texture,
-                                   int sub_x,
-                                   int sub_y,
-                                   int sub_width,
-                                   int sub_height);
 
 G_END_DECLS
 

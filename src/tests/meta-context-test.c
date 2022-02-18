@@ -72,10 +72,11 @@ meta_context_test_configure (MetaContext   *context,
     META_CONTEXT_CLASS (meta_context_test_parent_class);
   const char *plugin_name;
 
+  g_test_init (argc, argv, NULL);
+
   if (!context_class->configure (context, argc, argv, error))
     return FALSE;
 
-  g_test_init (argc, argv, NULL);
   g_test_bug_base ("https://gitlab.gnome.org/GNOME/mutter/issues/");
 
   if (priv->flags & META_CONTEXT_TEST_FLAG_TEST_CLIENT)
@@ -158,7 +159,18 @@ create_headless_backend (MetaContext  *context,
   return g_initable_new (META_TYPE_BACKEND_NATIVE,
                          NULL, error,
                          "context", context,
-                         "headless", TRUE,
+                         "mode", META_BACKEND_NATIVE_MODE_HEADLESS,
+                         NULL);
+}
+
+static MetaBackend *
+create_native_backend (MetaContext  *context,
+                       GError      **error)
+{
+  return g_initable_new (META_TYPE_BACKEND_NATIVE,
+                         NULL, error,
+                         "context", context,
+                         "mode", META_BACKEND_NATIVE_MODE_TEST,
                          NULL);
 }
 #endif /* HAVE_NATIVE_BACKEND */
@@ -178,6 +190,8 @@ meta_context_test_create_backend (MetaContext  *context,
 #ifdef HAVE_NATIVE_BACKEND
     case META_CONTEXT_TEST_TYPE_HEADLESS:
       return create_headless_backend (context, error);
+    case META_CONTEXT_TEST_TYPE_VKMS:
+      return create_native_backend (context, error);
 #endif /* HAVE_NATIVE_BACKEND */
     }
 
@@ -224,15 +238,30 @@ run_tests_idle (gpointer user_data)
 }
 
 int
-meta_context_test_run_tests (MetaContextTest *context_test)
+meta_context_test_run_tests (MetaContextTest  *context_test,
+                             MetaTestRunFlags  flags)
 {
   MetaContext *context = META_CONTEXT (context_test);
   g_autoptr (GError) error = NULL;
 
   if (!meta_context_setup (context, &error))
     {
-      g_printerr ("Test case failed to start: %s\n", error->message);
-      return EXIT_FAILURE;
+      if ((flags & META_TEST_RUN_FLAG_CAN_SKIP) &&
+          ((g_error_matches (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND) &&
+            strstr (error->message, "No GPUs found")) ||
+           (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_DBUS_ERROR) &&
+            strstr (error->message, "Could not take control")) ||
+           (g_error_matches (error, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_METHOD) &&
+            strstr (error->message, "Could not take control"))))
+        {
+          g_printerr ("Test skipped: %s\n", error->message);
+          return 77;
+        }
+      else
+        {
+          g_printerr ("Test case failed to setup: %s\n", error->message);
+          return EXIT_FAILURE;
+        }
     }
 
   if (!meta_context_start (context, &error))

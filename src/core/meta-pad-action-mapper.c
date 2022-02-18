@@ -582,34 +582,6 @@ meta_pad_action_mapper_handle_button (MetaPadActionMapper         *mapper,
 }
 
 static gboolean
-meta_pad_action_mapper_handle_action (MetaPadActionMapper *mapper,
-                                      ClutterInputDevice  *pad,
-                                      MetaPadActionType    action,
-                                      guint                number,
-                                      MetaPadDirection     direction,
-                                      guint                mode)
-{
-  GSettings *settings;
-  gboolean handled = FALSE;
-  char *accel;
-
-  settings = lookup_pad_action_settings (pad, action, number, direction, mode);
-  accel = g_settings_get_string (settings, "keybinding");
-
-  if (accel && *accel)
-    {
-      meta_pad_action_mapper_emulate_keybinding (mapper, accel, TRUE);
-      meta_pad_action_mapper_emulate_keybinding (mapper, accel, FALSE);
-      handled = TRUE;
-    }
-
-  g_object_unref (settings);
-  g_free (accel);
-
-  return handled;
-}
-
-static gboolean
 meta_pad_action_mapper_get_action_direction (MetaPadActionMapper *mapper,
                                              const ClutterEvent  *event,
                                              MetaPadDirection    *direction)
@@ -660,12 +632,68 @@ meta_pad_action_mapper_get_action_direction (MetaPadActionMapper *mapper,
   return has_direction;
 }
 
+static gboolean
+meta_pad_action_mapper_handle_action (MetaPadActionMapper *mapper,
+                                      ClutterInputDevice  *pad,
+                                      const ClutterEvent  *event,
+                                      MetaPadActionType    action,
+                                      guint                number,
+                                      guint                mode)
+{
+  MetaPadDirection direction = META_PAD_DIRECTION_NONE;
+  g_autoptr (GSettings) settings1 = NULL, settings2 = NULL;
+  g_autofree char *accel1, *accel2;
+  gboolean handled;
+
+  if (action == META_PAD_ACTION_RING)
+    {
+      settings1 = lookup_pad_action_settings (pad, action, number,
+                                              META_PAD_DIRECTION_CW, mode);
+      settings2 = lookup_pad_action_settings (pad, action, number,
+                                              META_PAD_DIRECTION_CCW, mode);
+    }
+  else if (action == META_PAD_ACTION_STRIP)
+    {
+      settings1 = lookup_pad_action_settings (pad, action, number,
+                                              META_PAD_DIRECTION_UP, mode);
+      settings2 = lookup_pad_action_settings (pad, action, number,
+                                              META_PAD_DIRECTION_DOWN, mode);
+    }
+  else
+    {
+      return FALSE;
+    }
+
+  accel1 = g_settings_get_string (settings1, "keybinding");
+  accel2 = g_settings_get_string (settings2, "keybinding");
+  handled = ((accel1 && *accel1) || (accel2 && *accel2));
+
+  if (meta_pad_action_mapper_get_action_direction (mapper, event, &direction))
+    {
+      const gchar *accel;
+
+      if (direction == META_PAD_DIRECTION_UP ||
+          direction == META_PAD_DIRECTION_CW)
+        accel = accel1;
+      else if (direction == META_PAD_DIRECTION_DOWN ||
+               direction == META_PAD_DIRECTION_CCW)
+        accel = accel2;
+
+      if (accel && *accel)
+        {
+          meta_pad_action_mapper_emulate_keybinding (mapper, accel, TRUE);
+          meta_pad_action_mapper_emulate_keybinding (mapper, accel, FALSE);
+        }
+    }
+
+  return handled;
+}
+
 gboolean
 meta_pad_action_mapper_handle_event (MetaPadActionMapper *mapper,
                                      const ClutterEvent  *event)
 {
   ClutterInputDevice *pad;
-  MetaPadDirection direction = META_PAD_DIRECTION_NONE;
 
   pad = clutter_event_get_source_device ((ClutterEvent *) event);
 
@@ -676,45 +704,73 @@ meta_pad_action_mapper_handle_event (MetaPadActionMapper *mapper,
       return meta_pad_action_mapper_handle_button (mapper, pad,
                                                    &event->pad_button);
     case CLUTTER_PAD_RING:
-      if (!meta_pad_action_mapper_get_action_direction (mapper,
-                                                        event, &direction))
-        return FALSE;
-      return meta_pad_action_mapper_handle_action (mapper, pad,
+      return meta_pad_action_mapper_handle_action (mapper, pad, event,
                                                    META_PAD_ACTION_RING,
                                                    event->pad_ring.ring_number,
-                                                   direction,
                                                    event->pad_ring.mode);
     case CLUTTER_PAD_STRIP:
-      if (!meta_pad_action_mapper_get_action_direction (mapper,
-                                                        event, &direction))
-        return FALSE;
-      return meta_pad_action_mapper_handle_action (mapper, pad,
+      return meta_pad_action_mapper_handle_action (mapper, pad, event,
                                                    META_PAD_ACTION_STRIP,
                                                    event->pad_strip.strip_number,
-                                                   direction,
                                                    event->pad_strip.mode);
     default:
       return FALSE;
     }
 }
 
+static void
+format_directional_action (GString          *str,
+                           MetaPadDirection  direction,
+                           const gchar      *action)
+{
+  switch (direction)
+    {
+    case META_PAD_DIRECTION_CW:
+      g_string_append_printf (str, "⭮ %s", action);
+      break;
+    case META_PAD_DIRECTION_CCW:
+      g_string_append_printf (str, "⭯ %s", action);
+      break;
+    case META_PAD_DIRECTION_UP:
+      g_string_append_printf (str, "↥ %s", action);
+      break;
+    case META_PAD_DIRECTION_DOWN:
+      g_string_append_printf (str, "↧ %s", action);
+      break;
+    case META_PAD_DIRECTION_NONE:
+      g_assert_not_reached ();
+    }
+}
 
 static char *
-compose_directional_action_label (GSettings *direction1,
-                                  GSettings *direction2)
+compose_directional_action_label (MetaPadDirection  direction1,
+                                  GSettings        *value1,
+                                  MetaPadDirection  direction2,
+                                  GSettings        *value2)
 {
-  char *accel1, *accel2, *str = NULL;
+  g_autofree char *accel1, *accel2;
+  GString *str;
 
-  accel1 = g_settings_get_string (direction1, "keybinding");
-  accel2 = g_settings_get_string (direction2, "keybinding");
+  accel1 = g_settings_get_string (value1, "keybinding");
+  accel2 = g_settings_get_string (value2, "keybinding");
 
-  if (accel1 && *accel1 && accel2 && *accel2)
-    str = g_strdup_printf ("%s / %s", accel1, accel2);
+  if ((!accel1 || !*accel1) && ((!accel2 || !*accel2)))
+    return NULL;
 
-  g_free (accel1);
-  g_free (accel2);
+  str = g_string_new (NULL);
 
-  return str;
+  if (accel1 && *accel1)
+    format_directional_action (str, direction1, accel1);
+
+  if (accel2 && *accel2)
+    {
+      if (str->len != 0)
+        g_string_append (str, " / ");
+
+      format_directional_action (str, direction2, accel2);
+    }
+
+  return g_string_free (str, FALSE);
 }
 
 static char *
@@ -731,7 +787,8 @@ meta_pad_action_mapper_get_ring_label (MetaPadActionMapper *mapper,
                                           META_PAD_DIRECTION_CW, mode);
   settings2 = lookup_pad_action_settings (pad, META_PAD_ACTION_RING, number,
                                           META_PAD_DIRECTION_CCW, mode);
-  label = compose_directional_action_label (settings1, settings2);
+  label = compose_directional_action_label (META_PAD_DIRECTION_CW, settings1,
+                                            META_PAD_DIRECTION_CCW, settings2);
   g_object_unref (settings1);
   g_object_unref (settings2);
 
@@ -752,7 +809,8 @@ meta_pad_action_mapper_get_strip_label (MetaPadActionMapper *mapper,
                                           META_PAD_DIRECTION_UP, mode);
   settings2 = lookup_pad_action_settings (pad, META_PAD_ACTION_STRIP, number,
                                           META_PAD_DIRECTION_DOWN, mode);
-  label = compose_directional_action_label (settings1, settings2);
+  label = compose_directional_action_label (META_PAD_DIRECTION_UP, settings1,
+                                            META_PAD_DIRECTION_DOWN, settings2);
   g_object_unref (settings1);
   g_object_unref (settings2);
 

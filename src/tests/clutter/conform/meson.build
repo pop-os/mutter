@@ -12,6 +12,7 @@ clutter_tests_conform_link_args = [
 clutter_conform_tests_actor_tests = [
   'actor-clone',
   'actor-destroy',
+  'actor-event-hold',
   'actor-graph',
   'actor-invariants',
   'actor-iter',
@@ -34,6 +35,7 @@ clutter_conform_tests_general_tests = [
   'color',
   'frame-clock',
   'frame-clock-timeline',
+  'grab',
   'interval',
   'script-parser',
   'timeline',

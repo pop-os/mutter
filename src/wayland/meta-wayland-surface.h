@@ -247,6 +247,9 @@ struct _MetaWaylandSurface
      */
     uint64_t sequence;
   } presentation_time;
+
+  /* dma-buf feedback */
+  MetaCrtc *scanout_candidate;
 };
 
 void                meta_wayland_shell_init     (MetaWaylandCompositor *compositor);
@@ -258,9 +261,6 @@ MetaWaylandSurface *meta_wayland_surface_create (MetaWaylandCompositor *composit
 
 MetaWaylandSurfaceState *
                     meta_wayland_surface_get_pending_state (MetaWaylandSurface *surface);
-
-MetaWaylandSurfaceState *
-                    meta_wayland_surface_ensure_cached_state (MetaWaylandSurface *surface);
 
 void                meta_wayland_surface_apply_cached_state (MetaWaylandSurface *surface);
 
@@ -348,6 +348,7 @@ gboolean            meta_wayland_surface_is_shortcuts_inhibited (MetaWaylandSurf
 
 CoglTexture *       meta_wayland_surface_get_texture (MetaWaylandSurface *surface);
 
+META_EXPORT_TEST
 MetaSurfaceActor *  meta_wayland_surface_get_actor (MetaWaylandSurface *surface);
 
 void                meta_wayland_surface_notify_geometry_changed (MetaWaylandSurface *surface);
@@ -361,6 +362,11 @@ int                 meta_wayland_surface_get_height (MetaWaylandSurface *surface
 
 CoglScanout *       meta_wayland_surface_try_acquire_scanout (MetaWaylandSurface *surface,
                                                               CoglOnscreen       *onscreen);
+
+MetaCrtc * meta_wayland_surface_get_scanout_candidate (MetaWaylandSurface *surface);
+
+void meta_wayland_surface_set_scanout_candidate (MetaWaylandSurface *surface,
+                                                 MetaCrtc           *crtc);
 
 static inline GNode *
 meta_get_next_subsurface_sibling (GNode *n)

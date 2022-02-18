@@ -29,6 +29,7 @@
 #include <string.h>
 
 #include "backends/meta-crtc.h"
+#include "backends/native/meta-kms.h"
 #include "backends/native/meta-kms-connector.h"
 #include "backends/native/meta-kms-device.h"
 #include "backends/native/meta-kms-mode.h"
@@ -96,6 +97,47 @@ meta_output_kms_set_underscan (MetaOutputKms *output_kms,
     }
 }
 
+static MetaPrivacyScreenState
+meta_output_kms_get_privacy_screen_state (MetaOutput *output)
+{
+  MetaOutputKms *output_kms = META_OUTPUT_KMS (output);
+  const MetaKmsConnectorState *connector_state;
+
+  connector_state =
+    meta_kms_connector_get_current_state (output_kms->kms_connector);
+
+  return connector_state->privacy_screen_state;
+}
+
+static gboolean
+meta_output_kms_set_privacy_screen_enabled (MetaOutput  *output,
+                                            gboolean     enabled,
+                                            GError     **error)
+{
+  MetaGpu *gpu;
+  MetaKms *kms;
+  MetaKmsDevice *kms_device;
+  MetaKmsUpdate *kms_update;
+  MetaOutputKms *output_kms = META_OUTPUT_KMS (output);
+  MetaKmsConnector *connector = meta_output_kms_get_kms_connector (output_kms);
+
+  if (!meta_kms_connector_is_privacy_screen_supported (connector))
+    {
+      g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+                           "No privacy screen support");
+      return FALSE;
+    }
+
+  gpu = meta_output_get_gpu (META_OUTPUT (output_kms));
+  kms_device = meta_gpu_kms_get_kms_device (META_GPU_KMS (gpu));
+  kms = meta_kms_device_get_kms (kms_device);
+  kms_update = meta_kms_ensure_pending_update (kms, kms_device);
+
+  meta_kms_update_set_privacy_screen (kms_update, connector, enabled);
+
+  return TRUE;
+}
+
 uint32_t
 meta_output_kms_get_connector_id (MetaOutputKms *output_kms)
 {
@@ -132,7 +174,6 @@ add_common_modes (MetaOutputInfo *output_info,
 {
   MetaCrtcMode *crtc_mode;
   GPtrArray *array;
-  float refresh_rate;
   unsigned i;
   unsigned max_hdisplay = 0;
   unsigned max_vdisplay = 0;
@@ -144,17 +185,15 @@ add_common_modes (MetaOutputInfo *output_info,
 
   for (i = 0; i < output_info->n_modes; i++)
     {
-      MetaCrtcMode *crtc_mode = output_info->modes[i];
-      MetaCrtcModeKms *crtc_mode_kms = META_CRTC_MODE_KMS (crtc_mode);
-      MetaKmsMode *kms_mode = meta_crtc_mode_kms_get_kms_mode (crtc_mode_kms);
-      const drmModeModeInfo *drm_mode = meta_kms_mode_get_drm_mode (kms_mode);
+      const MetaCrtcModeInfo *crtc_mode_info =
+        meta_crtc_mode_get_info (output_info->modes[i]);
       float bandwidth;
 
-      refresh_rate = meta_calculate_drm_mode_refresh_rate (drm_mode);
-      bandwidth = refresh_rate * drm_mode->hdisplay * drm_mode->vdisplay;
-      max_hdisplay = MAX (max_hdisplay, drm_mode->hdisplay);
-      max_vdisplay = MAX (max_vdisplay, drm_mode->vdisplay);
-      max_refresh_rate = MAX (max_refresh_rate, refresh_rate);
+      bandwidth = crtc_mode_info->refresh_rate * crtc_mode_info->width *
+                  crtc_mode_info->height;
+      max_hdisplay = MAX (max_hdisplay, crtc_mode_info->width);
+      max_vdisplay = MAX (max_vdisplay, crtc_mode_info->height);
+      max_refresh_rate = MAX (max_refresh_rate, crtc_mode_info->refresh_rate);
       max_bandwidth = MAX (max_bandwidth, bandwidth);
     }
 
@@ -175,6 +214,8 @@ add_common_modes (MetaOutputInfo *output_info,
       MetaKmsMode *fallback_mode = l->data;
       const drmModeModeInfo *drm_mode;
       float bandwidth;
+      float refresh_rate;
+      gboolean is_duplicate = FALSE;
 
       if (!(meta_kms_mode_get_flags (fallback_mode) & flag_filter))
         continue;
@@ -186,6 +227,23 @@ add_common_modes (MetaOutputInfo *output_info,
           drm_mode->vdisplay > max_vdisplay ||
           refresh_rate > max_refresh_rate ||
           bandwidth > max_bandwidth)
+        continue;
+
+      for (i = 0; i < output_info->n_modes; i++)
+        {
+          const MetaCrtcModeInfo *crtc_mode_info =
+            meta_crtc_mode_get_info (output_info->modes[i]);
+
+          if (drm_mode->hdisplay == crtc_mode_info->width &&
+              drm_mode->vdisplay == crtc_mode_info->height &&
+              fabs (1 - (refresh_rate / crtc_mode_info->refresh_rate)) <
+              SYNC_TOLERANCE)
+            {
+              is_duplicate = TRUE;
+              break;
+            }
+        }
+      if (is_duplicate)
         continue;
 
       crtc_mode = meta_gpu_kms_get_mode_from_kms_mode (gpu_kms, fallback_mode);
@@ -409,6 +467,12 @@ static void
 meta_output_kms_class_init (MetaOutputKmsClass *klass)
 {
   MetaOutputNativeClass *output_native_class = META_OUTPUT_NATIVE_CLASS (klass);
+  MetaOutputClass *output_class = META_OUTPUT_CLASS (klass);
+
+  output_class->get_privacy_screen_state =
+    meta_output_kms_get_privacy_screen_state;
+  output_class->set_privacy_screen_enabled =
+    meta_output_kms_set_privacy_screen_enabled;
 
   output_native_class->read_edid = meta_output_kms_read_edid;
 }

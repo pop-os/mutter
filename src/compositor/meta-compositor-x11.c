@@ -74,6 +74,7 @@ meta_compositor_x11_process_xevent (MetaCompositorX11 *compositor_x11,
 {
   MetaCompositor *compositor = META_COMPOSITOR (compositor_x11);
   MetaDisplay *display = meta_compositor_get_display (compositor);
+  MetaBackend *backend = meta_compositor_get_backend (compositor);
   MetaX11Display *x11_display = display->x11_display;
   int damage_event_base;
 
@@ -104,7 +105,7 @@ meta_compositor_x11_process_xevent (MetaCompositorX11 *compositor_x11,
    * stage is invisible
    */
   if (xevent->type == MapNotify)
-    meta_x11_handle_event (xevent);
+    meta_x11_handle_event (backend, xevent);
 }
 
 static void
@@ -209,6 +210,7 @@ meta_compositor_x11_unmanage (MetaCompositor *compositor)
   MetaX11Display *x11_display = display->x11_display;
   Display *xdisplay = x11_display->xdisplay;
   Window xroot = x11_display->xroot;
+  MetaCompositorClass *parent_class;
 
   /*
    * This is the most important part of cleanup - we have to do this before
@@ -216,6 +218,9 @@ meta_compositor_x11_unmanage (MetaCompositor *compositor)
    * able to redirect subwindows
    */
   XCompositeUnredirectSubwindows (xdisplay, xroot, CompositeRedirectManual);
+
+  parent_class = META_COMPOSITOR_CLASS (meta_compositor_x11_parent_class);
+  parent_class->unmanage (compositor);
 }
 
 /*

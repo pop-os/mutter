@@ -60,7 +60,6 @@ typedef struct
   guint abstract_fd_watch_id;
   guint unix_fd_watch_id;
 
-  guint xserver_grace_period_id;
   struct wl_display *wayland_display;
   struct wl_client *client;
   struct wl_resource *xserver_resource;
@@ -68,8 +67,6 @@ typedef struct
 
   GCancellable *xserver_died_cancellable;
   GSubprocess *proc;
-
-  GList *x11_windows;
 
   MetaXWaylandDnd *dnd;
 
@@ -86,6 +83,8 @@ struct _MetaWaylandCompositor
 
   struct wl_display *wayland_display;
   char *display_name;
+  GSource *source;
+
   GHashTable *outputs;
   GList *frame_callback_surfaces;
 
@@ -98,6 +97,7 @@ struct _MetaWaylandCompositor
   GHashTable *scheduled_surface_associations;
 
   MetaWaylandPresentationTime presentation_time;
+  MetaWaylandDmaBufManager *dma_buf_manager;
 };
 
 #define META_TYPE_WAYLAND_COMPOSITOR (meta_wayland_compositor_get_type ())

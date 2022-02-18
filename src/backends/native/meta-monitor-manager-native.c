@@ -34,7 +34,6 @@
  * See also #MetaMonitorManagerXrandr for an implementation using XRandR.
  */
 
-#include "backends/meta-monitor.h"
 #include "config.h"
 
 #include "backends/native/meta-monitor-manager-native.h"
@@ -47,11 +46,12 @@
 #include "backends/meta-backend-private.h"
 #include "backends/meta-crtc.h"
 #include "backends/meta-monitor-config-manager.h"
+#include "backends/meta-monitor.h"
 #include "backends/meta-output.h"
 #include "backends/native/meta-backend-native.h"
 #include "backends/native/meta-crtc-kms.h"
 #include "backends/native/meta-gpu-kms.h"
-#include "backends/native/meta-kms-update.h"
+#include "backends/native/meta-kms-device.h"
 #include "backends/native/meta-kms.h"
 #include "backends/native/meta-launcher.h"
 #include "backends/native/meta-output-kms.h"
@@ -148,8 +148,6 @@ meta_monitor_manager_native_set_power_save_mode (MetaMonitorManager *manager,
                                                  MetaPowerSave       mode)
 {
   MetaBackend *backend = meta_monitor_manager_get_backend (manager);
-  MetaBackendNative *backend_native = META_BACKEND_NATIVE (backend);
-  MetaKms *kms = meta_backend_native_get_kms (backend_native);
   GList *l;
 
   for (l = meta_backend_get_gpus (backend); l; l = l->next)
@@ -170,24 +168,7 @@ meta_monitor_manager_native_set_power_save_mode (MetaMonitorManager *manager,
         case META_POWER_SAVE_SUSPEND:
         case META_POWER_SAVE_OFF:
           {
-            MetaKmsDevice *kms_device = meta_gpu_kms_get_kms_device (gpu_kms);
-            MetaKmsUpdate *kms_update;
-            MetaKmsUpdateFlag flags;
-            g_autoptr (MetaKmsFeedback) kms_feedback = NULL;
-
-            kms_update = meta_kms_ensure_pending_update (kms, kms_device);
-            meta_kms_update_set_power_save (kms_update);
-
-            flags = META_KMS_UPDATE_FLAG_NONE;
-            kms_feedback = meta_kms_post_pending_update_sync (kms,
-                                                              kms_device,
-                                                              flags);
-            if (meta_kms_feedback_get_result (kms_feedback) !=
-                META_KMS_FEEDBACK_PASSED)
-              {
-                g_warning ("Failed to enter power saving mode: %s",
-                           meta_kms_feedback_get_error (kms_feedback)->message);
-              }
+            meta_kms_device_disable (meta_gpu_kms_get_kms_device (gpu_kms));
             break;
           }
         }
@@ -377,12 +358,28 @@ meta_monitor_manager_native_get_crtc_gamma (MetaMonitorManager  *manager,
                                             unsigned short     **green,
                                             unsigned short     **blue)
 {
+  MetaMonitorManagerNative *manager_native =
+    META_MONITOR_MANAGER_NATIVE (manager);
+  MetaCrtcKms *crtc_kms = META_CRTC_KMS (crtc);
+  MetaKmsCrtcGamma *crtc_gamma;
   MetaKmsCrtc *kms_crtc;
   const MetaKmsCrtcState *crtc_state;
 
   g_return_if_fail (META_IS_CRTC_KMS (crtc));
 
-  kms_crtc = meta_crtc_kms_get_kms_crtc (META_CRTC_KMS (crtc));
+  crtc_gamma =
+    meta_monitor_manager_native_get_cached_crtc_gamma (manager_native,
+                                                       crtc_kms);
+  if (crtc_gamma)
+    {
+      *size = crtc_gamma->size;
+      *red = g_memdup2 (crtc_gamma->red, *size * sizeof **red);
+      *green = g_memdup2 (crtc_gamma->green, *size * sizeof **green);
+      *blue = g_memdup2 (crtc_gamma->blue, *size * sizeof **blue);
+      return;
+    }
+
+  kms_crtc = meta_crtc_kms_get_kms_crtc (crtc_kms);
   crtc_state = meta_kms_crtc_get_current_state (kms_crtc);
 
   *size = crtc_state->gamma.size;
@@ -510,6 +507,8 @@ on_kms_resources_changed (MetaKms              *kms,
                           MetaKmsUpdateChanges  changes,
                           MetaMonitorManager   *manager)
 {
+  gboolean needs_emit_privacy_screen_change = FALSE;
+
   g_assert (changes != META_KMS_UPDATE_CHANGE_NONE);
 
   if (changes == META_KMS_UPDATE_CHANGE_GAMMA)
@@ -518,7 +517,29 @@ on_kms_resources_changed (MetaKms              *kms,
       return;
     }
 
+  if (changes & META_KMS_UPDATE_CHANGE_PRIVACY_SCREEN)
+    {
+      if (manager->privacy_screen_change_state ==
+          META_PRIVACY_SCREEN_CHANGE_STATE_NONE)
+        {
+          /* Privacy screen has been changed by "something", the best guess
+           * we can do is that has been triggered by an hotkey.
+           */
+          manager->privacy_screen_change_state =
+            META_PRIVACY_SCREEN_CHANGE_STATE_PENDING_HOTKEY;
+        }
+
+      needs_emit_privacy_screen_change = TRUE;
+
+      if (changes == META_KMS_UPDATE_CHANGE_PRIVACY_SCREEN)
+        goto out;
+    }
+
   handle_hotplug_event (manager);
+
+out:
+  if (needs_emit_privacy_screen_change)
+    meta_monitor_manager_maybe_emit_privacy_screen_change (manager);
 }
 
 static void
@@ -696,6 +717,69 @@ allocate_virtual_monitor_id (MetaMonitorManagerNative *manager_native)
     }
 }
 
+static void
+on_kms_privacy_screen_update_result (const MetaKmsFeedback *kms_feedback,
+                                     gpointer               user_data)
+{
+  MetaMonitorManager *manager = user_data;
+  MetaBackend *backend = meta_monitor_manager_get_backend (manager);
+  MetaKms *kms = meta_backend_native_get_kms (META_BACKEND_NATIVE (backend));
+
+  if (meta_kms_feedback_get_result (kms_feedback) == META_KMS_FEEDBACK_FAILED)
+    {
+      manager->privacy_screen_change_state =
+        META_PRIVACY_SCREEN_CHANGE_STATE_NONE;
+      return;
+    }
+
+  on_kms_resources_changed (kms,
+                            META_KMS_UPDATE_CHANGE_PRIVACY_SCREEN,
+                            manager);
+}
+
+static gboolean
+meta_monitor_manager_native_set_privacy_screen_enabled (MetaMonitorManager *manager,
+                                                        gboolean            enabled)
+{
+  MetaMonitorManagerClass *manager_class;
+  MetaBackend *backend = meta_monitor_manager_get_backend (manager);
+  MetaKms *kms = meta_backend_native_get_kms (META_BACKEND_NATIVE (backend));
+  gboolean any_update = FALSE;
+  GList *l;
+
+  manager_class =
+    META_MONITOR_MANAGER_CLASS (meta_monitor_manager_native_parent_class);
+
+  if (!manager_class->set_privacy_screen_enabled (manager, enabled))
+    return FALSE;
+
+  for (l = meta_kms_get_devices (kms); l; l = l->next)
+    {
+      MetaKmsDevice *kms_device = l->data;
+      MetaKmsUpdate *kms_update;
+
+      kms_update = meta_kms_get_pending_update (kms, kms_device);
+
+      if (kms_update)
+        {
+          meta_kms_update_remove_result_listeners (
+            kms_update, on_kms_privacy_screen_update_result, manager);
+          meta_kms_update_add_result_listener (
+            kms_update, on_kms_privacy_screen_update_result, manager);
+          any_update = TRUE;
+       }
+    }
+
+  if (any_update)
+    {
+      ClutterStage *stage = CLUTTER_STAGE (meta_backend_get_stage (backend));
+
+      clutter_stage_schedule_update (stage);
+    }
+
+  return TRUE;
+}
+
 static MetaVirtualMonitor *
 meta_monitor_manager_native_create_virtual_monitor (MetaMonitorManager            *manager,
                                                     const MetaVirtualMonitorInfo  *info,
@@ -819,6 +903,8 @@ meta_monitor_manager_native_class_init (MetaMonitorManagerNativeClass *klass)
     meta_monitor_manager_native_get_crtc_gamma;
   manager_class->set_crtc_gamma =
     meta_monitor_manager_native_set_crtc_gamma;
+  manager_class->set_privacy_screen_enabled =
+    meta_monitor_manager_native_set_privacy_screen_enabled;
   manager_class->is_transform_handled =
     meta_monitor_manager_native_is_transform_handled;
   manager_class->calculate_monitor_mode_scale =

@@ -26,6 +26,7 @@
 
 #include "config.h"
 
+#include "core/display-private.h"
 #include "core/util-private.h"
 
 #include <stdio.h>
@@ -71,17 +72,10 @@ static const GDebugKey meta_debug_keys[] = {
   { "screen-cast", META_DEBUG_SCREEN_CAST },
   { "remote-desktop", META_DEBUG_REMOTE_DESKTOP },
   { "backend", META_DEBUG_BACKEND },
+  { "render", META_DEBUG_RENDER },
 };
 
-#ifdef WITH_VERBOSE_MODE
-static void
-meta_topic_real_valist (MetaDebugTopic topic,
-                        const char    *format,
-                        va_list        args) G_GNUC_PRINTF(2, 0);
-#endif
-
 static gint verbose_topics = 0;
-static int no_prefix = 0;
 static gboolean is_wayland_compositor = FALSE;
 static int debug_paint_flags = 0;
 
@@ -264,18 +258,8 @@ utf8_fputs (const char *str,
 }
 
 #ifdef WITH_VERBOSE_MODE
-void
-meta_verbose_real (const char *format, ...)
-{
-  va_list args;
-
-  va_start (args, format);
-  meta_topic_real_valist (META_DEBUG_VERBOSE, format, args);
-  va_end (args);
-}
-
-static const char*
-topic_name (MetaDebugTopic topic)
+const char *
+meta_topic_to_string (MetaDebugTopic topic)
 {
   switch (topic)
     {
@@ -319,6 +303,8 @@ topic_name (MetaDebugTopic topic)
       return "DBUS";
     case META_DEBUG_INPUT:
       return "INPUT";
+    case META_DEBUG_WAYLAND:
+      return "WAYLAND";
     case META_DEBUG_KMS:
       return "KMS";
     case META_DEBUG_SCREEN_CAST:
@@ -327,16 +313,14 @@ topic_name (MetaDebugTopic topic)
       return "REMOTE_DESKTOP";
     case META_DEBUG_BACKEND:
       return "BACKEND";
+    case META_DEBUG_RENDER:
+      return "RENDER";
     case META_DEBUG_VERBOSE:
       return "VERBOSE";
-    case META_DEBUG_WAYLAND:
-      return "WAYLAND";
     }
 
   return "WM";
 }
-
-static int sync_count = 0;
 
 gboolean
 meta_is_topic_enabled (MetaDebugTopic topic)
@@ -348,52 +332,6 @@ meta_is_topic_enabled (MetaDebugTopic topic)
     return FALSE;
 
   return !!(verbose_topics & topic);
-}
-
-static void
-meta_topic_real_valist (MetaDebugTopic topic,
-                        const char    *format,
-                        va_list        args)
-{
-  gchar *str;
-  FILE *out;
-
-  g_return_if_fail (format != NULL);
-
-  if (!meta_is_topic_enabled (topic))
-    return;
-
-  str = g_strdup_vprintf (format, args);
-
-  out = logfile ? logfile : stderr;
-
-  if (no_prefix == 0)
-    fprintf (out, "%s: ", topic_name (topic));
-
-  if (topic == META_DEBUG_SYNC)
-    {
-      ++sync_count;
-      fprintf (out, "%d: ", sync_count);
-    }
-
-  utf8_fputs (str, out);
-  utf8_fputs ("\n", out);
-
-  fflush (out);
-
-  g_free (str);
-}
-
-void
-meta_topic_real (MetaDebugTopic topic,
-                 const char *format,
-                 ...)
-{
-  va_list args;
-
-  va_start (args, format);
-  meta_topic_real_valist (topic, format, args);
-  va_end (args);
 }
 #endif /* WITH_VERBOSE_MODE */
 
@@ -416,8 +354,7 @@ meta_bug (const char *format, ...)
   out = stderr;
 #endif
 
-  if (no_prefix == 0)
-    utf8_fputs ("Bug in window manager: ", out);
+  utf8_fputs ("Bug in window manager: ", out);
   utf8_fputs (str, out);
   utf8_fputs ("\n", out);
 
@@ -448,8 +385,7 @@ meta_warning (const char *format, ...)
   out = stderr;
 #endif
 
-  if (no_prefix == 0)
-    utf8_fputs ("Window manager warning: ", out);
+  utf8_fputs ("Window manager warning: ", out);
   utf8_fputs (str, out);
   utf8_fputs ("\n", out);
 
@@ -479,8 +415,7 @@ meta_fatal (const char *format, ...)
   out = stderr;
 #endif
 
-  if (no_prefix == 0)
-    utf8_fputs ("Window manager error: ", out);
+  utf8_fputs ("Window manager error: ", out);
   utf8_fputs (str, out);
   utf8_fputs ("\n", out);
 
@@ -489,20 +424,6 @@ meta_fatal (const char *format, ...)
   g_free (str);
 
   meta_exit (META_EXIT_ERROR);
-}
-
-void
-meta_push_no_msg_prefix (void)
-{
-  ++no_prefix;
-}
-
-void
-meta_pop_no_msg_prefix (void)
-{
-  g_return_if_fail (no_prefix > 0);
-
-  --no_prefix;
 }
 
 void
@@ -596,6 +517,15 @@ append_argument (GPtrArray  *args,
     locale_arg = g_strdup ("???");
 
   g_ptr_array_add (args, locale_arg);
+}
+
+static void
+child_setup (gpointer user_data)
+{
+  MetaDisplay *display = meta_get_display ();
+  MetaContext *context = meta_display_get_context (display);
+
+  meta_context_restore_rlimit_nofile (context, NULL);
 }
 
 /**
@@ -702,7 +632,7 @@ meta_show_dialog (const char *type,
                  (gchar**) args->pdata,
                  NULL,
                  G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD,
-                 NULL, NULL,
+                 child_setup, NULL,
                  &child_pid,
                  &error
                  );
@@ -769,6 +699,12 @@ meta_remove_clutter_debug_flags (ClutterDebugFlag     debug_flags,
   clutter_remove_debug_flags (debug_flags, draw_flags, pick_flags);
 }
 
+/**
+ * meta_get_clutter_debug_flags:
+ * @debug_flags: (out) (optional): return location for debug flags
+ * @draw_flags: (out) (optional): return location for draw debug flags
+ * @pick_flags: (out) (optional): return location for pick debug flags
+ */
 void
 meta_get_clutter_debug_flags (ClutterDebugFlag     *debug_flags,
                               ClutterDrawDebugFlag *draw_flags,

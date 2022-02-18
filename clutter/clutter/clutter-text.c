@@ -187,6 +187,13 @@ struct _ClutterTextPrivate
   ClutterInputContentHintFlags input_hints;
   ClutterInputContentPurpose input_purpose;
 
+  ClutterGrab *grab;
+
+  float last_click_x;
+  float last_click_y;
+  uint32_t last_click_time_ms;
+  int click_count;
+
   /* bitfields */
   guint alignment               : 2;
   guint wrap                    : 1;
@@ -2163,6 +2170,39 @@ clutter_text_select_line (ClutterText *self)
   clutter_text_set_selection (self, start_pos, end_pos);
 }
 
+static int
+clutter_text_update_click_count (ClutterText        *self,
+                                 const ClutterEvent *event)
+{
+  ClutterTextPrivate *priv = self->priv;
+  ClutterSettings *settings;
+  int double_click_time, double_click_distance;
+  uint32_t evtime;
+  float x, y;
+
+  settings = clutter_settings_get_default ();
+  clutter_event_get_coords (event, &x, &y);
+  evtime = clutter_event_get_time (event);
+
+  g_object_get (settings,
+                "double-click-distance", &double_click_distance,
+                "double-click-time", &double_click_time,
+                NULL);
+
+  if (evtime > (priv->last_click_time_ms + double_click_time) ||
+      (ABS (x - priv->last_click_x) > double_click_distance) ||
+      (ABS (y - priv->last_click_y) > double_click_distance))
+    priv->click_count = 0;
+
+  priv->last_click_time_ms = evtime;
+  priv->last_click_x = x;
+  priv->last_click_y = y;
+
+  priv->click_count = (priv->click_count % 3) + 1;
+
+  return priv->click_count;
+}
+
 static gboolean
 clutter_text_press (ClutterActor *actor,
                     ClutterEvent *event)
@@ -2170,6 +2210,7 @@ clutter_text_press (ClutterActor *actor,
   ClutterText *self = CLUTTER_TEXT (actor);
   ClutterTextPrivate *priv = self->priv;
   ClutterEventType type = clutter_event_type (event);
+  ClutterActor *stage;
   gboolean res = FALSE;
   gfloat x, y;
   gint index_;
@@ -2219,7 +2260,9 @@ clutter_text_press (ClutterActor *actor,
        */
       if (type == CLUTTER_BUTTON_PRESS)
         {
-          gint click_count = clutter_event_get_click_count (event);
+          gint click_count;
+
+          click_count = clutter_text_update_click_count (self, event);
 
           if (click_count == 1)
             {
@@ -2248,18 +2291,11 @@ clutter_text_press (ClutterActor *actor,
   /* grab the pointer */
   priv->in_select_drag = TRUE;
 
-  if (type == CLUTTER_BUTTON_PRESS)
-    {
-      clutter_input_device_grab (clutter_event_get_device (event),
-                                 actor);
-    }
-  else
-    {
-      clutter_input_device_sequence_grab (clutter_event_get_device (event),
-                                          clutter_event_get_event_sequence (event),
-                                          actor);
-      priv->in_select_touch = TRUE;
-    }
+  stage = clutter_actor_get_stage (actor);
+  priv->grab = clutter_stage_grab (CLUTTER_STAGE (stage), actor);
+
+  if (type != CLUTTER_BUTTON_PRESS)
+    priv->in_select_touch = TRUE;
 
   return CLUTTER_EVENT_STOP;
 }
@@ -2306,11 +2342,16 @@ clutter_text_release (ClutterActor *actor,
 
   if (priv->in_select_drag)
     {
+      if (priv->grab)
+        {
+          clutter_grab_dismiss (priv->grab);
+          g_clear_pointer (&priv->grab, clutter_grab_unref);
+        }
+
       if (type == CLUTTER_BUTTON_RELEASE)
         {
           if (!priv->in_select_touch)
             {
-              clutter_input_device_ungrab (clutter_event_get_device (event));
               priv->in_select_drag = FALSE;
 
               return CLUTTER_EVENT_STOP;
@@ -2320,11 +2361,6 @@ clutter_text_release (ClutterActor *actor,
         {
           if (priv->in_select_touch)
             {
-              ClutterInputDevice *device = clutter_event_get_device (event);
-              ClutterEventSequence *sequence =
-                clutter_event_get_event_sequence (event);
-
-              clutter_input_device_sequence_ungrab (device, sequence);
               priv->in_select_touch = FALSE;
               priv->in_select_drag = FALSE;
 

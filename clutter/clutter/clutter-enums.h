@@ -804,6 +804,7 @@ typedef enum /*< flags prefix=CLUTTER_EVENT >*/
   CLUTTER_EVENT_FLAG_INPUT_METHOD = 1 << 1,
   CLUTTER_EVENT_FLAG_REPEATED     = 1 << 2,
   CLUTTER_EVENT_FLAG_RELATIVE_MOTION = 1 << 3,
+  CLUTTER_EVENT_FLAG_GRAB_NOTIFY  = 1 << 4,
 } ClutterEventFlags;
 
 /**
@@ -829,6 +830,11 @@ typedef enum /*< flags prefix=CLUTTER_EVENT >*/
  *   determined by its phase field; event added in 1.24
  * @CLUTTER_TOUCHPAD_SWIPE: A swipe gesture event, the current state is
  *   determined by its phase field; event added in 1.24
+ * @CLUTTER_TOUCHPAD_HOLD: A hold gesture event, the current state is
+ *   determined by its phase field. A hold gesture starts when the user places a
+ *   finger on the touchpad and ends when all fingers are lifted. It is
+ *   cancelled when the finger(s) move past a certain threshold.
+ *   Event added in 40.4
  * @CLUTTER_PROXIMITY_IN: A tool entered in proximity to a tablet;
  *   event added in 1.28
  * @CLUTTER_PROXIMITY_OUT: A tool left from the proximity area of a tablet;
@@ -857,6 +863,7 @@ typedef enum /*< prefix=CLUTTER >*/
   CLUTTER_TOUCH_CANCEL,
   CLUTTER_TOUCHPAD_PINCH,
   CLUTTER_TOUCHPAD_SWIPE,
+  CLUTTER_TOUCHPAD_HOLD,
   CLUTTER_PROXIMITY_IN,
   CLUTTER_PROXIMITY_OUT,
   CLUTTER_PAD_BUTTON_PRESS,
@@ -898,12 +905,7 @@ typedef enum /*< prefix=CLUTTER_SCROLL >*/
 
 /**
  * ClutterFeatureFlags:
- * @CLUTTER_FEATURE_STAGE_STATIC: Set if stage size if fixed (i.e framebuffer)
- * @CLUTTER_FEATURE_STAGE_CURSOR: Set if stage has a graphical cursor.
  * @CLUTTER_FEATURE_SHADERS_GLSL: Set if the backend supports GLSL shaders.
- * @CLUTTER_FEATURE_OFFSCREEN: Set if the backend supports offscreen rendering.
- * @CLUTTER_FEATURE_STAGE_MULTIPLE: Set if multiple stages are supported.
- * @CLUTTER_FEATURE_SWAP_EVENTS: Set if the GLX_INTEL_swap_event is supported.
  *
  * Runtime flags indicating specific features available via Clutter window
  * system and graphics backend.
@@ -912,12 +914,7 @@ typedef enum /*< prefix=CLUTTER_SCROLL >*/
  */
 typedef enum
 {
-  CLUTTER_FEATURE_STAGE_STATIC           = (1 << 6),
-  CLUTTER_FEATURE_STAGE_CURSOR           = (1 << 8),
   CLUTTER_FEATURE_SHADERS_GLSL           = (1 << 9),
-  CLUTTER_FEATURE_OFFSCREEN              = (1 << 10),
-  CLUTTER_FEATURE_STAGE_MULTIPLE         = (1 << 11),
-  CLUTTER_FEATURE_SWAP_EVENTS            = (1 << 12)
 } ClutterFeatureFlags;
 
 /**
@@ -1440,24 +1437,6 @@ typedef enum
 } ClutterStepMode;
 
 /**
- * ClutterZoomAxis:
- * @CLUTTER_ZOOM_X_AXIS: Scale only on the X axis
- * @CLUTTER_ZOOM_Y_AXIS: Scale only on the Y axis
- * @CLUTTER_ZOOM_BOTH: Scale on both axis
- *
- * The axis of the constraint that should be applied by the
- * zooming action.
- *
- * Since: 1.12
- */
-typedef enum /*< prefix=CLUTTER_ZOOM >*/
-{
-  CLUTTER_ZOOM_X_AXIS,
-  CLUTTER_ZOOM_Y_AXIS,
-  CLUTTER_ZOOM_BOTH
-} ClutterZoomAxis;
-
-/**
  * ClutterGestureTriggerEdge:
  * @CLUTTER_GESTURE_TRIGGER_EDGE_NONE: Tell #ClutterGestureAction that
  * the gesture must begin immediately and there's no drag limit that
@@ -1643,6 +1622,21 @@ typedef enum
   CLUTTER_PREEDIT_RESET_CLEAR,
   CLUTTER_PREEDIT_RESET_COMMIT,
 } ClutterPreeditResetMode;
+
+typedef enum
+{
+  CLUTTER_PHASE_CAPTURE,
+  CLUTTER_PHASE_BUBBLE,
+} ClutterEventPhase;
+
+typedef enum
+{
+  CLUTTER_GRAB_STATE_NONE = 0,
+  CLUTTER_GRAB_STATE_POINTER = 1 << 0,
+  CLUTTER_GRAB_STATE_KEYBOARD = 1 << 1,
+  CLUTTER_GRAB_STATE_ALL = (CLUTTER_GRAB_STATE_POINTER |
+                            CLUTTER_GRAB_STATE_KEYBOARD),
+} ClutterGrabState;
 
 G_END_DECLS
 

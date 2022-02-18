@@ -120,6 +120,12 @@ struct _MetaMonitorConfigStore
   GFile *user_file;
   GFile *custom_read_file;
   GFile *custom_write_file;
+
+  gboolean has_stores_policy;
+  GList *stores_policy;
+
+  gboolean has_dbus_policy;
+  MetaMonitorConfigPolicy policy;
 };
 
 #define META_MONITOR_CONFIG_STORE_ERROR (meta_monitor_config_store_error_quark ())
@@ -136,6 +142,7 @@ G_DEFINE_QUARK (meta-monitor-config-store-error-quark,
 typedef enum
 {
   STATE_INITIAL,
+  STATE_UNKNOWN,
   STATE_MONITORS,
   STATE_CONFIGURATION,
   STATE_MIGRATED,
@@ -161,12 +168,19 @@ typedef enum
   STATE_MONITOR_MODE_FLAG,
   STATE_MONITOR_UNDERSCANNING,
   STATE_DISABLED,
+  STATE_POLICY,
+  STATE_STORES,
+  STATE_STORE,
+  STATE_DBUS,
 } ParserState;
 
 typedef struct
 {
   ParserState state;
   MetaMonitorConfigStore *config_store;
+  GFile *file;
+
+  GHashTable *pending_configs;
 
   ParserState monitor_spec_parent_state;
 
@@ -179,12 +193,47 @@ typedef struct
   MetaMonitorConfig *current_monitor_config;
   MetaLogicalMonitorConfig *current_logical_monitor_config;
   GList *current_disabled_monitor_specs;
+  gboolean seen_policy;
+  gboolean seen_stores;
+  gboolean seen_dbus;
+  MetaConfigStore pending_store;
+  GList *stores;
+
+  gboolean enable_dbus_set;
+  gboolean enable_dbus;
+
+  ParserState unknown_state_root;
+  int unknown_level;
 
   MetaMonitorsConfigFlag extra_config_flags;
 } ConfigParser;
 
 G_DEFINE_TYPE (MetaMonitorConfigStore, meta_monitor_config_store,
                G_TYPE_OBJECT)
+
+static gboolean
+text_equals (const char *text,
+             int         len,
+             const char *expect)
+{
+  if (strlen (expect) != len)
+    return FALSE;
+
+  return strncmp (text, expect, len) == 0;
+}
+
+static void
+enter_unknown_element (ConfigParser *parser,
+                       const char   *element_name,
+                       const char   *root_element_name,
+                       ParserState   root_state)
+{
+  parser->state = STATE_UNKNOWN;
+  parser->unknown_level = 1;
+  parser->unknown_state_root = root_state;
+  g_warning ("Unknown element <%s> under <%s>, ignoring",
+             element_name, root_element_name);
+}
 
 static void
 handle_start_element (GMarkupParseContext  *context,
@@ -240,15 +289,37 @@ handle_start_element (GMarkupParseContext  *context,
 
     case STATE_MONITORS:
       {
-        if (!g_str_equal (element_name, "configuration"))
+        if (g_str_equal (element_name, "configuration"))
           {
-            g_set_error (error, G_MARKUP_ERROR, G_MARKUP_ERROR_UNKNOWN_ELEMENT,
-                         "Invalid toplevel element '%s'", element_name);
+            parser->state = STATE_CONFIGURATION;
+            parser->current_was_migrated = FALSE;
+          }
+        else if (g_str_equal (element_name, "policy"))
+          {
+            if (parser->seen_policy)
+              {
+                g_set_error (error,
+                             G_MARKUP_ERROR, G_MARKUP_ERROR_UNKNOWN_ELEMENT,
+                             "Multiple policy definitions");
+                return;
+              }
+
+            parser->seen_policy = TRUE;
+            parser->state = STATE_POLICY;
+          }
+        else
+          {
+            enter_unknown_element (parser, element_name,
+                                   "monitors", STATE_MONITORS);
             return;
           }
 
-        parser->state = STATE_CONFIGURATION;
-        parser->current_was_migrated = FALSE;
+        return;
+      }
+
+    case STATE_UNKNOWN:
+      {
+        parser->unknown_level++;
 
         return;
       }
@@ -274,9 +345,8 @@ handle_start_element (GMarkupParseContext  *context,
           }
         else
           {
-            g_set_error (error, G_MARKUP_ERROR, G_MARKUP_ERROR_UNKNOWN_ELEMENT,
-                         "Invalid configuration element '%s'", element_name);
-            return;
+            enter_unknown_element (parser, element_name,
+                                   "configuration", STATE_CONFIGURATION);
           }
 
         return;
@@ -323,9 +393,8 @@ handle_start_element (GMarkupParseContext  *context,
           }
         else
           {
-            g_set_error (error, G_MARKUP_ERROR, G_MARKUP_ERROR_UNKNOWN_ELEMENT,
-                         "Invalid monitor logicalmonitor element '%s'", element_name);
-            return;
+            enter_unknown_element (parser, element_name,
+                                   "logicalmonitor", STATE_LOGICAL_MONITOR);
           }
 
         return;
@@ -488,6 +557,79 @@ handle_start_element (GMarkupParseContext  *context,
         parser->monitor_spec_parent_state = STATE_DISABLED;
         parser->state = STATE_MONITOR_SPEC;
 
+        return;
+      }
+
+    case STATE_POLICY:
+      {
+        if (!(parser->extra_config_flags &
+              META_MONITORS_CONFIG_FLAG_SYSTEM_CONFIG))
+          {
+            g_set_error (error, G_MARKUP_ERROR, G_MARKUP_ERROR_INVALID_CONTENT,
+                         "Policy can only be defined in system level configurations");
+            return;
+          }
+
+        if (g_str_equal (element_name, "stores"))
+          {
+            if (parser->seen_stores)
+              {
+                g_set_error (error, G_MARKUP_ERROR, G_MARKUP_ERROR_UNKNOWN_ELEMENT,
+                             "Multiple stores elements under policy");
+                return;
+              }
+
+            parser->seen_stores = TRUE;
+            parser->state = STATE_STORES;
+          }
+        else if (g_str_equal (element_name, "dbus"))
+          {
+            if (parser->seen_dbus)
+              {
+                g_set_error (error,
+                             G_MARKUP_ERROR, G_MARKUP_ERROR_UNKNOWN_ELEMENT,
+                             "Multiple dbus elements under policy");
+                return;
+              }
+
+            parser->seen_dbus = TRUE;
+            parser->state = STATE_DBUS;
+          }
+        else
+          {
+            enter_unknown_element (parser, element_name,
+                                   "policy", STATE_POLICY);
+          }
+
+        return;
+      }
+
+    case STATE_STORES:
+      {
+        if (g_str_equal (element_name, "store"))
+          {
+            parser->state = STATE_STORE;
+          }
+        else
+          {
+            enter_unknown_element (parser, element_name,
+                                   "stores", STATE_STORES);
+          }
+
+        return;
+      }
+
+    case STATE_STORE:
+      {
+        g_set_error (error, G_MARKUP_ERROR, G_MARKUP_ERROR_UNKNOWN_ELEMENT,
+                     "Invalid store sub element '%s'", element_name);
+        return;
+      }
+
+    case STATE_DBUS:
+      {
+        g_set_error (error, G_MARKUP_ERROR, G_MARKUP_ERROR_UNKNOWN_ELEMENT,
+                     "Invalid dbus sub element '%s'", element_name);
         return;
       }
     }
@@ -786,10 +928,91 @@ handle_end_element (GMarkupParseContext  *context,
             return;
           }
 
-        g_hash_table_replace (parser->config_store->configs,
+        g_hash_table_replace (parser->pending_configs,
                               config->key, config);
 
         parser->state = STATE_MONITORS;
+        return;
+      }
+
+    case STATE_STORE:
+        g_assert (g_str_equal (element_name, "store"));
+
+        if (parser->pending_store == -1)
+          {
+            g_set_error (error, G_MARKUP_ERROR, G_MARKUP_ERROR_INVALID_CONTENT,
+                         "Got an empty store");
+            return;
+          }
+
+        if (g_list_find (parser->stores,
+                         GINT_TO_POINTER (parser->pending_store)))
+          {
+            g_set_error (error, G_MARKUP_ERROR, G_MARKUP_ERROR_INVALID_CONTENT,
+                         "Multiple identical stores in policy");
+            return;
+          }
+
+        parser->stores =
+          g_list_append (parser->stores,
+                         GINT_TO_POINTER (parser->pending_store));
+        parser->pending_store = -1;
+
+        parser->state = STATE_STORES;
+        return;
+
+    case STATE_STORES:
+        g_assert (g_str_equal (element_name, "stores"));
+
+        if (parser->config_store->has_stores_policy)
+          {
+            g_warning ("Ignoring stores policy from '%s', "
+                       "it has already been configured",
+                       g_file_peek_path (parser->file));
+            g_clear_pointer (&parser->stores, g_list_free);
+          }
+        else
+          {
+            parser->config_store->stores_policy =
+              g_steal_pointer (&parser->stores);
+            parser->config_store->has_stores_policy = TRUE;
+          }
+
+        parser->state = STATE_POLICY;
+        return;
+
+    case STATE_DBUS:
+        if (!parser->config_store->has_dbus_policy)
+          {
+            parser->config_store->has_dbus_policy = TRUE;
+            parser->config_store->policy.enable_dbus = parser->enable_dbus;
+            parser->enable_dbus_set = FALSE;
+          }
+        else
+          {
+            g_warning ("Policy for monitor configuration via D-Bus "
+                       "has already been set, ignoring policy from '%s'",
+                       g_file_get_path (parser->file));
+          }
+        parser->state = STATE_POLICY;
+
+        return;
+
+    case STATE_POLICY:
+        g_assert (g_str_equal (element_name, "policy"));
+
+        parser->state = STATE_MONITORS;
+        return;
+
+    case STATE_UNKNOWN:
+      {
+        parser->unknown_level--;
+        if (parser->unknown_level == 0)
+          {
+            g_assert (parser->unknown_state_root >= 0);
+            parser->state = parser->unknown_state_root;
+            parser->unknown_state_root = -1;
+          }
         return;
       }
 
@@ -870,12 +1093,12 @@ read_bool (const char  *text,
            gboolean    *out_value,
            GError     **error)
 {
-  if (strncmp (text, "no", text_len) == 0)
+  if (text_equals (text, text_len, "no"))
     {
       *out_value = FALSE;
       return TRUE;
     }
-  else if (strncmp (text, "yes", text_len) == 0)
+  else if (text_equals (text, text_len, "yes"))
     {
       *out_value = TRUE;
       return TRUE;
@@ -912,6 +1135,9 @@ handle_text (GMarkupParseContext *context,
 
   switch (parser->state)
     {
+    case STATE_UNKNOWN:
+      return;
+
     case STATE_INITIAL:
     case STATE_MONITORS:
     case STATE_CONFIGURATION:
@@ -922,6 +1148,8 @@ handle_text (GMarkupParseContext *context,
     case STATE_MONITOR_MODE:
     case STATE_TRANSFORM:
     case STATE_DISABLED:
+    case STATE_POLICY:
+    case STATE_STORES:
       {
         if (!is_all_whitespace (text, text_len))
           g_set_error (error, G_MARKUP_ERROR, G_MARKUP_ERROR_INVALID_CONTENT,
@@ -1002,13 +1230,13 @@ handle_text (GMarkupParseContext *context,
 
     case STATE_TRANSFORM_ROTATION:
       {
-        if (strncmp (text, "normal", text_len) == 0)
+        if (text_equals (text, text_len, "normal"))
           parser->current_transform = META_MONITOR_TRANSFORM_NORMAL;
-        else if (strncmp (text, "left", text_len) == 0)
+        else if (text_equals (text, text_len, "left"))
           parser->current_transform = META_MONITOR_TRANSFORM_90;
-        else if (strncmp (text, "upside_down", text_len) == 0)
+        else if (text_equals (text, text_len, "upside_down"))
           parser->current_transform = META_MONITOR_TRANSFORM_180;
-        else if (strncmp (text, "right", text_len) == 0)
+        else if (text_equals (text, text_len, "right"))
           parser->current_transform = META_MONITOR_TRANSFORM_270;
         else
           g_set_error (error, G_MARKUP_ERROR, G_MARKUP_ERROR_INVALID_CONTENT,
@@ -1051,7 +1279,7 @@ handle_text (GMarkupParseContext *context,
 
     case STATE_MONITOR_MODE_FLAG:
       {
-        if (strncmp (text, "interlace", text_len) == 0)
+        if (text_equals (text, text_len, "interlace"))
           {
             parser->current_monitor_mode_spec->flags |=
               META_CRTC_MODE_FLAG_INTERLACE;
@@ -1072,6 +1300,45 @@ handle_text (GMarkupParseContext *context,
                    error);
         return;
       }
+
+    case STATE_STORE:
+      {
+        MetaConfigStore store;
+
+        if (parser->pending_store != -1)
+          {
+            g_set_error (error, G_MARKUP_ERROR, G_MARKUP_ERROR_INVALID_CONTENT,
+                         "Multiple store strings");
+            return;
+          }
+
+        if (text_equals (text, text_len, "system"))
+          {
+            store = META_CONFIG_STORE_SYSTEM;
+          }
+        else if (text_equals (text, text_len, "user"))
+          {
+            store = META_CONFIG_STORE_USER;
+          }
+        else
+          {
+            g_set_error (error, G_MARKUP_ERROR, G_MARKUP_ERROR_INVALID_CONTENT,
+                         "Invalid store %.*s", (int) text_len, text);
+            return;
+          }
+
+        parser->pending_store = store;
+        return;
+      }
+
+    case STATE_DBUS:
+      {
+        parser->enable_dbus_set = TRUE;
+        read_bool (text, text_len,
+                   &parser->enable_dbus,
+                   error);
+        return;
+      }
     }
 }
 
@@ -1085,6 +1352,7 @@ static gboolean
 read_config_file (MetaMonitorConfigStore  *config_store,
                   GFile                   *file,
                   MetaMonitorsConfigFlag   extra_config_flags,
+                  GHashTable             **out_configs,
                   GError                 **error)
 {
   char *buffer;
@@ -1097,8 +1365,15 @@ read_config_file (MetaMonitorConfigStore  *config_store,
 
   parser = (ConfigParser) {
     .state = STATE_INITIAL,
+    .file = file,
     .config_store = config_store,
+    .pending_configs = g_hash_table_new_full (meta_monitors_config_key_hash,
+                                              meta_monitors_config_key_equal,
+                                              NULL,
+                                              g_object_unref),
     .extra_config_flags = extra_config_flags,
+    .unknown_state_root = -1,
+    .pending_store = -1,
   };
 
   parse_context = g_markup_parse_context_new (&config_parser,
@@ -1116,8 +1391,12 @@ read_config_file (MetaMonitorConfigStore  *config_store,
                       meta_monitor_config_free);
       g_clear_pointer (&parser.current_logical_monitor_config,
                        meta_logical_monitor_config_free);
+      g_list_free (parser.stores);
+      g_hash_table_unref (parser.pending_configs);
       return FALSE;
     }
+
+  *out_configs = g_steal_pointer (&parser.pending_configs);
 
   g_markup_parse_context_free (parse_context);
   g_free (buffer);
@@ -1418,6 +1697,11 @@ meta_monitor_config_store_save (MetaMonitorConfigStore *config_store)
       return;
     }
 
+  if (config_store->has_stores_policy &&
+      !g_list_find (config_store->stores_policy,
+                    GINT_TO_POINTER (META_CONFIG_STORE_USER)))
+    return;
+
   config_store->save_cancellable = g_cancellable_new ();
 
   buffer = generate_config_xml (config_store);
@@ -1477,29 +1761,48 @@ meta_monitor_config_store_remove (MetaMonitorConfigStore *config_store,
 }
 
 gboolean
-meta_monitor_config_store_set_custom (MetaMonitorConfigStore *config_store,
-                                      const char             *read_path,
-                                      const char             *write_path,
-                                      GError                **error)
+meta_monitor_config_store_set_custom (MetaMonitorConfigStore  *config_store,
+                                      const char              *read_path,
+                                      const char              *write_path,
+                                      MetaMonitorsConfigFlag   config_flags,
+                                      GError                 **error)
 {
+  GHashTable *new_configs = NULL;
+
   g_clear_object (&config_store->custom_read_file);
   g_clear_object (&config_store->custom_write_file);
-  g_hash_table_remove_all (config_store->configs);
 
   config_store->custom_read_file = g_file_new_for_path (read_path);
   if (write_path)
     config_store->custom_write_file = g_file_new_for_path (write_path);
 
-  return read_config_file (config_store,
-                           config_store->custom_read_file,
-                           META_MONITORS_CONFIG_FLAG_NONE,
-                           error);
+  g_clear_pointer (&config_store->stores_policy, g_list_free);
+  config_store->has_stores_policy = FALSE;
+  config_store->policy.enable_dbus = TRUE;
+  config_store->has_dbus_policy = FALSE;
+
+  if (!read_config_file (config_store,
+                         config_store->custom_read_file,
+                         config_flags,
+                         &new_configs,
+                         error))
+    return FALSE;
+
+  g_clear_pointer (&config_store->configs, g_hash_table_unref);
+  config_store->configs = g_steal_pointer (&new_configs);
+  return TRUE;
 }
 
 int
 meta_monitor_config_store_get_config_count (MetaMonitorConfigStore *config_store)
 {
   return (int) g_hash_table_size (config_store->configs);
+}
+
+GList *
+meta_monitor_config_store_get_stores_policy (MetaMonitorConfigStore *config_store)
+{
+  return config_store->stores_policy;
 }
 
 MetaMonitorManager *
@@ -1520,75 +1823,8 @@ static void
 meta_monitor_config_store_constructed (GObject *object)
 {
   MetaMonitorConfigStore *config_store = META_MONITOR_CONFIG_STORE (object);
-  const char * const *system_dirs;
-  char *user_file_path;
-  GError *error = NULL;
 
-  for (system_dirs = g_get_system_config_dirs ();
-       system_dirs && *system_dirs;
-       system_dirs++)
-    {
-      g_autofree char *system_file_path = NULL;
-
-      system_file_path = g_build_filename (*system_dirs, "monitors.xml", NULL);
-      if (g_file_test (system_file_path, G_FILE_TEST_EXISTS))
-        {
-          g_autoptr (GFile) system_file = NULL;
-
-          system_file = g_file_new_for_path (system_file_path);
-          if (!read_config_file (config_store,
-                                 system_file,
-                                 META_MONITORS_CONFIG_FLAG_SYSTEM_CONFIG,
-                                 &error))
-            {
-              if (g_error_matches (error,
-                                   META_MONITOR_CONFIG_STORE_ERROR,
-                                   META_MONITOR_CONFIG_STORE_ERROR_NEEDS_MIGRATION))
-                g_warning ("System monitor configuration file (%s) is "
-                           "incompatible; ask your administrator to migrate "
-                           "the system monitor configuration.",
-                           system_file_path);
-              else
-                g_warning ("Failed to read monitors config file '%s': %s",
-                           system_file_path, error->message);
-              g_clear_error (&error);
-            }
-        }
-    }
-
-  user_file_path = g_build_filename (g_get_user_config_dir (),
-                                     "monitors.xml",
-                                     NULL);
-  config_store->user_file = g_file_new_for_path (user_file_path);
-
-  if (g_file_test (user_file_path, G_FILE_TEST_EXISTS))
-    {
-      if (!read_config_file (config_store,
-                             config_store->user_file,
-                             META_MONITORS_CONFIG_FLAG_NONE,
-                             &error))
-        {
-          if (error->domain == META_MONITOR_CONFIG_STORE_ERROR &&
-              error->code == META_MONITOR_CONFIG_STORE_ERROR_NEEDS_MIGRATION)
-            {
-              g_clear_error (&error);
-              if (!meta_migrate_old_user_monitors_config (config_store, &error))
-                {
-                  g_warning ("Failed to migrate old monitors config file: %s",
-                             error->message);
-                  g_error_free (error);
-                }
-            }
-          else
-            {
-              g_warning ("Failed to read monitors config file '%s': %s",
-                         user_file_path, error->message);
-              g_error_free (error);
-            }
-        }
-    }
-
-  g_free (user_file_path);
+  meta_monitor_config_store_reset (config_store);
 
   G_OBJECT_CLASS (meta_monitor_config_store_parent_class)->constructed (object);
 }
@@ -1611,6 +1847,7 @@ meta_monitor_config_store_dispose (GObject *object)
   g_clear_object (&config_store->user_file);
   g_clear_object (&config_store->custom_read_file);
   g_clear_object (&config_store->custom_write_file);
+  g_clear_pointer (&config_store->stores_policy, g_list_free);
 
   G_OBJECT_CLASS (meta_monitor_config_store_parent_class)->dispose (object);
 }
@@ -1658,6 +1895,7 @@ meta_monitor_config_store_init (MetaMonitorConfigStore *config_store)
                                                  meta_monitors_config_key_equal,
                                                  NULL,
                                                  g_object_unref);
+  config_store->policy.enable_dbus = TRUE;
 }
 
 static void
@@ -1680,4 +1918,140 @@ meta_monitor_config_store_class_init (MetaMonitorConfigStoreClass *klass)
                          G_PARAM_CONSTRUCT_ONLY);
 
   g_object_class_install_properties (object_class, PROP_LAST, obj_props);
+}
+
+static void
+replace_configs (MetaMonitorConfigStore *config_store,
+                 GHashTable             *configs)
+{
+  GHashTableIter iter;
+  MetaMonitorsConfigKey *key;
+  MetaMonitorsConfig *config;
+
+  g_hash_table_iter_init (&iter, configs);
+  while (g_hash_table_iter_next (&iter,
+                                 (gpointer *) &key,
+                                 (gpointer *) &config))
+    {
+      g_hash_table_iter_steal (&iter);
+      g_hash_table_replace (config_store->configs, key, config);
+    }
+}
+
+void
+meta_monitor_config_store_reset (MetaMonitorConfigStore *config_store)
+{
+  g_autoptr (GHashTable) system_configs = NULL;
+  g_autoptr (GHashTable) user_configs = NULL;
+  const char * const *system_dirs;
+  char *user_file_path;
+  GError *error = NULL;
+
+  g_clear_object (&config_store->user_file);
+  g_clear_object (&config_store->custom_read_file);
+  g_clear_object (&config_store->custom_write_file);
+  g_hash_table_remove_all (config_store->configs);
+
+  for (system_dirs = g_get_system_config_dirs ();
+       system_dirs && *system_dirs;
+       system_dirs++)
+    {
+      g_autofree char *system_file_path = NULL;
+
+      system_file_path = g_build_filename (*system_dirs, "monitors.xml", NULL);
+      if (g_file_test (system_file_path, G_FILE_TEST_EXISTS))
+        {
+          g_autoptr (GFile) system_file = NULL;
+
+          system_file = g_file_new_for_path (system_file_path);
+          if (!read_config_file (config_store,
+                                 system_file,
+                                 META_MONITORS_CONFIG_FLAG_SYSTEM_CONFIG,
+                                 &system_configs,
+                                 &error))
+            {
+              if (g_error_matches (error,
+                                   META_MONITOR_CONFIG_STORE_ERROR,
+                                   META_MONITOR_CONFIG_STORE_ERROR_NEEDS_MIGRATION))
+                g_warning ("System monitor configuration file (%s) is "
+                           "incompatible; ask your administrator to migrate "
+                           "the system monitor configuration.",
+                           system_file_path);
+              else
+                g_warning ("Failed to read monitors config file '%s': %s",
+                           system_file_path, error->message);
+              g_clear_error (&error);
+            }
+        }
+    }
+
+  user_file_path = g_build_filename (g_get_user_config_dir (),
+                                     "monitors.xml",
+                                     NULL);
+  config_store->user_file = g_file_new_for_path (user_file_path);
+
+  if (g_file_test (user_file_path, G_FILE_TEST_EXISTS))
+    {
+      if (!read_config_file (config_store,
+                             config_store->user_file,
+                             META_MONITORS_CONFIG_FLAG_NONE,
+                             &user_configs,
+                             &error))
+        {
+          if (error->domain == META_MONITOR_CONFIG_STORE_ERROR &&
+              error->code == META_MONITOR_CONFIG_STORE_ERROR_NEEDS_MIGRATION)
+            {
+              g_clear_error (&error);
+              if (!meta_migrate_old_user_monitors_config (config_store, &error))
+                {
+                  g_warning ("Failed to migrate old monitors config file: %s",
+                             error->message);
+                  g_error_free (error);
+                }
+            }
+          else
+            {
+              g_warning ("Failed to read monitors config file '%s': %s",
+                         user_file_path, error->message);
+              g_error_free (error);
+            }
+        }
+    }
+
+  if (config_store->has_stores_policy)
+    {
+      GList *l;
+
+      for (l = g_list_last (config_store->stores_policy); l; l = l->prev)
+        {
+          MetaConfigStore store = GPOINTER_TO_INT (l->data);
+
+          switch (store)
+            {
+            case META_CONFIG_STORE_SYSTEM:
+              if (system_configs)
+                replace_configs (config_store, system_configs);
+              break;
+            case META_CONFIG_STORE_USER:
+              if (user_configs)
+                replace_configs (config_store, user_configs);
+            }
+        }
+    }
+  else
+    {
+      if (system_configs)
+        replace_configs (config_store, system_configs);
+      if (user_configs)
+        replace_configs (config_store, user_configs);
+    }
+
+
+  g_free (user_file_path);
+}
+
+const MetaMonitorConfigPolicy *
+meta_monitor_config_store_get_policy (MetaMonitorConfigStore *config_store)
+{
+  return &config_store->policy;
 }

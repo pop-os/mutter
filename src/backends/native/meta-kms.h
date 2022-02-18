@@ -31,12 +31,6 @@ typedef enum _MetaKmsFlags
   META_KMS_FLAG_NO_MODE_SETTING = 1 << 0,
 } MetaKmsFlags;
 
-typedef enum _MetaKmsUpdateFlag
-{
-  META_KMS_UPDATE_FLAG_NONE = 0,
-  META_KMS_UPDATE_FLAG_PRESERVE_ON_ERROR = 1 << 0,
-} MetaKmsUpdateFlag;
-
 #define META_TYPE_KMS (meta_kms_get_type ())
 G_DECLARE_FINAL_TYPE (MetaKms, meta_kms, META, KMS, GObject)
 
@@ -52,12 +46,17 @@ MetaKmsFeedback * meta_kms_post_pending_update_sync (MetaKms           *kms,
                                                      MetaKmsDevice     *device,
                                                      MetaKmsUpdateFlag  flags);
 
+MetaKmsFeedback * meta_kms_post_test_update_sync (MetaKms       *kms,
+                                                  MetaKmsUpdate *update);
+
 void meta_kms_discard_pending_page_flips (MetaKms *kms);
 
 void meta_kms_notify_modes_set (MetaKms *kms);
 
+META_EXPORT_TEST
 MetaBackend * meta_kms_get_backend (MetaKms *kms);
 
+META_EXPORT_TEST
 GList * meta_kms_get_devices (MetaKms *kms);
 
 void meta_kms_resume (MetaKms *kms);

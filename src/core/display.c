@@ -124,6 +124,9 @@ typedef struct
 typedef struct _MetaDisplayPrivate
 {
   MetaContext *context;
+
+  guint queue_later_ids[META_N_QUEUE_TYPES];
+  GList *queue_windows[META_N_QUEUE_TYPES];
 } MetaDisplayPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE (MetaDisplay, meta_display, G_TYPE_OBJECT)
@@ -163,6 +166,7 @@ enum
   WORKAREAS_CHANGED,
   CLOSING,
   INIT_XSERVER,
+  WINDOW_VISIBILITY_UPDATED,
   LAST_SIGNAL
 };
 
@@ -194,6 +198,12 @@ static void    prefs_changed_callback    (MetaPreference pref,
 
 static int mru_cmp (gconstpointer a,
                     gconstpointer b);
+
+static void
+meta_display_show_osd (MetaDisplay *display,
+                       gint         monitor_idx,
+                       const gchar *icon_name,
+                       const gchar *message);
 
 static void
 meta_display_get_property(GObject         *object,
@@ -519,6 +529,16 @@ meta_display_class_init (MetaDisplayClass *klass)
                   NULL, NULL,
                   G_TYPE_BOOLEAN, 1, G_TYPE_TASK);
 
+  display_signals[WINDOW_VISIBILITY_UPDATED] =
+    g_signal_new ("window-visibility-updated",
+                  G_TYPE_FROM_CLASS (klass),
+                  G_SIGNAL_RUN_LAST,
+                  0, NULL, NULL, NULL,
+                  G_TYPE_NONE, 3,
+                  G_TYPE_POINTER,
+                  G_TYPE_POINTER,
+                  G_TYPE_POINTER);
+
   g_object_class_install_property (object_class,
                                    PROP_COMPOSITOR_MODIFIERS,
                                    g_param_spec_flags ("compositor-modifiers",
@@ -653,6 +673,19 @@ on_ui_scaling_factor_changed (MetaSettings *settings,
                               MetaDisplay  *display)
 {
   meta_display_reload_cursor (display);
+}
+
+static void
+on_monitor_privacy_screen_changed (MetaDisplay        *display,
+                                   MetaLogicalMonitor *logical_monitor,
+                                   gboolean            enabled)
+{
+  meta_display_show_osd (display,
+                         logical_monitor->number,
+                         enabled ? "screen-privacy-symbolic"
+                                 : "screen-privacy-disabled-symbolic",
+                         enabled ? _("Privacy Screen Enabled")
+                                 : _("Privacy Screen Disabled"));
 }
 
 static gboolean
@@ -863,6 +896,9 @@ meta_display_new (MetaContext  *context,
   monitor_manager = meta_backend_get_monitor_manager (backend);
   g_signal_connect (monitor_manager, "monitors-changed-internal",
                     G_CALLBACK (on_monitors_changed_internal), display);
+  g_signal_connect_object (monitor_manager, "monitor-privacy-screen-changed",
+                           G_CALLBACK (on_monitor_privacy_screen_changed),
+                           display, G_CONNECT_SWAPPED);
 
   display->pad_action_mapper = meta_pad_action_mapper_new (monitor_manager);
 
@@ -889,7 +925,11 @@ meta_display_new (MetaContext  *context,
 #ifdef HAVE_WAYLAND
   if (meta_is_wayland_compositor ())
     {
+      MetaWaylandCompositor *wayland_compositor =
+        meta_wayland_compositor_get_default ();
       MetaX11DisplayPolicy x11_display_policy;
+
+      meta_wayland_compositor_init_display (wayland_compositor, display);
 
       x11_display_policy = meta_context_get_x11_display_policy (context);
       if (x11_display_policy == META_X11_DISPLAY_POLICY_MANDATORY)
@@ -1725,11 +1765,9 @@ static void
 manage_root_cursor_sprite_scale (MetaDisplay             *display,
                                  MetaCursorSpriteXcursor *sprite_xcursor)
 {
-  g_signal_connect_object (sprite_xcursor,
-                           "prepare-at",
-                           G_CALLBACK (root_cursor_prepare_at),
-                           display,
-                           0);
+  meta_cursor_sprite_set_prepare_func (META_CURSOR_SPRITE (sprite_xcursor),
+                                       (MetaCursorPrepareFunc) root_cursor_prepare_at,
+                                       display);
 }
 
 void
@@ -1792,10 +1830,6 @@ get_event_route_from_grab_op (MetaGrabOp op)
 
     case META_GRAB_OP_WINDOW_BASE:
       return META_EVENT_ROUTE_WINDOW_OP;
-
-    case META_GRAB_OP_COMPOSITOR:
-      /* begin_grab_op shouldn't be called with META_GRAB_OP_COMPOSITOR. */
-      g_assert_not_reached ();
 
     case META_GRAB_OP_WAYLAND_POPUP:
       return META_EVENT_ROUTE_WAYLAND_POPUP;
@@ -2029,9 +2063,7 @@ meta_display_end_grab_op (MetaDisplay *display,
  * Gets the current grab operation, if any.
  *
  * Return value: the current grab operation, or %META_GRAB_OP_NONE if
- * Mutter doesn't currently have a grab. %META_GRAB_OP_COMPOSITOR will
- * be returned if a compositor-plugin modal operation is in effect
- * (See mutter_begin_modal_for_plugin())
+ * Mutter doesn't currently have a grab.
  */
 MetaGrabOp
 meta_display_get_grab_op (MetaDisplay *display)
@@ -2142,6 +2174,7 @@ meta_display_ping_timeout (gpointer data)
   MetaDisplay *display = window->display;
 
   meta_window_set_alive (window, FALSE);
+  meta_window_show_close_dialog (window);
 
   ping_data->ping_timeout_id = 0;
 
@@ -2231,6 +2264,8 @@ meta_display_ping_window (MetaWindow *window,
               serial, window->desc);
 
   META_WINDOW_GET_CLASS (window)->ping (window, serial);
+
+  window->events_during_ping = 0;
 }
 
 /**
@@ -2382,6 +2417,31 @@ mru_cmp (gconstpointer a,
     return 1;
   else
     return 0;
+}
+
+/**
+ * meta_display_list_all_windows:
+ * @display: a #MetaDisplay
+ *
+ * List all windows, including override-redirect ones. The windows are
+ * in no particular order.
+ *
+ * Returns: (transfer container) (element-type Meta.Window): List of windows
+ */
+GList *
+meta_display_list_all_windows (MetaDisplay *display)
+{
+  GList *all_windows = NULL;
+  g_autoptr (GSList) windows = NULL;
+  GSList *l;
+
+  windows = meta_display_list_windows (display,
+                                       META_LIST_INCLUDE_OVERRIDE_REDIRECT);
+
+  /* Yay for mixing GList and GSList in the API */
+  for (l = windows; l; l = l->next)
+    all_windows = g_list_prepend (all_windows, l->data);
+  return all_windows;
 }
 
 /**
@@ -3886,4 +3946,193 @@ MetaSelection *
 meta_display_get_selection (MetaDisplay *display)
 {
   return display->selection;
+}
+
+#ifdef WITH_VERBOSE_MODE
+static const char* meta_window_queue_names[META_N_QUEUE_TYPES] =
+  {
+    "calc-showing",
+    "move-resize",
+  };
+#endif
+
+static int
+window_stack_cmp (gconstpointer a,
+                  gconstpointer b)
+{
+  MetaWindow *aw = (gpointer) a;
+  MetaWindow *bw = (gpointer) b;
+
+  return meta_stack_windows_cmp (aw->display->stack,
+                                 aw, bw);
+}
+
+static void
+warn_on_incorrectly_unmanaged_window (MetaWindow *window)
+{
+  g_warn_if_fail (!window->unmanaging);
+}
+
+static gboolean
+update_window_visibilities_idle (gpointer user_data)
+{
+  MetaDisplay *display = META_DISPLAY (user_data);
+  MetaDisplayPrivate *priv = meta_display_get_instance_private (display);
+  int queue_idx;
+  g_autoptr (GList) windows = NULL;
+  g_autoptr (GList) unplaced = NULL;
+  g_autoptr (GList) should_show = NULL;
+  g_autoptr (GList) should_hide = NULL;
+  GList *l;
+
+  COGL_TRACE_BEGIN_SCOPED (MetaDisplayUpdateVisibility,
+                           "Display: Update visibility");
+
+  queue_idx = __builtin_ctz (META_QUEUE_CALC_SHOWING);
+
+  windows = g_steal_pointer (&priv->queue_windows[queue_idx]);
+  priv->queue_later_ids[queue_idx] = 0;
+
+  for (l = windows; l; l = l->next)
+    {
+      MetaWindow *window = l->data;
+
+      if (!window->placed)
+        unplaced = g_list_prepend (unplaced, window);
+      else if (meta_window_should_be_showing (window))
+        should_show = g_list_prepend (should_show, window);
+      else
+        should_hide = g_list_prepend (should_hide, window);
+    }
+
+  /* Sort bottom to top */
+  unplaced = g_list_sort (unplaced, window_stack_cmp);
+  should_hide = g_list_sort (should_hide, window_stack_cmp);
+
+  /* Sort top to bottom */
+  should_show = g_list_sort (should_show, window_stack_cmp);
+  should_show = g_list_reverse (should_show);
+
+  COGL_TRACE_BEGIN (MetaDisplayShowUnplacedWindows,
+                    "Display: Show unplaced windows");
+  g_list_foreach (unplaced, (GFunc) meta_window_update_visibility, NULL);
+  COGL_TRACE_END (MetaDisplayShowUnplacedWindows);
+
+  meta_stack_freeze (display->stack);
+
+  COGL_TRACE_BEGIN (MetaDisplayShowWindows, "Display: Show windows");
+  g_list_foreach (should_show, (GFunc) meta_window_update_visibility, NULL);
+  COGL_TRACE_END (MetaDisplayShowWindows);
+
+  COGL_TRACE_BEGIN (MetaDisplayHideWindows, "Display: Show windows");
+  g_list_foreach (should_hide, (GFunc) meta_window_update_visibility, NULL);
+  COGL_TRACE_END (MetaDisplayHideWindows);
+
+  meta_stack_thaw (display->stack);
+
+  g_list_foreach (windows, (GFunc) meta_window_clear_queued, NULL);
+
+  g_signal_emit (display, display_signals[WINDOW_VISIBILITY_UPDATED], 0,
+                 unplaced, should_show, should_hide);
+
+  g_list_foreach (windows, (GFunc) warn_on_incorrectly_unmanaged_window, NULL);
+
+  return G_SOURCE_REMOVE;
+}
+
+static gboolean
+move_resize_idle (gpointer user_data)
+{
+  MetaDisplay *display = META_DISPLAY (user_data);
+  MetaDisplayPrivate *priv = meta_display_get_instance_private (display);
+  int queue_idx;
+  g_autoptr (GList) windows = NULL;
+
+  queue_idx = __builtin_ctz (META_QUEUE_MOVE_RESIZE);
+
+  windows = g_steal_pointer (&priv->queue_windows[queue_idx]);
+  priv->queue_later_ids[queue_idx] = 0;
+
+  g_list_foreach (windows, (GFunc) meta_window_update_layout, NULL);
+  g_list_foreach (windows, (GFunc) warn_on_incorrectly_unmanaged_window, NULL);
+
+  return G_SOURCE_REMOVE;
+}
+
+void
+meta_display_queue_window (MetaDisplay   *display,
+                           MetaWindow    *window,
+                           MetaQueueType  queue_types)
+{
+  MetaDisplayPrivate *priv = meta_display_get_instance_private (display);
+  MetaCompositor *compositor = display->compositor;
+  MetaLaters *laters = meta_compositor_get_laters (compositor);
+  int queue_idx;
+
+  for (queue_idx = 0; queue_idx < META_N_QUEUE_TYPES; queue_idx++)
+    {
+      const MetaLaterType window_queue_later_when[META_N_QUEUE_TYPES] =
+        {
+          META_LATER_CALC_SHOWING,
+          META_LATER_RESIZE,
+        };
+
+      const GSourceFunc window_queue_later_handler[META_N_QUEUE_TYPES] =
+        {
+          update_window_visibilities_idle,
+          move_resize_idle,
+        };
+
+      if (!(queue_types & 1 << queue_idx))
+        continue;
+
+      meta_topic (META_DEBUG_WINDOW_STATE,
+                  "Queueing %s for window '%s'",
+                  meta_window_queue_names[queue_idx],
+                  meta_window_get_description (window));
+
+      priv->queue_windows[queue_idx] =
+        g_list_prepend (priv->queue_windows[queue_idx], window);
+
+      if (!priv->queue_later_ids[queue_idx])
+        {
+          meta_laters_add (laters,
+                           window_queue_later_when[queue_idx],
+                           window_queue_later_handler[queue_idx],
+                           display, NULL);
+
+        }
+    }
+}
+
+void
+meta_display_unqueue_window (MetaDisplay   *display,
+                             MetaWindow    *window,
+                             MetaQueueType  queue_types)
+{
+  MetaDisplayPrivate *priv = meta_display_get_instance_private (display);
+  MetaCompositor *compositor = display->compositor;
+  MetaLaters *laters = meta_compositor_get_laters (compositor);
+  int queue_idx;
+
+  for (queue_idx = 0; queue_idx < META_N_QUEUE_TYPES; queue_idx++)
+    {
+      if (!(queue_types & 1 << queue_idx))
+        continue;
+
+      meta_topic (META_DEBUG_WINDOW_STATE,
+                  "Unqueuing %s for window '%s'",
+                  meta_window_queue_names[queue_idx],
+                  window->desc);
+
+      priv->queue_windows[queue_idx] =
+        g_list_remove (priv->queue_windows[queue_idx], window);
+
+      if (!priv->queue_windows[queue_idx] && priv->queue_later_ids[queue_idx])
+        {
+          meta_laters_remove (laters,
+                              priv->queue_later_ids[queue_idx]);
+          priv->queue_later_ids[queue_idx] = 0;
+        }
+    }
 }

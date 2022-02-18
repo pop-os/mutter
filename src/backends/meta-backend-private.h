@@ -106,6 +106,8 @@ struct _MetaBackendClass
 
   void (* set_pointer_constraint) (MetaBackend           *backend,
                                    MetaPointerConstraint *constraint);
+
+  gboolean (* is_headless) (MetaBackend *backend);
 };
 
 void meta_backend_destroy (MetaBackend *backend);
@@ -115,6 +117,7 @@ void meta_backend_prepare_shutdown (MetaBackend *backend);
 META_EXPORT_TEST
 ClutterBackend * meta_backend_get_clutter_backend (MetaBackend *backend);
 
+META_EXPORT_TEST
 ClutterSeat * meta_backend_get_default_seat (MetaBackend *bakcend);
 
 MetaIdleMonitor * meta_backend_get_idle_monitor (MetaBackend        *backend,
@@ -123,9 +126,8 @@ MetaIdleMonitor * meta_backend_get_idle_monitor (MetaBackend        *backend,
 MetaIdleManager * meta_backend_get_idle_manager (MetaBackend *backend);
 
 META_EXPORT_TEST
-MetaMonitorManager * meta_backend_get_monitor_manager (MetaBackend *backend);
-META_EXPORT_TEST
 MetaOrientationManager * meta_backend_get_orientation_manager (MetaBackend *backend);
+META_EXPORT_TEST
 MetaCursorTracker * meta_backend_get_cursor_tracker (MetaBackend *backend);
 MetaCursorRenderer * meta_backend_get_cursor_renderer_for_device (MetaBackend        *backend,
                                                                   ClutterInputDevice *device);
@@ -151,6 +153,7 @@ void meta_backend_finish_touch_sequence (MetaBackend          *backend,
                                          ClutterEventSequence *sequence,
                                          MetaSequenceState     state);
 
+META_EXPORT_TEST
 MetaLogicalMonitor * meta_backend_get_current_logical_monitor (MetaBackend *backend);
 
 struct xkb_keymap * meta_backend_get_keymap (MetaBackend *backend);
@@ -158,9 +161,6 @@ struct xkb_keymap * meta_backend_get_keymap (MetaBackend *backend);
 xkb_layout_index_t meta_backend_get_keymap_layout_group (MetaBackend *backend);
 
 gboolean meta_backend_is_lid_closed (MetaBackend *backend);
-
-void meta_backend_update_last_device (MetaBackend        *backend,
-                                      ClutterInputDevice *device);
 
 MetaPointerConstraint * meta_backend_get_client_pointer_constraint (MetaBackend *backend);
 void meta_backend_set_client_pointer_constraint (MetaBackend *backend,
@@ -201,5 +201,8 @@ void meta_backend_remove_hw_cursor_inhibitor (MetaBackend           *backend,
                                               MetaHwCursorInhibitor *inhibitor);
 
 gboolean meta_backend_is_hw_cursors_inhibited (MetaBackend *backend);
+
+void meta_backend_update_from_event (MetaBackend  *backend,
+                                     ClutterEvent *event);
 
 #endif /* META_BACKEND_PRIVATE_H */

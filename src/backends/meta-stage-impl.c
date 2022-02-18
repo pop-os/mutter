@@ -36,11 +36,13 @@
 #include "clutter/clutter-mutter.h"
 #include "cogl/cogl.h"
 #include "core/util-private.h"
+#include "meta/meta-backend.h"
 
 #define MAX_STACK_RECTS 256
 
 typedef struct _MetaStageImplPrivate
 {
+  MetaBackend *backend;
   int64_t global_frame_counter;
 } MetaStageImplPrivate;
 
@@ -57,10 +59,14 @@ G_DEFINE_TYPE_WITH_CODE (MetaStageImpl,
 enum
 {
   PROP_0,
+
   PROP_WRAPPER,
   PROP_BACKEND,
-  PROP_LAST
+
+  N_PROPS
 };
+
+static GParamSpec *obj_props[N_PROPS];
 
 static void
 meta_stage_impl_unrealize (ClutterStageWindow *stage_window)
@@ -197,6 +203,48 @@ paint_damage_region (ClutterStageWindow *stage_window,
     }
 
   cogl_framebuffer_pop_matrix (framebuffer);
+}
+
+static void
+queue_damage_region (ClutterStageWindow *stage_window,
+                     ClutterStageView   *stage_view,
+                     cairo_region_t     *damage_region)
+{
+  int *damage, n_rects, i;
+  g_autofree int *freeme = NULL;
+  CoglFramebuffer *framebuffer;
+  CoglOnscreen *onscreen;
+
+  if (cairo_region_is_empty (damage_region))
+    return;
+
+  framebuffer = clutter_stage_view_get_onscreen (stage_view);
+  if (!COGL_IS_ONSCREEN (framebuffer))
+    return;
+
+  onscreen = COGL_ONSCREEN (framebuffer);
+
+  n_rects = cairo_region_num_rectangles (damage_region);
+
+  if (n_rects < MAX_STACK_RECTS)
+    damage = g_newa (int, n_rects * 4);
+  else
+    damage = freeme = g_new (int, n_rects * 4);
+
+  for (i = 0; i < n_rects; i++)
+    {
+      cairo_rectangle_int_t rect;
+      int height = cogl_framebuffer_get_height (framebuffer);
+
+      cairo_region_get_rectangle (damage_region, i, &rect);
+      damage[i * 4] = rect.x;
+      /* y coordinate needs to be flipped for OpenGL */
+      damage[i * 4 + 1] = height - rect.y - rect.height;
+      damage[i * 4 + 2] = rect.width;
+      damage[i * 4 + 3] = rect.height;
+    }
+
+  cogl_onscreen_queue_damage_region (onscreen, damage, n_rects);
 }
 
 static void
@@ -550,6 +598,8 @@ meta_stage_impl_redraw_view_primary (MetaStageImpl    *stage_impl,
     }
   else if (use_clipped_redraw)
     {
+      queue_damage_region (stage_window, stage_view, fb_clip_region);
+
       cogl_framebuffer_push_region_clip (fb, fb_clip_region);
 
       paint_stage (stage_impl, stage_view, redraw_clip);
@@ -722,6 +772,7 @@ meta_stage_impl_set_property (GObject      *gobject,
                               GParamSpec   *pspec)
 {
   MetaStageImpl *self = META_STAGE_IMPL (gobject);
+  MetaStageImplPrivate *priv = meta_stage_impl_get_instance_private (self);
 
   switch (prop_id)
     {
@@ -730,7 +781,7 @@ meta_stage_impl_set_property (GObject      *gobject,
       break;
 
     case PROP_BACKEND:
-      self->backend = g_value_get_object (value);
+      priv->backend = g_value_get_object (value);
       break;
 
     default:
@@ -746,11 +797,35 @@ meta_stage_impl_class_init (MetaStageImplClass *klass)
 
   gobject_class->set_property = meta_stage_impl_set_property;
 
-  g_object_class_override_property (gobject_class, PROP_WRAPPER, "wrapper");
-  g_object_class_override_property (gobject_class, PROP_BACKEND, "backend");
+  obj_props[PROP_WRAPPER] =
+    g_param_spec_object ("wrapper",
+                         "Wrapper",
+                         "Back pointer to the Stage actor",
+                         CLUTTER_TYPE_STAGE,
+                         G_PARAM_WRITABLE |
+                         G_PARAM_CONSTRUCT_ONLY |
+                         G_PARAM_STATIC_STRINGS);
+  obj_props[PROP_BACKEND] =
+    g_param_spec_object ("backend",
+                         "MetaBackend",
+                         "MetaBackend",
+                         META_TYPE_BACKEND,
+                         G_PARAM_WRITABLE |
+                         G_PARAM_CONSTRUCT_ONLY |
+                         G_PARAM_STATIC_STRINGS);
+  g_object_class_install_properties (gobject_class, N_PROPS, obj_props);
 }
 
 static void
 meta_stage_impl_init (MetaStageImpl *stage)
 {
+}
+
+MetaBackend *
+meta_stage_impl_get_backend (MetaStageImpl *stage_impl)
+{
+  MetaStageImplPrivate *priv =
+    meta_stage_impl_get_instance_private (stage_impl);
+
+  return priv->backend;
 }

@@ -72,6 +72,8 @@ struct _MetaEgl
 
   PFNEGLQUERYDMABUFFORMATSEXTPROC eglQueryDmaBufFormatsEXT;
   PFNEGLQUERYDMABUFMODIFIERSEXTPROC eglQueryDmaBufModifiersEXT;
+
+  PFNEGLQUERYDISPLAYATTRIBEXTPROC eglQueryDisplayAttribEXT;
 };
 
 G_DEFINE_TYPE (MetaEgl, meta_egl, G_TYPE_OBJECT)
@@ -157,6 +159,9 @@ set_egl_error (GError **error)
     return;
 
   error_number = eglGetError ();
+  if (error_number == EGL_SUCCESS)
+    return;
+
   error_str = get_egl_error_str (error_number);
   g_set_error_literal (error, META_EGL_ERROR,
                        error_number,
@@ -1094,7 +1099,26 @@ meta_egl_query_dma_buf_modifiers (MetaEgl      *egl,
       return FALSE;
     }
 
-    return TRUE;
+  return TRUE;
+}
+
+gboolean
+meta_egl_query_display_attrib (MetaEgl     *egl,
+                               EGLDisplay   display,
+                               EGLint       attribute,
+                               EGLAttrib   *value,
+                               GError     **error)
+{
+  if (!is_egl_proc_valid (egl->eglQueryDisplayAttribEXT, error))
+    return FALSE;
+
+  if (!egl->eglQueryDisplayAttribEXT (display, attribute, value))
+    {
+      set_egl_error (error);
+      return FALSE;
+    }
+
+  return TRUE;
 }
 
 #define GET_EGL_PROC_ADDR(proc) \
@@ -1136,6 +1160,8 @@ meta_egl_constructed (GObject *object)
 
   GET_EGL_PROC_ADDR (eglQueryDmaBufFormatsEXT);
   GET_EGL_PROC_ADDR (eglQueryDmaBufModifiersEXT);
+
+  GET_EGL_PROC_ADDR (eglQueryDisplayAttribEXT);
 }
 
 #undef GET_EGL_PROC_ADDR

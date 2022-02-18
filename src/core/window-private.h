@@ -56,14 +56,7 @@ typedef enum
   META_CLIENT_TYPE_MAX_RECOGNIZED = 2
 } MetaClientType;
 
-typedef enum
-{
-  META_QUEUE_CALC_SHOWING = 1 << 0,
-  META_QUEUE_MOVE_RESIZE  = 1 << 1,
-  META_QUEUE_UPDATE_ICON  = 1 << 2,
-} MetaQueueType;
-
-#define NUMBER_OF_QUEUES 3
+#define META_N_QUEUE_TYPES 2
 
 typedef enum
 {
@@ -79,6 +72,7 @@ typedef enum
   META_MOVE_RESIZE_WAYLAND_STATE_CHANGED = 1 << 9,
   META_MOVE_RESIZE_FORCE_UPDATE_MONITOR = 1 << 10,
   META_MOVE_RESIZE_PLACEMENT_CHANGED = 1 << 11,
+  META_MOVE_RESIZE_WAYLAND_CLIENT_RESIZE = 1 << 12,
 } MetaMoveResizeFlags;
 
 typedef enum
@@ -183,9 +177,6 @@ struct _MetaWindow
   Visual *xvisual;
   char *desc; /* used in debug spew */
   char *title;
-
-  cairo_surface_t *icon;
-  cairo_surface_t *mini_icon;
 
   MetaWindowType type;
 
@@ -400,9 +391,6 @@ struct _MetaWindow
   /* Are we in meta_window_new()? */
   guint constructing : 1;
 
-  /* Are we in the various queues? (Bitfield: see META_WINDOW_IS_IN_QUEUE) */
-  guint is_in_queues : NUMBER_OF_QUEUES;
-
   /* Used by keybindings.c */
   guint keys_grabbed : 1;     /* normal keybindings grabbed */
   guint grab_on_frame : 1;    /* grabs are on the frame */
@@ -435,6 +423,9 @@ struct _MetaWindow
 
   /* whether focus should be restored on map */
   guint restore_focus_on_map : 1;
+
+  /* Whether the window is alive */
+  guint is_alive : 1;
 
   /* if non-NULL, the bounds of the window frame */
   cairo_region_t *frame_bounds;
@@ -516,8 +507,8 @@ struct _MetaWindow
    * For X11 windows, this matches XGetGeometry of the toplevel.
    *
    * For Wayland windows, the position matches the position of the
-   * surface associated with shell surface (wl_shell_surface, xdg_surface
-   * etc). The size matches the size surface size as displayed in the stage.
+   * surface associated with shell surface (xdg_surface, etc.)
+   * The size matches the size surface size as displayed in the stage.
    */
   MetaRectangle buffer_rect;
 
@@ -563,11 +554,14 @@ struct _MetaWindow
   } placement;
 
   guint unmanage_idle_id;
+  guint close_dialog_timeout_id;
 
   pid_t client_pid;
 
   gboolean has_valid_cgroup;
   GFile *cgroup_path;
+
+  unsigned int events_during_ping;
 };
 
 struct _MetaWindowClass
@@ -601,9 +595,10 @@ struct _MetaWindowClass
   void (*get_default_skip_hints) (MetaWindow *window,
                                   gboolean   *skip_taskbar_out,
                                   gboolean   *skip_pager_out);
-  gboolean (*update_icon)        (MetaWindow       *window,
-                                  cairo_surface_t **icon,
-                                  cairo_surface_t **mini_icon);
+
+  cairo_surface_t * (*get_icon) (MetaWindow *window);
+  cairo_surface_t * (*get_mini_icon) (MetaWindow *window);
+
   pid_t (*get_client_pid)        (MetaWindow *window);
   void (*update_main_monitor)    (MetaWindow                   *window,
                                   MetaWindowUpdateMonitorFlags  flags);
@@ -823,6 +818,7 @@ void meta_window_set_gtk_dbus_properties  (MetaWindow *window,
                                            const char *window_object_path);
 
 gboolean meta_window_has_transient_type   (MetaWindow *window);
+gboolean meta_window_has_modals           (MetaWindow *window);
 
 void meta_window_set_transient_for        (MetaWindow *window,
                                            MetaWindow *parent);
@@ -859,6 +855,10 @@ MetaLogicalMonitor * meta_window_get_main_logical_monitor (MetaWindow *window);
 void meta_window_update_monitor (MetaWindow                   *window,
                                  MetaWindowUpdateMonitorFlags  flags);
 
+cairo_surface_t * meta_window_get_icon (MetaWindow *window);
+
+cairo_surface_t * meta_window_get_mini_icon (MetaWindow *window);
+
 void meta_window_set_urgent (MetaWindow *window,
                              gboolean    urgent);
 
@@ -876,6 +876,11 @@ void meta_window_grab_op_began (MetaWindow *window, MetaGrabOp op);
 void meta_window_grab_op_ended (MetaWindow *window, MetaGrabOp op);
 
 void meta_window_set_alive (MetaWindow *window, gboolean is_alive);
+gboolean meta_window_get_alive (MetaWindow *window);
+
+void meta_window_show_close_dialog (MetaWindow *window);
+void meta_window_hide_close_dialog (MetaWindow *window);
+void meta_window_ensure_close_dialog_timeout (MetaWindow *window);
 
 gboolean meta_window_has_pointer (MetaWindow *window);
 
@@ -897,4 +902,14 @@ gboolean meta_window_is_focus_async (MetaWindow *window);
 GFile *meta_window_get_unit_cgroup (MetaWindow *window);
 gboolean meta_window_unit_cgroup_equal (MetaWindow *window1,
                                         MetaWindow *window2);
+
+void meta_window_check_alive_on_event (MetaWindow *window,
+                                       uint32_t    timestamp);
+
+void meta_window_update_visibility (MetaWindow  *window);
+
+void meta_window_clear_queued (MetaWindow *window);
+
+void meta_window_update_layout (MetaWindow *window);
+
 #endif

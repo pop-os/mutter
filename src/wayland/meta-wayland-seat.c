@@ -234,7 +234,6 @@ meta_wayland_seat_new (MetaWaylandCompositor *compositor,
                               NULL);
 
   seat->text_input = meta_wayland_text_input_new (seat);
-  seat->gtk_text_input = meta_wayland_gtk_text_input_new (seat);
 
   meta_wayland_data_device_init (&seat->data_device);
   meta_wayland_data_device_primary_init (&seat->primary_data_device);
@@ -277,7 +276,6 @@ meta_wayland_seat_free (MetaWaylandSeat *seat)
   meta_wayland_touch_disable (seat->touch);
   g_object_unref (seat->touch);
 
-  meta_wayland_gtk_text_input_destroy (seat->gtk_text_input);
   meta_wayland_text_input_destroy (seat->text_input);
 
   g_free (seat);
@@ -388,8 +386,6 @@ meta_wayland_seat_handle_event (MetaWaylandSeat *seat,
       event->type == CLUTTER_TOUCH_BEGIN)
     {
       meta_wayland_text_input_handle_event (seat->text_input, event);
-      meta_wayland_gtk_text_input_handle_event (seat->gtk_text_input,
-                                                event);
     }
 
   switch (event->type)
@@ -400,6 +396,7 @@ meta_wayland_seat_handle_event (MetaWaylandSeat *seat,
     case CLUTTER_SCROLL:
     case CLUTTER_TOUCHPAD_SWIPE:
     case CLUTTER_TOUCHPAD_PINCH:
+    case CLUTTER_TOUCHPAD_HOLD:
       if (meta_wayland_seat_has_pointer (seat))
         return meta_wayland_pointer_handle_event (seat->pointer, event);
 
@@ -407,10 +404,6 @@ meta_wayland_seat_handle_event (MetaWaylandSeat *seat,
     case CLUTTER_KEY_PRESS:
     case CLUTTER_KEY_RELEASE:
       if (meta_wayland_text_input_handle_event (seat->text_input, event))
-        return TRUE;
-
-      if (meta_wayland_gtk_text_input_handle_event (seat->gtk_text_input,
-                                                    event))
         return TRUE;
 
       if (meta_wayland_seat_has_keyboard (seat))
@@ -428,9 +421,6 @@ meta_wayland_seat_handle_event (MetaWaylandSeat *seat,
     case CLUTTER_IM_DELETE:
     case CLUTTER_IM_PREEDIT:
       if (meta_wayland_text_input_handle_event (seat->text_input, event))
-        return TRUE;
-      if (meta_wayland_gtk_text_input_handle_event (seat->gtk_text_input,
-                                                    event))
         return TRUE;
 
       break;
@@ -460,7 +450,6 @@ meta_wayland_seat_set_input_focus (MetaWaylandSeat    *seat,
   meta_wayland_tablet_seat_set_pad_focus (tablet_seat, surface);
 
   meta_wayland_text_input_set_focus (seat->text_input, surface);
-  meta_wayland_gtk_text_input_set_focus (seat->gtk_text_input, surface);
 }
 
 gboolean

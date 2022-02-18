@@ -148,7 +148,7 @@ meta_test_headless_monitor_connect (void)
 }
 
 static MetaMonitorTestSetup *
-create_headless_test_setup (void)
+create_headless_test_setup (MetaBackend *backend)
 {
   return g_new0 (MetaMonitorTestSetup, 1);
 }
@@ -156,7 +156,7 @@ create_headless_test_setup (void)
 static void
 init_tests (void)
 {
-  meta_monitor_manager_test_init_test_setup (create_headless_test_setup);
+  meta_init_monitor_test_setup (create_headless_test_setup);
 
   g_test_add_func ("/headless-start/start", meta_test_headless_start);
   g_test_add_func ("/headless-start/monitor-getters",
@@ -176,5 +176,6 @@ main (int argc, char *argv[])
 
   init_tests ();
 
-  return meta_context_test_run_tests (META_CONTEXT_TEST (context));
+  return meta_context_test_run_tests (META_CONTEXT_TEST (context),
+                                      META_TEST_RUN_FLAG_NONE);
 }

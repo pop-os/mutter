@@ -61,8 +61,10 @@ struct _MetaBackendX11Private
 {
   /* The host X11 display */
   Display *xdisplay;
+  Screen *xscreen;
   xcb_connection_t *xcb;
   GSource *source;
+  Window root_window;
 
   int xsync_event_base;
   int xsync_error_base;
@@ -247,30 +249,6 @@ translate_crossing_event (MetaBackendX11 *x11,
   meta_backend_x11_translate_crossing_event (x11, enter_event);
 }
 
-static void
-handle_device_change (MetaBackendX11 *x11,
-                      XIEvent        *event)
-{
-  XIDeviceChangedEvent *device_changed;
-  ClutterInputDevice *device;
-  ClutterBackend *backend;
-  ClutterSeat *seat;
-
-  if (event->evtype != XI_DeviceChanged)
-    return;
-
-  device_changed = (XIDeviceChangedEvent *) event;
-
-  if (device_changed->reason != XISlaveSwitch)
-    return;
-
-  backend = meta_backend_get_clutter_backend (META_BACKEND (x11));
-  seat = clutter_backend_get_default_seat (backend);
-  device = meta_seat_x11_lookup_device_id (META_SEAT_X11 (seat),
-                                           device_changed->sourceid);
-  meta_backend_update_last_device (META_BACKEND (x11), device);
-}
-
 /* Clutter makes the assumption that there is only one X window
  * per stage, which is a valid assumption to make for a generic
  * application toolkit. As such, it will ignore any events sent
@@ -319,10 +297,7 @@ handle_input_event (MetaBackendX11 *x11,
     {
       XIEvent *input_event = (XIEvent *) event->xcookie.data;
 
-      if (input_event->evtype == XI_DeviceChanged)
-        handle_device_change (x11, input_event);
-      else
-        maybe_spoof_event_as_stage_event (x11, input_event);
+      maybe_spoof_event_as_stage_event (x11, input_event);
     }
 }
 
@@ -427,7 +402,7 @@ handle_host_xevent (MetaBackend *backend,
   if (!bypass_clutter)
     {
       handle_input_event (x11, event);
-      meta_x11_handle_event (event);
+      meta_x11_handle_event (backend, event);
     }
 
   XFreeEventData (priv->xdisplay, &event->xcookie);
@@ -620,7 +595,7 @@ meta_backend_x11_post_init (MetaBackend *backend)
 static ClutterBackend *
 meta_backend_x11_create_clutter_backend (MetaBackend *backend)
 {
-  return g_object_new (META_TYPE_CLUTTER_BACKEND_X11, NULL);
+  return CLUTTER_BACKEND (meta_clutter_backend_x11_new (backend));
 }
 
 static ClutterSeat *
@@ -653,7 +628,8 @@ meta_backend_x11_create_default_seat (MetaBackend  *backend,
       return NULL;
     }
 
-  seat_x11 = meta_seat_x11_new (event_base,
+  seat_x11 = meta_seat_x11_new (backend,
+                                event_base,
                                 META_VIRTUAL_CORE_POINTER_ID,
                                 META_VIRTUAL_CORE_KEYBOARD_ID);
   return CLUTTER_SEAT (seat_x11);
@@ -866,8 +842,9 @@ meta_backend_x11_initable_init (GInitable    *initable,
     }
 
   priv->xdisplay = xdisplay;
+  priv->xscreen = DefaultScreenOfDisplay (xdisplay);
   priv->xcb = XGetXCBConnection (priv->xdisplay);
-  meta_clutter_x11_set_display (xdisplay);
+  priv->root_window = DefaultRootWindow (xdisplay);
 
   init_xkb_state (x11);
 
@@ -951,6 +928,23 @@ meta_backend_x11_get_xdisplay (MetaBackendX11 *x11)
   MetaBackendX11Private *priv = meta_backend_x11_get_instance_private (x11);
 
   return priv->xdisplay;
+}
+
+Screen *
+meta_backend_x11_get_xscreen (MetaBackendX11 *x11)
+{
+  MetaBackendX11Private *priv = meta_backend_x11_get_instance_private (x11);
+
+  return priv->xscreen;
+}
+
+Window
+meta_backend_x11_get_root_xwindow (MetaBackendX11 *backend_x11)
+{
+  MetaBackendX11Private *priv =
+    meta_backend_x11_get_instance_private (backend_x11);
+
+  return priv->root_window;
 }
 
 Window

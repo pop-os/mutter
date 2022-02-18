@@ -529,7 +529,7 @@ gboolean
 cogl_renderer_connect (CoglRenderer *renderer, GError **error)
 {
   int i;
-  GString *error_message;
+  g_autoptr (GString) error_message = NULL;
   gboolean constraints_failed = FALSE;
 
   if (renderer->connected)
@@ -594,7 +594,6 @@ cogl_renderer_connect (CoglRenderer *renderer, GError **error)
       else
         {
           renderer->connected = TRUE;
-          g_string_free (error_message, TRUE);
           return TRUE;
         }
     }
@@ -613,7 +612,6 @@ cogl_renderer_connect (CoglRenderer *renderer, GError **error)
       g_set_error (error, COGL_WINSYS_ERROR, COGL_WINSYS_ERROR_INIT,
                    "Failed to connected to any renderer: %s",
                    error_message->str);
-      g_string_free (error_message, TRUE);
       return FALSE;
     }
 
@@ -773,6 +771,17 @@ cogl_renderer_create_dma_buf (CoglRenderer  *renderer,
                "CoglRenderer doesn't support creating DMA buffers");
 
   return NULL;
+}
+
+gboolean
+cogl_renderer_is_dma_buf_supported (CoglRenderer *renderer)
+{
+  const CoglWinsysVtable *winsys = _cogl_renderer_get_winsys (renderer);
+
+  if (winsys->renderer_is_dma_buf_supported)
+    return winsys->renderer_is_dma_buf_supported (renderer);
+  else
+    return FALSE;
 }
 
 void

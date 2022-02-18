@@ -5,7 +5,6 @@ cdata = configuration_data()
 cdata.set('COGL_HAS_GL', have_gl)
 cdata.set('CLUTTER_COGL_HAS_GL', have_gl)
 cdata.set('COGL_HAS_GLX_SUPPORT', have_glx)
-cdata.set('COGL_HAS_WAYLAND_EGL_SERVER_SUPPORT', have_wayland)
 cdata.set('COGL_HAS_EGL_PLATFORM_XLIB_SUPPORT', have_egl_xlib)
 cdata.set('COGL_HAS_EGL_SUPPORT', have_egl)
 cdata.set('COGL_HAS_X11', have_x11)
@@ -65,7 +64,6 @@ cogl_egl_defines_h = configure_file(
 built_headers += [cogl_gl_header_h]
 
 cogl_deprecated_headers = [
-  'deprecated/cogl-material-compat.h',
   'deprecated/cogl-shader.h',
   'deprecated/cogl-clutter.h',
   'deprecated/cogl-type-casts.h',
@@ -351,7 +349,6 @@ cogl_sources = [
   'cogl-fence.c',
   'cogl-fence-private.h',
   'cogl-scanout.c',
-  'deprecated/cogl-material-compat.c',
   'deprecated/cogl-program.c',
   'deprecated/cogl-program-private.h',
   'deprecated/cogl-auto-texture.c',
@@ -395,12 +392,6 @@ if have_glx
     'winsys/cogl-winsys-glx-feature-functions.h',
     'winsys/cogl-winsys-glx-private.h',
     'winsys/cogl-winsys-glx.c',
-  ]
-endif
-
-if have_wayland
-  cogl_nonintrospected_headers += [
-    'cogl-wayland-server.h',
   ]
 endif
 

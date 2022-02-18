@@ -278,6 +278,15 @@ out:
 }
 
 void
+meta_kms_crtc_disable (MetaKmsCrtc *crtc)
+{
+  crtc->current_state.is_active = FALSE;
+  crtc->current_state.rect = (MetaRectangle) { 0 };
+  crtc->current_state.is_drm_mode_valid = FALSE;
+  crtc->current_state.drm_mode = (drmModeModeInfo) { 0 };
+}
+
+void
 meta_kms_crtc_predict_state (MetaKmsCrtc   *crtc,
                              MetaKmsUpdate *update)
 {

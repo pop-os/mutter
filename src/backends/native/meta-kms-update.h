@@ -89,8 +89,10 @@ GList * meta_kms_feedback_get_failed_planes (const MetaKmsFeedback *feedback);
 
 const GError * meta_kms_feedback_get_error (const MetaKmsFeedback *feedback);
 
+META_EXPORT_TEST
 MetaKmsUpdate * meta_kms_update_new (MetaKmsDevice *device);
 
+META_EXPORT_TEST
 void meta_kms_update_free (MetaKmsUpdate *update);
 
 void meta_kms_update_set_underscanning (MetaKmsUpdate    *update,
@@ -101,8 +103,14 @@ void meta_kms_update_set_underscanning (MetaKmsUpdate    *update,
 void meta_kms_update_unset_underscanning (MetaKmsUpdate    *update,
                                           MetaKmsConnector *connector);
 
+void meta_kms_update_set_privacy_screen (MetaKmsUpdate    *update,
+                                         MetaKmsConnector *connector,
+                                         gboolean          enabled);
+
+META_EXPORT_TEST
 void meta_kms_update_set_power_save (MetaKmsUpdate *update);
 
+META_EXPORT_TEST
 void meta_kms_update_mode_set (MetaKmsUpdate *update,
                                MetaKmsCrtc   *crtc,
                                GList         *connectors,
@@ -119,6 +127,7 @@ void meta_kms_plane_assignment_set_fb_damage (MetaKmsPlaneAssignment *plane_assi
                                               const int              *rectangles,
                                               int                     n_rectangles);
 
+META_EXPORT_TEST
 MetaKmsPlaneAssignment * meta_kms_update_assign_plane (MetaKmsUpdate          *update,
                                                        MetaKmsCrtc            *crtc,
                                                        MetaKmsPlane           *plane,
@@ -142,6 +151,7 @@ void meta_kms_update_set_custom_page_flip (MetaKmsUpdate             *update,
                                            MetaKmsCustomPageFlipFunc  func,
                                            gpointer                   user_data);
 
+META_EXPORT_TEST
 void meta_kms_plane_assignment_set_cursor_hotspot (MetaKmsPlaneAssignment *plane_assignment,
                                                    int                     x,
                                                    int                     y);
@@ -149,6 +159,10 @@ void meta_kms_plane_assignment_set_cursor_hotspot (MetaKmsPlaneAssignment *plane
 void meta_kms_update_add_result_listener (MetaKmsUpdate             *update,
                                           MetaKmsResultListenerFunc  func,
                                           gpointer                   user_data);
+
+void meta_kms_update_remove_result_listeners (MetaKmsUpdate             *update,
+                                              MetaKmsResultListenerFunc  func,
+                                              gpointer                   user_data);
 
 static inline MetaFixed16
 meta_fixed_16_from_int (int16_t d)
@@ -178,6 +192,15 @@ meta_fixed_16_rectangle_to_rectangle (MetaFixed16Rectangle fixed_rect)
     .height = meta_fixed_16_to_int (fixed_rect.height),
   };
 }
+
+#define META_FIXED_16_RECTANGLE_INIT(_x,_y,_w,_h) \
+  (MetaFixed16Rectangle) { .x = (_x), .y = (_y), .width = (_w), .height = (_h) }
+
+#define META_FIXED_16_RECTANGLE_INIT_INT(_x,_y,_w,_h) \
+  META_FIXED_16_RECTANGLE_INIT (meta_fixed_16_from_int (_x), \
+                                meta_fixed_16_from_int (_y), \
+                                meta_fixed_16_from_int (_w), \
+                                meta_fixed_16_from_int (_h))
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (MetaKmsFeedback, meta_kms_feedback_free)
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (MetaKmsUpdate, meta_kms_update_free)

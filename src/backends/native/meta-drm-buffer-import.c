@@ -45,6 +45,16 @@ G_DEFINE_TYPE (MetaDrmBufferImport, meta_drm_buffer_import,
                META_TYPE_DRM_BUFFER)
 
 static int
+meta_drm_buffer_import_export_fd (MetaDrmBuffer  *buffer,
+                                  GError        **error)
+{
+  MetaDrmBufferImport *buffer_import = META_DRM_BUFFER_IMPORT (buffer);
+
+  return meta_drm_buffer_export_fd (META_DRM_BUFFER (buffer_import->importee),
+                                    error);
+}
+
+static int
 meta_drm_buffer_import_get_width (MetaDrmBuffer *buffer)
 {
   MetaDrmBufferImport *buffer_import = META_DRM_BUFFER_IMPORT (buffer);
@@ -68,12 +78,39 @@ meta_drm_buffer_import_get_stride (MetaDrmBuffer *buffer)
   return meta_drm_buffer_get_stride (META_DRM_BUFFER (buffer_import->importee));
 }
 
+static int
+meta_drm_buffer_import_get_bpp (MetaDrmBuffer *buffer)
+{
+  MetaDrmBufferImport *buffer_import = META_DRM_BUFFER_IMPORT (buffer);
+
+  return meta_drm_buffer_get_bpp (META_DRM_BUFFER (buffer_import->importee));
+}
+
 static uint32_t
 meta_drm_buffer_import_get_format (MetaDrmBuffer *buffer)
 {
   MetaDrmBufferImport *buffer_import = META_DRM_BUFFER_IMPORT (buffer);
 
   return meta_drm_buffer_get_format (META_DRM_BUFFER (buffer_import->importee));
+}
+
+static int
+meta_drm_buffer_import_get_offset (MetaDrmBuffer *buffer,
+                                   int            offset)
+{
+  MetaDrmBufferImport *buffer_import = META_DRM_BUFFER_IMPORT (buffer);
+  MetaDrmBuffer *importee = META_DRM_BUFFER (buffer_import->importee);
+
+  return meta_drm_buffer_get_offset (importee, offset);
+}
+
+static uint32_t
+meta_drm_buffer_import_get_modifier (MetaDrmBuffer *buffer)
+{
+  MetaDrmBufferImport *buffer_import = META_DRM_BUFFER_IMPORT (buffer);
+  MetaDrmBuffer *importee = META_DRM_BUFFER (buffer_import->importee);
+
+  return meta_drm_buffer_get_modifier (importee);
 }
 
 static struct gbm_bo *
@@ -144,10 +181,9 @@ import_gbm_buffer (MetaDrmBufferImport  *buffer_import,
 
   fb_args.handles[0] = gbm_bo_get_handle (imported_bo).u32;
 
-  ret = meta_drm_buffer_ensure_fb_id (META_DRM_BUFFER (buffer_import),
-                                      FALSE /* use_modifiers */,
-                                      &fb_args,
-                                      error);
+  ret = meta_drm_buffer_do_ensure_fb_id (META_DRM_BUFFER (buffer_import),
+                                         &fb_args,
+                                         error);
 
   gbm_bo_destroy (imported_bo);
 
@@ -167,6 +203,7 @@ meta_drm_buffer_import_new (MetaDeviceFile     *device_file,
 
   buffer_import = g_object_new (META_TYPE_DRM_BUFFER_IMPORT,
                                 "device-file", device_file,
+                                "flags", META_DRM_BUFFER_FLAG_DISABLE_MODIFIERS,
                                 NULL);
   g_set_object (&buffer_import->importee, buffer_gbm);
 
@@ -202,8 +239,12 @@ meta_drm_buffer_import_class_init (MetaDrmBufferImportClass *klass)
 
   object_class->finalize = meta_drm_buffer_import_finalize;
 
+  buffer_class->export_fd = meta_drm_buffer_import_export_fd;
   buffer_class->get_width = meta_drm_buffer_import_get_width;
   buffer_class->get_height = meta_drm_buffer_import_get_height;
   buffer_class->get_stride = meta_drm_buffer_import_get_stride;
+  buffer_class->get_bpp = meta_drm_buffer_import_get_bpp;
   buffer_class->get_format = meta_drm_buffer_import_get_format;
+  buffer_class->get_offset = meta_drm_buffer_import_get_offset;
+  buffer_class->get_modifier = meta_drm_buffer_import_get_modifier;
 }

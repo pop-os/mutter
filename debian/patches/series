@@ -1,5 +1,3 @@
-tests-Don-t-use-TestEnvironment.patch
-tests-Don-t-continue-if-setup-commands-fail.patch
 theme-use-gtk_render_icon_suface-to-paint-button-icon.patch
 theme-load-icons-as-Gtk-does-with-fallback-and-RTL-suppor.patch
 meson-add-back-default_driver-option.patch
@@ -8,3 +6,4 @@ Consistently-pass-timestamp-as-uint64-when-creating-MetaS.patch
 x11-Add-support-for-fractional-scaling-using-Randr.patch
 debian/tests-Tag-unstable-tests-as-flaky.patch
 debian/tests-Do-not-run-screencast-tests.patch
+debian/meson-Do-not-mark-CI-test-tools-as-required.patch

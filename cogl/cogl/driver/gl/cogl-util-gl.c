@@ -363,13 +363,17 @@ _cogl_context_get_gl_extensions (CoglContext *context)
       char **split_env_disabled_extensions;
       char **src, **dst;
 
-      if (env_disabled_extensions)
-        split_env_disabled_extensions =
-          g_strsplit (env_disabled_extensions,
-                      ",",
-                      0 /* no max tokens */);
+      if (*env_disabled_extensions)
+        {
+          split_env_disabled_extensions =
+            g_strsplit (env_disabled_extensions,
+                        ",",
+                        0 /* no max tokens */);
+        }
       else
-        split_env_disabled_extensions = NULL;
+        {
+          split_env_disabled_extensions = NULL;
+        }
 
       for (dst = ret, src = ret;
            *src;
@@ -554,7 +558,7 @@ cogl_gl_get_gpu_time_ns (CoglContext *context)
   int64_t gpu_time_ns;
 
   g_return_val_if_fail (cogl_has_feature (context,
-                                          COGL_FEATURE_ID_GET_GPU_TIME),
+                                          COGL_FEATURE_ID_TIMESTAMP_QUERY),
                         0);
 
   GE (context, glGetInteger64v (GL_TIMESTAMP, &gpu_time_ns));

@@ -1332,6 +1332,35 @@ notify_swipe_gesture_event (ClutterInputDevice          *input_device,
 }
 
 static void
+notify_hold_gesture_event (ClutterInputDevice          *input_device,
+                           ClutterTouchpadGesturePhase  phase,
+                           uint64_t                     time_us,
+                           uint32_t                     n_fingers)
+{
+  MetaSeatImpl *seat_impl;
+  ClutterEvent *event = NULL;
+
+  seat_impl = seat_impl_from_device (input_device);
+
+  event = clutter_event_new (CLUTTER_TOUCHPAD_HOLD);
+
+  event->touchpad_hold.phase = phase;
+  event->touchpad_hold.time = us2ms (time_us);
+  event->touchpad_hold.n_fingers = n_fingers;
+
+  meta_input_device_native_get_coords_in_impl (META_INPUT_DEVICE_NATIVE (seat_impl->core_pointer),
+                                               &event->touchpad_hold.x,
+                                               &event->touchpad_hold.y);
+
+  meta_xkb_translate_state (event, seat_impl->xkb, seat_impl->button_state);
+
+  clutter_event_set_device (event, seat_impl->core_pointer);
+  clutter_event_set_source_device (event, input_device);
+
+  queue_event (seat_impl, event);
+}
+
+static void
 notify_proximity (ClutterInputDevice *input_device,
                   uint64_t            time_us,
                   gboolean            in)
@@ -1931,6 +1960,45 @@ notify_discrete_axis (MetaSeatImpl                  *seat_impl,
 }
 
 static void
+handle_pointer_scroll (MetaSeatImpl          *seat_impl,
+                       struct libinput_event *event)
+{
+  struct libinput_device *libinput_device = libinput_event_get_device (event);
+  ClutterInputDevice *device;
+  uint64_t time_us;
+  enum libinput_pointer_axis_source source;
+  struct libinput_event_pointer *axis_event =
+    libinput_event_get_pointer_event (event);
+  ClutterScrollSource scroll_source;
+
+  device = libinput_device_get_user_data (libinput_device);
+
+  time_us = libinput_event_pointer_get_time_usec (axis_event);
+  source = libinput_event_pointer_get_axis_source (axis_event);
+  scroll_source = translate_scroll_source (source);
+
+  /* libinput < 0.8 sent wheel click events with value 10. Since 0.8
+   * the value is the angle of the click in degrees. To keep
+   * backwards-compat with existing clients, we just send multiples of
+   * the click count.
+   */
+
+  switch (scroll_source)
+    {
+    case CLUTTER_SCROLL_SOURCE_WHEEL:
+      notify_discrete_axis (seat_impl, device, time_us, scroll_source,
+                            axis_event);
+      break;
+    case CLUTTER_SCROLL_SOURCE_FINGER:
+    case CLUTTER_SCROLL_SOURCE_CONTINUOUS:
+    case CLUTTER_SCROLL_SOURCE_UNKNOWN:
+      notify_continuous_axis (seat_impl, device, time_us, scroll_source,
+                              axis_event);
+      break;
+    }
+}
+
+static void
 process_tablet_axis (MetaSeatImpl          *seat_impl,
                      struct libinput_event *event)
 {
@@ -2106,36 +2174,7 @@ process_device_event (MetaSeatImpl          *seat_impl,
 
     case LIBINPUT_EVENT_POINTER_AXIS:
       {
-        uint64_t time_us;
-        enum libinput_pointer_axis_source source;
-        struct libinput_event_pointer *axis_event =
-          libinput_event_get_pointer_event (event);
-        ClutterScrollSource scroll_source;
-
-        device = libinput_device_get_user_data (libinput_device);
-
-        time_us = libinput_event_pointer_get_time_usec (axis_event);
-        source = libinput_event_pointer_get_axis_source (axis_event);
-        scroll_source = translate_scroll_source (source);
-
-        /* libinput < 0.8 sent wheel click events with value 10. Since 0.8
-           the value is the angle of the click in degrees. To keep
-           backwards-compat with existing clients, we just send multiples of
-           the click count. */
-
-        switch (scroll_source)
-          {
-          case CLUTTER_SCROLL_SOURCE_WHEEL:
-            notify_discrete_axis (seat_impl, device, time_us, scroll_source,
-                                  axis_event);
-            break;
-          case CLUTTER_SCROLL_SOURCE_FINGER:
-          case CLUTTER_SCROLL_SOURCE_CONTINUOUS:
-          case CLUTTER_SCROLL_SOURCE_UNKNOWN:
-            notify_continuous_axis (seat_impl, device, time_us, scroll_source,
-                                    axis_event);
-            break;
-          }
+        handle_pointer_scroll (seat_impl, event);
         break;
       }
 
@@ -2365,6 +2404,28 @@ process_device_event (MetaSeatImpl          *seat_impl,
         notify_swipe_gesture_event (device,
                                     CLUTTER_TOUCHPAD_GESTURE_PHASE_UPDATE,
                                     time_us, n_fingers, dx, dy, dx_unaccel, dy_unaccel);
+        break;
+      }
+    case LIBINPUT_EVENT_GESTURE_HOLD_BEGIN:
+    case LIBINPUT_EVENT_GESTURE_HOLD_END:
+      {
+        struct libinput_event_gesture *gesture_event =
+          libinput_event_get_gesture_event (event);
+        ClutterTouchpadGesturePhase phase;
+        uint32_t n_fingers;
+        uint64_t time_us;
+
+        device = libinput_device_get_user_data (libinput_device);
+        time_us = libinput_event_gesture_get_time_usec (gesture_event);
+        n_fingers = libinput_event_gesture_get_finger_count (gesture_event);
+
+        if (libinput_event_get_type (event) == LIBINPUT_EVENT_GESTURE_HOLD_BEGIN)
+          phase = CLUTTER_TOUCHPAD_GESTURE_PHASE_BEGIN;
+        else
+          phase = libinput_event_gesture_get_cancelled (gesture_event) ?
+            CLUTTER_TOUCHPAD_GESTURE_PHASE_CANCEL : CLUTTER_TOUCHPAD_GESTURE_PHASE_END;
+
+        notify_hold_gesture_event (device, phase, time_us, n_fingers);
         break;
       }
     case LIBINPUT_EVENT_TABLET_TOOL_AXIS:
@@ -3351,6 +3412,8 @@ set_keyboard_layout_index (GTask *task)
 
   seat_impl->layout_idx = idx;
 
+  meta_seat_impl_sync_leds_in_impl (seat_impl);
+
   g_rw_lock_writer_unlock (&seat_impl->state_lock);
 
   g_task_return_boolean (task, TRUE);
@@ -3453,6 +3516,59 @@ meta_seat_impl_set_pointer_constraint (MetaSeatImpl              *seat_impl,
   g_object_unref (task);
 }
 
+static void
+ensure_pointer_onscreen (MetaSeatImpl *seat_impl)
+{
+  int i, candidate = -1;
+  int nearest_monitor_x, nearest_monitor_y, min_distance = G_MAXINT;
+  cairo_rectangle_int_t monitor_rect;
+  graphene_point_t coords;
+
+  if (!meta_seat_impl_query_state (seat_impl,
+                                   seat_impl->core_pointer, NULL,
+                                   &coords, NULL))
+    return;
+
+  /* Pointer is in a view */
+  if (meta_viewport_info_get_view_at (seat_impl->viewports,
+                                      coords.x, coords.y) >= 0)
+    return;
+
+  /* Find nearest view */
+  for (i = 0; i < meta_viewport_info_get_num_views (seat_impl->viewports); i++)
+    {
+      meta_viewport_info_get_view_info (seat_impl->viewports, i,
+                                        &monitor_rect, NULL);
+      nearest_monitor_x = MIN (ABS (coords.x - monitor_rect.x),
+                               ABS (coords.x -
+                                    monitor_rect.x + monitor_rect.width));
+      nearest_monitor_y = MIN (ABS (coords.y - monitor_rect.y),
+                               ABS (coords.y -
+                                    monitor_rect.y + monitor_rect.height));
+      if (nearest_monitor_x < min_distance ||
+          nearest_monitor_y < min_distance)
+        {
+          min_distance = MIN (nearest_monitor_x, nearest_monitor_y);
+          candidate = i;
+        }
+    }
+
+  if (candidate < 0)
+    return;
+
+  /* Calculate new coordinates on nearest view */
+  meta_viewport_info_get_view_info (seat_impl->viewports,
+                                    candidate,
+                                    &monitor_rect, NULL);
+  coords.x = CLAMP (coords.x, monitor_rect.x,
+                    monitor_rect.x + monitor_rect.width - 1);
+  coords.y = CLAMP (coords.y, monitor_rect.y,
+                    monitor_rect.y + monitor_rect.height - 1);
+
+  notify_absolute_motion_in_impl (seat_impl->core_pointer, 0,
+                                  coords.x, coords.y, NULL);
+}
+
 static gboolean
 set_viewports (GTask *task)
 {
@@ -3461,6 +3577,8 @@ set_viewports (GTask *task)
 
   g_set_object (&seat_impl->viewports, viewports);
   g_task_return_boolean (task, TRUE);
+
+  ensure_pointer_onscreen (seat_impl);
 
   return G_SOURCE_REMOVE;
 }

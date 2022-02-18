@@ -72,9 +72,28 @@ find_systemd_session (gchar **session_id,
   g_auto (GStrv) sessions = NULL;
   int n_sessions;
   int saved_errno;
+  const char *xdg_session_id = NULL;
 
   g_assert (session_id != NULL);
   g_assert (error == NULL || *error == NULL);
+
+  xdg_session_id = g_getenv ("XDG_SESSION_ID");
+  if (xdg_session_id)
+    {
+      saved_errno = sd_session_is_active (xdg_session_id);
+      if (saved_errno < 0)
+        {
+          g_set_error (error,
+                       G_IO_ERROR,
+                       G_IO_ERROR_NOT_FOUND,
+                       "Failed to get status of XDG_SESSION_ID session (%s)",
+                       g_strerror (-saved_errno));
+          return FALSE;
+        }
+
+      *session_id = g_strdup (xdg_session_id);
+      return TRUE;
+    }
 
   /* if we are in a logind session, we can trust that value, so use it. This
    * happens for example when you run mutter directly from a VT but when
@@ -116,43 +135,43 @@ find_systemd_session (gchar **session_id,
               return FALSE;
             }
 
-        if (n_sessions == 0)
-          {
-            g_set_error (error,
-                         G_IO_ERROR,
-                         G_IO_ERROR_NOT_FOUND,
-                         "User %d has no sessions",
-                         getuid ());
-            return FALSE;
-          }
+          if (n_sessions == 0)
+            {
+              g_set_error (error,
+                           G_IO_ERROR,
+                           G_IO_ERROR_NOT_FOUND,
+                           "User %d has no sessions",
+                           getuid ());
+              return FALSE;
+            }
 
-        for (int i = 0; i < n_sessions; ++i)
-          {
-            saved_errno = sd_session_get_class (sessions[i], &class);
-            if (saved_errno < 0)
-              {
-                g_warning ("Couldn't get class for session '%d': %s",
-                           i,
-                           g_strerror (-saved_errno));
-                continue;
-              }
+          for (int i = 0; i < n_sessions; ++i)
+            {
+              saved_errno = sd_session_get_class (sessions[i], &class);
+              if (saved_errno < 0)
+                {
+                  g_warning ("Couldn't get class for session '%d': %s",
+                             i,
+                             g_strerror (-saved_errno));
+                  continue;
+                }
 
-            if (g_strcmp0 (class, "greeter") == 0)
-              {
-                local_session_id = g_strdup (sessions[i]);
-                break;
-              }
-          }
+              if (g_strcmp0 (class, "greeter") == 0)
+                {
+                  local_session_id = g_strdup (sessions[i]);
+                  break;
+                }
+            }
 
-        if (!local_session_id)
-          {
-            g_set_error (error,
-                         G_IO_ERROR,
-                         G_IO_ERROR_NOT_FOUND,
-                         "Couldn't find a session or a greeter session for user %d",
-                         getuid ());
-            return FALSE;
-          }
+          if (!local_session_id)
+            {
+              g_set_error (error,
+                           G_IO_ERROR,
+                           G_IO_ERROR_NOT_FOUND,
+                           "Couldn't find a session or a greeter session for user %d",
+                           getuid ());
+              return FALSE;
+            }
         }
       else
         {
@@ -221,8 +240,9 @@ find_systemd_session (gchar **session_id,
 }
 
 static MetaDbusLogin1Session *
-get_session_proxy (GCancellable *cancellable,
-                   GError      **error)
+get_session_proxy (const char    *fallback_session_id,
+                   GCancellable  *cancellable,
+                   GError       **error)
 {
   g_autofree char *proxy_path = NULL;
   g_autofree char *session_id = NULL;
@@ -232,10 +252,21 @@ get_session_proxy (GCancellable *cancellable,
 
   if (!find_systemd_session (&session_id, &local_error))
     {
-      g_propagate_prefixed_error (error,
-                                  g_steal_pointer (&local_error),
-                                  "Could not get session ID: ");
-      return NULL;
+      if (fallback_session_id)
+        {
+          meta_topic (META_DEBUG_BACKEND,
+                      "Failed to get seat ID: %s, using fallback (%s)",
+                      local_error->message, fallback_session_id);
+          g_clear_error (&local_error);
+          session_id = g_strdup (fallback_session_id);
+        }
+      else
+        {
+          g_propagate_prefixed_error (error,
+                                      g_steal_pointer (&local_error),
+                                      "Could not get session ID: ");
+          return NULL;
+        }
     }
 
   proxy_path = get_escaped_dbus_path ("/org/freedesktop/login1/session", session_id);
@@ -340,15 +371,18 @@ meta_launcher_get_session_proxy (MetaLauncher *launcher)
 }
 
 MetaLauncher *
-meta_launcher_new (GError **error)
+meta_launcher_new (const char  *fallback_session_id,
+                   const char  *fallback_seat_id,
+                   GError     **error)
 {
   MetaLauncher *self = NULL;
   g_autoptr (MetaDbusLogin1Session) session_proxy = NULL;
   g_autoptr (MetaDbusLogin1Seat) seat_proxy = NULL;
+  g_autoptr (GError) local_error = NULL;
   g_autofree char *seat_id = NULL;
   gboolean have_control = FALSE;
 
-  session_proxy = get_session_proxy (NULL, error);
+  session_proxy = get_session_proxy (fallback_session_id, NULL, error);
   if (!session_proxy)
     goto fail;
 
@@ -363,9 +397,23 @@ meta_launcher_new (GError **error)
 
   have_control = TRUE;
 
-  seat_id = get_seat_id (error);
+  seat_id = get_seat_id (&local_error);
   if (!seat_id)
-    goto fail;
+    {
+      if (fallback_seat_id)
+        {
+          meta_topic (META_DEBUG_BACKEND,
+                      "Failed to get seat ID: %s, using fallback (%s)",
+                      local_error->message, fallback_seat_id);
+          g_clear_error (&local_error);
+          seat_id = g_strdup (fallback_seat_id);
+        }
+      else
+        {
+          g_propagate_error (error, local_error);
+          goto fail;
+        }
+    }
 
   seat_proxy = get_seat_proxy (seat_id, NULL, error);
   if (!seat_proxy)

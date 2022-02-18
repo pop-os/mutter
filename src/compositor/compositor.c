@@ -146,12 +146,6 @@ static void
 on_top_window_actor_destroyed (MetaWindowActor *window_actor,
                                MetaCompositor  *compositor);
 
-static gboolean
-is_modal (MetaDisplay *display)
-{
-  return display->event_route == META_EVENT_ROUTE_COMPOSITOR_GRAB;
-}
-
 static void sync_actor_stacking (MetaCompositor *compositor);
 
 static void
@@ -348,131 +342,16 @@ meta_stage_is_focused (MetaDisplay *display)
   return (display->x11_display->focus_xwindow == window);
 }
 
-static gboolean
-grab_devices (MetaModalOptions  options,
-              guint32           timestamp)
-{
-  MetaBackend *backend = META_BACKEND (meta_get_backend ());
-  gboolean pointer_grabbed = FALSE;
-  gboolean keyboard_grabbed = FALSE;
-
-  if ((options & META_MODAL_POINTER_ALREADY_GRABBED) == 0)
-    {
-      if (!meta_backend_grab_device (backend, META_VIRTUAL_CORE_POINTER_ID, timestamp))
-        goto fail;
-
-      pointer_grabbed = TRUE;
-    }
-
-  if ((options & META_MODAL_KEYBOARD_ALREADY_GRABBED) == 0)
-    {
-      if (!meta_backend_grab_device (backend, META_VIRTUAL_CORE_KEYBOARD_ID, timestamp))
-        goto fail;
-
-      keyboard_grabbed = TRUE;
-    }
-
-  return TRUE;
-
- fail:
-  if (pointer_grabbed)
-    meta_backend_ungrab_device (backend, META_VIRTUAL_CORE_POINTER_ID, timestamp);
-  if (keyboard_grabbed)
-    meta_backend_ungrab_device (backend, META_VIRTUAL_CORE_KEYBOARD_ID, timestamp);
-
-  return FALSE;
-}
-
-static void
+void
 meta_compositor_grab_begin (MetaCompositor *compositor)
 {
   META_COMPOSITOR_GET_CLASS (compositor)->grab_begin (compositor);
 }
 
-static void
+void
 meta_compositor_grab_end (MetaCompositor *compositor)
 {
   META_COMPOSITOR_GET_CLASS (compositor)->grab_end (compositor);
-}
-
-gboolean
-meta_begin_modal_for_plugin (MetaCompositor   *compositor,
-                             MetaPlugin       *plugin,
-                             MetaModalOptions  options,
-                             guint32           timestamp)
-{
-  /* To some extent this duplicates code in meta_display_begin_grab_op(), but there
-   * are significant differences in how we handle grabs that make it difficult to
-   * merge the two.
-   */
-  MetaCompositorPrivate *priv =
-    meta_compositor_get_instance_private (compositor);
-  MetaDisplay *display = priv->display;
-
-#ifdef HAVE_WAYLAND
-  if (display->grab_op == META_GRAB_OP_WAYLAND_POPUP)
-    {
-      MetaWaylandSeat *seat = meta_wayland_compositor_get_default ()->seat;
-      meta_wayland_pointer_end_popup_grab (seat->pointer);
-    }
-#endif
-
-  if (is_modal (display) || display->grab_op != META_GRAB_OP_NONE)
-    return FALSE;
-
-  if (display->x11_display)
-    {
-      /* XXX: why is this needed? */
-      XIUngrabDevice (display->x11_display->xdisplay,
-                      META_VIRTUAL_CORE_POINTER_ID,
-                      timestamp);
-      XSync (display->x11_display->xdisplay, False);
-    }
-
-  if (!grab_devices (options, timestamp))
-    return FALSE;
-
-  display->grab_op = META_GRAB_OP_COMPOSITOR;
-  display->event_route = META_EVENT_ROUTE_COMPOSITOR_GRAB;
-  display->grab_window = NULL;
-  display->grab_have_pointer = TRUE;
-  display->grab_have_keyboard = TRUE;
-
-  g_signal_emit_by_name (display, "grab-op-begin",
-                         display->grab_window, display->grab_op);
-
-  meta_compositor_grab_begin (compositor);
-
-  return TRUE;
-}
-
-void
-meta_end_modal_for_plugin (MetaCompositor *compositor,
-                           MetaPlugin     *plugin,
-                           guint32         timestamp)
-{
-  MetaCompositorPrivate *priv =
-    meta_compositor_get_instance_private (compositor);
-  MetaDisplay *display = priv->display;
-  MetaBackend *backend = meta_get_backend ();
-  MetaWindow *grab_window = display->grab_window;
-  MetaGrabOp grab_op = display->grab_op;
-
-  g_return_if_fail (is_modal (display));
-
-  display->grab_op = META_GRAB_OP_NONE;
-  display->event_route = META_EVENT_ROUTE_NORMAL;
-  display->grab_window = NULL;
-  display->grab_have_pointer = FALSE;
-  display->grab_have_keyboard = FALSE;
-
-  meta_backend_ungrab_device (backend, META_VIRTUAL_CORE_POINTER_ID, timestamp);
-  meta_backend_ungrab_device (backend, META_VIRTUAL_CORE_KEYBOARD_ID, timestamp);
-
-  meta_compositor_grab_end (compositor);
-
-  g_signal_emit_by_name (display, "grab-op-end",
-                         grab_window, grab_op);
 }
 
 static void
@@ -557,6 +436,7 @@ meta_compositor_do_manage (MetaCompositor  *compositor,
     return FALSE;
 
   priv->plugin_mgr = meta_plugin_manager_new (compositor);
+  meta_plugin_manager_start (priv->plugin_mgr);
 
   return TRUE;
 }
@@ -568,6 +448,20 @@ meta_compositor_manage (MetaCompositor *compositor)
 
   if (!meta_compositor_do_manage (compositor, &error))
     g_error ("Compositor failed to manage display: %s", error->message);
+}
+
+static void
+meta_compositor_real_unmanage (MetaCompositor *compositor)
+{
+  MetaCompositorPrivate *priv =
+    meta_compositor_get_instance_private (compositor);
+
+  g_clear_signal_handler (&priv->top_window_actor_destroy_id,
+                          priv->top_window_actor);
+
+  g_clear_pointer (&priv->window_group, clutter_actor_destroy);
+  g_clear_pointer (&priv->top_window_group, clutter_actor_destroy);
+  g_clear_pointer (&priv->feedback_group, clutter_actor_destroy);
 }
 
 void
@@ -1238,12 +1132,6 @@ meta_compositor_dispose (GObject *object)
   g_clear_signal_handler (&priv->before_paint_handler_id, stage);
   g_clear_signal_handler (&priv->after_paint_handler_id, stage);
 
-  g_clear_signal_handler (&priv->top_window_actor_destroy_id,
-                          priv->top_window_actor);
-
-  g_clear_pointer (&priv->window_group, clutter_actor_destroy);
-  g_clear_pointer (&priv->top_window_group, clutter_actor_destroy);
-  g_clear_pointer (&priv->feedback_group, clutter_actor_destroy);
   g_clear_pointer (&priv->windows, g_list_free);
 
   G_OBJECT_CLASS (meta_compositor_parent_class)->dispose (object);
@@ -1259,6 +1147,7 @@ meta_compositor_class_init (MetaCompositorClass *klass)
   object_class->constructed = meta_compositor_constructed;
   object_class->dispose = meta_compositor_dispose;
 
+  klass->unmanage = meta_compositor_real_unmanage;
   klass->remove_window = meta_compositor_real_remove_window;
   klass->before_paint = meta_compositor_real_before_paint;
   klass->after_paint = meta_compositor_real_after_paint;
@@ -1551,6 +1440,15 @@ meta_compositor_get_stage (MetaCompositor *compositor)
     meta_compositor_get_instance_private (compositor);
 
   return CLUTTER_STAGE (meta_backend_get_stage (priv->backend));
+}
+
+MetaBackend *
+meta_compositor_get_backend (MetaCompositor *compositor)
+{
+  MetaCompositorPrivate *priv =
+    meta_compositor_get_instance_private (compositor);
+
+  return priv->backend;
 }
 
 MetaWindowActor *

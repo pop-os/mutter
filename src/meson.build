@@ -460,6 +460,13 @@ mutter_sources = [
   'x11/xprops.h',
 ]
 
+if have_egl_device
+  mutter_sources += [
+    'backends/native/meta-render-device-egl-stream.c',
+    'backends/native/meta-render-device-egl-stream.h',
+  ]
+endif
+
 if have_egl
   mutter_sources += [
     'backends/meta-egl.c',
@@ -577,6 +584,8 @@ if have_wayland
     'wayland/meta-wayland-pointer.c',
     'wayland/meta-wayland-pointer-constraints.c',
     'wayland/meta-wayland-pointer-constraints.h',
+    'wayland/meta-wayland-pointer-gesture-hold.c',
+    'wayland/meta-wayland-pointer-gesture-hold.h',
     'wayland/meta-wayland-pointer-gesture-pinch.c',
     'wayland/meta-wayland-pointer-gesture-pinch.h',
     'wayland/meta-wayland-pointer-gestures.c',
@@ -619,8 +628,6 @@ if have_wayland
     'wayland/meta-wayland-tablet-tool.h',
     'wayland/meta-wayland-text-input.c',
     'wayland/meta-wayland-text-input.h',
-    'wayland/meta-wayland-text-input-legacy.c',
-    'wayland/meta-wayland-text-input-legacy.h',
     'wayland/meta-wayland-touch.c',
     'wayland/meta-wayland-touch.h',
     'wayland/meta-wayland-types.h',
@@ -629,8 +636,6 @@ if have_wayland
     'wayland/meta-wayland-viewporter.h',
     'wayland/meta-wayland-window-configuration.c',
     'wayland/meta-wayland-window-configuration.h',
-    'wayland/meta-wayland-wl-shell.c',
-    'wayland/meta-wayland-wl-shell.h',
     'wayland/meta-wayland-xdg-foreign.c',
     'wayland/meta-wayland-xdg-foreign.h',
     'wayland/meta-wayland-xdg-shell.c',
@@ -748,6 +753,13 @@ if have_native_backend
     'backends/native/meta-onscreen-native.h',
     'backends/native/meta-pointer-constraint-native.c',
     'backends/native/meta-pointer-constraint-native.h',
+    'backends/native/meta-render-device-gbm.c',
+    'backends/native/meta-render-device-gbm.h',
+    'backends/native/meta-render-device-private.h',
+    'backends/native/meta-render-device-surfaceless.c',
+    'backends/native/meta-render-device-surfaceless.h',
+    'backends/native/meta-render-device.c',
+    'backends/native/meta-render-device.h',
     'backends/native/meta-renderer-native-gles3.c',
     'backends/native/meta-renderer-native-gles3.h',
     'backends/native/meta-renderer-native-private.h',
@@ -790,6 +802,7 @@ endif
 if have_native_backend
   mutter_private_enum_sources += [
     'backends/native/meta-backend-native-types.h',
+    'backends/native/meta-drm-buffer.h',
     'backends/native/meta-kms-types.h',
   ]
 endif
@@ -807,14 +820,14 @@ if mutter_private_enum_sources.length() > 0
 endif
 
 dbus_display_config_built_sources = gnome.gdbus_codegen('meta-dbus-display-config',
-    'org.gnome.Mutter.DisplayConfig.xml',
+    join_paths(dbus_interfaces_dir, 'org.gnome.Mutter.DisplayConfig.xml'),
     interface_prefix: 'org.gnome.Mutter.',
     namespace: 'MetaDBus',
   )
 mutter_built_sources += dbus_display_config_built_sources
 
 dbus_idle_monitor_built_sources = gnome.gdbus_codegen('meta-dbus-idle-monitor',
-    'org.gnome.Mutter.IdleMonitor.xml',
+    join_paths(dbus_interfaces_dir, 'org.gnome.Mutter.IdleMonitor.xml'),
     interface_prefix: 'org.gnome.Mutter.',
     namespace: 'MetaDBus',
     object_manager: true,
@@ -853,7 +866,7 @@ if have_native_backend
   mutter_built_sources += default_modes_h
 
   dbus_login1_built_sources = gnome.gdbus_codegen('meta-dbus-login1',
-    'org.freedesktop.login1.xml',
+    join_paths(dbus_interfaces_dir, 'org.freedesktop.login1.xml'),
     interface_prefix: 'org.freedesktop.login1.',
     namespace: 'MetaDbusLogin1',
   )
@@ -862,19 +875,26 @@ endif
 
 if have_remote_desktop
   dbus_remote_desktop_built_sources = gnome.gdbus_codegen('meta-dbus-remote-desktop',
-      'org.gnome.Mutter.RemoteDesktop.xml',
+      join_paths(dbus_interfaces_dir, 'org.gnome.Mutter.RemoteDesktop.xml'),
       interface_prefix: 'org.gnome.Mutter.',
       namespace: 'MetaDBus',
     )
   mutter_built_sources += dbus_remote_desktop_built_sources
 
   dbus_screen_cast_built_sources = gnome.gdbus_codegen('meta-dbus-screen-cast',
-      'org.gnome.Mutter.ScreenCast.xml',
+      join_paths(dbus_interfaces_dir, 'org.gnome.Mutter.ScreenCast.xml'),
       interface_prefix: 'org.gnome.Mutter.',
       namespace: 'MetaDBus',
     )
   mutter_built_sources += dbus_screen_cast_built_sources
 endif
+
+dbus_rtkit_built_sources = gnome.gdbus_codegen('meta-dbus-rtkit1',
+    join_paths(dbus_interfaces_dir, 'org.freedesktop.RealtimeKit1.xml'),
+    interface_prefix: 'org.freedesktop.',
+    namespace: 'MetaDbus',
+)
+mutter_built_sources += dbus_rtkit_built_sources
 
 wayland_protocol_server_headers = []
 wayland_protocol_client_headers = []
@@ -888,7 +908,6 @@ if have_wayland
   wayland_protocols = [
     ['gtk-primary-selection', 'private', ],
     ['gtk-shell', 'private', ],
-    ['gtk-text-input', 'private', ],
     ['keyboard-shortcuts-inhibit', 'unstable', 'v1', ],
     ['linux-dmabuf', 'unstable', 'v1', ],
     ['pointer-constraints', 'unstable', 'v1', ],

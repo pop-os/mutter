@@ -22,11 +22,14 @@
 
 #include "config.h"
 
+#include "backends/x11/meta-xkb-a11y-x11.h"
+
 #include <X11/XKBlib.h>
 #include <X11/extensions/XKBstr.h>
 
+#include "backends/x11/meta-backend-x11.h"
 #include "backends/x11/meta-clutter-backend-x11.h"
-#include "backends/x11/meta-xkb-a11y-x11.h"
+#include "backends/x11/meta-seat-x11.h"
 #include "core/display-private.h"
 #include "meta/meta-x11-errors.h"
 
@@ -41,6 +44,15 @@
                                       XkbControlsEnabledMask
 
 static int _xkb_event_base;
+
+static Display *
+xdisplay_from_seat (ClutterSeat *seat)
+{
+  MetaSeatX11 *seat_x11 = META_SEAT_X11 (seat);
+  MetaBackend *backend = meta_seat_x11_get_backend (META_SEAT_X11 (seat_x11));
+
+  return meta_backend_x11_get_xdisplay (META_BACKEND_X11 (backend));
+}
 
 static XkbDescRec *
 get_xkb_desc_rec (Display *xdisplay)
@@ -77,7 +89,7 @@ set_xkb_desc_rec (Display    *xdisplay,
 static void
 check_settings_changed (ClutterSeat *seat)
 {
-  Display *xdisplay = meta_clutter_x11_get_default_display ();
+  Display *xdisplay = xdisplay_from_seat (seat);
   MetaKbdA11ySettings kbd_a11y_settings;
   MetaKeyboardA11yFlags what_changed = 0;
   MetaInputSettings *input_settings;
@@ -205,7 +217,7 @@ void
 meta_seat_x11_apply_kbd_a11y_settings (ClutterSeat         *seat,
                                        MetaKbdA11ySettings *kbd_a11y_settings)
 {
-  Display *xdisplay = meta_clutter_x11_get_default_display ();
+  Display *xdisplay = xdisplay_from_seat (seat);
   XkbDescRec *desc;
   gboolean enable_accessX;
 
@@ -323,7 +335,11 @@ meta_seat_x11_apply_kbd_a11y_settings (ClutterSeat         *seat,
 gboolean
 meta_seat_x11_a11y_init (ClutterSeat *seat)
 {
-  Display *xdisplay = meta_clutter_x11_get_default_display ();
+  MetaBackend *backend = meta_get_backend ();
+  ClutterBackend *clutter_backend = meta_backend_get_clutter_backend (backend);
+  MetaClutterBackendX11 *clutter_backend_x11 =
+    META_CLUTTER_BACKEND_X11 (clutter_backend);
+  Display *xdisplay = xdisplay_from_seat (seat);
   guint event_mask;
 
   if (!is_xkb_available (xdisplay))
@@ -333,7 +349,9 @@ meta_seat_x11_a11y_init (ClutterSeat *seat)
 
   XkbSelectEvents (xdisplay, XkbUseCoreKbd, event_mask, event_mask);
 
-  meta_clutter_x11_add_filter (xkb_a11y_event_filter, seat);
+  meta_clutter_backend_x11_add_filter (clutter_backend_x11,
+                                       xkb_a11y_event_filter,
+                                       seat);
 
   return TRUE;
 }

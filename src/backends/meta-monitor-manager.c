@@ -51,6 +51,7 @@
 #include "backends/meta-logical-monitor.h"
 #include "backends/meta-monitor.h"
 #include "backends/meta-monitor-config-manager.h"
+#include "backends/meta-monitor-config-store.h"
 #include "backends/meta-orientation-manager.h"
 #include "backends/meta-output.h"
 #include "backends/meta-virtual-monitor.h"
@@ -70,6 +71,7 @@ enum
 
   PROP_BACKEND,
   PROP_PANEL_ORIENTATION_MANAGED,
+  PROP_HAS_BUILTIN_PANEL,
 
   PROP_LAST
 };
@@ -82,6 +84,7 @@ enum
   MONITORS_CHANGED_INTERNAL,
   POWER_SAVE_MODE_CHANGED,
   CONFIRM_DISPLAY_CHANGE,
+  MONITOR_PRIVACY_SCREEN_CHANGED,
   SIGNALS_LAST
 };
 
@@ -107,6 +110,8 @@ typedef struct _MetaMonitorManagerPrivate
   GList *virtual_monitors;
 
   gboolean shutting_down;
+
+  gboolean has_builtin_panel;
 } MetaMonitorManagerPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE (MetaMonitorManager, meta_monitor_manager,
@@ -1003,6 +1008,99 @@ experimental_features_changed (MetaSettings           *settings,
   meta_settings_update_ui_scaling_factor (settings);
 }
 
+static gboolean
+meta_monitor_manager_real_set_privacy_screen_enabled (MetaMonitorManager *manager,
+                                                      gboolean            enabled)
+{
+  GList *l;
+
+  for (l = manager->monitors; l; l = l->next)
+    {
+      g_autoptr (GError) error = NULL;
+      MetaMonitor *monitor = l->data;
+
+      if (!meta_monitor_set_privacy_screen_enabled (monitor, enabled, &error))
+        {
+          if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED))
+            continue;
+
+          g_warning ("Failed to set privacy screen setting on monitor %s: %s",
+                     meta_monitor_get_display_name (monitor), error->message);
+          return FALSE;
+        }
+    }
+
+  return TRUE;
+}
+
+static gboolean
+set_privacy_screen_enabled (MetaMonitorManager *manager,
+                            gboolean            enabled)
+{
+  MetaMonitorManagerClass *manager_class =
+    META_MONITOR_MANAGER_GET_CLASS (manager);
+
+  return manager_class->set_privacy_screen_enabled (manager, enabled);
+}
+
+static gboolean
+ensure_monitors_settings (MetaMonitorManager *manager)
+{
+  MetaSettings *settings = meta_backend_get_settings (manager->backend);
+
+  return set_privacy_screen_enabled (
+    manager, meta_settings_is_privacy_screen_enabled (settings));
+}
+
+static MetaPrivacyScreenState
+get_global_privacy_screen_state (MetaMonitorManager *manager)
+{
+  MetaPrivacyScreenState global_state = META_PRIVACY_SCREEN_UNAVAILABLE;
+  GList *l;
+
+  for (l = manager->monitors; l; l = l->next)
+    {
+      MetaMonitor *monitor = l->data;
+      MetaPrivacyScreenState monitor_state;
+
+      if (!meta_monitor_is_active (monitor))
+        continue;
+
+      monitor_state = meta_monitor_get_privacy_screen_state (monitor);
+      if (monitor_state == META_PRIVACY_SCREEN_UNAVAILABLE)
+        continue;
+
+      if (monitor_state & META_PRIVACY_SCREEN_DISABLED)
+        return META_PRIVACY_SCREEN_DISABLED;
+
+      if (monitor_state & META_PRIVACY_SCREEN_ENABLED)
+        global_state = META_PRIVACY_SCREEN_ENABLED;
+    }
+
+  return global_state;
+}
+
+static void
+apply_privacy_screen_settings (MetaMonitorManager *manager)
+{
+  MetaSettings *settings = meta_backend_get_settings (manager->backend);
+  MetaPrivacyScreenState privacy_screen_state =
+    get_global_privacy_screen_state (manager);
+
+  if (privacy_screen_state == META_PRIVACY_SCREEN_UNAVAILABLE)
+    return;
+
+  if (!!(privacy_screen_state & META_PRIVACY_SCREEN_ENABLED) ==
+      meta_settings_is_privacy_screen_enabled (settings))
+    return;
+
+  if (ensure_monitors_settings (manager))
+    {
+      manager->privacy_screen_change_state =
+        META_PRIVACY_SCREEN_CHANGE_STATE_PENDING_SETTING;
+    }
+}
+
 static void
 update_panel_orientation_managed (MetaMonitorManager *manager)
 {
@@ -1036,16 +1134,54 @@ update_panel_orientation_managed (MetaMonitorManager *manager)
     handle_orientation_change (orientation_manager, manager);
 }
 
+static void
+update_has_builtin_panel (MetaMonitorManager *manager)
+{
+  MetaMonitorManagerPrivate *priv =
+    meta_monitor_manager_get_instance_private (manager);
+  GList *l;
+  gboolean has_builtin_panel = FALSE;
+
+  for (l = manager->monitors; l; l = l->next)
+    {
+      MetaMonitor *monitor = META_MONITOR (l->data);
+
+      if (meta_monitor_is_laptop_panel (monitor))
+        {
+          has_builtin_panel = TRUE;
+          break;
+        }
+    }
+
+  if (priv->has_builtin_panel == has_builtin_panel)
+    return;
+
+  priv->has_builtin_panel = has_builtin_panel;
+  g_object_notify_by_pspec (G_OBJECT (manager),
+                            obj_props[PROP_HAS_BUILTIN_PANEL]);
+}
+
 void
 meta_monitor_manager_setup (MetaMonitorManager *manager)
 {
+  MetaMonitorConfigStore *config_store;
+  const MetaMonitorConfigPolicy *policy;
+
   manager->in_init = TRUE;
 
   manager->config_manager = meta_monitor_config_manager_new (manager);
+  config_store =
+    meta_monitor_config_manager_get_store (manager->config_manager);
+  policy = meta_monitor_config_store_get_policy (config_store);
+  meta_dbus_display_config_set_apply_monitors_config_allowed (manager->display_config,
+                                                              policy->enable_dbus);
+
 
   meta_monitor_manager_read_current_state (manager);
 
   meta_monitor_manager_ensure_initial_config (manager);
+
+  apply_privacy_screen_settings (manager);
 
   manager->in_init = FALSE;
 }
@@ -1063,6 +1199,11 @@ meta_monitor_manager_constructed (GObject *object)
                            "experimental-features-changed",
                            G_CALLBACK (experimental_features_changed),
                            manager, 0);
+
+  g_signal_connect_object (settings,
+                           "privacy-screen-changed",
+                           G_CALLBACK (apply_privacy_screen_settings),
+                           manager, G_CONNECT_SWAPPED);
 
   monitor_manager_setup_dbus_config_handlers (manager);
 
@@ -1148,6 +1289,7 @@ meta_monitor_manager_set_property (GObject      *object,
       manager->backend = g_value_get_object (value);
       break;
     case PROP_PANEL_ORIENTATION_MANAGED:
+    case PROP_HAS_BUILTIN_PANEL:
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
     }
@@ -1160,6 +1302,8 @@ meta_monitor_manager_get_property (GObject    *object,
                                    GParamSpec *pspec)
 {
   MetaMonitorManager *manager = META_MONITOR_MANAGER (object);
+  MetaMonitorManagerPrivate *priv =
+    meta_monitor_manager_get_instance_private (manager);
 
   switch (prop_id)
     {
@@ -1168,6 +1312,9 @@ meta_monitor_manager_get_property (GObject    *object,
       break;
     case PROP_PANEL_ORIENTATION_MANAGED:
       g_value_set_boolean (value, manager->panel_orientation_managed);
+      break;
+    case PROP_HAS_BUILTIN_PANEL:
+      g_value_set_boolean (value, priv->has_builtin_panel);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -1187,6 +1334,8 @@ meta_monitor_manager_class_init (MetaMonitorManagerClass *klass)
 
   klass->read_edid = meta_monitor_manager_real_read_edid;
   klass->read_current_state = meta_monitor_manager_real_read_current_state;
+  klass->set_privacy_screen_enabled =
+    meta_monitor_manager_real_set_privacy_screen_enabled;
 
   signals[MONITORS_CHANGED] =
     g_signal_new ("monitors-changed",
@@ -1220,6 +1369,21 @@ meta_monitor_manager_class_init (MetaMonitorManagerClass *klass)
                   NULL, NULL, NULL,
 		  G_TYPE_NONE, 0);
 
+  /**
+   * MetaMonitorManager::monitor-privacy-screen-changed: (skip)
+   * @monitor_manager: The #MetaMonitorManager
+   * @logical_monitor: The #MetaLogicalMonitor where the privacy screen state
+   *                   changed
+   * @enabled: %TRUE if the privacy screen was enabled, otherwise %FALSE
+   */
+  signals[MONITOR_PRIVACY_SCREEN_CHANGED] =
+    g_signal_new ("monitor-privacy-screen-changed",
+                  G_TYPE_FROM_CLASS (object_class),
+                  G_SIGNAL_RUN_LAST,
+                  0,
+                  NULL, NULL, NULL,
+                  G_TYPE_NONE, 2, META_TYPE_LOGICAL_MONITOR, G_TYPE_BOOLEAN);
+
   obj_props[PROP_BACKEND] =
     g_param_spec_object ("backend",
                          "backend",
@@ -1237,6 +1401,16 @@ meta_monitor_manager_class_init (MetaMonitorManagerClass *klass)
                           G_PARAM_READABLE |
                           G_PARAM_EXPLICIT_NOTIFY |
                           G_PARAM_STATIC_STRINGS);
+
+  obj_props[PROP_HAS_BUILTIN_PANEL] =
+    g_param_spec_boolean ("has-builtin-panel",
+                          "Has builtin panel",
+                          "The system has a built in panel",
+                          FALSE,
+                          G_PARAM_READABLE |
+                          G_PARAM_EXPLICIT_NOTIFY |
+                          G_PARAM_STATIC_STRINGS);
+
   g_object_class_install_properties (object_class, PROP_LAST, obj_props);
 }
 
@@ -1300,6 +1474,55 @@ combine_gpu_lists (MetaMonitorManager    *manager,
     }
 
   return list;
+}
+
+static void
+emit_privacy_screen_change (MetaMonitorManager *manager)
+{
+  GList *l;
+
+  for (l = manager->monitors; l; l = l->next)
+    {
+      MetaMonitor *monitor = l->data;
+      MetaPrivacyScreenState privacy_screen_state;
+      gboolean enabled;
+
+      if (!meta_monitor_is_active (monitor))
+        continue;
+
+      privacy_screen_state = meta_monitor_get_privacy_screen_state (monitor);
+      if (privacy_screen_state == META_PRIVACY_SCREEN_UNAVAILABLE)
+        continue;
+
+      enabled = !!(privacy_screen_state & META_PRIVACY_SCREEN_ENABLED);
+
+      g_signal_emit (manager, signals[MONITOR_PRIVACY_SCREEN_CHANGED], 0,
+                     meta_monitor_get_logical_monitor (monitor), enabled);
+    }
+}
+
+void
+meta_monitor_manager_maybe_emit_privacy_screen_change (MetaMonitorManager *manager)
+{
+  MetaPrivacyScreenChangeState reason = manager->privacy_screen_change_state;
+
+  if (reason == META_PRIVACY_SCREEN_CHANGE_STATE_NONE)
+    return;
+
+  if (reason == META_PRIVACY_SCREEN_CHANGE_STATE_PENDING_HOTKEY)
+    emit_privacy_screen_change (manager);
+
+  if (reason != META_PRIVACY_SCREEN_CHANGE_STATE_PENDING_SETTING)
+    {
+      MetaSettings *settings = meta_backend_get_settings (manager->backend);
+
+      meta_settings_set_privacy_screen_enabled (settings,
+        get_global_privacy_screen_state (manager) ==
+        META_PRIVACY_SCREEN_ENABLED);
+    }
+
+  meta_dbus_display_config_emit_monitors_changed (manager->display_config);
+  manager->privacy_screen_change_state = META_PRIVACY_SCREEN_CHANGE_STATE_NONE;
 }
 
 static gboolean
@@ -1658,6 +1881,7 @@ meta_monitor_manager_handle_get_current_state (MetaDBusDisplayConfig *skeleton,
       MetaMonitorSpec *monitor_spec = meta_monitor_get_spec (monitor);
       MetaMonitorMode *current_mode;
       MetaMonitorMode *preferred_mode;
+      MetaPrivacyScreenState privacy_screen_state;
       GVariantBuilder modes_builder;
       GVariantBuilder monitor_properties_builder;
       GList *k;
@@ -1756,6 +1980,19 @@ meta_monitor_manager_handle_get_current_state (MetaDBusDisplayConfig *skeleton,
       g_variant_builder_add (&monitor_properties_builder, "{sv}",
                              "display-name",
                              g_variant_new_string (display_name));
+
+      privacy_screen_state = meta_monitor_get_privacy_screen_state (monitor);
+      if (privacy_screen_state != META_PRIVACY_SCREEN_UNAVAILABLE)
+        {
+          GVariant *state;
+
+          state = g_variant_new ("(bb)",
+            !!(privacy_screen_state & META_PRIVACY_SCREEN_ENABLED),
+            !!(privacy_screen_state & META_PRIVACY_SCREEN_LOCKED));
+
+          g_variant_builder_add (&monitor_properties_builder, "{sv}",
+                                 "privacy-screen-state", state);
+        }
 
       g_variant_builder_add (&monitors_builder, MONITOR_FORMAT,
                              monitor_spec->connector,
@@ -2325,6 +2562,8 @@ meta_monitor_manager_handle_apply_monitors_config (MetaDBusDisplayConfig *skelet
                                                    GVariant              *properties_variant,
                                                    MetaMonitorManager    *manager)
 {
+  MetaMonitorConfigStore *config_store;
+  const MetaMonitorConfigPolicy *policy;
   MetaMonitorManagerCapability capabilities;
   GVariant *layout_mode_variant = NULL;
   MetaLogicalMonitorLayoutMode layout_mode;
@@ -2338,6 +2577,18 @@ meta_monitor_manager_handle_apply_monitors_config (MetaDBusDisplayConfig *skelet
       g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
                                              G_DBUS_ERROR_ACCESS_DENIED,
                                              "The requested configuration is based on stale information");
+      return TRUE;
+    }
+
+  config_store =
+    meta_monitor_config_manager_get_store (manager->config_manager);
+  policy = meta_monitor_config_store_get_policy (config_store);
+
+  if (!policy->enable_dbus)
+    {
+      g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
+                                             G_DBUS_ERROR_ACCESS_DENIED,
+                                             "Monitor configuration via D-Bus is disabled");
       return TRUE;
     }
 
@@ -3152,6 +3403,7 @@ rebuild_monitors (MetaMonitorManager *manager)
     }
 
   update_panel_orientation_managed (manager);
+  update_has_builtin_panel (manager);
 }
 
 void
@@ -3308,6 +3560,8 @@ meta_monitor_manager_rebuild (MetaMonitorManager *manager,
   old_logical_monitors = manager->logical_monitors;
 
   meta_monitor_manager_update_logical_state (manager, config);
+
+  ensure_monitors_settings (manager);
 
   meta_monitor_manager_notify_monitors_changed (manager);
 

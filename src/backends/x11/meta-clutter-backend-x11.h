@@ -27,6 +27,7 @@
 
 #include <glib-object.h>
 
+#include "backends/meta-backend-types.h"
 #include "clutter/clutter-mutter.h"
 
 struct _MetaClutterBackendX11
@@ -34,14 +35,6 @@ struct _MetaClutterBackendX11
   ClutterBackend parent_instance;
 
   Display *xdisplay;
-  char   *display_name;
-
-  Screen  *xscreen;
-  int      xscreen_num;
-  int      xscreen_width;
-  int      xscreen_height;
-
-  Window   xwin_root;
 
   /* event source */
   GSList  *event_filters;
@@ -77,18 +70,20 @@ typedef MetaX11FilterReturn (*MetaX11FilterFunc) (XEvent        *xev,
                                                   ClutterEvent  *cev,
                                                   gpointer       data);
 
+MetaClutterBackendX11 * meta_clutter_backend_x11_new (MetaBackend *backend);
+
 void meta_clutter_x11_trap_x_errors (void);
 gint meta_clutter_x11_untrap_x_errors (void);
 
-Display *meta_clutter_x11_get_default_display (void);
-int meta_clutter_x11_get_default_screen (void);
 Window meta_clutter_x11_get_root_window (void);
-void meta_clutter_x11_set_display (Display * xdpy);
 
-void meta_clutter_x11_add_filter (MetaX11FilterFunc func,
-                                  gpointer          data);
-void meta_clutter_x11_remove_filter (MetaX11FilterFunc func,
-                                     gpointer          data);
+void meta_clutter_backend_x11_add_filter (MetaClutterBackendX11 *clutter_backend_x11,
+                                          MetaX11FilterFunc      func,
+                                          gpointer               data);
+
+void meta_clutter_backend_x11_remove_filter (MetaClutterBackendX11 *clutter_backend_x11,
+                                             MetaX11FilterFunc      func,
+                                             gpointer               data);
 
 void meta_clutter_x11_set_use_stereo_stage (gboolean use_stereo);
 gboolean meta_clutter_x11_get_use_stereo_stage (void);

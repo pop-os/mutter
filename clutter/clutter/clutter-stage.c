@@ -28,14 +28,6 @@
  * #ClutterStage is a top level 'window' on which child actors are placed
  * and manipulated.
  *
- * Backends might provide support for multiple stages. The support for this
- * feature can be checked at run-time using the clutter_feature_available()
- * function and the %CLUTTER_FEATURE_STAGE_MULTIPLE flag. If the backend used
- * supports multiple stages, new #ClutterStage instances can be created
- * using clutter_stage_new(). These stages must be managed by the developer
- * using clutter_actor_destroy(), which will take care of destroying all the
- * actors contained inside them.
- *
  * #ClutterStage is a proxy actor, wrapping the backend-specific implementation
  * (a #StageWindow) of the windowing system. It is possible to subclass
  * #ClutterStage, as long as every overridden virtual function chains up to the
@@ -60,6 +52,7 @@
 #include "clutter-enum-types.h"
 #include "clutter-event-private.h"
 #include "clutter-frame-clock.h"
+#include "clutter-grab.h"
 #include "clutter-id-pool.h"
 #include "clutter-input-device-private.h"
 #include "clutter-main.h"
@@ -69,6 +62,7 @@
 #include "clutter-paint-volume-private.h"
 #include "clutter-pick-context-private.h"
 #include "clutter-private.h"
+#include "clutter-seat-private.h"
 #include "clutter-stage-manager-private.h"
 #include "clutter-stage-private.h"
 #include "clutter-stage-view-private.h"
@@ -104,6 +98,7 @@ typedef struct _PointerDeviceEntry
   ClutterEventSequence *sequence;
   graphene_point_t coords;
   ClutterActor *current_actor;
+  cairo_region_t *clear_area;
 } PointerDeviceEntry;
 
 struct _ClutterStagePrivate
@@ -120,6 +115,9 @@ struct _ClutterStagePrivate
   gchar *title;
   ClutterActor *key_focused_actor;
 
+  ClutterGrab *topmost_grab;
+  ClutterGrabState grab_state;
+
   GQueue *event_queue;
 
   GArray *paint_volume_stack;
@@ -129,16 +127,21 @@ struct _ClutterStagePrivate
 
   int update_freeze_count;
 
-  gboolean needs_update_devices;
   gboolean pending_finish_queue_redraws;
 
   GHashTable *pointer_devices;
   GHashTable *touch_sequences;
 
-  guint throttle_motion_events : 1;
-  guint min_size_changed       : 1;
-  guint motion_events_enabled  : 1;
   guint actor_needs_immediate_relayout : 1;
+};
+
+struct _ClutterGrab
+{
+  grefcount ref_count;
+  ClutterStage *stage;
+  ClutterActor *actor;
+  ClutterGrab *prev;
+  ClutterGrab *next;
 };
 
 enum
@@ -281,6 +284,7 @@ clutter_stage_allocate (ClutterActor           *self,
   float new_width, new_height;
   float width, height;
   cairo_rectangle_int_t window_size;
+  ClutterActorBox children_box;
   ClutterLayoutManager *layout_manager = clutter_actor_get_layout_manager (self);
 
   if (priv->impl == NULL)
@@ -292,85 +296,26 @@ clutter_stage_allocate (ClutterActor           *self,
   /* the current Stage implementation size */
   _clutter_stage_window_get_geometry (priv->impl, &window_size);
 
-  /* if the stage is fixed size (for instance, it's using a EGL framebuffer)
-   * then we simply ignore any allocation request and override the
-   * allocation chain - because we cannot forcibly change the size of the
-   * stage window.
-   */
-  if (!clutter_feature_available (CLUTTER_FEATURE_STAGE_STATIC))
+  children_box.x1 = children_box.y1 = 0.f;
+  children_box.x2 = box->x2 - box->x1;
+  children_box.y2 = box->y2 - box->y1;
+
+  CLUTTER_NOTE (LAYOUT,
+                "Following allocation to %.2fx%.2f",
+                width, height);
+
+  clutter_actor_set_allocation (self, box);
+
+  clutter_layout_manager_allocate (layout_manager,
+                                   CLUTTER_CONTAINER (self),
+                                   &children_box);
+
+  if (window_size.width != CLUTTER_NEARBYINT (width) ||
+      window_size.height != CLUTTER_NEARBYINT (height))
     {
-      ClutterActorBox children_box;
-
-      children_box.x1 = children_box.y1 = 0.f;
-      children_box.x2 = box->x2 - box->x1;
-      children_box.y2 = box->y2 - box->y1;
-
-      CLUTTER_NOTE (LAYOUT,
-                    "Following allocation to %.2fx%.2f",
-                    width, height);
-
-      clutter_actor_set_allocation (self, box);
-
-      clutter_layout_manager_allocate (layout_manager,
-                                       CLUTTER_CONTAINER (self),
-                                       &children_box);
-
-      /* Ensure the window is sized correctly */
-      if (priv->min_size_changed)
-        {
-          gfloat min_width, min_height;
-          gboolean min_width_set, min_height_set;
-
-          g_object_get (G_OBJECT (self),
-                        "min-width", &min_width,
-                        "min-width-set", &min_width_set,
-                        "min-height", &min_height,
-                        "min-height-set", &min_height_set,
-                        NULL);
-
-          if (!min_width_set)
-            min_width = 1;
-          if (!min_height_set)
-            min_height = 1;
-
-          if (width < min_width)
-            width = min_width;
-          if (height < min_height)
-            height = min_height;
-
-          priv->min_size_changed = FALSE;
-        }
-
-      if (window_size.width != CLUTTER_NEARBYINT (width) ||
-          window_size.height != CLUTTER_NEARBYINT (height))
-        {
-          _clutter_stage_window_resize (priv->impl,
-                                        CLUTTER_NEARBYINT (width),
-                                        CLUTTER_NEARBYINT (height));
-        }
-    }
-  else
-    {
-      ClutterActorBox override = { 0, };
-
-      /* override the passed allocation */
-      override.x1 = 0;
-      override.y1 = 0;
-      override.x2 = window_size.width;
-      override.y2 = window_size.height;
-
-      CLUTTER_NOTE (LAYOUT,
-                    "Overriding original allocation of %.2fx%.2f "
-                    "with %.2fx%.2f",
-                    width, height,
-                    override.x2, override.y2);
-
-      /* and store the overridden allocation */
-      clutter_actor_set_allocation (self, &override);
-
-      clutter_layout_manager_allocate (layout_manager,
-                                       CLUTTER_CONTAINER (self),
-                                       &override);
+      _clutter_stage_window_resize (priv->impl,
+                                    CLUTTER_NEARBYINT (width),
+                                    CLUTTER_NEARBYINT (height));
     }
 
   /* set the viewport to the new allocation */
@@ -746,7 +691,6 @@ _clutter_stage_process_queued_events (ClutterStage *stage)
       ClutterEvent *next_event;
       ClutterInputDevice *device;
       ClutterInputDevice *next_device;
-      ClutterInputDeviceType device_type;
       gboolean check_device = FALSE;
 
       event = l->data;
@@ -762,16 +706,8 @@ _clutter_stage_process_queued_events (ClutterStage *stage)
       if (device != NULL && next_device != NULL)
         check_device = TRUE;
 
-      device_type = clutter_input_device_get_device_type (device);
-
-      /* Skip consecutive motion events coming from the same device,
-       * except those of tablet tools, since users of these events
-       * want no precision loss.
-       */
-      if (priv->throttle_motion_events && next_event != NULL &&
-          device_type != CLUTTER_TABLET_DEVICE &&
-          device_type != CLUTTER_PEN_DEVICE &&
-          device_type != CLUTTER_ERASER_DEVICE)
+      /* Skip consecutive motion events coming from the same device. */
+      if (next_event != NULL)
         {
           if (event->type == CLUTTER_MOTION &&
               (next_event->type == CLUTTER_MOTION ||
@@ -847,6 +783,19 @@ clutter_stage_dequeue_actor_relayout (ClutterStage *stage,
     }
 }
 
+static void
+clutter_stage_invalidate_views_devices (ClutterStage *stage)
+{
+  GList *l;
+
+  for (l = clutter_stage_peek_stage_views (stage); l; l = l->next)
+    {
+      ClutterStageView *view = l->data;
+
+      clutter_stage_view_invalidate_input_devices (view);
+    }
+}
+
 void
 clutter_stage_maybe_relayout (ClutterActor *actor)
 {
@@ -894,36 +843,33 @@ clutter_stage_maybe_relayout (ClutterActor *actor)
   CLUTTER_NOTE (ACTOR, "<<< Completed recomputing layout of %d subtrees", count);
 
   if (count)
-    priv->needs_update_devices = TRUE;
+    clutter_stage_invalidate_views_devices (stage);
 }
 
 GSList *
-clutter_stage_find_updated_devices (ClutterStage *stage)
+clutter_stage_find_updated_devices (ClutterStage     *stage,
+                                    ClutterStageView *view)
 {
   ClutterStagePrivate *priv = stage->priv;
   GSList *updating = NULL;
   GHashTableIter iter;
   gpointer value;
 
-  if (!priv->needs_update_devices)
-    return NULL;
-
-  priv->needs_update_devices = FALSE;
-
   g_hash_table_iter_init (&iter, priv->pointer_devices);
   while (g_hash_table_iter_next (&iter, NULL, &value))
     {
       PointerDeviceEntry *entry = value;
-      ClutterStageView *view;
-      const cairo_region_t *clip;
+      ClutterStageView *pointer_view;
 
-      view = clutter_stage_get_view_at (stage, entry->coords.x, entry->coords.y);
-      if (!view)
+      pointer_view = clutter_stage_get_view_at (stage,
+                                                entry->coords.x,
+                                                entry->coords.y);
+      if (!pointer_view)
+        continue;
+      if (pointer_view != view)
         continue;
 
-      clip = clutter_stage_view_peek_redraw_clip (view);
-      if (!clip || cairo_region_contains_point (clip, entry->coords.x, entry->coords.y))
-        updating = g_slist_prepend (updating, entry->device);
+      updating = g_slist_prepend (updating, entry->device);
     }
 
   return updating;
@@ -977,22 +923,17 @@ clutter_stage_update_devices (ClutterStage *stage,
     {
       ClutterInputDevice *device = l->data;
       PointerDeviceEntry *entry = NULL;
-      ClutterActor *new_actor;
 
       entry = g_hash_table_lookup (priv->pointer_devices, device);
       g_assert (entry != NULL);
 
-      new_actor = _clutter_stage_do_pick (stage,
-                                          entry->coords.x,
-                                          entry->coords.y,
-                                          CLUTTER_PICK_REACTIVE);
-
-      clutter_stage_update_device (stage,
-                                   device, NULL,
-                                   entry->coords,
-                                   CLUTTER_CURRENT_TIME,
-                                   new_actor,
-                                   TRUE);
+      clutter_stage_pick_and_update_device (stage,
+                                            device,
+                                            NULL,
+                                            CLUTTER_DEVICE_UPDATE_IGNORE_CACHE |
+                                            CLUTTER_DEVICE_UPDATE_EMIT_CROSSING,
+                                            entry->coords,
+                                            CLUTTER_CURRENT_TIME);
     }
 }
 
@@ -1066,11 +1007,12 @@ setup_ray_for_coordinates (ClutterStage       *stage,
 }
 
 static ClutterActor *
-_clutter_stage_do_pick_on_view (ClutterStage     *stage,
-                                float             x,
-                                float             y,
-                                ClutterPickMode   mode,
-                                ClutterStageView *view)
+_clutter_stage_do_pick_on_view (ClutterStage      *stage,
+                                float              x,
+                                float              y,
+                                ClutterPickMode    mode,
+                                ClutterStageView  *view,
+                                cairo_region_t   **clear_area)
 {
   g_autoptr (ClutterPickStack) pick_stack = NULL;
   ClutterPickContext *pick_context;
@@ -1088,7 +1030,7 @@ _clutter_stage_do_pick_on_view (ClutterStage     *stage,
   pick_stack = clutter_pick_context_steal_stack (pick_context);
   clutter_pick_context_destroy (pick_context);
 
-  actor = clutter_pick_stack_search_actor (pick_stack, &p, &ray);
+  actor = clutter_pick_stack_search_actor (pick_stack, &p, &ray, clear_area);
   return actor ? actor : CLUTTER_ACTOR (stage);
 }
 
@@ -1119,11 +1061,12 @@ clutter_stage_get_view_at (ClutterStage *stage,
   return NULL;
 }
 
-ClutterActor *
-_clutter_stage_do_pick (ClutterStage   *stage,
-                        float           x,
-                        float           y,
-                        ClutterPickMode mode)
+static ClutterActor *
+_clutter_stage_do_pick (ClutterStage     *stage,
+                        float             x,
+                        float             y,
+                        ClutterPickMode   mode,
+                        cairo_region_t  **clear_area)
 {
   ClutterActor *actor = CLUTTER_ACTOR (stage);
   ClutterStagePrivate *priv = stage->priv;
@@ -1147,7 +1090,7 @@ _clutter_stage_do_pick (ClutterStage   *stage,
 
   view = clutter_stage_get_view_at (stage, x, y);
   if (view)
-    return _clutter_stage_do_pick_on_view (stage, x, y, mode, view);
+    return _clutter_stage_do_pick_on_view (stage, x, y, mode, view, clear_area);
 
   return actor;
 }
@@ -1173,25 +1116,6 @@ clutter_stage_constructed (GObject *gobject)
 
   /* this will take care to sinking the floating reference */
   _clutter_stage_manager_add_stage (stage_manager, self);
-
-  /* if this stage has been created on a backend that does not
-   * support multiple stages then it becomes the default stage
-   * as well; any other attempt at creating a ClutterStage will
-   * fail.
-   */
-  if (!clutter_feature_available (CLUTTER_FEATURE_STAGE_MULTIPLE))
-    {
-      if (G_UNLIKELY (clutter_stage_manager_get_default_stage (stage_manager) != NULL))
-        {
-          g_error ("Unable to create another stage: the backend of "
-                   "type '%s' does not support multiple stages. Use "
-                   "clutter_stage_manager_get_default_stage() instead "
-                   "to access the stage singleton.",
-                   G_OBJECT_TYPE_NAME (clutter_get_default_backend ()));
-        }
-
-      _clutter_stage_manager_set_default_stage (stage_manager, self);
-    }
 
   G_OBJECT_CLASS (clutter_stage_parent_class)->constructed (gobject);
 }
@@ -1281,6 +1205,9 @@ clutter_stage_dispose (GObject *object)
   /* this will release the reference on the stage */
   stage_manager = clutter_stage_manager_get_default ();
   _clutter_stage_manager_remove_stage (stage_manager, stage);
+
+  g_hash_table_remove_all (priv->pointer_devices);
+  g_hash_table_remove_all (priv->touch_sequences);
 
   G_OBJECT_CLASS (clutter_stage_parent_class)->dispose (object);
 }
@@ -1592,12 +1519,6 @@ clutter_stage_class_init (ClutterStageClass *klass)
 }
 
 static void
-clutter_stage_notify_min_size (ClutterStage *self)
-{
-  self->priv->min_size_changed = TRUE;
-}
-
-static void
 clutter_stage_init (ClutterStage *self)
 {
   cairo_rectangle_int_t geom = { 0, };
@@ -1636,10 +1557,6 @@ clutter_stage_init (ClutterStage *self)
 
   priv->event_queue = g_queue_new ();
 
-  priv->throttle_motion_events = TRUE;
-  priv->min_size_changed = FALSE;
-  priv->motion_events_enabled = TRUE;
-
   priv->pointer_devices =
     g_hash_table_new_full (NULL, NULL,
                            NULL, (GDestroyNotify) free_pointer_device_entry);
@@ -1655,12 +1572,6 @@ clutter_stage_init (ClutterStage *self)
   clutter_actor_set_reactive (CLUTTER_ACTOR (self), TRUE);
   clutter_stage_set_title (self, g_get_prgname ());
   clutter_stage_set_key_focus (self, NULL);
-
-  g_signal_connect (self, "notify::min-width",
-                    G_CALLBACK (clutter_stage_notify_min_size), NULL);
-  g_signal_connect (self, "notify::min-height",
-                    G_CALLBACK (clutter_stage_notify_min_size), NULL);
-
   clutter_stage_set_viewport (self, geom.width, geom.height);
 
   priv->pending_queue_redraws =
@@ -2016,7 +1927,7 @@ clutter_stage_get_actor_at_pos (ClutterStage    *stage,
 {
   g_return_val_if_fail (CLUTTER_IS_STAGE (stage), NULL);
 
-  return _clutter_stage_do_pick (stage, x, y, pick_mode);
+  return _clutter_stage_do_pick (stage, x, y, pick_mode, NULL);
 }
 
 /**
@@ -2122,13 +2033,23 @@ clutter_stage_set_key_focus (ClutterStage *stage,
    * intended. The order of events would be:
    *   1st focus-out, 2nd focus-out (on stage), 2nd focus-in, 1st focus-in
    */
-  if (actor != NULL)
+  priv->key_focused_actor = actor;
+
+  /* If the key focused actor is allowed to receive key events according
+   * to the given grab (or there is none) set key focus on it, otherwise
+   * key focus is delayed until there are grabbing conditions that allow
+   * it to get key focus.
+   */
+  if (!priv->topmost_grab ||
+      priv->topmost_grab->actor == CLUTTER_ACTOR (stage) ||
+      priv->topmost_grab->actor == actor ||
+      (actor && clutter_actor_contains (priv->topmost_grab->actor, actor)))
     {
-      priv->key_focused_actor = actor;
-      _clutter_actor_set_has_key_focus (actor, TRUE);
+      if (actor != NULL)
+        _clutter_actor_set_has_key_focus (actor, TRUE);
+      else
+        _clutter_actor_set_has_key_focus (CLUTTER_ACTOR (stage), TRUE);
     }
-  else
-    _clutter_actor_set_has_key_focus (CLUTTER_ACTOR (stage), TRUE);
 
   g_object_notify_by_pspec (G_OBJECT (stage), obj_props[PROP_KEY_FOCUS]);
 }
@@ -2496,136 +2417,6 @@ _clutter_stage_get_default_window (void)
 }
 
 /**
- * clutter_stage_set_throttle_motion_events:
- * @stage: a #ClutterStage
- * @throttle: %TRUE to throttle motion events
- *
- * Sets whether motion events received between redraws should
- * be throttled or not. If motion events are throttled, those
- * events received by the windowing system between redraws will
- * be compressed so that only the last event will be propagated
- * to the @stage and its actors.
- *
- * This function should only be used if you want to have all
- * the motion events delivered to your application code.
- *
- * Since: 1.0
- */
-void
-clutter_stage_set_throttle_motion_events (ClutterStage *stage,
-                                          gboolean      throttle)
-{
-  ClutterStagePrivate *priv;
-
-  g_return_if_fail (CLUTTER_IS_STAGE (stage));
-
-  priv = stage->priv;
-
-  if (priv->throttle_motion_events != throttle)
-    priv->throttle_motion_events = throttle;
-}
-
-/**
- * clutter_stage_get_throttle_motion_events:
- * @stage: a #ClutterStage
- *
- * Retrieves the value set with clutter_stage_set_throttle_motion_events()
- *
- * Return value: %TRUE if the motion events are being throttled,
- *   and %FALSE otherwise
- *
- * Since: 1.0
- */
-gboolean
-clutter_stage_get_throttle_motion_events (ClutterStage *stage)
-{
-  g_return_val_if_fail (CLUTTER_IS_STAGE (stage), FALSE);
-
-  return stage->priv->throttle_motion_events;
-}
-
-/**
- * clutter_stage_set_minimum_size:
- * @stage: a #ClutterStage
- * @width: width, in pixels
- * @height: height, in pixels
- *
- * Sets the minimum size for a stage window, if the default backend
- * uses #ClutterStage inside a window
- *
- * This is a convenience function, and it is equivalent to setting the
- * #ClutterActor:min-width and #ClutterActor:min-height on @stage
- *
- * If the current size of @stage is smaller than the minimum size, the
- * @stage will be resized to the new @width and @height
- *
- * Since: 1.2
- */
-void
-clutter_stage_set_minimum_size (ClutterStage *stage,
-                                guint         width,
-                                guint         height)
-{
-  g_return_if_fail (CLUTTER_IS_STAGE (stage));
-  g_return_if_fail ((width > 0) && (height > 0));
-
-  g_object_set (G_OBJECT (stage),
-                "min-width", (gfloat) width,
-                "min-height", (gfloat )height,
-                NULL);
-}
-
-/**
- * clutter_stage_get_minimum_size:
- * @stage: a #ClutterStage
- * @width: (out): return location for the minimum width, in pixels,
- *   or %NULL
- * @height: (out): return location for the minimum height, in pixels,
- *   or %NULL
- *
- * Retrieves the minimum size for a stage window as set using
- * clutter_stage_set_minimum_size().
- *
- * The returned size may not correspond to the actual minimum size and
- * it is specific to the #ClutterStage implementation inside the
- * Clutter backend
- *
- * Since: 1.2
- */
-void
-clutter_stage_get_minimum_size (ClutterStage *stage,
-                                guint        *width_p,
-                                guint        *height_p)
-{
-  gfloat width, height;
-  gboolean width_set, height_set;
-
-  g_return_if_fail (CLUTTER_IS_STAGE (stage));
-
-  g_object_get (G_OBJECT (stage),
-                "min-width", &width,
-                "min-width-set", &width_set,
-                "min-height", &height,
-                "min-height-set", &height_set,
-                NULL);
-
-  /* if not width or height have been set, then the Stage
-   * minimum size is defined to be 1x1
-   */
-  if (!width_set)
-    width = 1;
-
-  if (!height_set)
-    height = 1;
-
-  if (width_p)
-    *width_p = (guint) width;
-
-  if (height_p)
-    *height_p = (guint) height;
-}
-
-/**
  * clutter_stage_schedule_update:
  * @stage: a #ClutterStage actor
  *
@@ -2896,70 +2687,6 @@ clutter_stage_maybe_finish_queue_redraws (ClutterStage *stage)
        */
       g_hash_table_iter_init (&iter, priv->pending_queue_redraws);
     }
-}
-
-/**
- * clutter_stage_set_motion_events_enabled:
- * @stage: a #ClutterStage
- * @enabled: %TRUE to enable the motion events delivery, and %FALSE
- *   otherwise
- *
- * Sets whether per-actor motion events (and relative crossing
- * events) should be disabled or not.
- *
- * The default is %TRUE.
- *
- * If @enable is %FALSE the following signals will not be emitted
- * by the actors children of @stage:
- *
- *  - #ClutterActor::motion-event
- *  - #ClutterActor::enter-event
- *  - #ClutterActor::leave-event
- *
- * The events will still be delivered to the #ClutterStage.
- *
- * The main side effect of this function is that disabling the motion
- * events will disable picking to detect the #ClutterActor underneath
- * the pointer for each motion event. This is useful, for instance,
- * when dragging a #ClutterActor across the @stage: the actor underneath
- * the pointer is not going to change, so it's meaningless to perform
- * a pick.
- *
- * Since: 1.8
- */
-void
-clutter_stage_set_motion_events_enabled (ClutterStage *stage,
-                                         gboolean      enabled)
-{
-  ClutterStagePrivate *priv;
-
-  g_return_if_fail (CLUTTER_IS_STAGE (stage));
-
-  priv = stage->priv;
-
-  enabled = !!enabled;
-
-  if (priv->motion_events_enabled != enabled)
-    priv->motion_events_enabled = enabled;
-}
-
-/**
- * clutter_stage_get_motion_events_enabled:
- * @stage: a #ClutterStage
- *
- * Retrieves the value set using clutter_stage_set_motion_events_enabled().
- *
- * Return value: %TRUE if the per-actor motion event delivery is enabled
- *   and %FALSE otherwise
- *
- * Since: 1.8
- */
-gboolean
-clutter_stage_get_motion_events_enabled (ClutterStage *stage)
-{
-  g_return_val_if_fail (CLUTTER_IS_STAGE (stage), FALSE);
-
-  return stage->priv->motion_events_enabled;
 }
 
 void
@@ -3429,22 +3156,16 @@ on_device_actor_reactive_changed (ClutterActor       *actor,
                                   PointerDeviceEntry *entry)
 {
   ClutterStage *self = entry->stage;
-  ClutterActor *new_device_actor;
 
   g_assert (!clutter_actor_get_reactive (actor));
 
-  new_device_actor =
-    _clutter_stage_do_pick (self,
-                            entry->coords.x,
-                            entry->coords.y,
-                            CLUTTER_PICK_REACTIVE);
-
-  clutter_stage_update_device (self,
-                               entry->device, entry->sequence,
-                               entry->coords,
-                               CLUTTER_CURRENT_TIME,
-                               new_device_actor,
-                               TRUE);
+  clutter_stage_pick_and_update_device (self,
+                                        entry->device,
+                                        entry->sequence,
+                                        CLUTTER_DEVICE_UPDATE_IGNORE_CACHE |
+                                        CLUTTER_DEVICE_UPDATE_EMIT_CROSSING,
+                                        entry->coords,
+                                        CLUTTER_CURRENT_TIME);
 }
 
 static void
@@ -3454,11 +3175,10 @@ on_device_actor_destroyed (ClutterActor       *actor,
   /* Simply unset the current_actor pointer here, there's no need to
    * unset has_pointer or to disconnect any signals because the actor
    * is gone anyway.
-   * Also, as soon as the next repaint happens, a repick should be triggered
-   * and the PointerDeviceEntry will get updated again, so no need to
-   * trigger a repick here.
    */
   entry->current_actor = NULL;
+  g_clear_pointer (&entry->clear_area, cairo_region_destroy);
+  clutter_stage_repick_device (entry->stage, entry->device);
 }
 
 static void
@@ -3478,6 +3198,8 @@ free_pointer_device_entry (PointerDeviceEntry *entry)
       _clutter_actor_set_has_pointer (actor, FALSE);
    }
 
+  g_clear_pointer (&entry->clear_area, cairo_region_destroy);
+
   g_free (entry);
 }
 
@@ -3486,7 +3208,8 @@ clutter_stage_update_device_entry (ClutterStage         *self,
                                    ClutterInputDevice   *device,
                                    ClutterEventSequence *sequence,
                                    graphene_point_t      coords,
-                                   ClutterActor         *actor)
+                                   ClutterActor         *actor,
+                                   cairo_region_t       *clear_area)
 {
   ClutterStagePrivate *priv = self->priv;
   PointerDeviceEntry *entry = NULL;
@@ -3542,6 +3265,10 @@ clutter_stage_update_device_entry (ClutterStage         *self,
           _clutter_actor_set_has_pointer (actor, TRUE);
         }
     }
+
+  g_clear_pointer (&entry->clear_area, cairo_region_destroy);
+  if (clear_area)
+    entry->clear_area = cairo_region_reference (clear_area);
 }
 
 void
@@ -3617,4 +3344,580 @@ clutter_stage_get_device_coords (ClutterStage         *stage,
 
   if (entry && coords)
     *coords = entry->coords;
+}
+
+static void
+clutter_stage_set_device_coords (ClutterStage         *stage,
+                                 ClutterInputDevice   *device,
+                                 ClutterEventSequence *sequence,
+                                 graphene_point_t      coords)
+{
+  ClutterStagePrivate *priv = stage->priv;
+  PointerDeviceEntry *entry = NULL;
+
+  if (sequence != NULL)
+    entry = g_hash_table_lookup (priv->touch_sequences, sequence);
+  else
+    entry = g_hash_table_lookup (priv->pointer_devices, device);
+
+  if (entry)
+    entry->coords = coords;
+}
+
+static ClutterActor *
+find_common_root_actor (ClutterStage *stage,
+                        ClutterActor *a,
+                        ClutterActor *b)
+{
+  if (a && b)
+    {
+      while (a)
+        {
+          if (a == b || clutter_actor_contains (a, b))
+            return a;
+
+          a = clutter_actor_get_parent (a);
+        }
+    }
+
+  return CLUTTER_ACTOR (stage);
+}
+
+static ClutterEvent *
+create_crossing_event (ClutterStage         *stage,
+                       ClutterInputDevice   *device,
+                       ClutterEventSequence *sequence,
+                       ClutterEventType      event_type,
+                       ClutterEventFlags     flags,
+                       ClutterActor         *source,
+                       ClutterActor         *related,
+                       graphene_point_t      coords,
+                       uint32_t              time_ms)
+{
+  ClutterEvent *event;
+
+  event = clutter_event_new (event_type);
+  event->crossing.time = time_ms;
+  event->crossing.flags = flags;
+  event->crossing.stage = stage;
+  event->crossing.source = source;
+  event->crossing.x = coords.x;
+  event->crossing.y = coords.y;
+  event->crossing.related = related;
+  event->crossing.sequence = sequence;
+  clutter_event_set_device (event, device);
+
+  return event;
+}
+
+void
+clutter_stage_update_device (ClutterStage         *stage,
+                             ClutterInputDevice   *device,
+                             ClutterEventSequence *sequence,
+                             graphene_point_t      point,
+                             uint32_t              time_ms,
+                             ClutterActor         *new_actor,
+                             cairo_region_t       *clear_area,
+                             gboolean              emit_crossing)
+{
+  ClutterInputDeviceType device_type;
+  ClutterActor *old_actor, *root;
+  gboolean device_actor_changed;
+  ClutterEvent *event;
+
+  device_type = clutter_input_device_get_device_type (device);
+
+  g_assert (device_type != CLUTTER_KEYBOARD_DEVICE &&
+            device_type != CLUTTER_PAD_DEVICE);
+
+  old_actor = clutter_stage_get_device_actor (stage, device, sequence);
+  device_actor_changed = new_actor != old_actor;
+
+  clutter_stage_update_device_entry (stage,
+                                     device, sequence,
+                                     point,
+                                     new_actor,
+                                     clear_area);
+
+  if (device_actor_changed)
+    {
+      CLUTTER_NOTE (EVENT,
+                    "Updating actor under cursor (device %s, at %.2f, %.2f): %s",
+                    clutter_input_device_get_device_name (device),
+                    point.x,
+                    point.y,
+                    _clutter_actor_get_debug_name (new_actor));
+
+      if (emit_crossing)
+        {
+          ClutterActor *grab_actor;
+
+          root = find_common_root_actor (stage, new_actor, old_actor);
+
+          grab_actor = clutter_stage_get_grab_actor (stage);
+
+          /* If the common root is outside the currently effective grab,
+           * it involves actors outside the grabbed actor hierarchy, the
+           * events should be propagated from/inside the grab actor.
+           */
+          if (grab_actor &&
+              root != grab_actor &&
+              !clutter_actor_contains (grab_actor, root))
+            root = grab_actor;
+        }
+
+      /* we need to make sure that this event is processed
+       * before any other event we might have queued up until
+       * now, so we go on, and synthesize the event emission
+       * ourselves
+       */
+      if (old_actor && emit_crossing)
+        {
+          event = create_crossing_event (stage,
+                                         device, sequence,
+                                         CLUTTER_LEAVE,
+                                         CLUTTER_EVENT_NONE,
+                                         old_actor, new_actor,
+                                         point, time_ms);
+          if (!_clutter_event_process_filters (event))
+            _clutter_actor_handle_event (old_actor, root, event);
+
+          clutter_event_free (event);
+        }
+
+      if (new_actor && emit_crossing)
+        {
+          event = create_crossing_event (stage,
+                                         device, sequence,
+                                         CLUTTER_ENTER,
+                                         CLUTTER_EVENT_NONE,
+                                         new_actor, old_actor,
+                                         point, time_ms);
+          if (!_clutter_event_process_filters (event))
+            _clutter_actor_handle_event (new_actor, root, event);
+
+          clutter_event_free (event);
+        }
+    }
+}
+
+void
+clutter_stage_repick_device (ClutterStage       *stage,
+                             ClutterInputDevice *device)
+{
+  graphene_point_t point;
+
+  clutter_stage_get_device_coords (stage, device, NULL, &point);
+  clutter_stage_pick_and_update_device (stage,
+                                        device,
+                                        NULL,
+                                        CLUTTER_DEVICE_UPDATE_IGNORE_CACHE |
+                                        CLUTTER_DEVICE_UPDATE_EMIT_CROSSING,
+                                        point,
+                                        CLUTTER_CURRENT_TIME);
+}
+
+static gboolean
+clutter_stage_check_in_clear_area (ClutterStage         *stage,
+                                   ClutterInputDevice   *device,
+                                   ClutterEventSequence *sequence,
+                                   graphene_point_t      point)
+{
+  ClutterStagePrivate *priv = stage->priv;
+  PointerDeviceEntry *entry = NULL;
+
+  g_return_val_if_fail (CLUTTER_IS_STAGE (stage), FALSE);
+  g_return_val_if_fail (device != NULL, FALSE);
+
+  if (sequence != NULL)
+    entry = g_hash_table_lookup (priv->touch_sequences, sequence);
+  else
+    entry = g_hash_table_lookup (priv->pointer_devices, device);
+
+  if (!entry)
+    return FALSE;
+  if (!entry->clear_area)
+    return FALSE;
+
+  return cairo_region_contains_point (entry->clear_area,
+                                      point.x, point.y);
+}
+
+ClutterActor *
+clutter_stage_pick_and_update_device (ClutterStage             *stage,
+                                      ClutterInputDevice       *device,
+                                      ClutterEventSequence     *sequence,
+                                      ClutterDeviceUpdateFlags  flags,
+                                      graphene_point_t          point,
+                                      uint32_t                  time_ms)
+{
+  ClutterActor *new_actor;
+  cairo_region_t *clear_area = NULL;
+
+  if ((flags & CLUTTER_DEVICE_UPDATE_IGNORE_CACHE) == 0)
+    {
+      if (clutter_stage_check_in_clear_area (stage, device,
+                                             sequence, point))
+        {
+          clutter_stage_set_device_coords (stage, device,
+                                           sequence, point);
+          return clutter_stage_get_device_actor (stage, device, sequence);
+        }
+    }
+
+  new_actor = _clutter_stage_do_pick (stage,
+                                      point.x,
+                                      point.y,
+                                      CLUTTER_PICK_REACTIVE,
+                                      &clear_area);
+
+  /* Picking should never fail, but if it does, we bail out here */
+  g_return_val_if_fail (new_actor != NULL, NULL);
+
+  clutter_stage_update_device (stage,
+                               device, sequence,
+                               point,
+                               time_ms,
+                               new_actor,
+                               clear_area,
+                               !!(flags & CLUTTER_DEVICE_UPDATE_EMIT_CROSSING));
+
+  g_clear_pointer (&clear_area, cairo_region_destroy);
+
+  return new_actor;
+}
+
+static void
+clutter_stage_notify_grab_on_pointer_entry (ClutterStage       *stage,
+                                            PointerDeviceEntry *entry,
+                                            ClutterActor       *grab_actor,
+                                            ClutterActor       *old_grab_actor)
+{
+  gboolean pointer_in_grab, pointer_in_old_grab;
+  ClutterEventType event_type = CLUTTER_NOTHING;
+  ClutterActor *topmost, *deepmost;
+
+  if (!entry->current_actor)
+    return;
+
+  pointer_in_grab =
+    !grab_actor ||
+    grab_actor == entry->current_actor ||
+    clutter_actor_contains (grab_actor, entry->current_actor);
+  pointer_in_old_grab =
+    !old_grab_actor ||
+    old_grab_actor == entry->current_actor ||
+    clutter_actor_contains (old_grab_actor, entry->current_actor);
+
+  /* Equate NULL actors to the stage here, to ease calculations further down. */
+  if (!grab_actor)
+    grab_actor = CLUTTER_ACTOR (stage);
+  if (!old_grab_actor)
+    old_grab_actor = CLUTTER_ACTOR (stage);
+
+  if (grab_actor == old_grab_actor)
+    return;
+
+  if (pointer_in_grab && pointer_in_old_grab)
+    {
+      /* Both grabs happen to contain the pointer actor, we have to figure out
+       * which is topmost, and emit ENTER/LEAVE events accordingly on the actors
+       * between old/new grabs.
+       */
+      if (clutter_actor_contains (grab_actor, old_grab_actor))
+        {
+          /* grab_actor is above old_grab_actor, emit ENTER events in the
+           * line between those two actors.
+           */
+          event_type = CLUTTER_ENTER;
+          deepmost = clutter_actor_get_parent (old_grab_actor);
+          topmost = grab_actor;
+        }
+      else if (clutter_actor_contains (old_grab_actor, grab_actor))
+        {
+          /* old_grab_actor is above grab_actor, emit LEAVE events in the
+           * line between those two actors.
+           */
+          event_type = CLUTTER_LEAVE;
+          deepmost = clutter_actor_get_parent (grab_actor);
+          topmost = old_grab_actor;
+        }
+    }
+  else if (pointer_in_grab)
+    {
+      /* Pointer is somewhere inside the grab_actor hierarchy. Emit ENTER events
+       * from the current grab actor to the pointer actor.
+       */
+      event_type = CLUTTER_ENTER;
+      deepmost = entry->current_actor;
+      topmost = grab_actor;
+    }
+  else if (pointer_in_old_grab)
+    {
+      /* Pointer is somewhere inside the old_grab_actor hierarchy. Emit LEAVE
+       * events from the common root of old/cur grab actors to the pointer
+       * actor.
+       */
+      event_type = CLUTTER_LEAVE;
+      deepmost = entry->current_actor;
+      topmost = find_common_root_actor (stage, grab_actor, old_grab_actor);
+    }
+
+  if (event_type != CLUTTER_NOTHING)
+    {
+      ClutterEvent *event;
+
+      event = create_crossing_event (stage,
+                                     entry->device,
+                                     entry->sequence,
+                                     event_type,
+                                     CLUTTER_EVENT_FLAG_GRAB_NOTIFY,
+                                     entry->current_actor,
+                                     event_type == CLUTTER_LEAVE ?
+                                     grab_actor : old_grab_actor,
+                                     entry->coords,
+                                     CLUTTER_CURRENT_TIME);
+      if (!_clutter_event_process_filters (event))
+        _clutter_actor_handle_event (deepmost, topmost, event);
+      clutter_event_free (event);
+    }
+}
+
+static void
+clutter_stage_notify_grab_on_key_focus (ClutterStage *stage,
+                                        ClutterActor *grab_actor,
+                                        ClutterActor *old_grab_actor)
+{
+  ClutterStagePrivate *priv = stage->priv;
+  ClutterActor *key_focus;
+  gboolean focus_in_grab, focus_in_old_grab;
+
+  key_focus = priv->key_focused_actor ?
+    priv->key_focused_actor : CLUTTER_ACTOR (stage);
+
+  focus_in_grab =
+    !grab_actor ||
+    grab_actor == key_focus ||
+    clutter_actor_contains (grab_actor, key_focus);
+  focus_in_old_grab =
+    !old_grab_actor ||
+    old_grab_actor == key_focus ||
+    clutter_actor_contains (old_grab_actor, key_focus);
+
+  if (focus_in_grab && !focus_in_old_grab)
+    _clutter_actor_set_has_key_focus (CLUTTER_ACTOR (key_focus), TRUE);
+  else if (!focus_in_grab && focus_in_old_grab)
+    _clutter_actor_set_has_key_focus (CLUTTER_ACTOR (key_focus), FALSE);
+}
+
+static void
+clutter_stage_notify_grab (ClutterStage *stage,
+                           ClutterGrab  *cur,
+                           ClutterGrab  *old)
+{
+  ClutterStagePrivate *priv = stage->priv;
+  ClutterActor *cur_actor = NULL, *old_actor = NULL;
+  PointerDeviceEntry *entry;
+  GHashTableIter iter;
+
+  if (cur)
+    cur_actor = cur->actor;
+  if (old)
+    old_actor = old->actor;
+
+  /* Nothing to notify */
+  if (cur_actor == old_actor)
+    return;
+
+  g_hash_table_iter_init (&iter, priv->pointer_devices);
+  while (g_hash_table_iter_next (&iter, NULL, (gpointer *) &entry))
+    {
+      /* Update pointers */
+      clutter_stage_notify_grab_on_pointer_entry (stage,
+                                                  entry,
+                                                  cur_actor,
+                                                  old_actor);
+    }
+
+  g_hash_table_iter_init (&iter, priv->touch_sequences);
+  while (g_hash_table_iter_next (&iter, NULL, (gpointer *) &entry))
+    {
+      /* Update touch sequences */
+      clutter_stage_notify_grab_on_pointer_entry (stage,
+                                                  entry,
+                                                  cur_actor,
+                                                  old_actor);
+    }
+
+  clutter_stage_notify_grab_on_key_focus (stage, cur_actor, old_actor);
+}
+
+ClutterGrab *
+clutter_grab_ref (ClutterGrab *grab)
+{
+  g_ref_count_inc (&grab->ref_count);
+  return grab;
+}
+
+void
+clutter_grab_unref (ClutterGrab *grab)
+{
+  if (g_ref_count_dec (&grab->ref_count))
+    {
+      clutter_grab_dismiss (grab);
+      g_free (grab);
+    }
+}
+
+G_DEFINE_BOXED_TYPE (ClutterGrab, clutter_grab,
+                     clutter_grab_ref, clutter_grab_unref)
+
+/**
+ * clutter_stage_grab:
+ * @stage: The #ClutterStage
+ * @actor: The actor grabbing input
+ *
+ * Grabs input onto a certain actor. Events will be propagated as
+ * usual inside its hierarchy.
+ *
+ * Returns: (transfer none): (nullable): an opaque #ClutterGrab handle, drop
+ *   with clutter_grab_dismiss()
+ **/
+ClutterGrab *
+clutter_stage_grab (ClutterStage *stage,
+                    ClutterActor *actor)
+{
+  ClutterStagePrivate *priv;
+  ClutterGrab *grab;
+
+  g_return_val_if_fail (CLUTTER_IS_STAGE (stage), NULL);
+  g_return_val_if_fail (CLUTTER_IS_ACTOR (actor), NULL);
+
+  priv = stage->priv;
+
+  if (!priv->topmost_grab)
+    {
+      ClutterMainContext *context;
+      ClutterSeat *seat;
+
+      /* First grab in the chain, trigger a backend grab too */
+      context = _clutter_context_get_default ();
+      seat = clutter_backend_get_default_seat (context->backend);
+      priv->grab_state =
+        clutter_seat_grab (seat, clutter_get_current_event_time ());
+    }
+
+  grab = g_new0 (ClutterGrab, 1);
+  g_ref_count_init (&grab->ref_count);
+  grab->stage = stage;
+  grab->actor = actor;
+  grab->prev = NULL;
+  grab->next = priv->topmost_grab;
+
+  if (priv->topmost_grab)
+    priv->topmost_grab->prev = grab;
+
+  priv->topmost_grab = grab;
+  clutter_actor_attach_grab (actor, grab);
+  clutter_stage_notify_grab (stage, grab, grab->next);
+
+  return grab;
+}
+
+void
+clutter_stage_unlink_grab (ClutterStage *stage,
+                           ClutterGrab  *grab)
+{
+  ClutterStagePrivate *priv = stage->priv;
+  ClutterGrab *prev, *next;
+
+  /* This grab is already detached */
+  if (!grab->prev && !grab->next && priv->topmost_grab != grab)
+    return;
+
+  prev = grab->prev;
+  next = grab->next;
+
+  if (prev)
+    prev->next = next;
+  if (next)
+    next->prev = prev;
+
+  if (priv->topmost_grab == grab)
+    {
+      /* This is the active grab */
+      g_assert (prev == NULL);
+      priv->topmost_grab = next;
+      clutter_stage_notify_grab (stage, next, grab);
+    }
+
+  clutter_actor_detach_grab (grab->actor, grab);
+
+  if (!priv->topmost_grab)
+    {
+      ClutterMainContext *context;
+      ClutterSeat *seat;
+
+      /* This was the last remaining grab, trigger a backend ungrab */
+      context = _clutter_context_get_default ();
+      seat = clutter_backend_get_default_seat (context->backend);
+      clutter_seat_ungrab (seat, clutter_get_current_event_time ());
+      priv->grab_state = CLUTTER_GRAB_STATE_NONE;
+    }
+
+  grab->next = NULL;
+  grab->prev = NULL;
+}
+
+/**
+ * clutter_grab_dismiss:
+ * @grab: Grab to undo
+ *
+ * Removes a grab. If this grab is effective, crossing events
+ * will be generated to indicate the change in event redirection.
+ **/
+void
+clutter_grab_dismiss (ClutterGrab *grab)
+{
+  g_return_if_fail (grab != NULL);
+
+  clutter_stage_unlink_grab (grab->stage, grab);
+}
+
+/**
+ * clutter_grab_get_seat_state:
+ * @grab: a Grab handle
+ *
+ * Returns the windowing-level state of the
+ * grab, the devices that are guaranteed to be
+ * grabbed.
+ *
+ * Returns: The state of the grab.
+ **/
+ClutterGrabState
+clutter_grab_get_seat_state (ClutterGrab *grab)
+{
+  g_return_val_if_fail (grab != NULL, CLUTTER_GRAB_STATE_NONE);
+
+  return grab->stage->priv->grab_state;
+}
+
+/**
+ * clutter_stage_get_grab_actor:
+ * @stage: a #ClutterStage
+ *
+ * Gets the actor that currently holds a grab.
+ *
+ * Returns: (transfer none): The grabbing actor
+ **/
+ClutterActor *
+clutter_stage_get_grab_actor (ClutterStage *stage)
+{
+  ClutterStagePrivate *priv = stage->priv;
+
+  if (!priv->topmost_grab)
+    return NULL;
+
+  /* Return active grab */
+  return priv->topmost_grab->actor;
 }

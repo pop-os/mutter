@@ -34,6 +34,7 @@
 #include <X11/Xatom.h>
 #include <X11/extensions/Xfixes.h>
 
+#include "core/meta-workspace-manager-private.h"
 #include "meta/meta-x11-errors.h"
 #include "wayland/meta-wayland-data-device.h"
 #include "wayland/meta-xwayland-private.h"
@@ -635,12 +636,15 @@ pick_drop_surface (MetaWaylandCompositor *compositor,
                    const ClutterEvent    *event)
 {
   MetaDisplay *display = meta_get_display ();
+  MetaWorkspaceManager *workspace_manager = display->workspace_manager;
+  MetaWorkspace *workspace = workspace_manager->active_workspace;
   MetaWindow *focus_window = NULL;
   graphene_point_t pos;
 
   clutter_event_get_coords (event, &pos.x, &pos.y);
   focus_window = meta_stack_get_default_focus_window_at_point (display->stack,
-                                                               NULL, NULL,
+                                                               workspace,
+                                                               NULL,
                                                                pos.x, pos.y);
   return focus_window ? focus_window->surface : NULL;
 }
@@ -942,10 +946,11 @@ meta_xwayland_dnd_handle_event (XEvent *xevent)
 }
 
 void
-meta_xwayland_init_dnd (Display *xdisplay)
+meta_xwayland_init_dnd (MetaX11Display *x11_display)
 {
   MetaWaylandCompositor *compositor = meta_wayland_compositor_get_default ();
   MetaXWaylandManager *manager = &compositor->xwayland_manager;
+  Display *xdisplay = meta_x11_display_get_xdisplay (x11_display);
   MetaXWaylandDnd *dnd = manager->dnd;
   XSetWindowAttributes attributes;
   guint32 i, version = XDND_VERSION;
@@ -961,7 +966,7 @@ meta_xwayland_init_dnd (Display *xdisplay)
   attributes.override_redirect = True;
 
   dnd->dnd_window = XCreateWindow (xdisplay,
-                                   gdk_x11_window_get_xid (gdk_get_default_root_window ()),
+                                   meta_x11_display_get_xroot (x11_display),
                                    -1, -1, 1, 1,
                                    0, /* border width */
                                    0, /* depth */
@@ -977,13 +982,13 @@ meta_xwayland_init_dnd (Display *xdisplay)
 
 void
 meta_xwayland_shutdown_dnd (MetaXWaylandManager *manager,
-                            Display             *xdisplay)
+                            MetaX11Display      *x11_display)
 {
   MetaXWaylandDnd *dnd = manager->dnd;
 
   g_assert (dnd != NULL);
 
-  XDestroyWindow (xdisplay, dnd->dnd_window);
+  XDestroyWindow (meta_x11_display_get_xdisplay (x11_display), dnd->dnd_window);
   dnd->dnd_window = None;
 
   g_free (dnd);

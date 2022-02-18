@@ -29,6 +29,8 @@ typedef enum _MetaKmsConnectorProp
   META_KMS_CONNECTOR_PROP_UNDERSCAN,
   META_KMS_CONNECTOR_PROP_UNDERSCAN_HBORDER,
   META_KMS_CONNECTOR_PROP_UNDERSCAN_VBORDER,
+  META_KMS_CONNECTOR_PROP_PRIVACY_SCREEN_SW_STATE,
+  META_KMS_CONNECTOR_PROP_PRIVACY_SCREEN_HW_STATE,
   META_KMS_CONNECTOR_N_PROPS
 } MetaKmsConnectorProp;
 
@@ -40,6 +42,8 @@ const char * meta_kms_connector_get_prop_name (MetaKmsConnector     *connector,
 
 MetaKmsUpdateChanges meta_kms_connector_update_state (MetaKmsConnector *connector,
                                                       drmModeRes       *drm_resources);
+
+void meta_kms_connector_disable (MetaKmsConnector *connector);
 
 void meta_kms_connector_predict_state (MetaKmsConnector *connector,
                                        MetaKmsUpdate    *update);

@@ -38,7 +38,6 @@
 #include "backends/native/meta-backend-native-private.h"
 #include "backends/native/meta-input-thread.h"
 
-#include <sched.h>
 #include <stdlib.h>
 
 #include "backends/meta-cursor-tracker-private.h"
@@ -61,16 +60,19 @@
 #include "cogl/cogl.h"
 #include "core/meta-border.h"
 #include "meta/main.h"
+#include "meta-dbus-rtkit1.h"
 
 #ifdef HAVE_REMOTE_DESKTOP
 #include "backends/meta-screen-cast.h"
 #endif
 
+#include "meta-private-enum-types.h"
+
 enum
 {
   PROP_0,
 
-  PROP_HEADLESS,
+  PROP_MODE,
 
   N_PROPS
 };
@@ -86,7 +88,7 @@ struct _MetaBackendNative
   MetaUdev *udev;
   MetaKms *kms;
 
-  gboolean is_headless;
+  MetaBackendNativeMode mode;
 };
 
 static GInitableIface *initable_parent_iface;
@@ -117,7 +119,7 @@ meta_backend_native_dispose (GObject *object)
 static ClutterBackend *
 meta_backend_native_create_clutter_backend (MetaBackend *backend)
 {
-  return g_object_new (META_TYPE_CLUTTER_BACKEND_NATIVE, NULL);
+  return CLUTTER_BACKEND (meta_clutter_backend_native_new (backend));
 }
 
 static ClutterSeat *
@@ -125,12 +127,21 @@ meta_backend_native_create_default_seat (MetaBackend  *backend,
                                          GError      **error)
 {
   MetaBackendNative *backend_native = META_BACKEND_NATIVE (backend);
-  const char *seat_id;
+  const char *seat_id = NULL;
   MetaSeatNativeFlag flags;
 
-  seat_id = meta_backend_native_get_seat_id (backend_native);
+  switch (backend_native->mode)
+    {
+    case META_BACKEND_NATIVE_MODE_DEFAULT:
+    case META_BACKEND_NATIVE_MODE_HEADLESS:
+      seat_id = meta_backend_native_get_seat_id (backend_native);
+      break;
+    case META_BACKEND_NATIVE_MODE_TEST:
+      seat_id = META_BACKEND_TEST_INPUT_SEAT;
+      break;
+    }
 
-  if (meta_backend_native_is_headless (backend_native))
+  if (meta_backend_is_headless (backend))
     flags = META_SEAT_NATIVE_FLAG_NO_LIBINPUT;
   else
     flags = META_SEAT_NATIVE_FLAG_NONE;
@@ -147,40 +158,15 @@ static void
 maybe_disable_screen_cast_dma_bufs (MetaBackendNative *native)
 {
   MetaBackend *backend = META_BACKEND (native);
-  MetaSettings *settings = meta_backend_get_settings (backend);
   MetaRenderer *renderer = meta_backend_get_renderer (backend);
-  MetaRendererNative *renderer_native = META_RENDERER_NATIVE (renderer);
   MetaScreenCast *screen_cast = meta_backend_get_screen_cast (backend);
-  MetaGpuKms *primary_gpu;
-  MetaKmsDevice *kms_device;
-  const char *driver_name;
-  static const char *enable_dma_buf_drivers[] = {
-    "i915",
-    NULL,
-  };
 
-  primary_gpu = meta_renderer_native_get_primary_gpu (renderer_native);
-  if (!primary_gpu)
+  if (!meta_renderer_is_hardware_accelerated (renderer))
     {
-      g_message ("Disabling DMA buffer screen sharing (surfaceless)");
-      goto disable_dma_bufs;
+      g_message ("Disabling DMA buffer screen sharing "
+                 "(not hardware accelerated)");
+      meta_screen_cast_disable_dma_bufs (screen_cast);
     }
-
-  kms_device = meta_gpu_kms_get_kms_device (primary_gpu);
-  driver_name = meta_kms_device_get_driver_name (kms_device);
-
-  if (g_strv_contains (enable_dma_buf_drivers, driver_name))
-    return;
-
-  if (meta_settings_is_experimental_feature_enabled (settings,
-        META_EXPERIMENTAL_FEATURE_DMA_BUF_SCREEN_SHARING))
-    return;
-
-  g_message ("Disabling DMA buffer screen sharing for driver '%s'.",
-             driver_name);
-
-disable_dma_bufs:
-  meta_screen_cast_disable_dma_bufs (screen_cast);
 }
 #endif /* HAVE_REMOTE_DESKTOP */
 
@@ -209,15 +195,36 @@ meta_backend_native_post_init (MetaBackend *backend)
   if (meta_settings_is_experimental_feature_enabled (settings,
                                                      META_EXPERIMENTAL_FEATURE_RT_SCHEDULER))
     {
-      int retval;
-      struct sched_param sp = {
-        .sched_priority = sched_get_priority_min (SCHED_RR)
-      };
+      g_autoptr (MetaDbusRealtimeKit1) rtkit_proxy = NULL;
+      g_autoptr (GError) error = NULL;
 
-      retval = sched_setscheduler (0, SCHED_RR | SCHED_RESET_ON_FORK, &sp);
+      rtkit_proxy =
+        meta_dbus_realtime_kit1_proxy_new_for_bus_sync (G_BUS_TYPE_SYSTEM,
+                                                        G_DBUS_PROXY_FLAGS_DO_NOT_LOAD_PROPERTIES |
+                                                        G_DBUS_PROXY_FLAGS_DO_NOT_CONNECT_SIGNALS |
+                                                        G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+                                                        "org.freedesktop.RealtimeKit1",
+                                                        "/org/freedesktop/RealtimeKit1",
+                                                        NULL,
+                                                        &error);
 
-      if (retval != 0)
-        g_warning ("Failed to set RT scheduler: %m");
+      if (rtkit_proxy)
+        {
+          uint32_t priority;
+
+          priority = sched_get_priority_min (SCHED_RR);
+          meta_dbus_realtime_kit1_call_make_thread_realtime_sync (rtkit_proxy,
+                                                                  gettid (),
+                                                                  priority,
+                                                                  NULL,
+                                                                  &error);
+        }
+
+      if (error)
+        {
+          g_dbus_error_strip_remote_error (error);
+          g_message ("Failed to set RT scheduler: %s", error->message);
+        }
     }
 
 #ifdef HAVE_REMOTE_DESKTOP
@@ -233,10 +240,12 @@ meta_backend_native_create_monitor_manager (MetaBackend *backend,
 {
   MetaBackendNative *backend_native = META_BACKEND_NATIVE (backend);
   MetaMonitorManager *manager;
+  gboolean needs_outputs;
 
+  needs_outputs = !(backend_native->mode & META_BACKEND_NATIVE_MODE_HEADLESS);
   manager = g_initable_new (META_TYPE_MONITOR_MANAGER_NATIVE, NULL, error,
                             "backend", backend,
-                            "needs-outputs", !backend_native->is_headless,
+                            "needs-outputs", needs_outputs,
                             NULL);
   if (!manager)
     return NULL;
@@ -351,16 +360,23 @@ meta_backend_native_lock_layout_group (MetaBackend *backend,
 const char *
 meta_backend_native_get_seat_id (MetaBackendNative *backend_native)
 {
-  if (backend_native->is_headless)
-    return "seat0";
-  else
-    return meta_launcher_get_seat_id (backend_native->launcher);
+  switch (backend_native->mode)
+    {
+    case META_BACKEND_NATIVE_MODE_DEFAULT:
+    case META_BACKEND_NATIVE_MODE_TEST:
+      return meta_launcher_get_seat_id (backend_native->launcher);
+    case META_BACKEND_NATIVE_MODE_HEADLESS:
+      return "seat0";
+    }
+  g_assert_not_reached ();
 }
 
-gboolean
-meta_backend_native_is_headless (MetaBackendNative *backend_native)
+static gboolean
+meta_backend_native_is_headless (MetaBackend *backend)
 {
-  return backend_native->is_headless;
+  MetaBackendNative *backend_native = META_BACKEND_NATIVE (backend);
+
+  return backend_native->mode == META_BACKEND_NATIVE_MODE_HEADLESS;
 }
 
 static void
@@ -428,6 +444,21 @@ create_gpu_from_udev_device (MetaBackendNative  *native,
   return meta_gpu_kms_new (native, kms_device, error);
 }
 
+static gboolean
+should_ignore_device (MetaBackendNative *backend_native,
+                      GUdevDevice       *device)
+{
+  switch (backend_native->mode)
+    {
+    case META_BACKEND_NATIVE_MODE_DEFAULT:
+    case META_BACKEND_NATIVE_MODE_HEADLESS:
+      return meta_is_udev_device_ignore (device);
+    case META_BACKEND_NATIVE_MODE_TEST:
+      return !meta_is_udev_test_device (device);
+    }
+  g_assert_not_reached ();
+}
+
 static void
 on_udev_device_added (MetaUdev          *udev,
                       GUdevDevice       *device,
@@ -457,9 +488,9 @@ on_udev_device_added (MetaUdev          *udev,
         }
     }
 
-  if (meta_is_udev_device_ignore (device))
+  if (should_ignore_device (native, device))
     {
-      g_message ("Ignoring DRM device '%s' (from udev rule)", device_path);
+      g_message ("Ignoring DRM device '%s'", device_path);
       return;
     }
 
@@ -493,9 +524,9 @@ init_gpus (MetaBackendNative  *native,
       MetaGpuKms *gpu_kms;
       GError *local_error = NULL;
 
-      if (meta_is_udev_device_ignore (device))
+      if (should_ignore_device (native, device))
         {
-          g_message ("Ignoring DRM device '%s' (from udev rule)",
+          g_message ("Ignoring DRM device '%s'",
                      g_udev_device_get_device_file (device));
           continue;
         }
@@ -516,7 +547,7 @@ init_gpus (MetaBackendNative  *native,
 
   g_list_free_full (devices, g_object_unref);
 
-  if (!native->is_headless &&
+  if (!meta_backend_is_headless (backend) &&
       g_list_length (meta_backend_get_gpus (backend)) == 0)
     {
       g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
@@ -537,6 +568,7 @@ meta_backend_native_initable_init (GInitable     *initable,
                                    GError       **error)
 {
   MetaBackendNative *native = META_BACKEND_NATIVE (initable);
+  MetaBackend *backend = META_BACKEND (native);
   MetaKmsFlags kms_flags;
 
   if (!meta_is_stage_views_enabled ())
@@ -546,9 +578,25 @@ meta_backend_native_initable_init (GInitable     *initable,
       return FALSE;
     }
 
-  if (!native->is_headless)
+  if (!meta_backend_is_headless (backend))
     {
-      native->launcher = meta_launcher_new (error);
+      const char *session_id = NULL;
+      const char *seat_id = NULL;
+
+      switch (native->mode)
+        {
+        case META_BACKEND_NATIVE_MODE_DEFAULT:
+          break;
+        case META_BACKEND_NATIVE_MODE_HEADLESS:
+          g_assert_not_reached ();
+          break;
+        case META_BACKEND_NATIVE_MODE_TEST:
+          session_id = "dummy";
+          seat_id = "seat0";
+          break;
+        }
+
+      native->launcher = meta_launcher_new (session_id, seat_id, error);
       if (!native->launcher)
         return FALSE;
     }
@@ -557,7 +605,7 @@ meta_backend_native_initable_init (GInitable     *initable,
   native->udev = meta_udev_new (native);
 
   kms_flags = META_KMS_FLAG_NONE;
-  if (native->is_headless)
+  if (meta_backend_is_headless (backend))
     kms_flags |= META_KMS_FLAG_NO_MODE_SETTING;
 
   native->kms = meta_kms_new (META_BACKEND (native), kms_flags, error);
@@ -580,8 +628,8 @@ meta_backend_native_set_property (GObject      *object,
 
   switch (prop_id)
     {
-    case PROP_HEADLESS:
-      backend_native->is_headless = g_value_get_boolean (value);
+    case PROP_MODE:
+      backend_native->mode = g_value_get_enum (value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -626,14 +674,17 @@ meta_backend_native_class_init (MetaBackendNativeClass *klass)
 
   backend_class->set_pointer_constraint = meta_backend_native_set_pointer_constraint;
 
-  obj_props[PROP_HEADLESS] =
-    g_param_spec_boolean ("headless",
-                          "headless",
-                          "Headless",
-                          FALSE,
-                          G_PARAM_WRITABLE |
-                          G_PARAM_CONSTRUCT_ONLY |
-                          G_PARAM_STATIC_STRINGS);
+  backend_class->is_headless = meta_backend_native_is_headless;
+
+  obj_props[PROP_MODE] =
+    g_param_spec_enum ("mode",
+                       "mode",
+                       "mode",
+                       META_TYPE_BACKEND_NATIVE_MODE,
+                       META_BACKEND_NATIVE_MODE_DEFAULT,
+                       G_PARAM_WRITABLE |
+                       G_PARAM_CONSTRUCT_ONLY |
+                       G_PARAM_STATIC_STRINGS);
   g_object_class_install_properties (object_class, N_PROPS, obj_props);
 }
 
@@ -673,14 +724,18 @@ meta_activate_vt (int vt, GError **error)
   MetaBackendNative *native = META_BACKEND_NATIVE (backend);
   MetaLauncher *launcher = meta_backend_native_get_launcher (native);
 
-  if (native->is_headless)
+  switch (native->mode)
     {
+    case META_BACKEND_NATIVE_MODE_DEFAULT:
+      return meta_launcher_activate_vt (launcher, vt, error);
+    case META_BACKEND_NATIVE_MODE_HEADLESS:
+    case META_BACKEND_NATIVE_MODE_TEST:
       g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
                    "Can't switch VT while headless");
       return FALSE;
     }
 
-  return meta_launcher_activate_vt (launcher, vt, error);
+  g_assert_not_reached ();
 }
 
 void

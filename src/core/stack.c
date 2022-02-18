@@ -86,7 +86,6 @@ on_stack_changed (MetaStack *stack)
   hidden_stack_ids = g_array_new (FALSE, FALSE, sizeof (uint64_t));
 
   meta_topic (META_DEBUG_STACK, "Bottom to top: ");
-  meta_push_no_msg_prefix ();
 
   sorted = meta_stack_list_windows (stack, NULL);
 
@@ -123,8 +122,6 @@ on_stack_changed (MetaStack *stack)
 
       g_array_append_val (all_root_children_stacked, stack_id);
     }
-
-  meta_pop_no_msg_prefix ();
 
   if (display->x11_display)
     {
@@ -418,6 +415,8 @@ void
 meta_stack_thaw (MetaStack *stack)
 {
   g_return_if_fail (stack->freeze_count > 0);
+
+  COGL_TRACE_BEGIN_SCOPED (MetaStackThaw, "Stack: thaw");
 
   stack->freeze_count -= 1;
   meta_stack_changed (stack);
@@ -1091,6 +1090,10 @@ meta_stack_get_default_focus_window_at_point (MetaStack     *stack,
                                               int            root_x,
                                               int            root_y)
 {
+  g_return_val_if_fail (META_IS_STACK (stack), NULL);
+  g_return_val_if_fail (META_IS_WORKSPACE (workspace), NULL);
+  g_return_val_if_fail (!not_this_one || META_IS_WINDOW (not_this_one), NULL);
+
   return get_default_focus_window (stack, workspace, not_this_one,
                                    TRUE, root_x, root_y);
 }
@@ -1100,6 +1103,10 @@ meta_stack_get_default_focus_window (MetaStack     *stack,
                                      MetaWorkspace *workspace,
                                      MetaWindow    *not_this_one)
 {
+  g_return_val_if_fail (META_IS_STACK (stack), NULL);
+  g_return_val_if_fail (META_IS_WORKSPACE (workspace), NULL);
+  g_return_val_if_fail (!not_this_one || META_IS_WINDOW (not_this_one), NULL);
+
   return get_default_focus_window (stack, workspace, not_this_one,
                                    FALSE, 0, 0);
 }

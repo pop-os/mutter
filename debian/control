@@ -24,6 +24,7 @@ Build-Depends: debhelper-compat (= 13),
                gobject-introspection (>= 1.41.3),
                gsettings-desktop-schemas-dev (>= 40~alpha),
                gtk-doc-tools (>= 1.15),
+               libc-bin <!nocheck>,
                libcairo2-dev (>= 1.10.0),
                libcanberra-gtk3-dev,
                libdrm-dev (>= 2.4.83) [linux-any],
@@ -41,12 +42,12 @@ Build-Depends: debhelper-compat (= 13),
                libgtk-3-dev (>= 3.19.8),
                libgudev-1.0-dev (>= 232) [linux-any],
                libice-dev,
-               libinput-dev (>= 1.18.0) [linux-any],
+               libinput-dev (>= 1.19.0) [linux-any],
                libjson-glib-dev (>= 0.13.2-1~),
                libnvidia-egl-wayland-dev [linux-any],
                libpam0g-dev,
                libpango1.0-dev (>= 1.46.0),
-               libpipewire-0.3-dev (>= 0.3.21) [linux-any],
+               libpipewire-0.3-dev (>= 0.3.33) [linux-any],
                libsm-dev,
                libstartup-notification0-dev (>= 0.7),
                libsysprof-capture-4-dev (>= 3.40.1) [linux-any],
@@ -62,7 +63,7 @@ Build-Depends: debhelper-compat (= 13),
                libxcursor-dev,
                libxdamage-dev,
                libxext-dev,
-               libxfixes-dev,
+               libxfixes-dev (>= 6.0),
                libxi-dev (>= 2:1.7.4),
                libxinerama-dev,
                libxkbcommon-dev (>= 0.4.3),
@@ -77,11 +78,11 @@ Build-Depends: debhelper-compat (= 13),
                python3-dbusmock <!nocheck>,
                sysprof (>= 3.40.1) [linux-any],
                udev [linux-any],
-               wayland-protocols (>= 1.21) [linux-any],
+               wayland-protocols (>= 1.24) [linux-any],
                xauth <!nocheck>,
                xcvt [linux-any],
                xkb-data,
-               xvfb,
+               xvfb <!nocheck>,
                xwayland [linux-any],
                zenity
 Rules-Requires-Root: no
@@ -116,13 +117,13 @@ Description: Example window manager using GNOME's window manager library
  This package contains the mutter executable. It can be used as a
  standalone window manager, but is primarily intended for debugging.
 
-Package: mutter-9-tests
+Package: mutter-10-tests
 Architecture: any
 Depends: at-spi2-core,
          dbus,
          dmz-cursor-theme,
-         libmutter-9-0 (= ${binary:Version}),
-         libmutter-test-9 (= ${binary:Version}),
+         libmutter-10-0 (= ${binary:Version}),
+         libmutter-test-10 (= ${binary:Version}),
          mutter (= ${binary:Version}),
          python3,
          python3-dbus,
@@ -145,11 +146,11 @@ Description: Tests for GNOME's window manager library
  This package contains test programs, designed to be run as part of a
  regression testsuite.
 
-Package: gir1.2-mutter-9
+Package: gir1.2-mutter-10
 Section: introspection
 Architecture: any
 Multi-Arch: same
-Depends: libmutter-9-0 (= ${binary:Version}),
+Depends: libmutter-10-0 (= ${binary:Version}),
          ${gir:Depends},
          ${misc:Depends},
          ${shlibs:Depends}
@@ -166,7 +167,7 @@ Description: GObject introspection data for Mutter
  This package contains the GObject introspection data which may be
  used to generate dynamic bindings.
 
-Package: libmutter-9-0
+Package: libmutter-10-0
 Section: libs
 Architecture: any
 Multi-Arch: same
@@ -178,7 +179,7 @@ Depends: adwaita-icon-theme,
          ${shlibs:Depends}
 Breaks: apparmor (<< 2.13.3-5~),
         gnome-control-center (<< 1:3.25.2),
-        gnome-settings-daemon (<< 3.31.91)
+        gnome-settings-daemon (<< 3.31.101)
 Description: window manager library from the Mutter window manager
  Mutter is a Wayland display server and X11 window manager and
  compositor library. It contains functionality related to, among other
@@ -192,11 +193,11 @@ Description: window manager library from the Mutter window manager
  This package contains the window manager shared library, used by mutter
  itself, and gnome-shell.
 
-Package: libmutter-9-dev
+Package: libmutter-10-dev
 Section: libdevel
 Architecture: any
 Multi-Arch: same
-Depends: gir1.2-mutter-9 (= ${binary:Version}),
+Depends: gir1.2-mutter-10 (= ${binary:Version}),
          gsettings-desktop-schemas-dev (>= 40~alpha),
          libatk1.0-dev,
          libcairo2-dev,
@@ -208,16 +209,16 @@ Depends: gir1.2-mutter-9 (= ${binary:Version}),
          libglib2.0-dev (>= 2.69.0),
          libgraphene-1.0-dev (>= 1.9.3),
          libgtk-3-dev,
-         libinput-dev (>= 1.18),
+         libinput-dev (>= 1.19),
          libjson-glib-dev,
-         libmutter-9-0 (= ${binary:Version}),
+         libmutter-10-0 (= ${binary:Version}),
          libpango1.0-dev,
          libwayland-dev [linux-any],
          libx11-dev,
          libxcomposite-dev,
          libxdamage-dev,
          libxext-dev,
-         libxfixes-dev,
+         libxfixes-dev (>= 6.0),
          libxi-dev,
          libxrandr-dev,
          ${misc:Depends}
@@ -233,11 +234,11 @@ Description: Development files for the Mutter window manager
  .
  This package contains the development files.
 
-Package: libmutter-test-9
+Package: libmutter-test-10
 Section: libs
 Architecture: any
 Multi-Arch: same
-Depends: libmutter-9-0 (= ${binary:Version}),
+Depends: libmutter-10-0 (= ${binary:Version}),
          mutter (= ${binary:Version}),
          ${misc:Depends},
          ${shlibs:Depends}

@@ -29,7 +29,6 @@
 
 #include "backends/meta-cursor-tracker-private.h"
 #include "clutter/clutter.h"
-#include "cogl/cogl-wayland-server.h"
 #include "cogl/cogl.h"
 #include "compositor/meta-surface-actor-wayland.h"
 #include "compositor/meta-surface-actor.h"
@@ -51,7 +50,6 @@
 #include "wayland/meta-wayland-seat.h"
 #include "wayland/meta-wayland-subsurface.h"
 #include "wayland/meta-wayland-viewporter.h"
-#include "wayland/meta-wayland-wl-shell.h"
 #include "wayland/meta-wayland-xdg-shell.h"
 #include "wayland/meta-window-wayland.h"
 #include "wayland/meta-xwayland-private.h"
@@ -77,6 +75,17 @@ typedef struct _MetaWaylandSurfaceRolePrivate
 {
   MetaWaylandSurface *surface;
 } MetaWaylandSurfaceRolePrivate;
+
+enum
+{
+  PROP_0,
+
+  PROP_SCANOUT_CANDIDATE,
+
+  N_PROPS
+};
+
+static GParamSpec *obj_props[N_PROPS];
 
 G_DEFINE_TYPE (MetaWaylandSurface, meta_wayland_surface, G_TYPE_OBJECT);
 
@@ -778,6 +787,17 @@ meta_wayland_surface_apply_state (MetaWaylandSurface      *surface,
   if (state->scale > 0)
     surface->scale = state->scale;
 
+  if ((get_buffer_width (surface) % surface->scale != 0) ||
+      (get_buffer_height (surface) % surface->scale != 0))
+    {
+      wl_resource_post_error (surface->resource, WL_SURFACE_ERROR_INVALID_SIZE,
+                              "Buffer size (%dx%d) must be an integer multiple "
+                              "of the buffer_scale (%d)",
+                              get_buffer_width (surface),
+                              get_buffer_height (surface), surface->scale);
+      goto cleanup;
+    }
+
   if (state->has_new_buffer_transform)
     surface->buffer_transform = state->buffer_transform;
 
@@ -946,12 +966,18 @@ cleanup:
   meta_wayland_surface_state_reset (state);
 }
 
+static void
+ensure_cached_state (MetaWaylandSurface *surface)
+{
+  if (!surface->cached_state)
+    surface->cached_state = g_object_new (META_TYPE_WAYLAND_SURFACE_STATE,
+                                          NULL);
+}
+
 void
 meta_wayland_surface_apply_cached_state (MetaWaylandSurface *surface)
 {
-  if (!surface->cached_state)
-    return;
-
+  ensure_cached_state (surface);
   meta_wayland_surface_apply_state (surface, surface->cached_state);
 }
 
@@ -959,15 +985,6 @@ MetaWaylandSurfaceState *
 meta_wayland_surface_get_pending_state (MetaWaylandSurface *surface)
 {
   return surface->pending_state;
-}
-
-MetaWaylandSurfaceState *
-meta_wayland_surface_ensure_cached_state (MetaWaylandSurface *surface)
-{
-  if (!surface->cached_state)
-    surface->cached_state = g_object_new (META_TYPE_WAYLAND_SURFACE_STATE,
-                                          NULL);
-  return surface->cached_state;
 }
 
 static void
@@ -992,17 +1009,15 @@ meta_wayland_surface_commit (MetaWaylandSurface *surface)
    */
   if (meta_wayland_surface_should_cache_state (surface))
     {
-      MetaWaylandSurfaceState *cached_state;
-
-      cached_state = meta_wayland_surface_ensure_cached_state (surface);
+      ensure_cached_state (surface);
 
       /*
        * A new commit indicates a new content update, so any previous
        * cached content update did not go on screen and needs to be discarded.
        */
-      meta_wayland_surface_state_discard_presentation_feedback (cached_state);
+      meta_wayland_surface_state_discard_presentation_feedback (surface->cached_state);
 
-      meta_wayland_surface_state_merge_into (pending, cached_state);
+      meta_wayland_surface_state_merge_into (pending, surface->cached_state);
     }
   else
     {
@@ -1018,19 +1033,16 @@ wl_surface_destroy (struct wl_client *client,
 }
 
 static void
-wl_surface_attach (struct wl_client *client,
+wl_surface_attach (struct wl_client   *client,
                    struct wl_resource *surface_resource,
                    struct wl_resource *buffer_resource,
-                   gint32 dx, gint32 dy)
+                   int32_t             dx,
+                   int32_t             dy)
 {
   MetaWaylandSurface *surface =
     wl_resource_get_user_data (surface_resource);
   MetaWaylandSurfaceState *pending = surface->pending_state;
   MetaWaylandBuffer *buffer;
-
-  /* X11 unmanaged window */
-  if (!surface)
-    return;
 
   if (buffer_resource)
     buffer = meta_wayland_buffer_from_resource (buffer_resource);
@@ -1069,10 +1081,6 @@ wl_surface_damage (struct wl_client   *client,
   MetaWaylandSurfaceState *pending = surface->pending_state;
   cairo_rectangle_int_t rectangle;
 
-  /* X11 unmanaged window */
-  if (!surface)
-    return;
-
   rectangle = (cairo_rectangle_int_t) {
     .x = x,
     .y = y,
@@ -1093,17 +1101,13 @@ destroy_frame_callback (struct wl_resource *callback_resource)
 }
 
 static void
-wl_surface_frame (struct wl_client *client,
+wl_surface_frame (struct wl_client   *client,
                   struct wl_resource *surface_resource,
-                  guint32 callback_id)
+                  uint32_t            callback_id)
 {
   MetaWaylandFrameCallback *callback;
   MetaWaylandSurface *surface = wl_resource_get_user_data (surface_resource);
   MetaWaylandSurfaceState *pending = surface->pending_state;
-
-  /* X11 unmanaged window */
-  if (!surface)
-    return;
 
   callback = g_new0 (MetaWaylandFrameCallback, 1);
   callback->surface = surface;
@@ -1118,16 +1122,12 @@ wl_surface_frame (struct wl_client *client,
 }
 
 static void
-wl_surface_set_opaque_region (struct wl_client *client,
+wl_surface_set_opaque_region (struct wl_client   *client,
                               struct wl_resource *surface_resource,
                               struct wl_resource *region_resource)
 {
   MetaWaylandSurface *surface = wl_resource_get_user_data (surface_resource);
   MetaWaylandSurfaceState *pending = surface->pending_state;
-
-  /* X11 unmanaged window */
-  if (!surface)
-    return;
 
   g_clear_pointer (&pending->opaque_region, cairo_region_destroy);
   if (region_resource)
@@ -1140,16 +1140,12 @@ wl_surface_set_opaque_region (struct wl_client *client,
 }
 
 static void
-wl_surface_set_input_region (struct wl_client *client,
+wl_surface_set_input_region (struct wl_client   *client,
                              struct wl_resource *surface_resource,
                              struct wl_resource *region_resource)
 {
   MetaWaylandSurface *surface = wl_resource_get_user_data (surface_resource);
   MetaWaylandSurfaceState *pending = surface->pending_state;
-
-  /* X11 unmanaged window */
-  if (!surface)
-    return;
 
   g_clear_pointer (&pending->input_region, cairo_region_destroy);
   if (region_resource)
@@ -1162,14 +1158,10 @@ wl_surface_set_input_region (struct wl_client *client,
 }
 
 static void
-wl_surface_commit (struct wl_client *client,
+wl_surface_commit (struct wl_client   *client,
                    struct wl_resource *resource)
 {
   MetaWaylandSurface *surface = wl_resource_get_user_data (resource);
-
-  /* X11 unmanaged window */
-  if (!surface)
-    return;
 
   meta_wayland_surface_commit (surface);
 }
@@ -1257,10 +1249,6 @@ wl_surface_damage_buffer (struct wl_client   *client,
   MetaWaylandSurface *surface = wl_resource_get_user_data (surface_resource);
   MetaWaylandSurfaceState *pending = surface->pending_state;
   cairo_rectangle_int_t rectangle;
-
-  /* X11 unmanaged window */
-  if (!surface)
-    return;
 
   rectangle = (cairo_rectangle_int_t) {
     .x = x,
@@ -1440,6 +1428,7 @@ wl_surface_destructor (struct wl_resource *resource)
 
   g_signal_emit (surface, surface_signals[SURFACE_DESTROY], 0);
 
+  g_clear_object (&surface->scanout_candidate);
   g_clear_object (&surface->role);
 
   if (surface->unassigned.buffer)
@@ -1476,9 +1465,6 @@ wl_surface_destructor (struct wl_resource *resource)
     wl_resource_destroy (cb->resource);
 
   meta_wayland_surface_discard_presentation_feedback (surface);
-
-  if (surface->resource)
-    wl_resource_set_user_data (surface->resource, NULL);
 
   if (surface->wl_subsurface)
     wl_resource_destroy (surface->wl_subsurface);
@@ -1555,14 +1541,13 @@ meta_wayland_surface_begin_grab_op (MetaWaylandSurface *surface,
  * @compositor: The #MetaWaylandCompositor object
  *
  * Initializes the Wayland interfaces providing features that deal with
- * desktop-specific conundrums, like XDG shell, wl_shell (deprecated), etc.
+ * desktop-specific conundrums, like XDG shell, etc.
  */
 void
 meta_wayland_shell_init (MetaWaylandCompositor *compositor)
 {
   meta_wayland_xdg_shell_init (compositor);
   meta_wayland_legacy_xdg_shell_init (compositor);
-  meta_wayland_wl_shell_init (compositor);
   meta_wayland_init_gtk_shell (compositor);
   meta_wayland_init_viewporter (compositor);
 }
@@ -1725,9 +1710,39 @@ meta_wayland_surface_init (MetaWaylandSurface *surface)
 }
 
 static void
+meta_wayland_surface_get_property (GObject    *object,
+                                   guint       prop_id,
+                                   GValue     *value,
+                                   GParamSpec *pspec)
+{
+  MetaWaylandSurface *surface = META_WAYLAND_SURFACE (object);
+
+  switch (prop_id)
+    {
+    case PROP_SCANOUT_CANDIDATE:
+      g_value_set_object (value, surface->scanout_candidate);
+      break;
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      break;
+    }
+}
+
+static void
 meta_wayland_surface_class_init (MetaWaylandSurfaceClass *klass)
 {
   GObjectClass *object_class = G_OBJECT_CLASS (klass);
+
+  object_class->get_property = meta_wayland_surface_get_property;
+
+  obj_props[PROP_SCANOUT_CANDIDATE] =
+    g_param_spec_object ("scanout-candidate",
+                         "scanout-candidate",
+                         "Scanout candidate for given CRTC",
+                         META_TYPE_CRTC,
+                         G_PARAM_READABLE |
+                         G_PARAM_STATIC_STRINGS);
+  g_object_class_install_properties (object_class, N_PROPS, obj_props);
 
   surface_signals[SURFACE_DESTROY] =
     g_signal_new ("destroy",
@@ -2130,4 +2145,22 @@ meta_wayland_surface_try_acquire_scanout (MetaWaylandSurface *surface,
   g_object_weak_ref (G_OBJECT (scanout), scanout_destroyed, buffer_ref);
 
   return scanout;
+}
+
+MetaCrtc *
+meta_wayland_surface_get_scanout_candidate (MetaWaylandSurface *surface)
+{
+  return surface->scanout_candidate;
+}
+
+void
+meta_wayland_surface_set_scanout_candidate (MetaWaylandSurface *surface,
+                                            MetaCrtc           *crtc)
+{
+  if (surface->scanout_candidate == crtc)
+    return;
+
+  g_set_object (&surface->scanout_candidate, crtc);
+  g_object_notify_by_pspec (G_OBJECT (surface),
+                            obj_props[PROP_SCANOUT_CANDIDATE]);
 }

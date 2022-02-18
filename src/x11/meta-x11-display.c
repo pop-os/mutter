@@ -1104,6 +1104,25 @@ meta_x11_init_gdk_display (GError **error)
   return TRUE;
 }
 
+static void
+on_window_visibility_updated (MetaDisplay    *display,
+                              GList          *placed_windows,
+                              GList          *shown_windows,
+                              GList          *hidden_windows,
+                              MetaX11Display *x11_display)
+{
+  GList *l;
+
+  if (meta_prefs_get_focus_mode () == G_DESKTOP_FOCUS_MODE_CLICK)
+    return;
+
+  if (display->mouse_mode)
+    return;
+
+  for (l = shown_windows; l; l = l->next)
+    meta_x11_display_increment_focus_sentinel (x11_display);
+}
+
 /**
  * meta_x11_display_new:
  *
@@ -1151,7 +1170,13 @@ meta_x11_display_new (MetaDisplay *display, GError **error)
 
 #ifdef HAVE_WAYLAND
   if (meta_is_wayland_compositor ())
-    meta_xwayland_complete_init (display, xdisplay);
+    {
+      MetaContext *context = meta_display_get_context (display);
+      MetaWaylandCompositor *compositor =
+        meta_context_get_wayland_compositor (context);
+
+      meta_xwayland_setup_xdisplay (&compositor->xwayland_manager, xdisplay);
+    }
 #endif
 
   if (meta_is_syncing ())
@@ -1230,6 +1255,10 @@ meta_x11_display_new (MetaDisplay *display, GError **error)
                            G_CALLBACK (update_cursor_theme),
                            x11_display,
                            G_CONNECT_SWAPPED);
+  g_signal_connect_object (display,
+                           "window-visibility-updated",
+                           G_CALLBACK (on_window_visibility_updated),
+                           x11_display, 0);
 
   update_cursor_theme (x11_display);
 
