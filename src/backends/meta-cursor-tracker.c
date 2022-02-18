@@ -132,6 +132,7 @@ update_displayed_cursor (MetaCursorTracker *tracker)
 
   if (cursor)
     {
+      meta_cursor_sprite_invalidate (cursor);
       g_signal_connect (cursor, "texture-changed",
                         G_CALLBACK (cursor_texture_updated), tracker);
     }

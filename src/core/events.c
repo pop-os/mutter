@@ -43,6 +43,7 @@
 
 #define IS_GESTURE_EVENT(e) ((e)->type == CLUTTER_TOUCHPAD_SWIPE || \
                              (e)->type == CLUTTER_TOUCHPAD_PINCH || \
+                             (e)->type == CLUTTER_TOUCHPAD_HOLD || \
                              (e)->type == CLUTTER_TOUCH_BEGIN || \
                              (e)->type == CLUTTER_TOUCH_UPDATE || \
                              (e)->type == CLUTTER_TOUCH_END || \
@@ -201,7 +202,7 @@ meta_display_handle_event (MetaDisplay        *display,
                            const ClutterEvent *event)
 {
   MetaBackend *backend = meta_get_backend ();
-  MetaWindow *window;
+  MetaWindow *window = NULL;
   gboolean bypass_clutter = FALSE;
   G_GNUC_UNUSED gboolean bypass_wayland = FALSE;
   MetaGestureTracker *gesture_tracker;
@@ -419,10 +420,15 @@ meta_display_handle_event (MetaDisplay        *display,
        * See: https://gitlab.gnome.org/GNOME/mutter/issues/88
        */
       if (meta_window_handle_ui_frame_event (window, event))
-        bypass_wayland = (event->type == CLUTTER_BUTTON_PRESS ||
-                          event->type == CLUTTER_TOUCH_BEGIN);
+        {
+          bypass_wayland = (event->type == CLUTTER_BUTTON_PRESS ||
+                            event->type == CLUTTER_TOUCH_BEGIN);
+        }
       else
-        meta_window_handle_ungrabbed_event (window, event);
+        {
+          bypass_wayland = meta_window_has_modals (window);
+          meta_window_handle_ungrabbed_event (window, event);
+        }
 
       /* This might start a grab op. If it does, then filter out the
        * event, and if it doesn't, replay the event to release our
@@ -474,6 +480,10 @@ meta_display_handle_event (MetaDisplay        *display,
 #ifdef HAVE_WAYLAND
   if (compositor && !bypass_wayland)
     {
+      if (window && event->type == CLUTTER_MOTION &&
+          event->any.time != CLUTTER_CURRENT_TIME)
+        meta_window_check_alive_on_event (window, event->any.time);
+
       if (meta_wayland_compositor_handle_event (compositor, event))
         bypass_clutter = TRUE;
     }

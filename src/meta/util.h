@@ -39,10 +39,6 @@ META_EXPORT
 gboolean meta_is_wayland_compositor (void);
 
 META_EXPORT
-void meta_verbose_real    (const char *format,
-                           ...) G_GNUC_PRINTF (1, 2);
-
-META_EXPORT
 void meta_bug        (const char *format,
                       ...) G_GNUC_PRINTF (1, 2);
 
@@ -80,6 +76,7 @@ void meta_fatal      (const char *format,
  * @META_DEBUG_SCREEN_CAST: screencasting
  * @META_DEBUG_REMOTE_DESKTOP: remote desktop
  * @META_DEBUG_BACKEND: backend
+ * @META_DEBUG_RENDER: native backend rendering
  */
 typedef enum
 {
@@ -109,6 +106,7 @@ typedef enum
   META_DEBUG_SCREEN_CAST     = 1 << 22,
   META_DEBUG_REMOTE_DESKTOP  = 1 << 23,
   META_DEBUG_BACKEND         = 1 << 24,
+  META_DEBUG_RENDER          = 1 << 25,
 } MetaDebugTopic;
 
 /**
@@ -124,11 +122,6 @@ typedef enum
 
 META_EXPORT
 gboolean meta_is_topic_enabled (MetaDebugTopic topic);
-
-META_EXPORT
-void meta_topic_real      (MetaDebugTopic topic,
-                           const char    *format,
-                           ...) G_GNUC_PRINTF (2, 3);
 
 META_EXPORT
 void meta_add_verbose_topic    (MetaDebugTopic topic);
@@ -175,21 +168,22 @@ GPid meta_show_dialog (const char *type,
 /* To disable verbose mode, we make these functions into no-ops */
 #ifdef WITH_VERBOSE_MODE
 
-#define meta_verbose(...) \
-  G_STMT_START \
-    { \
-      if (meta_is_topic_enabled (META_DEBUG_VERBOSE)) \
-        meta_verbose_real (__VA_ARGS__); \
-    } \
-  G_STMT_END
+const char * meta_topic_to_string (MetaDebugTopic topic);
 
-#define meta_topic(debug_topic,...) \
+#define meta_topic(debug_topic, ...) \
   G_STMT_START \
     { \
       if (meta_is_topic_enabled (debug_topic)) \
-        meta_topic_real (debug_topic, __VA_ARGS__); \
+        { \
+          g_autofree char *message = NULL; \
+\
+          message = g_strdup_printf (__VA_ARGS__); \
+          g_message ("%s: %s", meta_topic_to_string (debug_topic), message); \
+        } \
     } \
   G_STMT_END
+
+#define meta_verbose(...) meta_topic (META_DEBUG_VERBOSE, __VA_ARGS__)
 
 #else
 
@@ -223,6 +217,11 @@ META_EXPORT
 void meta_remove_clutter_debug_flags (ClutterDebugFlag     debug_flags,
                                       ClutterDrawDebugFlag draw_flags,
                                       ClutterPickDebugFlag pick_flags);
+
+META_EXPORT
+void meta_get_clutter_debug_flags (ClutterDebugFlag     *debug_flags,
+                                   ClutterDrawDebugFlag *draw_flags,
+                                   ClutterPickDebugFlag *pick_flags);
 
 META_EXPORT
 void meta_add_debug_paint_flag (MetaDebugPaintFlag flag);

@@ -64,16 +64,13 @@ clutter_features_from_cogl (void)
   
   clutter_flags |= CLUTTER_FEATURE_SHADERS_GLSL;
   
-  clutter_flags |= CLUTTER_FEATURE_OFFSCREEN;
-  
   return clutter_flags;
 }
 
 gboolean
-_clutter_feature_init (GError **error)
+clutter_feature_init (ClutterMainContext  *context,
+                      GError             **error)
 {
-  ClutterMainContext *context;
-
   CLUTTER_NOTE (MISC, "checking features");
 
   if (!__features)
@@ -86,14 +83,11 @@ _clutter_feature_init (GError **error)
   if (__features->features_set)
     return TRUE;
 
-  context = _clutter_context_get_default ();
-
   /* makes sure we have a GL context; if we have, this is a no-op */
   if (!_clutter_backend_create_context (context->backend, error))
     return FALSE;
 
-  __features->flags = (clutter_features_from_cogl ()
-                    | _clutter_backend_get_features (context->backend));
+  __features->flags = clutter_features_from_cogl ();
 
   __features->features_set = TRUE;
 

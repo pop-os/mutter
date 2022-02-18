@@ -25,21 +25,42 @@ struct _MetaCursorSpriteWayland
   MetaCursorSprite parent;
 
   MetaWaylandSurface *surface;
+  gboolean invalidated;
 };
 
 G_DEFINE_TYPE (MetaCursorSpriteWayland,
                meta_cursor_sprite_wayland,
                META_TYPE_CURSOR_SPRITE)
 
-static void
+static gboolean
 meta_cursor_sprite_wayland_realize_texture (MetaCursorSprite *sprite)
 {
+  MetaCursorSpriteWayland *sprite_wayland;
+
+  sprite_wayland = META_CURSOR_SPRITE_WAYLAND (sprite);
+
+  if (sprite_wayland->invalidated)
+    {
+      sprite_wayland->invalidated = FALSE;
+      return TRUE;
+    }
+
+  return FALSE;
 }
 
 static gboolean
 meta_cursor_sprite_wayland_is_animated (MetaCursorSprite *sprite)
 {
   return FALSE;
+}
+
+static void
+meta_cursor_sprite_wayland_invalidate (MetaCursorSprite *sprite)
+{
+  MetaCursorSpriteWayland *sprite_wayland;
+
+  sprite_wayland = META_CURSOR_SPRITE_WAYLAND (sprite);
+  sprite_wayland->invalidated = TRUE;
 }
 
 MetaCursorSpriteWayland *
@@ -74,5 +95,7 @@ meta_cursor_sprite_wayland_class_init (MetaCursorSpriteWaylandClass *klass)
 
   cursor_sprite_class->realize_texture =
     meta_cursor_sprite_wayland_realize_texture;
+  cursor_sprite_class->invalidate =
+    meta_cursor_sprite_wayland_invalidate;
   cursor_sprite_class->is_animated = meta_cursor_sprite_wayland_is_animated;
 }

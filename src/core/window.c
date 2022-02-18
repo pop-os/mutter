@@ -139,13 +139,11 @@ static void     update_move           (MetaWindow              *window,
                                        MetaEdgeResistanceFlags  flags,
                                        int                      x,
                                        int                      y);
-static gboolean update_move_timeout   (gpointer data);
 static void     update_resize         (MetaWindow              *window,
                                        MetaEdgeResistanceFlags  flags,
                                        int                      x,
                                        int                      y,
                                        gboolean                 force);
-static gboolean update_resize_timeout (gpointer data);
 static gboolean should_be_on_all_workspaces (MetaWindow *window);
 
 static void meta_window_flush_calc_showing   (MetaWindow *window);
@@ -216,6 +214,7 @@ enum
   PROP_GTK_APP_MENU_OBJECT_PATH,
   PROP_GTK_MENUBAR_OBJECT_PATH,
   PROP_ON_ALL_WORKSPACES,
+  PROP_IS_ALIVE,
 
   PROP_LAST,
 };
@@ -635,6 +634,13 @@ meta_window_class_init (MetaWindowClass *klass)
                           FALSE,
                           G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
 
+  obj_props[PROP_IS_ALIVE] =
+    g_param_spec_boolean ("is-alive",
+                          "Is alive",
+                          "Whether the window responds to pings",
+                          TRUE,
+                          G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
+
   g_object_class_install_properties (object_class, PROP_LAST, obj_props);
 
   window_signals[WORKSPACE_CHANGED] =
@@ -731,6 +737,7 @@ meta_window_init (MetaWindow *self)
 {
   self->stamp = next_window_stamp++;
   meta_prefs_add_listener (prefs_changed_callback, self);
+  self->is_alive = TRUE;
 }
 
 static gboolean
@@ -1460,6 +1467,7 @@ meta_window_unmanage (MetaWindow  *window,
   window->unmanaging = TRUE;
 
   g_clear_handle_id (&window->unmanage_idle_id, g_source_remove);
+  g_clear_handle_id (&window->close_dialog_timeout_id, g_source_remove);
 
   g_signal_emit (window, window_signals[UNMANAGING], 0);
 
@@ -4165,8 +4173,13 @@ meta_window_move_resize_internal (MetaWindow          *window,
       g_signal_emit (window, window_signals[SIZE_CHANGED], 0);
     }
 
-  if (moved_or_resized || did_placement)
-    window->unconstrained_rect = unconstrained_rect;
+  /* Only update the stored size when requested but not when a
+   * (potentially outdated) request completes */
+  if (!(flags & META_MOVE_RESIZE_WAYLAND_FINISH_MOVE_RESIZE) || 
+      flags & META_MOVE_RESIZE_WAYLAND_CLIENT_RESIZE)
+    {
+      window->unconstrained_rect = unconstrained_rect;
+    }
 
   if ((moved_or_resized ||
        did_placement ||
@@ -4211,6 +4224,9 @@ meta_window_move_resize_internal (MetaWindow          *window,
 
   meta_stack_update_window_tile_matches (window->display->stack,
                                          workspace_manager->active_workspace);
+
+  if (flags & META_MOVE_RESIZE_WAYLAND_CLIENT_RESIZE)
+    meta_window_queue (window, META_QUEUE_MOVE_RESIZE);
 }
 
 /**
@@ -6105,19 +6121,6 @@ check_moveresize_frequency (MetaWindow *window,
   return TRUE;
 }
 
-static gboolean
-update_move_timeout (gpointer data)
-{
-  MetaWindow *window = data;
-
-  update_move (window,
-               window->display->grab_last_edge_resistance_flags,
-               window->display->grab_latest_motion_x,
-               window->display->grab_latest_motion_y);
-
-  return FALSE;
-}
-
 static void
 update_move_maybe_tile (MetaWindow *window,
                         int         shake_threshold,
@@ -6352,7 +6355,6 @@ update_move (MetaWindow              *window,
   meta_window_edge_resistance_for_move (window,
                                         &new_x,
                                         &new_y,
-                                        update_move_timeout,
                                         flags);
 
   meta_window_move_frame (window, TRUE, new_x, new_y);
@@ -6491,7 +6493,6 @@ update_resize (MetaWindow              *window,
                                           &new_rect.width,
                                           &new_rect.height,
                                           gravity,
-                                          update_resize_timeout,
                                           flags);
 
   meta_window_resize_frame_with_gravity (window, TRUE,
@@ -7973,7 +7974,7 @@ meta_window_get_frame_bounds (MetaWindow *window)
  * meta_window_is_attached_dialog:
  * @window: a #MetaWindow
  *
- * Tests if @window is should be attached to its parent window.
+ * Tests if @window should be attached to its parent window.
  * (If the "attach_modal_dialogs" option is not enabled, this will
  * always return %FALSE.)
  *
@@ -7983,6 +7984,71 @@ gboolean
 meta_window_is_attached_dialog (MetaWindow *window)
 {
   return window->attached;
+}
+
+static gboolean
+has_attached_foreach_func (MetaWindow *window,
+                           void       *data)
+{
+  gboolean *is_attached = data;
+
+  *is_attached = window->attached && !window->unmanaging;
+
+  if (*is_attached)
+    return FALSE;
+
+  return TRUE;
+}
+
+
+/**
+ * meta_window_has_attached_dialogs:
+ * @window: a #MetaWindow
+ *
+ * Tests if @window has any transients attached to it.
+ * (If the "attach_modal_dialogs" option is not enabled, this will
+ * always return %FALSE.)
+ *
+ * Return value: whether @window has attached transients
+ */
+gboolean
+meta_window_has_attached_dialogs (MetaWindow *window)
+{
+  gboolean has_attached = FALSE;
+
+  meta_window_foreach_transient (window,
+                                 has_attached_foreach_func,
+                                 &has_attached);
+  return has_attached;
+}
+
+static gboolean
+has_modals_foreach_func (MetaWindow *window,
+                         void       *data)
+{
+  gboolean *is_modal = data;
+
+  *is_modal = window->type == META_WINDOW_MODAL_DIALOG && !window->unmanaging;
+
+  if (*is_modal)
+    return FALSE;
+
+  return TRUE;
+}
+
+/**
+ * meta_window_has_modals:
+ * @window: a #MetaWindow
+ *
+ * Return value: whether @window has any modal transients
+ */
+gboolean
+meta_window_has_modals (MetaWindow *window)
+{
+  gboolean has_modals = FALSE;
+
+  meta_window_foreach_transient (window, has_modals_foreach_func, &has_modals);
+  return has_modals;
 }
 
 /**
@@ -8825,4 +8891,56 @@ MetaWindowClientType
 meta_window_get_client_type (MetaWindow *window)
 {
   return window->client_type;
+}
+
+static gboolean
+meta_window_close_dialog_timeout (MetaWindow *window)
+{
+  meta_window_show_close_dialog (window);
+  window->close_dialog_timeout_id = 0;
+
+  return G_SOURCE_REMOVE;
+}
+
+void
+meta_window_ensure_close_dialog_timeout (MetaWindow *window)
+{
+  guint check_alive_timeout = meta_prefs_get_check_alive_timeout ();
+
+  if (window->is_alive)
+    return;
+  if (window->close_dialog_timeout_id != 0)
+    return;
+  if (check_alive_timeout == 0)
+    return;
+
+  window->close_dialog_timeout_id =
+    g_timeout_add (check_alive_timeout,
+                   (GSourceFunc) meta_window_close_dialog_timeout,
+                   window);
+  g_source_set_name_by_id (window->close_dialog_timeout_id,
+                           "[mutter] meta_window_close_dialog_timeout");
+}
+
+void
+meta_window_set_alive (MetaWindow *window,
+                       gboolean    is_alive)
+{
+  if (window->is_alive == is_alive)
+    return;
+
+  window->is_alive = is_alive;
+  g_object_notify_by_pspec (G_OBJECT (window), obj_props[PROP_IS_ALIVE]);
+
+  if (is_alive)
+    {
+      g_clear_handle_id (&window->close_dialog_timeout_id, g_source_remove);
+      meta_window_hide_close_dialog (window);
+    }
+}
+
+gboolean
+meta_window_get_alive (MetaWindow *window)
+{
+  return window->is_alive;
 }

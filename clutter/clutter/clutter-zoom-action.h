@@ -76,13 +76,6 @@ struct _ClutterZoomActionClass
   /*< private >*/
   ClutterGestureActionClass parent_class;
 
-  /*< public >*/
-  gboolean (* zoom)  (ClutterZoomAction *action,
-                      ClutterActor      *actor,
-                      graphene_point_t  *focal_point,
-                      gdouble            factor);
-
-  /*< private >*/
   void (* _clutter_zoom_action1) (void);
   void (* _clutter_zoom_action2) (void);
   void (* _clutter_zoom_action3) (void);
@@ -95,12 +88,6 @@ GType clutter_zoom_action_get_type (void) G_GNUC_CONST;
 
 CLUTTER_EXPORT
 ClutterAction * clutter_zoom_action_new                         (void);
-
-CLUTTER_EXPORT
-void            clutter_zoom_action_set_zoom_axis               (ClutterZoomAction *action,
-                                                                 ClutterZoomAxis    axis);
-CLUTTER_EXPORT
-ClutterZoomAxis clutter_zoom_action_get_zoom_axis               (ClutterZoomAction *action);
 
 CLUTTER_EXPORT
 void            clutter_zoom_action_get_focal_point             (ClutterZoomAction *action,

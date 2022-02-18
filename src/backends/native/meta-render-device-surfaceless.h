@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2015 Red Hat, Inc.
+ * Copyright (C) 2021 Red Hat Inc.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -15,19 +15,20 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
  * 02111-1307, USA.
+ *
  */
 
-#ifndef META_WAYLAND_WL_SHELL_H
-#define META_WAYLAND_WL_SHELL_H
+#ifndef META_RENDER_DEVICE_SURFACELESS_H
+#define META_RENDER_DEVICE_SURFACELESS_H
 
-#include "wayland/meta-wayland-shell-surface.h"
+#include "backends/native/meta-render-device-private.h"
 
-#define META_TYPE_WAYLAND_WL_SHELL_SURFACE (meta_wayland_wl_shell_surface_get_type ())
-G_DECLARE_FINAL_TYPE (MetaWaylandWlShellSurface,
-                      meta_wayland_wl_shell_surface,
-                      META, WAYLAND_WL_SHELL_SURFACE,
-                      MetaWaylandShellSurface);
+#define META_TYPE_RENDER_DEVICE_SURFACELESS (meta_render_device_surfaceless_get_type ())
+G_DECLARE_FINAL_TYPE (MetaRenderDeviceSurfaceless, meta_render_device_surfaceless,
+                      META, RENDER_DEVICE_SURFACELESS,
+                      MetaRenderDevice)
 
-void meta_wayland_wl_shell_init (MetaWaylandCompositor *compositor);
+MetaRenderDeviceSurfaceless * meta_render_device_surfaceless_new (MetaBackend  *backend,
+                                                                  GError      **error);
 
-#endif /* META_WAYLAND_WL_SHELL_H */
+#endif /* META_RENDER_DEVICE_SURFACELESS_H */

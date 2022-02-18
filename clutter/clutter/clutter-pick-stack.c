@@ -32,6 +32,7 @@ typedef struct
   Record base;
   ClutterActor *actor;
   int clip_index;
+  gboolean is_overlap;
 } PickRecord;
 
 typedef struct
@@ -342,12 +343,28 @@ clutter_pick_stack_log_pick (ClutterPickStack       *pick_stack,
 
   g_assert (!pick_stack->sealed);
 
+  rec.is_overlap = FALSE;
   rec.actor = actor;
   rec.clip_index = pick_stack->current_clip_stack_top;
-    rec.base.rect = *box;
+  rec.base.rect = *box;
   rec.base.projected = FALSE;
   rec.base.matrix_entry = cogl_matrix_stack_get_entry (pick_stack->matrix_stack);
   cogl_matrix_entry_ref (rec.base.matrix_entry);
+
+  g_array_append_val (pick_stack->vertices_stack, rec);
+}
+
+void
+clutter_pick_stack_log_overlap (ClutterPickStack *pick_stack,
+                                ClutterActor     *actor)
+{
+  PickRecord rec = { 0 };
+
+  g_assert (!pick_stack->sealed);
+
+  rec.is_overlap = TRUE;
+  rec.actor = actor;
+  rec.clip_index = pick_stack->current_clip_stack_top;
 
   g_array_append_val (pick_stack->vertices_stack, rec);
 }
@@ -412,10 +429,82 @@ clutter_pick_stack_pop_transform (ClutterPickStack *pick_stack)
   cogl_matrix_stack_pop (pick_stack->matrix_stack);
 }
 
+static gboolean
+get_verts_rectangle (graphene_point3d_t     verts[4],
+                     cairo_rectangle_int_t *rect)
+{
+  if (verts[0].x != verts[2].x ||
+      verts[0].y != verts[1].y ||
+      verts[3].x != verts[1].x ||
+      verts[3].y != verts[2].y ||
+      verts[0].x > verts[3].x ||
+      verts[0].y > verts[3].y)
+    return FALSE;
+
+  *rect = (cairo_rectangle_int_t) {
+    .x = ceilf (verts[0].x),
+    .y = ceilf (verts[0].y),
+    .width = floor (verts[1].x - ceilf (verts[0].x)),
+    .height = floor (verts[2].y - ceilf (verts[0].y)),
+  };
+
+  return TRUE;
+}
+
+static void
+calculate_clear_area (ClutterPickStack  *pick_stack,
+                      int                elem,
+                      ClutterActor      *actor,
+                      cairo_region_t   **clear_area)
+{
+  cairo_region_t *area = NULL;
+  graphene_point3d_t verts[4];
+  cairo_rectangle_int_t rect;
+  int i;
+
+  clutter_actor_get_abs_allocation_vertices (actor,
+                                             (graphene_point3d_t *) &verts);
+  if (!get_verts_rectangle (verts, &rect))
+    {
+      if (clear_area)
+        *clear_area = NULL;
+      return;
+    }
+
+  area = cairo_region_create_rectangle (&rect);
+
+  for (i = elem + 1; i < pick_stack->vertices_stack->len; i++)
+    {
+      PickRecord *rec =
+        &g_array_index (pick_stack->vertices_stack, PickRecord, i);
+      ClutterActorBox paint_box;
+
+      if (!rec->is_overlap &&
+	  (rec->base.rect.x1 == rec->base.rect.x2 ||
+	   rec->base.rect.y1 == rec->base.rect.y2))
+        continue;
+
+      clutter_actor_get_paint_box (rec->actor, &paint_box);
+      cairo_region_subtract_rectangle (area,
+                                       &(cairo_rectangle_int_t) {
+                                         .x = paint_box.x1,
+                                         .y = paint_box.y1,
+                                         .width = paint_box.x2 - paint_box.x1,
+                                         .height = paint_box.y2 - paint_box.y1,
+                                       });
+    }
+
+  if (clear_area)
+    *clear_area = g_steal_pointer (&area);
+
+  g_clear_pointer (&area, cairo_region_destroy);
+}
+
 ClutterActor *
-clutter_pick_stack_search_actor (ClutterPickStack         *pick_stack,
-                                 const graphene_point3d_t *point,
-                                 const graphene_ray_t     *ray)
+clutter_pick_stack_search_actor (ClutterPickStack          *pick_stack,
+                                 const graphene_point3d_t  *point,
+                                 const graphene_ray_t      *ray,
+                                 cairo_region_t           **clear_area)
 {
   int i;
 
@@ -428,8 +517,13 @@ clutter_pick_stack_search_actor (ClutterPickStack         *pick_stack,
       PickRecord *rec =
         &g_array_index (pick_stack->vertices_stack, PickRecord, i);
 
-      if (rec->actor && ray_intersects_record (pick_stack, rec, point, ray))
-        return rec->actor;
+      if (!rec->is_overlap && rec->actor &&
+          ray_intersects_record (pick_stack, rec, point, ray))
+        {
+          if (clear_area)
+            calculate_clear_area (pick_stack, i, rec->actor, clear_area);
+          return rec->actor;
+        }
     }
 
   return NULL;

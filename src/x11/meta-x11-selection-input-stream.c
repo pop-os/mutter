@@ -40,11 +40,8 @@ struct MetaX11SelectionInputStreamPrivate
   MetaX11Display *x11_display;
   Window window;
   GAsyncQueue *chunks;
-  char *selection;
   Atom xselection;
-  char *target;
   Atom xtarget;
-  char *property;
   Atom xproperty;
   const char *type;
   Atom xtype;
@@ -132,7 +129,12 @@ meta_x11_selection_input_stream_flush (MetaX11SelectionInputStream *stream)
 {
   MetaX11SelectionInputStreamPrivate *priv =
     meta_x11_selection_input_stream_get_instance_private (stream);
+  Display *xdisplay = priv->x11_display->xdisplay;
   gssize written;
+
+  meta_x11_error_trap_push (priv->x11_display);
+  XDeleteProperty (xdisplay, priv->window, priv->xproperty);
+  meta_x11_error_trap_pop (priv->x11_display);
 
   if (!meta_x11_selection_input_stream_has_data (stream))
     return;
@@ -282,12 +284,11 @@ meta_x11_selection_input_stream_finalize (GObject *object)
     META_X11_SELECTION_INPUT_STREAM (object);
   MetaX11SelectionInputStreamPrivate *priv =
     meta_x11_selection_input_stream_get_instance_private (stream);
+  Display *xdisplay = priv->x11_display->xdisplay;
 
   g_async_queue_unref (priv->chunks);
 
-  g_free (priv->selection);
-  g_free (priv->target);
-  g_free (priv->property);
+  XDestroyWindow (xdisplay, priv->window);
 
   G_OBJECT_CLASS (meta_x11_selection_input_stream_parent_class)->finalize (object);
 }
@@ -394,6 +395,7 @@ meta_x11_selection_input_stream_xevent (MetaX11SelectionInputStream *stream,
   GBytes *bytes;
   Atom type;
   gint format;
+  char *target;
 
   xdisplay = priv->x11_display->xdisplay;
   xwindow = priv->window;
@@ -428,9 +430,6 @@ meta_x11_selection_input_stream_xevent (MetaX11SelectionInputStream *stream,
           g_async_queue_push (priv->chunks, bytes);
           meta_x11_selection_input_stream_flush (stream);
         }
-
-      XDeleteProperty (xdisplay, xwindow, xevent->xproperty.atom);
-
       return FALSE;
 
     case SelectionNotify:
@@ -454,11 +453,13 @@ meta_x11_selection_input_stream_xevent (MetaX11SelectionInputStream *stream,
 
         if (xevent->xselection.property == None)
           {
+            target = XGetAtomName (xdisplay, priv->xtarget);
             g_task_return_new_error (task,
                                      G_IO_ERROR,
                                      G_IO_ERROR_NOT_FOUND,
-                                     _("Format %s not supported"), priv->target);
+                                     _("Format %s not supported"), target);
             meta_x11_selection_input_stream_complete (stream);
+            XFree (target);
           }
         else
           {
@@ -489,8 +490,6 @@ meta_x11_selection_input_stream_xevent (MetaX11SelectionInputStream *stream,
                     meta_x11_selection_input_stream_complete (stream);
                   }
               }
-
-            XDeleteProperty (xdisplay, xwindow, xevent->xselection.property);
           }
 
         g_object_unref (task);
@@ -504,7 +503,6 @@ meta_x11_selection_input_stream_xevent (MetaX11SelectionInputStream *stream,
 
 void
 meta_x11_selection_input_stream_new_async (MetaX11Display      *x11_display,
-                                           Window               window,
                                            const char          *selection,
                                            const char          *target,
                                            guint32              timestamp,
@@ -515,26 +513,35 @@ meta_x11_selection_input_stream_new_async (MetaX11Display      *x11_display,
 {
   MetaX11SelectionInputStream *stream;
   MetaX11SelectionInputStreamPrivate *priv;
+  XSetWindowAttributes attributes = { 0 };
 
   stream = g_object_new (META_TYPE_X11_SELECTION_INPUT_STREAM, NULL);
   priv = meta_x11_selection_input_stream_get_instance_private (stream);
 
+  attributes.event_mask = PropertyChangeMask;
+  attributes.override_redirect = True;
+
   priv->x11_display = x11_display;
   x11_display->selection.input_streams =
     g_list_prepend (x11_display->selection.input_streams, stream);
-  priv->selection = g_strdup (selection);
-  priv->xselection = XInternAtom (x11_display->xdisplay, priv->selection, False);
-  priv->target = g_strdup (target);
-  priv->xtarget = XInternAtom (x11_display->xdisplay, priv->target, False);
-  priv->property = g_strdup_printf ("META_SELECTION_%p", stream);
-  priv->xproperty = XInternAtom (x11_display->xdisplay, priv->property, False);
-  priv->window = window;
+  priv->xselection = XInternAtom (x11_display->xdisplay, selection, False);
+  priv->xtarget = XInternAtom (x11_display->xdisplay, target, False);
+  priv->xproperty = XInternAtom (x11_display->xdisplay, "META_SELECTION", False);
+  priv->window = XCreateWindow (x11_display->xdisplay,
+                                x11_display->xroot,
+                                -1, -1, 1, 1,
+                                0, /* border width */
+                                0, /* depth */
+                                InputOnly, /* class */
+                                CopyFromParent, /* visual */
+                                CWEventMask | CWOverrideRedirect,
+                                &attributes);
 
   XConvertSelection (x11_display->xdisplay,
                      priv->xselection,
                      priv->xtarget,
                      priv->xproperty,
-                     window,
+                     priv->window,
                      timestamp);
 
   priv->pending_task = g_task_new (NULL, cancellable, callback, user_data);

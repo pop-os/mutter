@@ -30,16 +30,6 @@
 
 enum
 {
-  PREPARE_AT,
-  TEXTURE_CHANGED,
-
-  LAST_SIGNAL
-};
-
-static guint signals[LAST_SIGNAL];
-
-enum
-{
   PROP_0,
 
   PROP_CURSOR_TRACKER,
@@ -49,6 +39,15 @@ enum
 
 static GParamSpec *obj_props[N_PROPS];
 
+enum
+{
+  TEXTURE_CHANGED,
+
+  LAST_SIGNAL
+};
+
+static guint signals[LAST_SIGNAL];
+
 typedef struct _MetaCursorSpritePrivate
 {
   GObject parent;
@@ -57,6 +56,9 @@ typedef struct _MetaCursorSpritePrivate
   float texture_scale;
   MetaMonitorTransform texture_transform;
   int hot_x, hot_y;
+
+  MetaCursorPrepareFunc prepare_func;
+  gpointer prepare_func_data;
 
   MetaCursorTracker *cursor_tracker;
 } MetaCursorSpritePrivate;
@@ -95,6 +97,7 @@ meta_cursor_sprite_clear_texture (MetaCursorSprite *sprite)
     meta_cursor_sprite_get_instance_private (sprite);
 
   g_clear_pointer (&priv->texture, cogl_object_unref);
+  meta_cursor_sprite_invalidate (sprite);
 }
 
 void
@@ -112,6 +115,8 @@ meta_cursor_sprite_set_texture (MetaCursorSprite *sprite,
   priv->hot_x = hot_x;
   priv->hot_y = hot_y;
 
+  meta_cursor_sprite_invalidate (sprite);
+
   g_signal_emit (sprite, signals[TEXTURE_CHANGED], 0);
 }
 
@@ -122,6 +127,9 @@ meta_cursor_sprite_set_texture_scale (MetaCursorSprite *sprite,
   MetaCursorSpritePrivate *priv =
     meta_cursor_sprite_get_instance_private (sprite);
 
+  if (priv->texture_scale != scale)
+    meta_cursor_sprite_invalidate (sprite);
+
   priv->texture_scale = scale;
 }
 
@@ -131,6 +139,9 @@ meta_cursor_sprite_set_texture_transform (MetaCursorSprite     *sprite,
 {
   MetaCursorSpritePrivate *priv =
     meta_cursor_sprite_get_instance_private (sprite);
+
+  if (priv->texture_transform != transform)
+    meta_cursor_sprite_invalidate (sprite);
 
   priv->texture_transform = transform;
 }
@@ -193,18 +204,43 @@ meta_cursor_sprite_get_texture_transform (MetaCursorSprite *sprite)
 }
 
 void
+meta_cursor_sprite_set_prepare_func (MetaCursorSprite      *sprite,
+                                     MetaCursorPrepareFunc  func,
+                                     gpointer               user_data)
+{
+  MetaCursorSpritePrivate *priv =
+    meta_cursor_sprite_get_instance_private (sprite);
+
+  priv->prepare_func = func;
+  priv->prepare_func_data = user_data;
+}
+
+void
 meta_cursor_sprite_prepare_at (MetaCursorSprite   *sprite,
                                float               best_scale,
                                int                 x,
                                int                 y)
 {
-  g_signal_emit (sprite, signals[PREPARE_AT], 0, best_scale, x, y);
+  MetaCursorSpritePrivate *priv =
+    meta_cursor_sprite_get_instance_private (sprite);
+
+  if (priv->prepare_func)
+    priv->prepare_func (sprite, best_scale, x, y, priv->prepare_func_data);
+}
+
+gboolean
+meta_cursor_sprite_realize_texture (MetaCursorSprite *sprite)
+{
+  return META_CURSOR_SPRITE_GET_CLASS (sprite)->realize_texture (sprite);
 }
 
 void
-meta_cursor_sprite_realize_texture (MetaCursorSprite *sprite)
+meta_cursor_sprite_invalidate (MetaCursorSprite *sprite)
 {
-  META_CURSOR_SPRITE_GET_CLASS (sprite)->realize_texture (sprite);
+  MetaCursorSpriteClass *sprite_class = META_CURSOR_SPRITE_GET_CLASS (sprite);
+
+  if (sprite_class->invalidate)
+    sprite_class->invalidate (sprite);
 }
 
 static void
@@ -288,15 +324,6 @@ meta_cursor_sprite_class_init (MetaCursorSpriteClass *klass)
                          G_PARAM_STATIC_STRINGS);
   g_object_class_install_properties (object_class, N_PROPS, obj_props);
 
-  signals[PREPARE_AT] = g_signal_new ("prepare-at",
-                                      G_TYPE_FROM_CLASS (object_class),
-                                      G_SIGNAL_RUN_LAST,
-                                      0,
-                                      NULL, NULL, NULL,
-                                      G_TYPE_NONE, 3,
-                                      G_TYPE_FLOAT,
-                                      G_TYPE_INT,
-                                      G_TYPE_INT);
   signals[TEXTURE_CHANGED] = g_signal_new ("texture-changed",
                                            G_TYPE_FROM_CLASS (object_class),
                                            G_SIGNAL_RUN_LAST,

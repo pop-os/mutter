@@ -1,15 +1,13 @@
 project('mutter', 'c',
-  version: '41.3',
+  version: '42.alpha',
   meson_version: '>= 0.53.0',
   license: 'GPLv2+'
 )
 
 split_version = meson.project_version().split('.')
 
-# Automatically increase API version each development cycle,
-# starting with 0 in 3.23.x
-api_version = split_version[0].to_int() - 32
-libmutter_api_version = '@0@'.format(api_version)
+# API version, bump each development cycle
+libmutter_api_version = '10'
 
 mutter_srcdir = meson.current_source_dir()
 mutter_builddir = meson.current_build_dir()
@@ -44,10 +42,10 @@ gudev_req = '>= 232'
 
 # wayland version requirements
 wayland_server_req = '>= 1.18'
-wayland_protocols_req = '>= 1.21'
+wayland_protocols_req = '>= 1.24'
 
 # native backend version requirements
-libinput_req = '>= 1.18.0'
+libinput_req = '>= 1.19.0'
 gbm_req = '>= 17.3'
 
 # screen cast version requirements
@@ -85,7 +83,6 @@ libmutter_name = 'mutter-' + libmutter_api_version
 
 mutter_installed_tests_datadir = join_paths(
   datadir, 'installed-tests', libmutter_name)
-
 mutter_installed_tests_libexecdir = join_paths(
   libexecdir, 'installed-tests', libmutter_name)
 
@@ -304,6 +301,8 @@ if have_tests
     is_default: true,
     exe_wrapper: default_test_wrappers,
   )
+
+  add_test_setup('plain')
 
   add_test_setup('CI',
     env: [

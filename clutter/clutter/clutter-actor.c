@@ -613,6 +613,7 @@
 #include "clutter-actor-private.h"
 
 #include "clutter-action.h"
+#include "clutter-action-private.h"
 #include "clutter-actor-meta-private.h"
 #include "clutter-animatable.h"
 #include "clutter-color-static.h"
@@ -1456,10 +1457,7 @@ clutter_actor_update_map_state (ClutterActor  *self,
       /* Map */
       if (should_be_mapped)
         {
-          if (!must_be_realized)
-            g_warning ("Somehow we think actor '%s' should be mapped but "
-                       "not realized, which isn't allowed",
-                       _clutter_actor_get_debug_name (self));
+          g_assert (should_be_mapped == must_be_realized);
 
           /* realization is allowed to fail (though I don't know what
            * an app is supposed to do about that - shouldn't it just
@@ -3962,7 +3960,10 @@ clutter_actor_pick (ClutterActor       *actor,
 
       clutter_paint_volume_to_box (&priv->last_paint_volume, &box);
       if (!clutter_pick_context_intersects_box (pick_context, &box))
-        goto out;
+        {
+          clutter_pick_context_log_overlap (pick_context, actor);
+          goto out;
+        }
     }
 
   if (priv->enable_model_view_transform)
@@ -9455,14 +9456,11 @@ clutter_actor_set_min_width (ClutterActor *self,
   ClutterActorBox old = { 0, };
   ClutterLayoutInfo *info;
 
-  /* if we are setting the size on a top-level actor and the
-   * backend only supports static top-levels (e.g. framebuffers)
-   * then we ignore the passed value and we override it with
-   * the stage implementation's preferred size.
-   */
-  if (CLUTTER_ACTOR_IS_TOPLEVEL (self) &&
-      clutter_feature_available (CLUTTER_FEATURE_STAGE_STATIC))
-    return;
+  if (CLUTTER_ACTOR_IS_TOPLEVEL (self))
+    {
+      g_warning ("Can't set the minimal width of a stage");
+      return;
+    }
 
   info = _clutter_actor_get_layout_info (self);
 
@@ -9493,14 +9491,11 @@ clutter_actor_set_min_height (ClutterActor *self,
   ClutterActorBox old = { 0, };
   ClutterLayoutInfo *info;
 
-  /* if we are setting the size on a top-level actor and the
-   * backend only supports static top-levels (e.g. framebuffers)
-   * then we ignore the passed value and we override it with
-   * the stage implementation's preferred size.
-   */
-  if (CLUTTER_ACTOR_IS_TOPLEVEL (self) &&
-      clutter_feature_available (CLUTTER_FEATURE_STAGE_STATIC))
-    return;
+  if (CLUTTER_ACTOR_IS_TOPLEVEL (self))
+    {
+      g_warning ("Can't set the minimal height of a stage");
+      return;
+    }
 
   info = _clutter_actor_get_layout_info (self);
 
@@ -9530,15 +9525,6 @@ clutter_actor_set_natural_width (ClutterActor *self,
   ClutterActorBox old = { 0, };
   ClutterLayoutInfo *info;
 
-  /* if we are setting the size on a top-level actor and the
-   * backend only supports static top-levels (e.g. framebuffers)
-   * then we ignore the passed value and we override it with
-   * the stage implementation's preferred size.
-   */
-  if (CLUTTER_ACTOR_IS_TOPLEVEL (self) &&
-      clutter_feature_available (CLUTTER_FEATURE_STAGE_STATIC))
-    return;
-
   info = _clutter_actor_get_layout_info (self);
 
   if (priv->natural_width_set && natural_width == info->natural.width)
@@ -9566,15 +9552,6 @@ clutter_actor_set_natural_height (ClutterActor *self,
   ClutterActorPrivate *priv = self->priv;
   ClutterActorBox old = { 0, };
   ClutterLayoutInfo *info;
-
-  /* if we are setting the size on a top-level actor and the
-   * backend only supports static top-levels (e.g. framebuffers)
-   * then we ignore the passed value and we override it with
-   * the stage implementation's preferred size.
-   */
-  if (CLUTTER_ACTOR_IS_TOPLEVEL (self) &&
-      clutter_feature_available (CLUTTER_FEATURE_STAGE_STATIC))
-    return;
 
   info = _clutter_actor_get_layout_info (self);
 
@@ -12257,6 +12234,38 @@ clutter_actor_set_child_at_index (ClutterActor *self,
  * Event handling
  */
 
+static gboolean
+clutter_actor_run_actions (ClutterActor       *self,
+                           const ClutterEvent *event,
+                           ClutterEventPhase   phase)
+{
+  ClutterActorPrivate *priv;
+  const GList *actions, *l;
+  gboolean retval = CLUTTER_EVENT_PROPAGATE;
+
+  priv = self->priv;
+  if (!priv->actions)
+    return CLUTTER_EVENT_PROPAGATE;
+
+  actions = _clutter_meta_group_peek_metas (priv->actions);
+
+  for (l = actions; l; l = l->next)
+    {
+      ClutterAction *action = l->data;
+      ClutterEventPhase action_phase;
+
+      action_phase = clutter_action_get_phase (action);
+
+      if (action_phase == phase)
+        {
+          if (clutter_action_handle_event (action, event))
+            retval = CLUTTER_EVENT_STOP;
+        }
+    }
+
+  return retval;
+}
+
 /**
  * clutter_actor_event:
  * @actor: a #ClutterActor
@@ -12278,6 +12287,7 @@ clutter_actor_event (ClutterActor       *actor,
                      const ClutterEvent *event,
                      gboolean            capture)
 {
+  ClutterEventPhase phase;
   gboolean retval = FALSE;
   gint signal_num = -1;
   GQuark detail = 0;
@@ -12286,6 +12296,11 @@ clutter_actor_event (ClutterActor       *actor,
   g_return_val_if_fail (event != NULL, FALSE);
 
   g_object_ref (actor);
+
+  phase = capture ? CLUTTER_PHASE_CAPTURE : CLUTTER_PHASE_BUBBLE;
+  retval = clutter_actor_run_actions (actor, event, phase);
+  if (retval)
+    goto handled;
 
   switch (event->type)
     {
@@ -12332,6 +12347,7 @@ clutter_actor_event (ClutterActor       *actor,
       break;
     case CLUTTER_TOUCHPAD_PINCH:
     case CLUTTER_TOUCHPAD_SWIPE:
+    case CLUTTER_TOUCHPAD_HOLD:
       signal_num = -1;
       detail = quark_touchpad;
       break;
@@ -12369,6 +12385,7 @@ clutter_actor_event (ClutterActor       *actor,
         g_signal_emit (actor, actor_signals[signal_num], 0, event, &retval);
     }
 
+ handled:
   g_object_unref (actor);
 
   return retval;
@@ -13250,6 +13267,22 @@ clutter_actor_set_animatable_property (ClutterActor *actor,
 }
 
 static void
+clutter_actor_update_pointer (ClutterActor *self)
+{
+  ClutterInputDevice *pointer;
+  ClutterStage *stage;
+  ClutterSeat *seat;
+
+  stage = CLUTTER_STAGE (_clutter_actor_get_stage_internal (self));
+  if (!stage)
+    return;
+
+  seat = clutter_backend_get_default_seat (clutter_get_default_backend ());
+  pointer = clutter_seat_get_pointer (seat);
+  clutter_stage_repick_device (stage, pointer);
+}
+
+static void
 clutter_actor_set_final_state (ClutterAnimatable *animatable,
                                const gchar       *property_name,
                                const GValue      *final)
@@ -13298,6 +13331,8 @@ clutter_actor_set_final_state (ClutterAnimatable *animatable,
             g_object_set_property (G_OBJECT (animatable), pspec->name, final);
         }
     }
+
+  clutter_actor_update_pointer (actor);
 
   g_free (p_name);
 }
@@ -14693,6 +14728,27 @@ clutter_actor_has_allocation (ClutterActor *self)
          !priv->needs_allocation;
 }
 
+static void
+clutter_actor_add_action_internal (ClutterActor      *self,
+                                   ClutterAction     *action,
+                                   ClutterEventPhase  phase)
+{
+  ClutterActorPrivate *priv;
+
+  priv = self->priv;
+
+  if (priv->actions == NULL)
+    {
+      priv->actions = g_object_new (CLUTTER_TYPE_META_GROUP, NULL);
+      priv->actions->actor = self;
+    }
+
+  clutter_action_set_phase (action, phase);
+  _clutter_meta_group_add_meta (priv->actions, CLUTTER_ACTOR_META (action));
+
+  g_object_notify_by_pspec (G_OBJECT (self), obj_props[PROP_ACTIONS]);
+}
+
 /**
  * clutter_actor_add_action:
  * @self: a #ClutterActor
@@ -14712,22 +14768,10 @@ void
 clutter_actor_add_action (ClutterActor  *self,
                           ClutterAction *action)
 {
-  ClutterActorPrivate *priv;
-
   g_return_if_fail (CLUTTER_IS_ACTOR (self));
   g_return_if_fail (CLUTTER_IS_ACTION (action));
 
-  priv = self->priv;
-
-  if (priv->actions == NULL)
-    {
-      priv->actions = g_object_new (CLUTTER_TYPE_META_GROUP, NULL);
-      priv->actions->actor = self;
-    }
-
-  _clutter_meta_group_add_meta (priv->actions, CLUTTER_ACTOR_META (action));
-
-  g_object_notify_by_pspec (G_OBJECT (self), obj_props[PROP_ACTIONS]);
+  clutter_actor_add_action_internal (self, action, CLUTTER_PHASE_BUBBLE);
 }
 
 /**
@@ -14759,6 +14803,22 @@ clutter_actor_add_action_with_name (ClutterActor  *self,
 
   clutter_actor_meta_set_name (CLUTTER_ACTOR_META (action), name);
   clutter_actor_add_action (self, action);
+}
+
+void
+clutter_actor_add_action_full (ClutterActor      *self,
+                               const char        *name,
+                               ClutterEventPhase  phase,
+                               ClutterAction     *action)
+{
+  g_return_if_fail (CLUTTER_IS_ACTOR (self));
+  g_return_if_fail (name != NULL);
+  g_return_if_fail (CLUTTER_IS_ACTION (action));
+  g_return_if_fail (phase == CLUTTER_PHASE_BUBBLE ||
+                    phase == CLUTTER_PHASE_CAPTURE);
+
+  clutter_actor_meta_set_name (CLUTTER_ACTOR_META (action), name);
+  clutter_actor_add_action_internal (self, action, phase);
 }
 
 /**
