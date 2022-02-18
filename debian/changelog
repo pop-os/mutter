@@ -1,4 +1,4 @@
-mutter (42~beta-1) UNRELEASED; urgency=medium
+mutter (42~beta-0ubuntu1) UNRELEASED; urgency=medium
 
   * New upstream release:
     - Implement a new Clutter grab API
@@ -28,8 +28,14 @@ mutter (42~beta-1) UNRELEASED; urgency=medium
   * debian/control: Update dependencies
   * debian/patches: Refresh and update to latest code
   * debian/libmutter-(test-)10.symbols: Update
+  * d/p/11-Add-support-for-fractional-scaling-using-Randr.patch:
+    - Refresh as per upstream changes
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 18 Feb 2022 02:31:40 +0100
+  [ Daniel van Vugt ]
+  * debian/patches: Add support for dynamic triple/double buffering
+    (LP: #1880586)
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 18 Feb 2022 04:22:18 +0100
 
 mutter (41.3-3ubuntu1) jammy; urgency=low
 
