@@ -26,9 +26,13 @@ G_BEGIN_DECLS
 #define META_TYPE_SEAT_X11 meta_seat_x11_get_type ()
 G_DECLARE_FINAL_TYPE (MetaSeatX11, meta_seat_x11, META, SEAT_X11, ClutterSeat)
 
-MetaSeatX11 * meta_seat_x11_new (int opcode,
-                                 int logical_pointer,
-                                 int logical_keyboard);
+MetaSeatX11 * meta_seat_x11_new (MetaBackend *backend,
+                                 int          opcode,
+                                 int          logical_pointer,
+                                 int          logical_keyboard);
+
+MetaBackend * meta_seat_x11_get_backend (MetaSeatX11 *seat_x11);
+
 gboolean meta_seat_x11_translate_event (MetaSeatX11  *seat,
 					XEvent       *xevent,
 					ClutterEvent *event);

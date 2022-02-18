@@ -56,14 +56,7 @@ typedef enum
   META_CLIENT_TYPE_MAX_RECOGNIZED = 2
 } MetaClientType;
 
-typedef enum
-{
-  META_QUEUE_CALC_SHOWING = 1 << 0,
-  META_QUEUE_MOVE_RESIZE  = 1 << 1,
-  META_QUEUE_UPDATE_ICON  = 1 << 2,
-} MetaQueueType;
-
-#define NUMBER_OF_QUEUES 3
+#define META_N_QUEUE_TYPES 2
 
 typedef enum
 {
@@ -184,9 +177,6 @@ struct _MetaWindow
   Visual *xvisual;
   char *desc; /* used in debug spew */
   char *title;
-
-  cairo_surface_t *icon;
-  cairo_surface_t *mini_icon;
 
   MetaWindowType type;
 
@@ -401,9 +391,6 @@ struct _MetaWindow
   /* Are we in meta_window_new()? */
   guint constructing : 1;
 
-  /* Are we in the various queues? (Bitfield: see META_WINDOW_IS_IN_QUEUE) */
-  guint is_in_queues : NUMBER_OF_QUEUES;
-
   /* Used by keybindings.c */
   guint keys_grabbed : 1;     /* normal keybindings grabbed */
   guint grab_on_frame : 1;    /* grabs are on the frame */
@@ -608,9 +595,10 @@ struct _MetaWindowClass
   void (*get_default_skip_hints) (MetaWindow *window,
                                   gboolean   *skip_taskbar_out,
                                   gboolean   *skip_pager_out);
-  gboolean (*update_icon)        (MetaWindow       *window,
-                                  cairo_surface_t **icon,
-                                  cairo_surface_t **mini_icon);
+
+  cairo_surface_t * (*get_icon) (MetaWindow *window);
+  cairo_surface_t * (*get_mini_icon) (MetaWindow *window);
+
   pid_t (*get_client_pid)        (MetaWindow *window);
   void (*update_main_monitor)    (MetaWindow                   *window,
                                   MetaWindowUpdateMonitorFlags  flags);
@@ -867,6 +855,10 @@ MetaLogicalMonitor * meta_window_get_main_logical_monitor (MetaWindow *window);
 void meta_window_update_monitor (MetaWindow                   *window,
                                  MetaWindowUpdateMonitorFlags  flags);
 
+cairo_surface_t * meta_window_get_icon (MetaWindow *window);
+
+cairo_surface_t * meta_window_get_mini_icon (MetaWindow *window);
+
 void meta_window_set_urgent (MetaWindow *window,
                              gboolean    urgent);
 
@@ -913,5 +905,11 @@ gboolean meta_window_unit_cgroup_equal (MetaWindow *window1,
 
 void meta_window_check_alive_on_event (MetaWindow *window,
                                        uint32_t    timestamp);
+
+void meta_window_update_visibility (MetaWindow  *window);
+
+void meta_window_clear_queued (MetaWindow *window);
+
+void meta_window_update_layout (MetaWindow *window);
 
 #endif

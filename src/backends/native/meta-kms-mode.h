@@ -25,6 +25,7 @@
 #include <xf86drmMode.h>
 
 #include "backends/native/meta-kms-types.h"
+#include "core/util-private.h"
 
 typedef enum _MetaKmsModeFlag
 {
@@ -33,10 +34,18 @@ typedef enum _MetaKmsModeFlag
   META_KMS_MODE_FLAG_FALLBACK_PORTRAIT = 1 << 1,
 } MetaKmsModeFlag;
 
+META_EXPORT_TEST
+int meta_kms_mode_get_width (MetaKmsMode *mode);
+
+META_EXPORT_TEST
+int meta_kms_mode_get_height (MetaKmsMode *mode);
+
+META_EXPORT_TEST
 const char * meta_kms_mode_get_name (MetaKmsMode *mode);
 
 MetaKmsModeFlag meta_kms_mode_get_flags (MetaKmsMode *mode);
 
+META_EXPORT_TEST
 const drmModeModeInfo * meta_kms_mode_get_drm_mode (MetaKmsMode *mode);
 
 gboolean meta_kms_mode_equal (MetaKmsMode *mode,

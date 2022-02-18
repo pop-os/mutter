@@ -111,6 +111,12 @@ option('introspection',
   description: 'Enable GObject introspection'
 )
 
+option('docs',
+  type: 'boolean',
+  value: false,
+  description: 'Enable gi-docgen documentation'
+)
+
 option('cogl_tests',
   type: 'boolean',
   value: true,
@@ -139,6 +145,24 @@ option('tests',
   type: 'boolean',
   value: true,
   description: 'Enable tests globally. Specific test suites can be controlled with core_tests, clutter_tests, and cogl_tests'
+)
+
+option('kvm_tests',
+  type: 'boolean',
+  value: false,
+  description: 'Enable running certain tests in a virtual machine with a custom built kernel'
+)
+
+option('kvm_kernel_image',
+  type: 'string',
+  value: '',
+  description: 'Path to a Linux kernel image to be used for KVM testing'
+)
+
+option('tty_tests',
+  type: 'boolean',
+  value: false,
+  description: 'Enable tests that must be run on a TTY (KMS tests without KVM)'
 )
 
 option('profiler',
@@ -175,10 +199,4 @@ option('xwayland_initfd',
   type: 'feature',
   value: 'auto',
   description: 'Whether -initfd argument is passed to Xwayland to guarantee services (e.g. gsd-xsettings) startup before applications'
-)
-
-option('xwayland_ignore_executables',
-  type: 'string',
-  value: 'gsd-xsettings,ibus-x11,pulseaudio,Xwayland',
-  description: 'Comma delimited list of executable names to ignore when terminating Xwayland'
 )

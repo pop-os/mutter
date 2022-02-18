@@ -36,11 +36,13 @@
 #include "clutter/clutter-mutter.h"
 #include "cogl/cogl.h"
 #include "core/util-private.h"
+#include "meta/meta-backend.h"
 
 #define MAX_STACK_RECTS 256
 
 typedef struct _MetaStageImplPrivate
 {
+  MetaBackend *backend;
   int64_t global_frame_counter;
 } MetaStageImplPrivate;
 
@@ -57,10 +59,14 @@ G_DEFINE_TYPE_WITH_CODE (MetaStageImpl,
 enum
 {
   PROP_0,
+
   PROP_WRAPPER,
   PROP_BACKEND,
-  PROP_LAST
+
+  N_PROPS
 };
+
+static GParamSpec *obj_props[N_PROPS];
 
 static void
 meta_stage_impl_unrealize (ClutterStageWindow *stage_window)
@@ -766,6 +772,7 @@ meta_stage_impl_set_property (GObject      *gobject,
                               GParamSpec   *pspec)
 {
   MetaStageImpl *self = META_STAGE_IMPL (gobject);
+  MetaStageImplPrivate *priv = meta_stage_impl_get_instance_private (self);
 
   switch (prop_id)
     {
@@ -774,7 +781,7 @@ meta_stage_impl_set_property (GObject      *gobject,
       break;
 
     case PROP_BACKEND:
-      self->backend = g_value_get_object (value);
+      priv->backend = g_value_get_object (value);
       break;
 
     default:
@@ -790,11 +797,35 @@ meta_stage_impl_class_init (MetaStageImplClass *klass)
 
   gobject_class->set_property = meta_stage_impl_set_property;
 
-  g_object_class_override_property (gobject_class, PROP_WRAPPER, "wrapper");
-  g_object_class_override_property (gobject_class, PROP_BACKEND, "backend");
+  obj_props[PROP_WRAPPER] =
+    g_param_spec_object ("wrapper",
+                         "Wrapper",
+                         "Back pointer to the Stage actor",
+                         CLUTTER_TYPE_STAGE,
+                         G_PARAM_WRITABLE |
+                         G_PARAM_CONSTRUCT_ONLY |
+                         G_PARAM_STATIC_STRINGS);
+  obj_props[PROP_BACKEND] =
+    g_param_spec_object ("backend",
+                         "MetaBackend",
+                         "MetaBackend",
+                         META_TYPE_BACKEND,
+                         G_PARAM_WRITABLE |
+                         G_PARAM_CONSTRUCT_ONLY |
+                         G_PARAM_STATIC_STRINGS);
+  g_object_class_install_properties (gobject_class, N_PROPS, obj_props);
 }
 
 static void
 meta_stage_impl_init (MetaStageImpl *stage)
 {
+}
+
+MetaBackend *
+meta_stage_impl_get_backend (MetaStageImpl *stage_impl)
+{
+  MetaStageImplPrivate *priv =
+    meta_stage_impl_get_instance_private (stage_impl);
+
+  return priv->backend;
 }

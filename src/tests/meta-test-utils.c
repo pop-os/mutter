@@ -25,6 +25,8 @@
 #include <string.h>
 #include <X11/Xlib-xcb.h>
 
+#include "backends/meta-monitor-config-store.h"
+#include "backends/meta-virtual-monitor.h"
 #include "core/display-private.h"
 #include "core/window-private.h"
 #include "meta-test/meta-context-test.h"
@@ -213,15 +215,13 @@ test_client_line_read (GObject      *source,
 }
 
 gboolean
-meta_test_client_do (MetaTestClient  *client,
-                     GError         **error,
-                     ...)
+meta_test_client_dov (MetaTestClient  *client,
+                      GError         **error,
+                      va_list          vap)
 {
   GString *command = g_string_new (NULL);
   char *line = NULL;
-  va_list vap;
-
-  va_start (vap, error);
+  GError *local_error = NULL;
 
   while (TRUE)
     {
@@ -239,12 +239,10 @@ meta_test_client_do (MetaTestClient  *client,
       g_free (quoted);
     }
 
-  va_end (vap);
-
   g_string_append_c (command, '\n');
 
   if (!g_data_output_stream_put_string (client->in, command->str,
-                                        client->cancellable, error))
+                                        client->cancellable, &local_error))
     goto out;
 
   g_data_input_stream_read_line_async (client->out,
@@ -253,7 +251,7 @@ meta_test_client_do (MetaTestClient  *client,
                                        test_client_line_read,
                                        client);
 
-  client->error = error;
+  client->error = &local_error;
   g_main_loop_run (client->loop);
   line = client->line;
   client->line = NULL;
@@ -261,9 +259,9 @@ meta_test_client_do (MetaTestClient  *client,
 
   if (!line)
     {
-      if (*error == NULL)
+      if (!local_error)
         {
-          g_set_error (error,
+          g_set_error (&local_error,
                        META_TEST_CLIENT_ERROR,
                        META_TEST_CLIENT_ERROR_RUNTIME_ERROR,
                        "test client exited");
@@ -273,7 +271,7 @@ meta_test_client_do (MetaTestClient  *client,
 
   if (strcmp (line, "OK") != 0)
     {
-      g_set_error (error,
+      g_set_error (&local_error,
                    META_TEST_CLIENT_ERROR,
                    META_TEST_CLIENT_ERROR_RUNTIME_ERROR,
                    "%s", line);
@@ -284,7 +282,30 @@ meta_test_client_do (MetaTestClient  *client,
   g_string_free (command, TRUE);
   g_free (line);
 
-  return *error == NULL;
+  if (local_error)
+    {
+      g_propagate_error (error, local_error);
+      return FALSE;
+    }
+  else
+    {
+      return TRUE;
+    }
+}
+
+gboolean
+meta_test_client_do (MetaTestClient  *client,
+                     GError         **error,
+                     ...)
+{
+  va_list vap;
+  gboolean retval;
+
+  va_start (vap, error);
+  retval = meta_test_client_dov (client, error, vap);
+  va_end (vap);
+
+  return retval;
 }
 
 gboolean
@@ -316,46 +337,47 @@ meta_test_client_wait (MetaTestClient  *client,
 }
 
 MetaWindow *
+meta_find_window_from_title (MetaContext *context,
+                             const char  *title)
+{
+  g_autoptr (GList) windows = NULL;
+  GList *l;
+
+  windows = meta_display_list_all_windows (meta_context_get_display (context));
+  for (l = windows; l; l = l->next)
+    {
+      MetaWindow *window = l->data;
+
+      if (g_strcmp0 (window->title, title) == 0)
+        return window;
+    }
+
+  return NULL;
+}
+
+MetaWindow *
 meta_test_client_find_window (MetaTestClient  *client,
                               const char      *window_id,
                               GError         **error)
 {
   MetaDisplay *display = meta_get_display ();
-  GSList *windows;
-  GSList *l;
-  MetaWindow *result;
-  char *expected_title;
-
-  windows =
-    meta_display_list_windows (display,
-                               META_LIST_INCLUDE_OVERRIDE_REDIRECT);
+  g_autofree char *expected_title = NULL;
+  MetaWindow *window;
 
   expected_title = g_strdup_printf ("test/%s/%s", client->id, window_id);
+  window = meta_find_window_from_title (meta_display_get_context (display),
+                                        expected_title);
 
-  result = NULL;
-  for (l = windows; l; l = l->next)
-    {
-      MetaWindow *window = l->data;
-
-      if (g_strcmp0 (window->title, expected_title) == 0)
-        {
-          result = window;
-          break;
-        }
-    }
-
-  g_slist_free (windows);
-  g_free (expected_title);
-
-  if (result == NULL)
+  if (!window)
     {
       g_set_error (error,
                    META_TEST_CLIENT_ERROR,
                    META_TEST_CLIENT_ERROR_RUNTIME_ERROR,
                    "window %s/%s isn't known to Mutter", client->id, window_id);
+      return NULL;
     }
 
-  return result;
+  return window;
 }
 
 typedef struct _WaitForShownData
@@ -458,12 +480,19 @@ meta_test_client_new (MetaContext           *context,
   wayland_display_name = meta_wayland_get_wayland_display_name (compositor);
   x11_display_name = meta_wayland_get_public_xwayland_display_name (compositor);
 
-  g_subprocess_launcher_setenv (launcher,
-                                "WAYLAND_DISPLAY", wayland_display_name,
-                                TRUE);
-  g_subprocess_launcher_setenv (launcher,
-                                "DISPLAY", x11_display_name,
-                                TRUE);
+  if (wayland_display_name)
+    {
+      g_subprocess_launcher_setenv (launcher,
+                                    "WAYLAND_DISPLAY", wayland_display_name,
+                                    TRUE);
+    }
+
+  if (x11_display_name)
+    {
+      g_subprocess_launcher_setenv (launcher,
+                                    "DISPLAY", x11_display_name,
+                                    TRUE);
+    }
 
   subprocess = g_subprocess_launcher_spawn (launcher,
                                             error,
@@ -564,4 +593,85 @@ meta_test_get_plugin_name (void)
     return name;
   else
     return "libdefault";
+}
+
+void
+meta_set_custom_monitor_config_full (MetaBackend            *backend,
+                                     const char             *filename,
+                                     MetaMonitorsConfigFlag  configs_flags)
+{
+  MetaMonitorManager *monitor_manager =
+    meta_backend_get_monitor_manager (backend);
+  MetaMonitorConfigManager *config_manager = monitor_manager->config_manager;
+  MetaMonitorConfigStore *config_store;
+  GError *error = NULL;
+  const char *path;
+
+  g_assert_nonnull (config_manager);
+
+  config_store = meta_monitor_config_manager_get_store (config_manager);
+
+  path = g_test_get_filename (G_TEST_DIST, "tests", "monitor-configs",
+                              filename, NULL);
+  if (!meta_monitor_config_store_set_custom (config_store, path, NULL,
+                                             configs_flags,
+                                             &error))
+    g_warning ("Failed to set custom config: %s", error->message);
+}
+
+static void
+on_view_presented (ClutterStage      *stage,
+                   ClutterStageView  *view,
+                   ClutterFrameInfo  *frame_info,
+                   GList            **presented_views)
+{
+  *presented_views = g_list_remove (*presented_views, view);
+}
+
+void
+meta_wait_for_paint (MetaContext *context)
+{
+  MetaBackend *backend = meta_context_get_backend (context);
+  ClutterActor *stage = meta_backend_get_stage (backend);
+  MetaRenderer *renderer = meta_backend_get_renderer (backend);
+  GList *views;
+  gulong handler_id;
+
+  clutter_actor_queue_redraw (stage);
+
+  views = g_list_copy (meta_renderer_get_views (renderer));
+  handler_id = g_signal_connect (stage, "presented",
+                                 G_CALLBACK (on_view_presented), &views);
+  while (views)
+    g_main_context_iteration (NULL, TRUE);
+  g_signal_handler_disconnect (stage, handler_id);
+}
+
+MetaVirtualMonitor *
+meta_create_test_monitor (MetaContext *context,
+                          int          width,
+                          int          height,
+                          float        refresh_rate)
+{
+  MetaBackend *backend = meta_context_get_backend (context);
+  MetaMonitorManager *monitor_manager = meta_backend_get_monitor_manager (backend);
+  g_autoptr (MetaVirtualMonitorInfo) monitor_info = NULL;
+  g_autoptr (GError) error = NULL;
+  static int serial_count = 0x10000;
+  g_autofree char *serial = NULL;
+  MetaVirtualMonitor *virtual_monitor;
+
+  serial = g_strdup_printf ("0x%x", serial_count++);
+  monitor_info = meta_virtual_monitor_info_new (width, height, refresh_rate,
+                                                "MetaTestVendor",
+                                                "MetaVirtualMonitor",
+                                                serial);
+  virtual_monitor = meta_monitor_manager_create_virtual_monitor (monitor_manager,
+                                                                 monitor_info,
+                                                                 &error);
+  if (!virtual_monitor)
+    g_error ("Failed to create virtual monitor: %s", error->message);
+  meta_monitor_manager_reload (monitor_manager);
+
+  return virtual_monitor;
 }

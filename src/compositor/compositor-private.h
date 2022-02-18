@@ -44,14 +44,6 @@ void meta_compositor_remove_window_actor (MetaCompositor  *compositor,
 
 void meta_switch_workspace_completed (MetaCompositor *compositor);
 
-gboolean meta_begin_modal_for_plugin (MetaCompositor   *compositor,
-                                      MetaPlugin       *plugin,
-                                      MetaModalOptions  options,
-                                      guint32           timestamp);
-void     meta_end_modal_for_plugin   (MetaCompositor   *compositor,
-                                      MetaPlugin       *plugin,
-                                      guint32           timestamp);
-
 MetaPluginManager * meta_compositor_get_plugin_manager (MetaCompositor *compositor);
 
 int64_t meta_compositor_monotonic_to_high_res_xserver_time (MetaCompositor *compositor,
@@ -74,13 +66,16 @@ gboolean meta_compositor_is_unredirect_inhibited (MetaCompositor *compositor);
 
 MetaDisplay * meta_compositor_get_display (MetaCompositor *compositor);
 
+MetaBackend * meta_compositor_get_backend (MetaCompositor *compositor);
+
 MetaWindowActor * meta_compositor_get_top_window_actor (MetaCompositor *compositor);
 
 ClutterStage * meta_compositor_get_stage (MetaCompositor *compositor);
 
 gboolean meta_compositor_is_switching_workspace (MetaCompositor *compositor);
 
-MetaLaters * meta_compositor_get_laters (MetaCompositor *compositor);
+void meta_compositor_grab_begin (MetaCompositor *compositor);
+void meta_compositor_grab_end (MetaCompositor *compositor);
 
 /*
  * This function takes a 64 bit time stamp from the monotonic clock, and clamps

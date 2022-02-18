@@ -19,7 +19,7 @@
 
 #include "config.h"
 
-#include "tests/monitor-test-utils.h"
+#include "tests/meta-monitor-test-utils.h"
 
 #include <float.h>
 
@@ -33,35 +33,31 @@
 #include "meta-backend-test.h"
 
 MetaGpu *
-test_get_gpu (void)
+meta_test_get_gpu (MetaBackend *backend)
 {
-  return META_GPU (meta_backend_get_gpus (meta_get_backend ())->data);
+  return META_GPU (meta_backend_get_gpus (backend)->data);
 }
 
 void
-set_custom_monitor_config (const char *filename)
+meta_set_custom_monitor_config (MetaContext *context,
+                                const char  *filename)
 {
-  MetaBackend *backend = meta_get_backend ();
-  MetaMonitorManager *monitor_manager =
-    meta_backend_get_monitor_manager (backend);
-  MetaMonitorConfigManager *config_manager = monitor_manager->config_manager;
-  MetaMonitorConfigStore *config_store;
-  GError *error = NULL;
-  const char *path;
+  meta_set_custom_monitor_config_full (meta_context_get_backend (context),
+                                       filename,
+                                       META_MONITORS_CONFIG_FLAG_NONE);
+}
 
-  g_assert_nonnull (config_manager);
-
-  config_store = meta_monitor_config_manager_get_store (config_manager);
-
-  path = g_test_get_filename (G_TEST_DIST, "tests", "monitor-configs",
-                              filename, NULL);
-  if (!meta_monitor_config_store_set_custom (config_store, path, NULL,
-                                             &error))
-    g_error ("Failed to set custom config: %s", error->message);
+void
+meta_set_custom_monitor_system_config (MetaContext *context,
+                                       const char  *filename)
+{
+  meta_set_custom_monitor_config_full (meta_context_get_backend (context),
+                                       filename,
+                                       META_MONITORS_CONFIG_FLAG_SYSTEM_CONFIG);
 }
 
 char *
-read_file (const char *file_path)
+meta_read_file (const char *file_path)
 {
   g_autoptr (GFile) file = NULL;
   g_autoptr (GFileInputStream) input_stream = NULL;
@@ -324,9 +320,10 @@ check_logical_monitor (MetaMonitorManager             *monitor_manager,
 }
 
 void
-check_monitor_configuration (MonitorTestCaseExpect *expect)
+meta_check_monitor_configuration (MetaContext           *context,
+                                  MonitorTestCaseExpect *expect)
 {
-  MetaBackend *backend = meta_get_backend ();
+  MetaBackend *backend = meta_context_get_backend (context);
   MetaRenderer *renderer = meta_backend_get_renderer (backend);
   MetaMonitorManager *monitor_manager =
     meta_backend_get_monitor_manager (backend);
@@ -623,8 +620,9 @@ check_monitor_configuration (MonitorTestCaseExpect *expect)
 }
 
 MetaMonitorTestSetup *
-create_monitor_test_setup (MonitorTestCaseSetup *setup,
-                           MonitorTestFlag       flags)
+meta_create_monitor_test_setup (MetaBackend          *backend,
+                                MonitorTestCaseSetup *setup,
+                                MonitorTestFlag       flags)
 {
   MetaMonitorTestSetup *test_setup;
   int i;
@@ -660,7 +658,7 @@ create_monitor_test_setup (MonitorTestCaseSetup *setup,
 
       crtc = g_object_new (META_TYPE_CRTC_TEST,
                            "id", (uint64_t) i + 1,
-                           "gpu", test_get_gpu (),
+                           "gpu", meta_test_get_gpu (backend),
                            NULL);
 
       test_setup->crtcs = g_list_append (test_setup->crtcs, crtc);
@@ -767,7 +765,7 @@ create_monitor_test_setup (MonitorTestCaseSetup *setup,
 
       output = g_object_new (META_TYPE_OUTPUT_TEST,
                              "id", (uint64_t) i,
-                             "gpu", test_get_gpu (),
+                             "gpu", meta_test_get_gpu (backend),
                              "info", output_info,
                              NULL);
 
@@ -830,12 +828,13 @@ check_expected_scales (MetaMonitor                 *monitor,
     }
 }
 
-void check_monitor_scales (MonitorTestCaseExpect       *expect,
+void
+meta_check_monitor_scales (MetaContext                 *context,
+                           MonitorTestCaseExpect       *expect,
                            MetaMonitorScalesConstraint  scales_constraints)
 {
-  MetaBackend *backend = meta_get_backend ();
   MetaMonitorManager *monitor_manager =
-    meta_backend_get_monitor_manager (backend);
+    meta_backend_get_monitor_manager (meta_context_get_backend (context));
 
   GList *monitors;
   GList *l;
@@ -875,4 +874,150 @@ void check_monitor_scales (MonitorTestCaseExpect       *expect,
                                  expected_mode->scales);
         }
     }
+}
+
+const char *
+meta_orientation_to_string (MetaOrientation orientation)
+{
+  switch (orientation)
+    {
+    case META_ORIENTATION_UNDEFINED:
+      return "(undefined)";
+    case META_ORIENTATION_NORMAL:
+      return "normal";
+    case META_ORIENTATION_BOTTOM_UP:
+      return "bottom-up";
+    case META_ORIENTATION_LEFT_UP:
+      return "left-up";
+    case META_ORIENTATION_RIGHT_UP:
+      return "right-up";
+    default:
+      return "(invalid)";
+    }
+}
+
+typedef struct
+{
+  MetaOrientation expected;
+  MetaOrientation orientation;
+  gulong connection_id;
+  guint timeout_id;
+  unsigned int times_signalled;
+} WaitForOrientation;
+
+static void
+on_orientation_changed (WaitForOrientation     *wfo,
+                        MetaOrientationManager *orientation_manager)
+{
+  wfo->orientation = meta_orientation_manager_get_orientation (orientation_manager);
+  wfo->times_signalled++;
+
+  g_test_message ("wait_for_orientation_changes: Orientation changed to %d: %s",
+                  wfo->orientation, meta_orientation_to_string (wfo->orientation));
+}
+
+static gboolean
+on_max_wait_timeout (gpointer data)
+{
+  WaitForOrientation *wfo = data;
+
+  wfo->timeout_id = 0;
+  return G_SOURCE_REMOVE;
+}
+
+/*
+ * Assert that the orientation eventually changes to @orientation.
+ */
+void
+meta_wait_for_orientation (MetaOrientationManager *orientation_manager,
+                           MetaOrientation         orientation,
+                           unsigned int           *times_signalled_out)
+{
+  WaitForOrientation wfo = {
+    .expected = orientation,
+  };
+
+  wfo.orientation = meta_orientation_manager_get_orientation (orientation_manager);
+  g_test_message ("%s: Waiting for orientation to change from "
+                  "%d: %s to %d: %s...",
+                  G_STRFUNC, wfo.orientation,
+                  meta_orientation_to_string (wfo.orientation),
+                  orientation, meta_orientation_to_string (orientation));
+
+  /* This timeout can be relatively generous because we don't expect to
+   * reach it: if we do, that's a test failure. */
+  wfo.timeout_id = g_timeout_add_seconds (10, on_max_wait_timeout, &wfo);
+  wfo.connection_id = g_signal_connect_swapped (orientation_manager,
+                                                "orientation-changed",
+                                                G_CALLBACK (on_orientation_changed),
+                                                &wfo);
+
+  while (wfo.orientation != orientation && wfo.timeout_id != 0)
+    g_main_context_iteration (NULL, TRUE);
+
+  if (wfo.orientation != orientation)
+    {
+      g_error ("Timed out waiting for orientation to change from %s to %s "
+               "(received %u orientation-changed signal(s) while waiting)",
+               meta_orientation_to_string (wfo.orientation),
+               meta_orientation_to_string (orientation),
+               wfo.times_signalled);
+    }
+
+  g_test_message ("%s: Orientation is now %d: %s",
+                  G_STRFUNC, orientation,
+                  meta_orientation_to_string (orientation));
+
+  g_clear_handle_id (&wfo.timeout_id, g_source_remove);
+  g_signal_handler_disconnect (orientation_manager, wfo.connection_id);
+
+  if (times_signalled_out != NULL)
+    *times_signalled_out = wfo.times_signalled;
+}
+
+/*
+ * Wait for a possible orientation change, but don't assert that one occurs.
+ */
+void
+meta_wait_for_possible_orientation_change (MetaOrientationManager *orientation_manager,
+                                           unsigned int           *times_signalled_out)
+{
+  WaitForOrientation wfo = {
+    .expected = META_ORIENTATION_UNDEFINED,
+  };
+
+  wfo.orientation = meta_orientation_manager_get_orientation (orientation_manager);
+  g_test_message ("%s: Waiting for orientation to maybe change from %d: %s...",
+                  G_STRFUNC, wfo.orientation,
+                  meta_orientation_to_string (wfo.orientation));
+
+  /* This can't be as long as the timeout for meta_wait_for_orientation(),
+   * because in the usual case we expect to reach this timeout: we're
+   * only waiting so that if the orientation (incorrectly?) changed here,
+   * we'd have a chance to detect that. */
+  wfo.timeout_id = g_timeout_add (1000, on_max_wait_timeout, &wfo);
+  wfo.connection_id = g_signal_connect_swapped (orientation_manager,
+                                                "orientation-changed",
+                                                G_CALLBACK (on_orientation_changed),
+                                                &wfo);
+
+  while (wfo.times_signalled == 0 && wfo.timeout_id != 0)
+    g_main_context_iteration (NULL, TRUE);
+
+  if (wfo.timeout_id == 0)
+    {
+      g_test_message ("%s: Orientation didn't change", G_STRFUNC);
+    }
+  else
+    {
+      g_test_message ("%s: Orientation is now %d: %s",
+                      G_STRFUNC, wfo.orientation,
+                      meta_orientation_to_string (wfo.orientation));
+    }
+
+  g_clear_handle_id (&wfo.timeout_id, g_source_remove);
+  g_signal_handler_disconnect (orientation_manager, wfo.connection_id);
+
+  if (times_signalled_out != NULL)
+    *times_signalled_out = wfo.times_signalled;
 }

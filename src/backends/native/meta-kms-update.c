@@ -35,8 +35,6 @@ struct _MetaKmsUpdate
   gboolean is_locked;
   uint64_t sequence_number;
 
-  gboolean power_save;
-
   GList *mode_sets;
   GList *plane_assignments;
   GList *connector_updates;
@@ -214,7 +212,6 @@ meta_kms_update_assign_plane (MetaKmsUpdate          *update,
 
   g_assert (!meta_kms_update_is_locked (update));
   g_assert (meta_kms_crtc_get_device (crtc) == update->device);
-  g_assert (!update->power_save);
   g_assert (meta_kms_plane_get_device (plane) == update->device);
   g_assert (meta_kms_plane_get_plane_type (plane) !=
             META_KMS_PLANE_TYPE_PRIMARY ||
@@ -253,7 +250,6 @@ meta_kms_update_unassign_plane (MetaKmsUpdate *update,
   g_assert (!meta_kms_update_is_locked (update));
   g_assert (meta_kms_crtc_get_device (crtc) == update->device);
   g_assert (meta_kms_plane_get_device (plane) == update->device);
-  g_assert (!update->power_save);
 
   plane_assignment = g_new0 (MetaKmsPlaneAssignment, 1);
   *plane_assignment = (MetaKmsPlaneAssignment) {
@@ -279,7 +275,6 @@ meta_kms_update_mode_set (MetaKmsUpdate *update,
 
   g_assert (!meta_kms_update_is_locked (update));
   g_assert (meta_kms_crtc_get_device (crtc) == update->device);
-  g_assert (!update->power_save);
 
   mode_set = g_new0 (MetaKmsModeSet, 1);
   *mode_set = (MetaKmsModeSet) {
@@ -325,7 +320,6 @@ meta_kms_update_set_underscanning (MetaKmsUpdate    *update,
 
   g_assert (!meta_kms_update_is_locked (update));
   g_assert (meta_kms_connector_get_device (connector) == update->device);
-  g_assert (!update->power_save);
 
   connector_update = ensure_connector_update (update, connector);
   connector_update->underscanning.has_update = TRUE;
@@ -342,7 +336,6 @@ meta_kms_update_unset_underscanning (MetaKmsUpdate    *update,
 
   g_assert (!meta_kms_update_is_locked (update));
   g_assert (meta_kms_connector_get_device (connector) == update->device);
-  g_assert (!update->power_save);
 
   connector_update = ensure_connector_update (update, connector);
   connector_update->underscanning.has_update = TRUE;
@@ -350,15 +343,17 @@ meta_kms_update_unset_underscanning (MetaKmsUpdate    *update,
 }
 
 void
-meta_kms_update_set_power_save (MetaKmsUpdate *update)
+meta_kms_update_set_privacy_screen (MetaKmsUpdate    *update,
+                                    MetaKmsConnector *connector,
+                                    gboolean          enabled)
 {
-  g_assert (!meta_kms_update_is_locked (update));
-  g_assert (!update->mode_sets);
-  g_assert (!update->plane_assignments);
-  g_assert (!update->connector_updates);
-  g_assert (!update->crtc_gammas);
+  MetaKmsConnectorUpdate *connector_update;
 
-  update->power_save = TRUE;
+  g_assert (meta_kms_connector_get_device (connector) == update->device);
+
+  connector_update = ensure_connector_update (update, connector);
+  connector_update->privacy_screen.has_update = TRUE;
+  connector_update->privacy_screen.is_enabled = enabled;
 }
 
 void
@@ -403,7 +398,6 @@ meta_kms_update_set_crtc_gamma (MetaKmsUpdate  *update,
 
   g_assert (!meta_kms_update_is_locked (update));
   g_assert (meta_kms_crtc_get_device (crtc) == update->device);
-  g_assert (!update->power_save);
 
   gamma = meta_kms_crtc_gamma_new (crtc, size, red, green, blue);
 
@@ -466,7 +460,6 @@ meta_kms_update_set_custom_page_flip (MetaKmsUpdate             *update,
   MetaKmsCustomPageFlip *custom_page_flip;
 
   g_assert (!meta_kms_update_is_locked (update));
-  g_assert (!update->power_save);
 
   custom_page_flip = g_new0 (MetaKmsCustomPageFlip, 1);
   custom_page_flip->func = func;
@@ -539,6 +532,28 @@ meta_kms_update_add_result_listener (MetaKmsUpdate             *update,
                                             listener);
 }
 
+void
+meta_kms_update_remove_result_listeners (MetaKmsUpdate             *update,
+                                         MetaKmsResultListenerFunc  func,
+                                         gpointer                   user_data)
+{
+  GList *l;
+
+  for (l = update->result_listeners; l;)
+    {
+      MetaKmsResultListener *listener = l->data;
+      GList *next = l->next;
+
+      if (listener->user_data == func && listener->user_data == user_data)
+        {
+          update->result_listeners =
+            g_list_delete_link (update->result_listeners, l);
+        }
+
+      l = next;
+    }
+}
+
 GList *
 meta_kms_update_take_result_listeners (MetaKmsUpdate *update)
 {
@@ -558,9 +573,10 @@ meta_kms_result_listener_free (MetaKmsResultListener *listener)
   g_free (listener);
 }
 
-MetaKmsPlaneAssignment *
-meta_kms_update_get_primary_plane_assignment (MetaKmsUpdate *update,
-                                              MetaKmsCrtc   *crtc)
+static MetaKmsPlaneAssignment *
+get_first_plane_assignment (MetaKmsUpdate    *update,
+                            MetaKmsCrtc      *crtc,
+                            MetaKmsPlaneType  plane_type)
 {
   GList *l;
 
@@ -569,7 +585,7 @@ meta_kms_update_get_primary_plane_assignment (MetaKmsUpdate *update,
       MetaKmsPlaneAssignment *plane_assignment = l->data;
 
       if (meta_kms_plane_get_plane_type (plane_assignment->plane) !=
-          META_KMS_PLANE_TYPE_PRIMARY)
+          plane_type)
         continue;
 
       if (plane_assignment->crtc != crtc)
@@ -579,6 +595,20 @@ meta_kms_update_get_primary_plane_assignment (MetaKmsUpdate *update,
     }
 
   return NULL;
+}
+
+MetaKmsPlaneAssignment *
+meta_kms_update_get_primary_plane_assignment (MetaKmsUpdate *update,
+                                              MetaKmsCrtc   *crtc)
+{
+  return get_first_plane_assignment (update, crtc, META_KMS_PLANE_TYPE_PRIMARY);
+}
+
+MetaKmsPlaneAssignment *
+meta_kms_update_get_cursor_plane_assignment (MetaKmsUpdate *update,
+                                             MetaKmsCrtc   *crtc)
+{
+  return get_first_plane_assignment (update, crtc, META_KMS_PLANE_TYPE_CURSOR);
 }
 
 GList *
@@ -609,12 +639,6 @@ GList *
 meta_kms_update_get_crtc_gammas (MetaKmsUpdate *update)
 {
   return update->crtc_gammas;
-}
-
-gboolean
-meta_kms_update_is_power_save (MetaKmsUpdate *update)
-{
-  return update->power_save;
 }
 
 void

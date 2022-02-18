@@ -31,6 +31,8 @@
 #include "backends/native/meta-launcher.h"
 #include "backends/native/meta-udev.h"
 
+#define META_BACKEND_TEST_INPUT_SEAT "meta-test-seat0"
+
 #define META_TYPE_BACKEND_NATIVE (meta_backend_native_get_type ())
 META_EXPORT_TEST
 G_DECLARE_FINAL_TYPE (MetaBackendNative, meta_backend_native,
@@ -46,6 +48,7 @@ MetaLauncher * meta_backend_native_get_launcher (MetaBackendNative *native);
 
 MetaUdev * meta_backend_native_get_udev (MetaBackendNative *native);
 
+META_EXPORT_TEST
 MetaKms * meta_backend_native_get_kms (MetaBackendNative *native);
 
 const char * meta_backend_native_get_seat_id (MetaBackendNative *backend_native);

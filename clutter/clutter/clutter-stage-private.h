@@ -22,6 +22,7 @@
 #ifndef __CLUTTER_STAGE_PRIVATE_H__
 #define __CLUTTER_STAGE_PRIVATE_H__
 
+#include <clutter/clutter-grab.h>
 #include <clutter/clutter-stage-window.h>
 #include <clutter/clutter-stage.h>
 #include <clutter/clutter-input-device.h>
@@ -74,7 +75,8 @@ void                _clutter_stage_maybe_setup_viewport  (ClutterStage          
                                                           ClutterStageView      *view);
 void                clutter_stage_maybe_relayout         (ClutterActor          *stage);
 void                clutter_stage_maybe_finish_queue_redraws (ClutterStage      *stage);
-GSList *            clutter_stage_find_updated_devices   (ClutterStage          *stage);
+GSList *            clutter_stage_find_updated_devices   (ClutterStage          *stage,
+                                                          ClutterStageView      *view);
 void                clutter_stage_update_devices         (ClutterStage          *stage,
                                                           GSList                *devices);
 void                clutter_stage_finish_layout          (ClutterStage          *stage);
@@ -148,6 +150,9 @@ ClutterActor * clutter_stage_pick_and_update_device (ClutterStage             *s
                                                      ClutterDeviceUpdateFlags  flags,
                                                      graphene_point_t          point,
                                                      uint32_t                  time_ms);
+
+void clutter_stage_unlink_grab (ClutterStage *self,
+                                ClutterGrab  *grab);
 
 G_END_DECLS
 

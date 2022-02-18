@@ -28,6 +28,7 @@
 #include "backends/native/meta-kms-types.h"
 
 #define META_TYPE_KMS_CONNECTOR (meta_kms_connector_get_type ())
+META_EXPORT_TEST
 G_DECLARE_FINAL_TYPE (MetaKmsConnector, meta_kms_connector,
                       META, KMS_CONNECTOR, GObject)
 
@@ -49,6 +50,7 @@ typedef struct _MetaKmsConnectorState
 
   gboolean has_scaling;
   gboolean non_desktop;
+  MetaPrivacyScreenState privacy_screen_state;
 
   CoglSubpixelOrder subpixel_order;
 
@@ -59,6 +61,7 @@ typedef struct _MetaKmsConnectorState
   MetaMonitorTransform panel_orientation_transform;
 } MetaKmsConnectorState;
 
+META_EXPORT_TEST
 MetaKmsDevice * meta_kms_connector_get_device (MetaKmsConnector *connector);
 
 uint32_t meta_kms_connector_get_connector_type (MetaKmsConnector *connector);
@@ -70,8 +73,14 @@ const char * meta_kms_connector_get_name (MetaKmsConnector *connector);
 gboolean meta_kms_connector_can_clone (MetaKmsConnector *connector,
                                        MetaKmsConnector *other_connector);
 
+META_EXPORT_TEST
+MetaKmsMode * meta_kms_connector_get_preferred_mode (MetaKmsConnector *connector);
+
+META_EXPORT_TEST
 const MetaKmsConnectorState * meta_kms_connector_get_current_state (MetaKmsConnector *connector);
 
 gboolean meta_kms_connector_is_underscanning_supported (MetaKmsConnector *connector);
+
+gboolean meta_kms_connector_is_privacy_screen_supported (MetaKmsConnector *connector);
 
 #endif /* META_KMS_CONNECTOR_H */
