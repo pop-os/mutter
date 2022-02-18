@@ -1,8 +1,35 @@
 mutter (42~beta-1) UNRELEASED; urgency=medium
 
-  * New upstream release
+  * New upstream release:
+    - Implement a new Clutter grab API
+    - Support KMS testing via QEMU
+    - Add support for privacy screen
+    - Allow changing monitor configuration policy
+    - Fix possible missed clicks on menus
+    - Place popups on the same monitor as the anchor rect (LP: #1930567)
+    - Announce DMA-BUF support via pipewire
+    - Raise the file descriptor limit of the wayland compositor
+    - Fix resetting idle time on lid open
+    - Reset idletime when unplugging the power cable
+    - Keep a single cursor sprite visible with tablets
+    - Sync keyboard LEDs after layout changes (LP: #1830637)
+    - Honor window input area in picking
+    - Handle mixture of keycombo/no action in pad rings/strips
+    - Fix videos in Firefox stuttering in overview
+    - Fix X11 middle button emulation setting
+    - Fix crash on empty frame info queue (LP: #1960585)
+    - Fix window size after returning from fullscreen (LP: #1947467)
+    - Don't change workspaces of unmanaged windows (LP: #1933996)
+    - Ensure constraints after client resize (LP: #1917939)
+  * debian/watch: Accept pre-release version
+    Can still use gbp import --upstream-version=XX.Y to get stable only
+  * debian: Rename packages to use mutter-10 API
+  * debian/rules: Compute mutter API version on unstable releases too
+  * debian/control: Update dependencies
+  * debian/patches: Refresh and update to latest code
+  * debian/libmutter-(test-)10.symbols: Update
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 18 Feb 2022 01:51:51 +0100
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 18 Feb 2022 02:31:40 +0100
 
 mutter (41.3-3) unstable; urgency=medium
 
