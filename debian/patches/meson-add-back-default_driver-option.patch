@@ -45,7 +45,7 @@ index a3c61cf..c45614c 100644
    input: 'cogl-config.h.meson',
    output: 'cogl-config.h',
 diff --git a/meson.build b/meson.build
-index 2cadd49..6b7d455 100644
+index 5041755..b6472a4 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -228,6 +228,8 @@ if have_wayland_eglstream
@@ -57,7 +57,7 @@ index 2cadd49..6b7d455 100644
  have_sm = get_option('sm')
  if have_sm
    sm_dep = dependency('sm')
-@@ -555,6 +557,7 @@ summary('Wayland', have_wayland, section: 'Options')
+@@ -587,6 +589,7 @@ summary('Wayland', have_wayland, section: 'Options')
  summary('Wayland EGLStream', have_wayland_eglstream, section: 'Options')
  summary('Native Backend', have_native_backend, section: 'Options')
  summary('EGL Device', have_egl_device, section: 'Options')
@@ -66,16 +66,19 @@ index 2cadd49..6b7d455 100644
  summary('gudev', have_libgudev, section: 'Options')
  summary('Wacom', have_libwacom, section: 'Options')
 diff --git a/meson_options.txt b/meson_options.txt
-index 6609e43..f1614f2 100644
+index 986199c..5d00dee 100644
 --- a/meson_options.txt
 +++ b/meson_options.txt
-@@ -182,3 +182,9 @@ option('xwayland_ignore_executables',
-   value: 'gsd-xsettings,ibus-x11,pulseaudio,Xwayland',
-   description: 'Comma delimited list of executable names to ignore when terminating Xwayland'
+@@ -69,6 +69,12 @@ option('wayland_eglstream',
+   description: 'Enable Wayland EGLStream support client support'
  )
-+
+ 
 +option('default_driver',
 +  type: 'combo',
 +  choices: ['auto', 'gl', 'gl3', 'gles2', 'nop'],
 +  value: 'auto'
 +)
++
+ option('udev',
+   type: 'boolean',
+   value: true,

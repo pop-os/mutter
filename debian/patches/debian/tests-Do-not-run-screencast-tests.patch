@@ -11,7 +11,7 @@ So let's disable this for now
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/src/tests/native-headless.c b/src/tests/native-headless.c
-index 6680ba7..8a2d24f 100644
+index 0c94255..9dcad93 100644
 --- a/src/tests/native-headless.c
 +++ b/src/tests/native-headless.c
 @@ -28,7 +28,8 @@ static void

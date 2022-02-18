@@ -43,10 +43,10 @@ index d30fbd3..8be7f9e 100644
    if (token->committed)
      {
 diff --git a/src/wayland/meta-wayland-gtk-shell.c b/src/wayland/meta-wayland-gtk-shell.c
-index 1ec5ffd..d069dc3 100644
+index 3d85c3f..5fd1d80 100644
 --- a/src/wayland/meta-wayland-gtk-shell.c
 +++ b/src/wayland/meta-wayland-gtk-shell.c
-@@ -523,7 +523,7 @@ gtk_shell_notify_launch (struct wl_client   *client,
+@@ -535,7 +535,7 @@ gtk_shell_notify_launch (struct wl_client   *client,
  {
    MetaDisplay *display = meta_get_display ();
    MetaStartupSequence *sequence;
