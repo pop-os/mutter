@@ -1,5 +1,6 @@
-mutter (42~beta-1) UNRELEASED; urgency=medium
+mutter (42~beta-1) experimental; urgency=medium
 
+  [ Marco Trevisan (Treviño) ]
   * New upstream release:
     - Implement a new Clutter grab API
     - Support KMS testing via QEMU
@@ -29,7 +30,10 @@ mutter (42~beta-1) UNRELEASED; urgency=medium
   * debian/patches: Refresh and update to latest code
   * debian/libmutter-(test-)10.symbols: Update
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 18 Feb 2022 02:31:40 +0100
+  [ Jeremy Bicha ]
+  * Update autopkgtest & lintian override for new version
+
+ -- Jeremy Bicha <jeremy.bicha@canonical.com>  Fri, 18 Feb 2022 07:32:24 -0500
 
 mutter (41.3-3) unstable; urgency=medium
 
