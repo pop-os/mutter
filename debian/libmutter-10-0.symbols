@@ -12,6 +12,8 @@ libmutter-10.so.0 libmutter-10-0 #MINVER#
  meta_backend_get_clutter_backend@Base 41.0
  meta_backend_get_context@Base 41.0
  meta_backend_get_core_idle_monitor@Base 41.0
+ meta_backend_get_current_logical_monitor@Base 42~beta
+ meta_backend_get_cursor_tracker@Base 42~beta
  meta_backend_get_default_seat@Base 42~alpha
  meta_backend_get_dnd@Base 3.28.2
  meta_backend_get_gpus@Base 3.33.4
@@ -25,6 +27,8 @@ libmutter-10.so.0 libmutter-10-0 #MINVER#
  meta_backend_is_headless@Base 42~alpha
  meta_backend_is_rendering_hardware_accelerated@Base 3.35.92
  meta_backend_lock_layout_group@Base 3.28.2
+ meta_backend_native_get_device_pool@Base 42~beta
+ meta_backend_native_get_kms@Base 42~beta
  (arch=linux-any)meta_backend_native_get_type@Base 40.0
  meta_backend_set_keymap@Base 3.28.2
  meta_backend_x11_nested_get_type@Base 3.28.2
@@ -76,6 +80,7 @@ libmutter-10.so.0 libmutter-10-0 #MINVER#
  meta_compositor_destroy@Base 3.28.2
  meta_compositor_filter_keybinding@Base 3.28.2
  meta_compositor_flash_display@Base 3.29.4
+ meta_compositor_get_laters@Base 42~beta
  meta_compositor_get_type@Base 3.33.91
  meta_compositor_hide_tile_preview@Base 3.28.2
  meta_compositor_hide_window@Base 3.28.2
@@ -106,6 +111,8 @@ libmutter-10.so.0 libmutter-10-0 #MINVER#
  meta_context_get_wayland_compositor@Base 41.0
  meta_context_is_replacing@Base 41.0
  meta_context_notify_ready@Base 41.0
+ meta_context_raise_rlimit_nofile@Base 42~beta
+ meta_context_restore_rlimit_nofile@Base 42~beta
  meta_context_run_main_loop@Base 41.0
  meta_context_set_gnome_wm_keybindings@Base 41.0
  meta_context_set_plugin_gtype@Base 41.0
@@ -140,6 +147,8 @@ libmutter-10.so.0 libmutter-10-0 #MINVER#
  meta_cursor_tracker_set_pointer_visible@Base 3.28.2
  meta_debug_paint_flag_get_type@Base 3.37.92
  meta_debug_topic_get_type@Base 3.28.2
+ meta_device_file_release@Base 42~beta
+ meta_device_pool_open@Base 42~beta
  meta_direction_get_type@Base 3.28.2
  meta_disable_unredirect_for_display@Base 3.29.4
  meta_display_add_ignored_crossing_serial@Base 3.28.2
@@ -197,6 +206,8 @@ libmutter-10.so.0 libmutter-10-0 #MINVER#
  meta_display_unset_input_focus@Base 3.33.4
  meta_display_xserver_time_is_before@Base 3.28.2
  meta_dnd_get_type@Base 3.28.2
+ meta_drm_buffer_dumb_new@Base 42~beta
+ meta_drm_buffer_get_type@Base 42~beta
  meta_edge_type_get_type@Base 3.28.2
  meta_enable_unredirect_for_display@Base 3.29.4
  meta_exit@Base 3.28.2
@@ -263,9 +274,58 @@ libmutter-10.so.0 libmutter-10-0 #MINVER#
  meta_key_binding_is_builtin@Base 3.28.2
  meta_key_binding_is_reversed@Base 3.28.2
  meta_keybindings_set_custom_handler@Base 3.28.2
+ meta_kms_connector_get_current_state@Base 42~beta
+ meta_kms_connector_get_device@Base 42~beta
+ meta_kms_connector_get_preferred_mode@Base 42~beta
+ meta_kms_connector_get_type@Base 42~beta
+ meta_kms_crtc_get_current_state@Base 42~beta
+ meta_kms_crtc_get_device@Base 42~beta
+ meta_kms_crtc_get_id@Base 42~beta
+ meta_kms_crtc_get_type@Base 42~beta
+ meta_kms_crtc_is_active@Base 42~beta
+ meta_kms_device_disable@Base 42~beta
+ meta_kms_device_get_connectors@Base 42~beta
+ meta_kms_device_get_crtcs@Base 42~beta
+ meta_kms_device_get_cursor_plane_for@Base 42~beta
+ meta_kms_device_get_driver_name@Base 42~beta
+ meta_kms_device_get_kms@Base 42~beta
+ meta_kms_device_get_path@Base 42~beta
+ meta_kms_device_get_planes@Base 42~beta
+ meta_kms_device_get_primary_plane_for@Base 42~beta
+ meta_kms_device_get_type@Base 42~beta
+ meta_kms_device_process_update_sync@Base 42~beta
+ meta_kms_device_uses_monotonic_clock@Base 42~beta
+ meta_kms_get_backend@Base 42~beta
+ meta_kms_get_devices@Base 42~beta
+ meta_kms_mode_clone@Base 42~beta
+ meta_kms_mode_free@Base 42~beta
+ meta_kms_mode_get_drm_mode@Base 42~beta
+ meta_kms_mode_get_height@Base 42~beta
+ meta_kms_mode_get_name@Base 42~beta
+ meta_kms_mode_get_width@Base 42~beta
+ meta_kms_plane_assignment_set_cursor_hotspot@Base 42~beta
+ meta_kms_plane_get_device@Base 42~beta
+ meta_kms_plane_get_plane_type@Base 42~beta
+ meta_kms_plane_is_usable_with@Base 42~beta
+ meta_kms_update_assign_plane@Base 42~beta
+ meta_kms_update_free@Base 42~beta
+ meta_kms_update_get_connector_updates@Base 42~beta
+ meta_kms_update_get_crtc_gammas@Base 42~beta
+ meta_kms_update_get_cursor_plane_assignment@Base 42~beta
+ meta_kms_update_get_device@Base 42~beta
+ meta_kms_update_get_mode_sets@Base 42~beta
+ meta_kms_update_get_page_flip_listeners@Base 42~beta
+ meta_kms_update_get_plane_assignments@Base 42~beta
+ meta_kms_update_get_primary_plane_assignment@Base 42~beta
+ meta_kms_update_is_locked@Base 42~beta
+ meta_kms_update_mode_set@Base 42~beta
+ meta_kms_update_new@Base 42~beta
+ meta_kms_update_states_sync@Base 42~beta
  meta_later_add@Base 3.28.2
  meta_later_remove@Base 3.28.2
  meta_later_type_get_type@Base 3.28.2
+ meta_laters_add@Base 42~beta
+ meta_laters_remove@Base 42~beta
  meta_launch_context_get_type@Base 3.31.90
  meta_launch_context_set_timestamp@Base 3.31.90
  meta_launch_context_set_workspace@Base 3.31.90
@@ -278,7 +338,6 @@ libmutter-10.so.0 libmutter-10-0 #MINVER#
  meta_maximize_flags_get_type@Base 3.28.2
  meta_migrate_old_monitors_config@Base 3.28.2
  meta_migrate_old_user_monitors_config@Base 3.28.2
- meta_modal_options_get_type@Base 3.28.2
  meta_monitor_calculate_crtc_pos@Base 3.28.2
  meta_monitor_calculate_mode_scale@Base 3.28.2
  meta_monitor_calculate_supported_scales@Base 3.28.2
@@ -303,9 +362,12 @@ libmutter-10.so.0 libmutter-10-0 #MINVER#
  meta_monitor_config_store_add@Base 3.28.2
  meta_monitor_config_store_get_config_count@Base 3.28.2
  meta_monitor_config_store_get_monitor_manager@Base 3.28.2
+ meta_monitor_config_store_get_policy@Base 42~beta
+ meta_monitor_config_store_get_stores_policy@Base 42~beta
  meta_monitor_config_store_lookup@Base 3.28.2
  meta_monitor_config_store_new@Base 3.28.2
  meta_monitor_config_store_remove@Base 3.28.2
+ meta_monitor_config_store_reset@Base 42~beta
  meta_monitor_config_store_set_custom@Base 3.28.2
  meta_monitor_crtc_to_logical_transform@Base 3.28.2
  meta_monitor_derive_current_mode@Base 3.28.2
@@ -397,10 +459,8 @@ libmutter-10.so.0 libmutter-10-0 #MINVER#
  meta_output_is_underscanning@Base 3.37.91
  meta_output_unassign_crtc@Base 3.28.2
  meta_pad_action_type_get_type@Base 3.28.2
- meta_plugin_begin_modal@Base 3.28.2
  meta_plugin_complete_display_change@Base 3.28.2
  meta_plugin_destroy_completed@Base 3.28.2
- meta_plugin_end_modal@Base 3.28.2
  meta_plugin_get_display@Base 3.29.4
  meta_plugin_get_info@Base 3.28.2
  meta_plugin_get_type@Base 3.28.2
@@ -1389,6 +1449,12 @@ libmutter-clutter-10.so.0 libmutter-10-0 #MINVER#
  clutter_get_default_text_direction@Base 3.29.4
  clutter_get_font_map@Base 3.29.4
  clutter_get_script_id@Base 3.29.4
+ clutter_grab_dismiss@Base 42~beta
+ clutter_grab_get_seat_state@Base 42~beta
+ clutter_grab_get_type@Base 42~beta
+ clutter_grab_ref@Base 42~beta
+ clutter_grab_state_get_type@Base 42~beta
+ clutter_grab_unref@Base 42~beta
  clutter_gravity_get_type@Base 3.29.4
  clutter_grid_layout_attach@Base 3.29.4
  clutter_grid_layout_attach_next_to@Base 3.29.4
@@ -1425,7 +1491,6 @@ libmutter-clutter-10.so.0 libmutter-10-0 #MINVER#
  clutter_input_device_get_device_name@Base 3.29.4
  clutter_input_device_get_device_node@Base 3.29.4
  clutter_input_device_get_device_type@Base 3.29.4
- clutter_input_device_get_grabbed_actor@Base 3.29.4
  clutter_input_device_get_group_n_modes@Base 3.29.4
  clutter_input_device_get_has_cursor@Base 3.29.4
  clutter_input_device_get_mode_switch_button_group@Base 3.29.4
@@ -1438,14 +1503,10 @@ libmutter-clutter-10.so.0 libmutter-10-0 #MINVER#
  clutter_input_device_get_seat@Base 3.35.90
  clutter_input_device_get_type@Base 3.29.4
  clutter_input_device_get_vendor_id@Base 3.29.4
- clutter_input_device_grab@Base 3.29.4
  clutter_input_device_is_grouped@Base 3.29.4
  clutter_input_device_is_mode_switch_button@Base 3.29.4
  clutter_input_device_pad_feature_get_type@Base 40.0
  clutter_input_device_pad_source_get_type@Base 3.29.4
- clutter_input_device_sequence_get_grabbed_actor@Base 3.29.4
- clutter_input_device_sequence_grab@Base 3.29.4
- clutter_input_device_sequence_ungrab@Base 3.29.4
  clutter_input_device_tool_get_axes@Base 40.0
  clutter_input_device_tool_get_id@Base 3.29.4
  clutter_input_device_tool_get_serial@Base 3.29.4
@@ -1453,7 +1514,6 @@ libmutter-clutter-10.so.0 libmutter-10-0 #MINVER#
  clutter_input_device_tool_get_type@Base 3.29.4
  clutter_input_device_tool_type_get_type@Base 3.29.4
  clutter_input_device_type_get_type@Base 3.29.4
- clutter_input_device_ungrab@Base 3.29.4
  clutter_input_focus_filter_event@Base 3.37.92
  clutter_input_focus_get_type@Base 3.29.4
  clutter_input_focus_is_focused@Base 3.29.4
@@ -1777,13 +1837,13 @@ libmutter-clutter-10.so.0 libmutter-10-0 #MINVER#
  clutter_stage_get_device_actor@Base 40.0
  clutter_stage_get_device_coords@Base 40.0
  clutter_stage_get_frame_counter@Base 3.29.4
+ clutter_stage_get_grab_actor@Base 42~beta
  clutter_stage_get_key_focus@Base 3.29.4
- clutter_stage_get_motion_events_enabled@Base 3.29.4
  clutter_stage_get_perspective@Base 3.29.4
- clutter_stage_get_throttle_motion_events@Base 3.29.4
  clutter_stage_get_title@Base 3.29.4
  clutter_stage_get_type@Base 3.29.4
  clutter_stage_get_view_at@Base 3.33.4
+ clutter_stage_grab@Base 42~beta
  clutter_stage_is_redraw_queued_on_view@Base 3.37.91
  clutter_stage_manager_get_default@Base 3.29.4
  clutter_stage_manager_get_default_stage@Base 3.29.4
@@ -1799,8 +1859,6 @@ libmutter-clutter-10.so.0 libmutter-10-0 #MINVER#
  clutter_stage_repick_device@Base 40.0
  clutter_stage_schedule_update@Base 3.37.91
  clutter_stage_set_key_focus@Base 3.29.4
- clutter_stage_set_motion_events_enabled@Base 3.29.4
- clutter_stage_set_throttle_motion_events@Base 3.29.4
  clutter_stage_set_title@Base 3.29.4
  clutter_stage_update_device@Base 40.0
  clutter_stage_view_add_redraw_clip@Base 40.0
@@ -2033,6 +2091,7 @@ libmutter-clutter-10.so.0 libmutter-10-0 #MINVER#
  clutter_value_take_paint_node@Base 3.29.4
  clutter_virtual_device_type_get_type@Base 3.29.4
  clutter_virtual_input_device_get_device_type@Base 3.33.92
+ clutter_virtual_input_device_get_seat@Base 42~beta
  clutter_virtual_input_device_get_type@Base 3.29.4
  clutter_virtual_input_device_notify_absolute_motion@Base 3.29.4
  clutter_virtual_input_device_notify_button@Base 3.29.4
@@ -2514,6 +2573,7 @@ libmutter-cogl-10.so.0 libmutter-10-0 #MINVER#
  cogl_renderer_get_driver@Base 3.29.4
  cogl_renderer_get_gtype@Base 3.29.4
  cogl_renderer_get_winsys_id@Base 3.29.4
+ cogl_renderer_is_dma_buf_supported@Base 42~beta
  cogl_renderer_new@Base 3.29.4
  cogl_renderer_remove_constraint@Base 3.29.4
  cogl_renderer_set_custom_winsys@Base 3.29.4
