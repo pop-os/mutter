@@ -10,7 +10,7 @@ Forwarded: No, forwarding is in progress and planned though
 ---
  .../org.gnome.Mutter.DisplayConfig.xml             |   5 +
  data/meson.build                                   |   7 +
- data/org.gnome.mutter.gschema.xml.in               |   5 +-
+ data/org.gnome.mutter.gschema.xml.in               |   7 +-
  data/org.gnome.mutter.x11.gschema.xml.in           |  30 ++
  src/backends/meta-crtc.c                           |  21 +
  src/backends/meta-crtc.h                           |   6 +
@@ -23,6 +23,7 @@ Forwarded: No, forwarding is in progress and planned though
  src/backends/meta-monitor.c                        |   1 -
  src/backends/meta-settings-private.h               |  17 +-
  src/backends/meta-settings.c                       | 148 +++++-
+ src/backends/native/meta-monitor-manager-native.c  |   1 +
  src/backends/x11/meta-crtc-xrandr.c                | 100 +++-
  src/backends/x11/meta-crtc-xrandr.h                |  14 +-
  src/backends/x11/meta-gpu-xrandr.c                 | 113 ++++-
@@ -33,7 +34,7 @@ Forwarded: No, forwarding is in progress and planned though
  src/compositor/meta-compositor-x11.c               |  99 +++-
  src/core/window.c                                  |  19 +
  src/tests/meta-monitor-manager-test.c              |   6 +-
- 25 files changed, 1532 insertions(+), 111 deletions(-)
+ 26 files changed, 1534 insertions(+), 112 deletions(-)
  create mode 100644 data/org.gnome.mutter.x11.gschema.xml.in
 
 diff --git a/data/dbus-interfaces/org.gnome.Mutter.DisplayConfig.xml b/data/dbus-interfaces/org.gnome.Mutter.DisplayConfig.xml
@@ -71,14 +72,23 @@ index ae98321..93be159 100644
    install_dir: join_paths(datadir, 'GConf/gsettings'),
  )
 diff --git a/data/org.gnome.mutter.gschema.xml.in b/data/org.gnome.mutter.gschema.xml.in
-index c014b74..2170f2c 100644
+index c014b74..683ad45 100644
 --- a/data/org.gnome.mutter.gschema.xml.in
 +++ b/data/org.gnome.mutter.gschema.xml.in
-@@ -141,7 +141,10 @@
-         • “autoclose-xwayland”        — automatically terminates Xwayland if all
+@@ -110,8 +110,7 @@
+       </description>
+     </key>
+ 
+-    <key name="experimental-features"
+-        flags='org.gnome.mutter.MetaExperimentalFeature'>
++    <key name="experimental-features" type="as">
+       <default>[]</default>
+       <summary>Enable experimental features</summary>
+       <description>
+@@ -142,6 +141,10 @@
                                          relevant X11 clients are gone.
                                          Requires a restart.
--
+ 
 +        • “x11-randr-fractional-scaling” — enable fractional scaling under X11
 +                                           using xrandr scaling. It might reduce
 +                                           performances.
@@ -1508,6 +1518,18 @@ index 2826ff9..b203818 100644
    signals[EXPERIMENTAL_FEATURES_CHANGED] =
      g_signal_new ("experimental-features-changed",
                    G_TYPE_FROM_CLASS (object_class),
+diff --git a/src/backends/native/meta-monitor-manager-native.c b/src/backends/native/meta-monitor-manager-native.c
+index 92d6877..7da9154 100644
+--- a/src/backends/native/meta-monitor-manager-native.c
++++ b/src/backends/native/meta-monitor-manager-native.c
+@@ -609,6 +609,7 @@ get_monitor_scale_constraints_from_layout_mode (MetaLogicalMonitorLayoutMode lay
+   switch (layout_mode)
+     {
+     case META_LOGICAL_MONITOR_LAYOUT_MODE_LOGICAL:
++    case META_LOGICAL_MONITOR_LAYOUT_MODE_GLOBAL_UI_LOGICAL:
+       break;
+     case META_LOGICAL_MONITOR_LAYOUT_MODE_PHYSICAL:
+       constraints |= META_MONITOR_SCALES_CONSTRAINT_NO_FRAC;
 diff --git a/src/backends/x11/meta-crtc-xrandr.c b/src/backends/x11/meta-crtc-xrandr.c
 index e06448b6..e17d3ea 100644
 --- a/src/backends/x11/meta-crtc-xrandr.c
