@@ -1,11 +1,11 @@
-mutter (42~beta-1ubuntu1) UNRELEASED; urgency=medium
+mutter (42~beta-1ubuntu1) jammy; urgency=medium
 
   * Merge with debian after being accepted (no content change)
   * xrandr-scaling: Do not change type of experimental settings schema.
     There's no real benefit to do this change as it's only for power-users
     and it will break updaters (and g-c-c integration).
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 25 Feb 2022 03:07:19 +0100
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Fri, 25 Feb 2022 03:22:10 +0100
 
 mutter (42~beta-1) experimental; urgency=medium
 
