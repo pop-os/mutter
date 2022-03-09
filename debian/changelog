@@ -1,3 +1,9 @@
+mutter (42~rc-1) UNRELEASED; urgency=medium
+
+  * New upstream release
+
+ -- Jeremy Bicha <jeremy.bicha@canonical.com>  Wed, 09 Mar 2022 08:00:00 -0500
+
 mutter (42~beta-1) experimental; urgency=medium
 
   [ Marco Trevisan (Treviño) ]
