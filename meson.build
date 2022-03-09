@@ -1,6 +1,6 @@
 project('mutter', 'c',
-  version: '42.beta',
-  meson_version: '>= 0.53.0',
+  version: '42.rc',
+  meson_version: '>= 0.55.0',
   license: 'GPLv2+'
 )
 
@@ -40,8 +40,8 @@ udev_req = '>= 228'
 gudev_req = '>= 232'
 
 # wayland version requirements
-wayland_server_req = '>= 1.18'
-wayland_protocols_req = '>= 1.24'
+wayland_server_req = '>= 1.20'
+wayland_protocols_req = '>= 1.25'
 
 # native backend version requirements
 libinput_req = '>= 1.19.0'
@@ -58,6 +58,20 @@ pkg = import('pkgconfig')
 i18n  = import('i18n')
 fs = import('fs')
 cc = meson.get_compiler('c')
+
+add_project_link_arguments(
+  cc.get_supported_link_arguments(
+    # meson automatically adds -rpath to targets and strips them when they
+    # are installed. ld adds a RUNPATH tag for -rpath arguments by default.
+    # This makes ld add a RPATH tag instead (as it did some time ago).
+    # The reason why we want RPATH and not RUNPATH is that LD_LIBRARY_PATH
+    # takes precedence over RUNPATH but not over RPATH. Since we usually run
+    # development builds in jhbuild which sets up LD_LIBRARY_PATH this can
+    # result in wrong dependencies being picked up by the linker.
+    '-Wl,--disable-new-dtags',
+  ),
+  language : 'c',
+)
 
 prefix = get_option('prefix')
 
@@ -106,7 +120,6 @@ gthread_dep = dependency('gobject-2.0', version: glib_req)
 gmodule_no_export_dep = dependency('gmodule-no-export-2.0', version: glib_req)
 gnome_settings_daemon_dep = dependency('gnome-settings-daemon')
 json_glib_dep = dependency('json-glib-1.0', version: json_glib_req)
-gnome_desktop_dep = dependency('gnome-desktop-3.0')
 xcomposite_dep = dependency('xcomposite', version: xcomposite_req)
 xcursor_dep = dependency('xcursor')
 xdamage_dep = dependency('xdamage')
@@ -132,6 +145,12 @@ dbus_dep = dependency('dbus-1')
 
 # For now always require X11 support
 have_x11 = true
+
+
+have_gnome_desktop = get_option('libgnome_desktop')
+if have_gnome_desktop
+  gnome_desktop_dep = dependency('gnome-desktop-3.0')
+endif
 
 have_gl = get_option('opengl')
 if have_gl
@@ -333,7 +352,6 @@ if have_tests
     ],
     exe_wrapper: [
       default_test_wrappers,
-      find_program('catchsegv'),
       find_program('xvfb-run'), '-a', '-s', '+iglx -noreset',
     ],
     timeout_multiplier: 10,
@@ -380,10 +398,7 @@ if buildtype != 'plain'
     '-fno-strict-aliasing',
     '-Wpointer-arith',
     '-Wmissing-declarations',
-    '-Wimplicit-function-declaration',
     '-Wformat=2',
-    '-Wformat-nonliteral',
-    '-Wformat-security',
     '-Wstrict-prototypes',
     '-Wmissing-prototypes',
     '-Wnested-externs',
@@ -412,6 +427,11 @@ if buildtype != 'plain'
     '-Werror=pointer-to-int-cast',
     '-Werror=empty-body',
     '-Werror=write-strings',
+    '-Wno-sign-compare',
+    '-Wno-cast-function-type',
+    '-Wno-unused-parameter',
+    '-Wno-missing-field-initializers',
+    '-Wno-type-limits',
   ]
   supported_warnings = cc.get_supported_arguments(all_warnings)
   add_project_arguments(supported_warnings, language: 'c')
@@ -438,6 +458,7 @@ cdata.set('HAVE_WAYLAND', have_wayland)
 cdata.set('HAVE_LIBSYSTEMD', have_libsystemd)
 cdata.set('HAVE_NATIVE_BACKEND', have_native_backend)
 cdata.set('HAVE_REMOTE_DESKTOP', have_remote_desktop)
+cdata.set('HAVE_GNOME_DESKTOP', have_gnome_desktop)
 cdata.set('HAVE_EGL_DEVICE', have_egl_device)
 cdata.set('HAVE_WAYLAND_EGLSTREAM', have_wayland_eglstream)
 cdata.set('HAVE_LIBGUDEV', have_libgudev)
@@ -588,6 +609,7 @@ summary('Wayland EGLStream', have_wayland_eglstream, section: 'Options')
 summary('Native Backend', have_native_backend, section: 'Options')
 summary('EGL Device', have_egl_device, section: 'Options')
 summary('Remote desktop', have_remote_desktop, section: 'Options')
+summary('libgnome-desktop', have_gnome_desktop, section: 'Options')
 summary('gudev', have_libgudev, section: 'Options')
 summary('Wacom', have_libwacom, section: 'Options')
 summary('SM', have_sm, section: 'Options')

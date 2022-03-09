@@ -291,6 +291,7 @@ clutter_click_action_handle_event (ClutterAction      *action,
     clutter_actor_meta_get_actor (CLUTTER_ACTOR_META (action));
   gboolean has_button = TRUE;
   ClutterModifierType modifier_state;
+  ClutterActor *target;
 
   if (!clutter_actor_meta_get_enabled (CLUTTER_ACTOR_META (action)))
     return CLUTTER_EVENT_PROPAGATE;
@@ -307,11 +308,17 @@ clutter_click_action_handle_event (ClutterAction      *action,
     {
     case CLUTTER_TOUCH_BEGIN:
       has_button = FALSE;
+
+      G_GNUC_FALLTHROUGH;
     case CLUTTER_BUTTON_PRESS:
       if (priv->is_held)
         return CLUTTER_EVENT_STOP;
 
-      if (!clutter_actor_contains (actor, clutter_event_get_source (event)))
+      target = clutter_stage_get_device_actor (clutter_event_get_stage (event),
+                                               clutter_event_get_device (event),
+                                               clutter_event_get_event_sequence (event));
+
+      if (!clutter_actor_contains (actor, target))
         return CLUTTER_EVENT_PROPAGATE;
 
       priv->press_button = has_button ? clutter_event_get_button (event) : 0;
@@ -354,6 +361,8 @@ clutter_click_action_handle_event (ClutterAction      *action,
 
     case CLUTTER_TOUCH_END:
       has_button = FALSE;
+
+      G_GNUC_FALLTHROUGH;
     case CLUTTER_BUTTON_RELEASE:
       if (!priv->is_held)
         return CLUTTER_EVENT_STOP;
@@ -368,7 +377,11 @@ clutter_click_action_handle_event (ClutterAction      *action,
 
       g_clear_handle_id (&priv->long_press_id, g_source_remove);
 
-      if (!clutter_actor_contains (actor, clutter_event_get_source (event)))
+      target = clutter_stage_get_device_actor (clutter_event_get_stage (event),
+                                               clutter_event_get_device (event),
+                                               clutter_event_get_event_sequence (event));
+
+      if (!clutter_actor_contains (actor, target))
         return CLUTTER_EVENT_PROPAGATE;
 
       /* exclude any button-mask so that we can compare
