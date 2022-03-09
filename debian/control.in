@@ -171,7 +171,8 @@ Depends: adwaita-icon-theme,
          ${shlibs:Depends}
 Breaks: apparmor (<< 2.13.3-5~),
         gnome-control-center (<< 1:3.25.2),
-        gnome-settings-daemon (<< 3.31.101)
+        gnome-settings-daemon (<< 3.31.101),
+        gnome-shell (<< 42~rc),
 Description: window manager library from the Mutter window manager
  Mutter is a Wayland display server and X11 window manager and
  compositor library. It contains functionality related to, among other
