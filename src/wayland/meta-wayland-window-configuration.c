@@ -21,40 +21,28 @@
 #include "config.h"
 
 #include "wayland/meta-wayland-window-configuration.h"
+#include "wayland/meta-window-wayland.h"
 
 static uint32_t global_serial_counter = 0;
 
-static gboolean
-is_window_size_fixed (MetaWindow *window)
-{
-  if (meta_window_is_fullscreen (window))
-    return TRUE;
-
-  if (meta_window_get_maximized (window) &
-      (META_MAXIMIZE_VERTICAL | META_MAXIMIZE_HORIZONTAL))
-    return TRUE;
-
-  if (meta_window_get_tile_mode (window) != META_TILE_NONE)
-    return TRUE;
-
-  return FALSE;
-}
-
 MetaWaylandWindowConfiguration *
 meta_wayland_window_configuration_new (MetaWindow          *window,
-                                       int                  x,
-                                       int                  y,
-                                       int                  width,
-                                       int                  height,
+                                       MetaRectangle        rect,
+                                       int                  bounds_width,
+                                       int                  bounds_height,
                                        int                  scale,
                                        MetaMoveResizeFlags  flags,
                                        MetaGravity          gravity)
 {
+  MetaWindowWayland *wl_window = META_WINDOW_WAYLAND (window);
   MetaWaylandWindowConfiguration *configuration;
 
   configuration = g_new0 (MetaWaylandWindowConfiguration, 1);
   *configuration = (MetaWaylandWindowConfiguration) {
     .serial = ++global_serial_counter,
+
+    .bounds_width = bounds_width,
+    .bounds_height = bounds_height,
 
     .scale = scale,
     .gravity = gravity,
@@ -62,34 +50,32 @@ meta_wayland_window_configuration_new (MetaWindow          *window,
   };
 
   if (flags & META_MOVE_RESIZE_MOVE_ACTION ||
-      window->rect.x != x ||
-      window->rect.y != y)
+      window->rect.x != rect.x ||
+      window->rect.y != rect.y)
     {
       configuration->has_position = TRUE;
-      configuration->x = x;
-      configuration->y = y;
+      configuration->x = rect.x;
+      configuration->y = rect.y;
     }
 
-  if (flags & META_MOVE_RESIZE_RESIZE_ACTION ||
-      is_window_size_fixed (window) ||
-      window->rect.width != width ||
-      window->rect.height != height)
-    {
-      configuration->has_size = TRUE;
-      configuration->width = width;
-      configuration->height = height;
-    }
+  configuration->has_size = (rect.width != 0 && rect.height != 0);
+  configuration->is_resizing = flags & META_MOVE_RESIZE_RESIZE_ACTION ||
+    meta_window_wayland_is_resize (wl_window, rect.width, rect.height);
+  configuration->width = rect.width;
+  configuration->height = rect.height;
 
   return configuration;
 }
 
 MetaWaylandWindowConfiguration *
-meta_wayland_window_configuration_new_relative (int rel_x,
-                                                int rel_y,
-                                                int width,
-                                                int height,
-                                                int scale)
+meta_wayland_window_configuration_new_relative (MetaWindow *window,
+                                                int         rel_x,
+                                                int         rel_y,
+                                                int         width,
+                                                int         height,
+                                                int         scale)
 {
+  MetaWindowWayland *wl_window = META_WINDOW_WAYLAND (window);
   MetaWaylandWindowConfiguration *configuration;
 
   configuration = g_new0 (MetaWaylandWindowConfiguration, 1);
@@ -100,7 +86,8 @@ meta_wayland_window_configuration_new_relative (int rel_x,
     .rel_x = rel_x,
     .rel_y = rel_y,
 
-    .has_size = TRUE,
+    .has_size = (width != 0 && height != 0),
+    .is_resizing = meta_window_wayland_is_resize (wl_window, width, height),
     .width = width,
     .height = height,
 
@@ -111,7 +98,8 @@ meta_wayland_window_configuration_new_relative (int rel_x,
 }
 
 MetaWaylandWindowConfiguration *
-meta_wayland_window_configuration_new_empty (void)
+meta_wayland_window_configuration_new_empty (int bounds_width,
+                                             int bounds_height)
 {
   MetaWaylandWindowConfiguration *configuration;
 
@@ -119,6 +107,8 @@ meta_wayland_window_configuration_new_empty (void)
   *configuration = (MetaWaylandWindowConfiguration) {
     .serial = ++global_serial_counter,
     .scale = 1,
+    .bounds_width = bounds_width,
+    .bounds_height = bounds_height,
   };
 
   return configuration;

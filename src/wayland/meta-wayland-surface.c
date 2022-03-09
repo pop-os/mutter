@@ -553,9 +553,10 @@ meta_wayland_surface_state_merge_into (MetaWaylandSurfaceState *from,
 
       to->newly_attached = TRUE;
       to->buffer = from->buffer;
-      to->dx = from->dx;
-      to->dy = from->dy;
     }
+
+  to->dx += from->dx;
+  to->dy += from->dy;
 
   wl_list_insert_list (&to->frame_callback_list, &from->frame_callback_list);
   wl_list_init (&from->frame_callback_list);
@@ -1055,6 +1056,16 @@ wl_surface_attach (struct wl_client   *client,
                               pending->buffer);
     }
 
+  if (wl_resource_get_version (surface_resource) >=
+      WL_SURFACE_OFFSET_SINCE_VERSION &&
+      (dx != 0 || dy != 0))
+    {
+      wl_resource_post_error (surface_resource,
+                              WL_SURFACE_ERROR_INVALID_OFFSET,
+                              "Attaching with an offset is no longer allowed");
+      return;
+    }
+
   pending->newly_attached = TRUE;
   pending->buffer = buffer;
   pending->dx = dx;
@@ -1259,6 +1270,19 @@ wl_surface_damage_buffer (struct wl_client   *client,
   cairo_region_union_rectangle (pending->buffer_damage, &rectangle);
 }
 
+static void
+wl_surface_offset (struct wl_client   *client,
+                   struct wl_resource *surface_resource,
+                   int32_t             dx,
+                   int32_t             dy)
+{
+  MetaWaylandSurface *surface = wl_resource_get_user_data (surface_resource);
+  MetaWaylandSurfaceState *pending = surface->pending_state;
+
+  pending->dx = dx;
+  pending->dy = dy;
+}
+
 static const struct wl_surface_interface meta_wayland_wl_surface_interface = {
   wl_surface_destroy,
   wl_surface_attach,
@@ -1270,6 +1294,7 @@ static const struct wl_surface_interface meta_wayland_wl_surface_interface = {
   wl_surface_set_buffer_transform,
   wl_surface_set_buffer_scale,
   wl_surface_damage_buffer,
+  wl_surface_offset,
 };
 
 static void
@@ -2163,4 +2188,69 @@ meta_wayland_surface_set_scanout_candidate (MetaWaylandSurface *surface,
   g_set_object (&surface->scanout_candidate, crtc);
   g_object_notify_by_pspec (G_OBJECT (surface),
                             obj_props[PROP_SCANOUT_CANDIDATE]);
+}
+
+gboolean
+meta_wayland_surface_can_scanout_untransformed (MetaWaylandSurface *surface,
+                                                MetaRendererView   *view,
+                                                int                 geometry_scale)
+{
+  if (meta_renderer_view_get_transform (view) != surface->buffer_transform)
+    return FALSE;
+
+  if (surface->viewport.has_dst_size)
+    {
+      MetaRectangle view_layout;
+      float view_scale;
+
+      clutter_stage_view_get_layout (CLUTTER_STAGE_VIEW (view), &view_layout);
+      view_scale = clutter_stage_view_get_scale (CLUTTER_STAGE_VIEW (view));
+
+      if (!G_APPROX_VALUE (view_layout.width, surface->viewport.dst_width,
+                           FLT_EPSILON) ||
+          !G_APPROX_VALUE (view_layout.height, surface->viewport.dst_height,
+                           FLT_EPSILON) ||
+          !G_APPROX_VALUE (view_layout.width * view_scale,
+                           get_buffer_width (surface),
+                           FLT_EPSILON) ||
+          !G_APPROX_VALUE (view_layout.height * view_scale,
+                           get_buffer_height (surface),
+                           FLT_EPSILON))
+        return FALSE;
+    }
+  else
+    {
+      if (meta_is_stage_views_scaled ())
+        {
+          float view_scale;
+
+          view_scale = clutter_stage_view_get_scale (CLUTTER_STAGE_VIEW (view));
+          if (!G_APPROX_VALUE (view_scale, surface->scale, FLT_EPSILON))
+            return FALSE;
+        }
+      else
+        {
+          if (geometry_scale != surface->scale)
+            return FALSE;
+        }
+    }
+
+  if (surface->viewport.has_src_rect)
+    {
+      if (!G_APPROX_VALUE (surface->viewport.src_rect.origin.x, 0.0,
+                           FLT_EPSILON) ||
+          !G_APPROX_VALUE (surface->viewport.src_rect.origin.y, 0.0,
+                           FLT_EPSILON) ||
+          !G_APPROX_VALUE (surface->viewport.src_rect.size.width *
+                           surface->scale,
+                           get_buffer_width (surface),
+                           FLT_EPSILON) ||
+          !G_APPROX_VALUE (surface->viewport.src_rect.size.height *
+                           surface->scale,
+                           get_buffer_height (surface),
+                           FLT_EPSILON))
+        return FALSE;
+    }
+
+  return TRUE;
 }
