@@ -4,20 +4,18 @@ Subject: meson: Do not mark CI test tools as required
 
 This way we can mark them as nocheck without build issues.
 ---
- meson.build | 4 ++--
- 1 file changed, 2 insertions(+), 2 deletions(-)
+ meson.build | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/meson.build b/meson.build
-index b6472a4..b581702 100644
+index 32033cc..fa4185c 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -335,8 +335,8 @@ if have_tests
+@@ -354,7 +354,7 @@ if have_tests
      ],
      exe_wrapper: [
        default_test_wrappers,
--      find_program('catchsegv'),
 -      find_program('xvfb-run'), '-a', '-s', '+iglx -noreset',
-+      find_program('catchsegv', required: false),
 +      find_program('xvfb-run', required: false), '-a', '-s', '+iglx -noreset',
      ],
      timeout_multiplier: 10,
