@@ -8,3 +8,4 @@ Support-Dynamic-triple-double-buffering.patch
 debian/tests-Tag-unstable-tests-as-flaky.patch
 debian/tests-Do-not-run-screencast-tests.patch
 debian/meson-Do-not-mark-CI-test-tools-as-required.patch
+debian/tests-skip-monitor-width-size-check-as-it-may-lead-to-une.patch
