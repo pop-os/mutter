@@ -1,12 +1,12 @@
-mutter (42.0-1) UNRELEASED; urgency=medium
-
-  [ Marco Trevisan (Treviño) ]
-  * debian/patches: Skip monitor-size tests that may fail on autopkgtest
+mutter (42.0-1) experimental; urgency=medium
 
   [ Jeremy Bicha ]
   * New upstream release
 
- -- Jeremy Bicha <jeremy.bicha@canonical.com>  Mon, 14 Mar 2022 09:17:28 -0400
+  [ Marco Trevisan (Treviño) ]
+  * debian/patches: Skip monitor-size tests that may fail on autopkgtest
+
+ -- Jeremy Bicha <jeremy.bicha@canonical.com>  Mon, 14 Mar 2022 09:28:30 -0400
 
 mutter (42~rc-1) experimental; urgency=medium
 
