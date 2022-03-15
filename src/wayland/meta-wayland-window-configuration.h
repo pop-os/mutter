@@ -40,30 +40,35 @@ struct _MetaWaylandWindowConfiguration
   int rel_y;
 
   gboolean has_size;
+  gboolean is_resizing;
   int width;
   int height;
 
   int scale;
   MetaGravity gravity;
   MetaMoveResizeFlags flags;
+
+  int bounds_width;
+  int bounds_height;
 };
 
 MetaWaylandWindowConfiguration * meta_wayland_window_configuration_new (MetaWindow          *window,
-                                                                        int                  x,
-                                                                        int                  y,
-                                                                        int                  width,
-                                                                        int                  height,
+                                                                        MetaRectangle        rect,
+                                                                        int                  max_width,
+                                                                        int                  max_height,
                                                                         int                  scale,
                                                                         MetaMoveResizeFlags  flags,
                                                                         MetaGravity          gravity);
 
-MetaWaylandWindowConfiguration * meta_wayland_window_configuration_new_relative (int rel_x,
-                                                                                 int rel_y,
-                                                                                 int width,
-                                                                                 int height,
-                                                                                 int scale);
+MetaWaylandWindowConfiguration * meta_wayland_window_configuration_new_relative (MetaWindow *window,
+                                                                                 int         rel_x,
+                                                                                 int         rel_y,
+                                                                                 int         width,
+                                                                                 int         height,
+                                                                                 int         scale);
 
-MetaWaylandWindowConfiguration * meta_wayland_window_configuration_new_empty (void);
+MetaWaylandWindowConfiguration * meta_wayland_window_configuration_new_empty (int bounds_width,
+                                                                              int bounds_height);
 
 void meta_wayland_window_configuration_free (MetaWaylandWindowConfiguration *configuration);
 

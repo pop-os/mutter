@@ -675,15 +675,10 @@ _clutter_boolean_continue_accumulator (GSignalInvocationHint *ihint,
 }
 
 static inline void
-emit_event_chain (ClutterEvent *event)
+emit_event_chain (ClutterActor *target,
+                  ClutterEvent *event)
 {
-  if (event->any.source == NULL)
-    {
-      CLUTTER_NOTE (EVENT, "No source set, discarding event");
-      return;
-    }
-
-  _clutter_actor_handle_event (event->any.source,
+  _clutter_actor_handle_event (target,
                                clutter_stage_get_grab_actor (event->any.stage),
                                event);
 }
@@ -694,13 +689,14 @@ emit_event_chain (ClutterEvent *event)
  */
 
 static inline void
-emit_event (ClutterEvent *event)
+emit_event (ClutterActor *target,
+            ClutterEvent *event)
 {
   if (event->type == CLUTTER_KEY_PRESS ||
       event->type == CLUTTER_KEY_RELEASE)
     cally_snoop_key_event ((ClutterKeyEvent *) event);
 
-  emit_event_chain (event);
+  emit_event_chain (target, event);
 }
 
 static ClutterActor *
@@ -745,9 +741,6 @@ update_device_for_event (ClutterStage *stage,
 void
 clutter_do_event (ClutterEvent *event)
 {
-  ClutterInputDevice *device;
-  ClutterEventSequence *sequence;
-
   /* we need the stage for the event */
   if (event->any.stage == NULL)
     {
@@ -759,57 +752,17 @@ clutter_do_event (ClutterEvent *event)
   if (CLUTTER_ACTOR_IN_DESTRUCTION (event->any.stage))
     return;
 
-  device = clutter_event_get_device (event);
-  sequence = clutter_event_get_event_sequence (event);
-
-  if (device)
+  switch (event->any.type)
     {
-      ClutterActor *actor = NULL;
-
-      switch (event->any.type)
-        {
-        case CLUTTER_ENTER:
-        case CLUTTER_MOTION:
-        case CLUTTER_BUTTON_PRESS:
-        case CLUTTER_TOUCH_BEGIN:
-        case CLUTTER_TOUCH_UPDATE:
-          actor = update_device_for_event (event->any.stage, event, TRUE);
-          break;
-        case CLUTTER_KEY_PRESS:
-        case CLUTTER_KEY_RELEASE:
-        case CLUTTER_PAD_BUTTON_PRESS:
-        case CLUTTER_PAD_BUTTON_RELEASE:
-        case CLUTTER_PAD_STRIP:
-        case CLUTTER_PAD_RING:
-        case CLUTTER_IM_COMMIT:
-        case CLUTTER_IM_DELETE:
-        case CLUTTER_IM_PREEDIT:
-          actor = clutter_stage_get_key_focus (event->any.stage);
-          break;
-        case CLUTTER_DEVICE_ADDED:
-        case CLUTTER_DEVICE_REMOVED:
-          actor = CLUTTER_ACTOR (event->any.stage);
-          break;
-        case CLUTTER_LEAVE:
-        case CLUTTER_BUTTON_RELEASE:
-        case CLUTTER_TOUCH_END:
-        case CLUTTER_TOUCH_CANCEL:
-        case CLUTTER_SCROLL:
-        case CLUTTER_TOUCHPAD_PINCH:
-        case CLUTTER_TOUCHPAD_SWIPE:
-        case CLUTTER_TOUCHPAD_HOLD:
-        case CLUTTER_PROXIMITY_IN:
-        case CLUTTER_PROXIMITY_OUT:
-          actor = clutter_stage_get_device_actor (event->any.stage,
-                                                  device, sequence);
-          break;
-        case CLUTTER_NOTHING:
-        case CLUTTER_EVENT_LAST:
-          g_assert_not_reached ();
-          break;
-        }
-
-      clutter_event_set_source (event, actor);
+    case CLUTTER_ENTER:
+    case CLUTTER_MOTION:
+    case CLUTTER_BUTTON_PRESS:
+    case CLUTTER_TOUCH_BEGIN:
+    case CLUTTER_TOUCH_UPDATE:
+      update_device_for_event (event->any.stage, event, TRUE);
+      break;
+    default:
+      break;
     }
 
   if (_clutter_event_process_filters (event))
@@ -856,8 +809,10 @@ _clutter_process_event_details (ClutterActor        *stage,
                                 ClutterEvent        *event)
 {
   ClutterInputDevice *device = clutter_event_get_device (event);
+  ClutterEventSequence *sequence = clutter_event_get_event_sequence (event);
   ClutterMainContext *clutter_context;
   ClutterBackend *backend;
+  ClutterActor *target;
 
   clutter_context = _clutter_context_get_default ();
   backend = clutter_context->backend;
@@ -865,7 +820,6 @@ _clutter_process_event_details (ClutterActor        *stage,
   switch (event->type)
     {
       case CLUTTER_NOTHING:
-        event->any.source = stage;
         break;
 
       case CLUTTER_KEY_PRESS:
@@ -880,47 +834,27 @@ _clutter_process_event_details (ClutterActor        *stage,
         {
           ClutterActor *actor = NULL;
 
-          /* check that we're not a synthetic event with source set */
-          if (event->any.source == NULL)
+          actor = clutter_stage_get_key_focus (CLUTTER_STAGE (stage));
+          if (G_UNLIKELY (actor == NULL))
             {
-              actor = clutter_stage_get_key_focus (CLUTTER_STAGE (stage));
-              event->any.source = actor;
-              if (G_UNLIKELY (actor == NULL))
-                {
-                  g_warning ("No key focus set, discarding");
-                  return;
-                }
+              g_warning ("No key focus set, discarding");
+              return;
             }
 
-          emit_event (event);
+          emit_event (actor, event);
         }
         break;
 
       case CLUTTER_ENTER:
-        emit_event (event);
+        target = clutter_stage_get_device_actor (CLUTTER_STAGE (stage),
+                                                 device, sequence);
+        emit_event (target, event);
         break;
 
       case CLUTTER_LEAVE:
-        /* same as CLUTTER_ENTER above: when leaving the stage
-         * we need to also emit a CLUTTER_LEAVE event on the
-         * actor currently underneath the device, unless it's the
-         * stage
-         */
-        if (event->any.source == stage &&
-            event->crossing.related == NULL &&
-            clutter_stage_get_device_actor (CLUTTER_STAGE (stage), device, NULL) != stage)
-          {
-            ClutterEvent *crossing;
-
-            crossing = clutter_event_copy (event);
-            crossing->crossing.related = stage;
-            crossing->crossing.source =
-              clutter_stage_get_device_actor (CLUTTER_STAGE (stage), device, NULL);
-
-            emit_event (crossing);
-            clutter_event_free (crossing);
-          }
-        emit_event (event);
+        target = clutter_stage_get_device_actor (CLUTTER_STAGE (stage),
+                                                 device, sequence);
+        emit_event (target, event);
         break;
 
       case CLUTTER_MOTION:
@@ -956,14 +890,15 @@ _clutter_process_event_details (ClutterActor        *stage,
         {
           gfloat x, y;
 
+          target = clutter_stage_get_device_actor (CLUTTER_STAGE (stage),
+                                                   device, sequence);
           clutter_event_get_coords (event, &x, &y);
 
           CLUTTER_NOTE (EVENT,
                         "Reactive event received at %.2f, %.2f - actor: %p",
-                        x, y,
-                        event->any.source);
+                        x, y, target);
 
-          emit_event (event);
+          emit_event (target, event);
           break;
         }
 
@@ -974,14 +909,15 @@ _clutter_process_event_details (ClutterActor        *stage,
         {
           gfloat x, y;
 
+          target = clutter_stage_get_device_actor (CLUTTER_STAGE (stage),
+                                                   device, sequence);
           clutter_event_get_coords (event, &x, &y);
 
           CLUTTER_NOTE (EVENT,
                         "Reactive event received at %.2f, %.2f - actor: %p",
-                        x, y,
-                        event->any.source);
+                        x, y, target);
 
-          emit_event (event);
+          emit_event (target, event);
 
           if (event->type == CLUTTER_TOUCH_END ||
               event->type == CLUTTER_TOUCH_CANCEL)

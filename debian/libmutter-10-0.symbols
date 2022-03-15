@@ -403,6 +403,7 @@ libmutter-10.so.0 libmutter-10-0 #MINVER#
  meta_monitor_manager_get_monitors@Base 3.28.2
  meta_monitor_manager_get_num_logical_monitors@Base 3.28.2
  meta_monitor_manager_get_panel_orientation_managed@Base 3.37.92
+ meta_monitor_manager_get_primary_logical_monitor@Base 42~rc
  meta_monitor_manager_get_switch_config@Base 3.28.2
  meta_monitor_manager_get_type@Base 3.28.2
  meta_monitor_manager_lid_is_closed_changed@Base 3.28.2
@@ -640,6 +641,7 @@ libmutter-10.so.0 libmutter-10-0 #MINVER#
  meta_virtual_monitor_get_output@Base 40.0
  meta_virtual_monitor_info_free@Base 40.0
  meta_virtual_monitor_info_new@Base 40.0
+ meta_virtual_monitor_set_mode@Base 42~rc
  meta_warning@Base 3.28.2
  (arch=linux-any)meta_wayland_actor_surface_get_actor@Base 3.35.90
  (arch=linux-any)meta_wayland_client_get_type@Base 3.37.91
@@ -1839,6 +1841,7 @@ libmutter-clutter-10.so.0 libmutter-10-0 #MINVER#
  clutter_stage_get_capture_final_size@Base 3.31.92
  clutter_stage_get_device_actor@Base 40.0
  clutter_stage_get_device_coords@Base 40.0
+ clutter_stage_get_event_actor@Base 42~rc
  clutter_stage_get_frame_counter@Base 3.29.4
  clutter_stage_get_grab_actor@Base 42~beta
  clutter_stage_get_key_focus@Base 3.29.4

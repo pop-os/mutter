@@ -28,7 +28,25 @@
 #include <stdint.h>
 #include <sys/mman.h>
 
+#include "meta-dbus-remote-desktop.h"
 #include "meta-dbus-screen-cast.h"
+
+#define assert_cursor_position(stream, x, y) \
+{ \
+  g_assert_cmpint (stream->cursor_x, ==, (x)); \
+  g_assert_cmpint (stream->cursor_y, ==, (y)); \
+}
+
+#define CURSOR_META_SIZE(width, height) \
+ (sizeof(struct spa_meta_cursor) + \
+  sizeof(struct spa_meta_bitmap) + width * height * 4)
+
+enum
+  {
+    CURSOR_MODE_HIDDEN = 0,
+    CURSOR_MODE_EMBEDDED = 1,
+    CURSOR_MODE_METADATA = 2,
+  };
 
 typedef struct _Stream
 {
@@ -39,12 +57,24 @@ typedef struct _Stream
   struct spa_hook pipewire_stream_listener;
   enum pw_stream_state state;
   int buffer_count;
+
+  int target_width;
+  int target_height;
+
+  int cursor_x;
+  int cursor_y;
 } Stream;
 
 typedef struct _Session
 {
-  MetaDBusScreenCastSession *proxy;
+  MetaDBusScreenCastSession *screen_cast_session_proxy;
+  MetaDBusRemoteDesktopSession *remote_desktop_session_proxy;
 } Session;
+
+typedef struct _RemoteDesktop
+{
+  MetaDBusRemoteDesktop *proxy;
+} RemoteDesktop;
 
 typedef struct _ScreenCast
 {
@@ -199,7 +229,7 @@ on_stream_param_changed (void                 *user_data,
   Stream *stream = user_data;
   uint8_t params_buffer[1024];
   struct spa_pod_builder pod_builder;
-  const struct spa_pod *params[2];
+  const struct spa_pod *params[3];
 
   if (!format || id != SPA_PARAM_Format)
     return;
@@ -223,8 +253,35 @@ on_stream_param_changed (void                 *user_data,
     SPA_PARAM_META_size, SPA_POD_Int (sizeof (struct spa_meta_header)),
     0);
 
+  params[2] = spa_pod_builder_add_object (
+    &pod_builder,
+    SPA_TYPE_OBJECT_ParamMeta, SPA_PARAM_Meta,
+    SPA_PARAM_META_type, SPA_POD_Id (SPA_META_Cursor),
+    SPA_PARAM_META_size, SPA_POD_CHOICE_RANGE_Int (CURSOR_META_SIZE (384, 384),
+                                                   CURSOR_META_SIZE (1, 1),
+                                                   CURSOR_META_SIZE (384, 384)),
+    0);
+
   pw_stream_update_params (stream->pipewire_stream,
                            params, G_N_ELEMENTS (params));
+}
+
+static void
+process_buffer_metadata (Stream            *stream,
+                         struct spa_buffer *buffer)
+{
+  struct spa_meta_cursor *spa_meta_cursor;
+
+  spa_meta_cursor = spa_buffer_find_meta_data (buffer, SPA_META_Cursor,
+                                               sizeof *spa_meta_cursor);
+  if (!spa_meta_cursor)
+    return;
+
+  if (!spa_meta_cursor_is_valid (spa_meta_cursor))
+    return;
+
+  stream->cursor_x = spa_meta_cursor->position.x;
+  stream->cursor_y = spa_meta_cursor->position.y;
 }
 
 static void
@@ -255,6 +312,8 @@ static void
 process_buffer (Stream            *stream,
                 struct spa_buffer *buffer)
 {
+  process_buffer_metadata (stream, buffer);
+
   if (buffer->datas[0].chunk->size == 0)
     g_assert_not_reached ();
   else if (buffer->datas[0].type == SPA_DATA_MemFd)
@@ -305,8 +364,7 @@ stream_connect (Stream *stream)
   struct pw_stream *pipewire_stream;
   uint8_t params_buffer[1024];
   struct spa_pod_builder pod_builder;
-  struct spa_rectangle min_rect;
-  struct spa_rectangle max_rect;
+  struct spa_rectangle rect;
   struct spa_fraction min_framerate;
   struct spa_fraction max_framerate;
   const struct spa_pod *params[2];
@@ -316,8 +374,7 @@ stream_connect (Stream *stream)
                                    "mutter-test-pipewire-stream",
                                    NULL);
 
-  min_rect = SPA_RECTANGLE (1, 1);
-  max_rect = SPA_RECTANGLE (50 , 50);
+  rect = SPA_RECTANGLE (stream->target_width, stream->target_height);
   min_framerate = SPA_FRACTION (1, 1);
   max_framerate = SPA_FRACTION (30, 1);
 
@@ -328,9 +385,7 @@ stream_connect (Stream *stream)
     SPA_FORMAT_mediaType, SPA_POD_Id (SPA_MEDIA_TYPE_video),
     SPA_FORMAT_mediaSubtype, SPA_POD_Id (SPA_MEDIA_SUBTYPE_raw),
     SPA_FORMAT_VIDEO_format, SPA_POD_Id (SPA_VIDEO_FORMAT_BGRx),
-    SPA_FORMAT_VIDEO_size, SPA_POD_CHOICE_RANGE_Rectangle (&min_rect,
-                                                           &min_rect,
-                                                           &max_rect),
+    SPA_FORMAT_VIDEO_size, SPA_POD_Rectangle (&rect),
     SPA_FORMAT_VIDEO_framerate, SPA_POD_Fraction (&SPA_FRACTION(0, 1)),
     SPA_FORMAT_VIDEO_maxFramerate, SPA_POD_CHOICE_RANGE_Fraction (&min_framerate,
                                                                   &min_framerate,
@@ -360,6 +415,16 @@ stream_wait_for_node (Stream *stream)
     g_main_context_iteration (NULL, TRUE);
 }
 
+static void
+stream_wait_for_cursor_position (Stream *stream,
+                                 int     x,
+                                 int     y)
+{
+  while (stream->cursor_x != x &&
+         stream->cursor_y != y)
+    g_main_context_iteration (NULL, TRUE);
+}
+
 static G_GNUC_UNUSED void
 stream_wait_for_streaming (Stream *stream)
 {
@@ -370,8 +435,37 @@ stream_wait_for_streaming (Stream *stream)
 static G_GNUC_UNUSED void
 stream_wait_for_render (Stream *stream)
 {
-  while (stream->buffer_count == 0)
+  int initial_buffer_count = stream->buffer_count;
+
+  while (stream->buffer_count == initial_buffer_count)
     g_main_context_iteration (NULL, TRUE);
+}
+
+static void
+stream_resize (Stream *stream,
+               int     width,
+               int     height)
+{
+  uint8_t params_buffer[1024];
+  struct spa_pod_builder pod_builder;
+  const struct spa_pod *params[1];
+  struct spa_rectangle rect;
+
+  stream->target_width = width;
+  stream->target_height = height;
+
+  rect = SPA_RECTANGLE (width, height);
+
+  pod_builder = SPA_POD_BUILDER_INIT (params_buffer, sizeof (params_buffer));
+
+  params[0] = spa_pod_builder_add_object (
+    &pod_builder,
+    SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat,
+    SPA_FORMAT_VIDEO_size, SPA_POD_Rectangle (&rect),
+    0);
+
+  pw_stream_update_params (stream->pipewire_stream,
+                           params, G_N_ELEMENTS (params));
 }
 
 static void
@@ -384,12 +478,17 @@ on_pipewire_stream_added (MetaDBusScreenCastStream *proxy,
 }
 
 static Stream *
-stream_new (const char *path)
+stream_new (const char *path,
+            int         width,
+            int         height)
 {
   Stream *stream;
   GError *error = NULL;
 
   stream = g_new0 (Stream, 1);
+  stream->target_width = width;
+  stream->target_height = height;
+
   stream->proxy = meta_dbus_screen_cast_stream_proxy_new_for_bus_sync (
     G_BUS_TYPE_SESSION,
     G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
@@ -416,13 +515,29 @@ stream_free (Stream *stream)
 }
 
 static void
+session_notify_absolute_pointer (Session *session,
+                                 Stream  *stream,
+                                 double   x,
+                                 double   y)
+{
+  GError *error = NULL;
+
+  if (!meta_dbus_remote_desktop_session_call_notify_pointer_motion_absolute_sync (
+        session->remote_desktop_session_proxy,
+        g_dbus_proxy_get_object_path (G_DBUS_PROXY (stream->proxy)),
+        x, y, NULL, &error))
+    g_error ("Failed to send absolute pointer motion event: %s", error->message);
+}
+
+static void
 session_start (Session *session)
 {
   GError *error = NULL;
 
-  if (!meta_dbus_screen_cast_session_call_start_sync (session->proxy,
-                                                      NULL,
-                                                      &error))
+  if (!meta_dbus_remote_desktop_session_call_start_sync (
+        session->remote_desktop_session_proxy,
+        NULL,
+        &error))
     g_error ("Failed to start session: %s", error->message);
 }
 
@@ -431,14 +546,17 @@ session_stop (Session *session)
 {
   GError *error = NULL;
 
-  if (!meta_dbus_screen_cast_session_call_stop_sync (session->proxy,
-                                                     NULL,
-                                                     &error))
+  if (!meta_dbus_remote_desktop_session_call_stop_sync (
+        session->remote_desktop_session_proxy,
+        NULL,
+        &error))
     g_error ("Failed to stop session: %s", error->message);
 }
 
 static Stream *
-session_record_virtual (Session *session)
+session_record_virtual (Session *session,
+                        int      width,
+                        int      height)
 {
   GVariantBuilder properties_builder;
   GVariant *properties_variant;
@@ -447,37 +565,33 @@ session_record_virtual (Session *session)
   Stream *stream;
 
   g_variant_builder_init (&properties_builder, G_VARIANT_TYPE ("a{sv}"));
+  g_variant_builder_add (&properties_builder, "{sv}",
+                         "cursor-mode",
+                         g_variant_new_uint32 (CURSOR_MODE_METADATA));
   properties_variant = g_variant_builder_end (&properties_builder);
 
   if (!meta_dbus_screen_cast_session_call_record_virtual_sync (
-        session->proxy,
+        session->screen_cast_session_proxy,
         properties_variant,
         &stream_path,
         NULL,
         &error))
     g_error ("Failed to create session: %s", error->message);
 
-  stream = stream_new (stream_path);
+  stream = stream_new (stream_path, width, height);
   g_assert_nonnull (stream);
   return stream;
 }
 
 static Session *
-session_new (const char *path)
+session_new (MetaDBusRemoteDesktopSession *remote_desktop_session_proxy,
+             MetaDBusScreenCastSession    *screen_cast_session_proxy)
 {
   Session *session;
-  GError *error = NULL;
 
   session = g_new0 (Session, 1);
-  session->proxy = meta_dbus_screen_cast_session_proxy_new_for_bus_sync (
-    G_BUS_TYPE_SESSION,
-    G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
-    "org.gnome.Mutter.ScreenCast",
-    path,
-    NULL,
-    &error);
-  if (!session->proxy)
-    g_error ("Failed to acquire proxy: %s", error->message);
+  session->remote_desktop_session_proxy = remote_desktop_session_proxy;
+  session->screen_cast_session_proxy = screen_cast_session_proxy;
 
   return session;
 }
@@ -485,32 +599,101 @@ session_new (const char *path)
 static void
 session_free (Session *session)
 {
-  g_clear_object (&session->proxy);
+  g_clear_object (&session->screen_cast_session_proxy);
+  g_clear_object (&session->remote_desktop_session_proxy);
   g_free (session);
 }
 
 static Session *
-screen_cast_create_session (ScreenCast *screen_cast)
+screen_cast_create_session (RemoteDesktop *remote_desktop,
+                            ScreenCast    *screen_cast)
 {
   GVariantBuilder properties_builder;
-  GVariant *properties_variant;
   GError *error = NULL;
-  g_autofree char *session_path = NULL;
+  g_autofree char *remote_desktop_session_path = NULL;
+  MetaDBusRemoteDesktopSession *remote_desktop_session_proxy;
+  g_autofree char *screen_cast_session_path = NULL;
+  MetaDBusScreenCastSession *screen_cast_session_proxy;
+  const char *session_id;
   Session *session;
 
-  g_variant_builder_init (&properties_builder, G_VARIANT_TYPE ("a{sv}"));
-  properties_variant = g_variant_builder_end (&properties_builder);
-
-  if (!meta_dbus_screen_cast_call_create_session_sync (screen_cast->proxy,
-                                                       properties_variant,
-                                                       &session_path,
-                                                       NULL,
-                                                       &error))
+  if (!meta_dbus_remote_desktop_call_create_session_sync (
+        remote_desktop->proxy,
+        &remote_desktop_session_path,
+        NULL,
+        &error))
     g_error ("Failed to create session: %s", error->message);
 
-  session = session_new (session_path);
+  remote_desktop_session_proxy =
+    meta_dbus_remote_desktop_session_proxy_new_for_bus_sync (
+      G_BUS_TYPE_SESSION,
+      G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+      "org.gnome.Mutter.RemoteDesktop",
+      remote_desktop_session_path,
+      NULL,
+      &error);
+  if (!remote_desktop_session_proxy)
+    g_error ("Failed to acquire proxy: %s", error->message);
+
+  session_id =
+    meta_dbus_remote_desktop_session_get_session_id (
+      remote_desktop_session_proxy);
+
+  g_variant_builder_init (&properties_builder, G_VARIANT_TYPE ("a{sv}"));
+  g_variant_builder_add (&properties_builder, "{sv}",
+                         "remote-desktop-session-id",
+                         g_variant_new_string (session_id));
+
+  if (!meta_dbus_screen_cast_call_create_session_sync (
+        screen_cast->proxy,
+        g_variant_builder_end (&properties_builder),
+        &screen_cast_session_path,
+        NULL,
+        &error))
+    g_error ("Failed to create session: %s", error->message);
+
+  screen_cast_session_proxy =
+    meta_dbus_screen_cast_session_proxy_new_for_bus_sync (
+      G_BUS_TYPE_SESSION,
+      G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+      "org.gnome.Mutter.ScreenCast",
+      screen_cast_session_path,
+      NULL,
+      &error);
+  if (!screen_cast_session_proxy)
+    g_error ("Failed to acquire proxy: %s", error->message);
+
+  session = session_new (remote_desktop_session_proxy,
+                         screen_cast_session_proxy);
   g_assert_nonnull (session);
   return session;
+}
+
+static RemoteDesktop *
+remote_desktop_new (void)
+{
+  RemoteDesktop *remote_desktop;
+  GError *error = NULL;
+
+  remote_desktop = g_new0 (RemoteDesktop, 1);
+  remote_desktop->proxy = meta_dbus_remote_desktop_proxy_new_for_bus_sync (
+    G_BUS_TYPE_SESSION,
+    G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+    "org.gnome.Mutter.RemoteDesktop",
+    "/org/gnome/Mutter/RemoteDesktop",
+    NULL,
+    &error);
+  if (!remote_desktop->proxy)
+    g_error ("Failed to acquire proxy: %s", error->message);
+
+  return remote_desktop;
+}
+
+static void
+remote_desktop_free (RemoteDesktop *remote_desktop)
+{
+  g_clear_object (&remote_desktop->proxy);
+  g_free (remote_desktop);
 }
 
 static ScreenCast *
@@ -544,27 +727,58 @@ int
 main (int    argc,
       char **argv)
 {
+  RemoteDesktop *remote_desktop;
   ScreenCast *screen_cast;
   Session *session;
   Stream *stream;
 
   init_pipewire ();
 
+  remote_desktop = remote_desktop_new ();
   screen_cast = screen_cast_new ();
-  session = screen_cast_create_session (screen_cast);
-  stream = session_record_virtual (session);
+  session = screen_cast_create_session (remote_desktop, screen_cast);
+  stream = session_record_virtual (session, 50, 40);
 
   session_start (session);
 
+  /* Check that the display server handles events being emitted too early. */
+  session_notify_absolute_pointer (session, stream, 2, 3);
+
+  /* Check that we receive the initial frame */
+
   stream_wait_for_node (stream);
-  stream_wait_for_streaming (stream);
   stream_wait_for_render (stream);
+  stream_wait_for_streaming (stream);
+  session_notify_absolute_pointer (session, stream, 6, 5);
+  session_notify_absolute_pointer (session, stream, 5, 6);
+  stream_wait_for_render (stream);
+  stream_wait_for_cursor_position (stream, 5, 6);
+  g_assert_cmpint (stream->spa_format.size.width, ==, 50);
+  g_assert_cmpint (stream->spa_format.size.height, ==, 40);
+
+  /* Check that resizing works */
+  stream_resize (stream, 70, 60);
+  while (TRUE)
+    {
+      stream_wait_for_render (stream);
+
+      if (stream->spa_format.size.width == 70 &&
+          stream->spa_format.size.height == 60)
+        break;
+
+      g_assert_cmpint (stream->spa_format.size.width, ==, 50);
+      g_assert_cmpint (stream->spa_format.size.height, ==, 40);
+    }
+
+  /* Check that resizing works */
+  stream_resize (stream, 60, 60);
 
   session_stop (session);
 
   stream_free (stream);
   session_free (session);
   screen_cast_free (screen_cast);
+  remote_desktop_free (remote_desktop);
 
   release_pipewire ();
 
