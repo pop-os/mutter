@@ -1,3 +1,9 @@
+mutter (42.0-2) unstable; urgency=medium
+
+  * Release to unstable
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Mon, 28 Mar 2022 09:34:27 -0400
+
 mutter (42.0-1) experimental; urgency=medium
 
   [ Jeremy Bicha ]
