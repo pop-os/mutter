@@ -1,3 +1,15 @@
+mutter (42.0-3) unstable; urgency=medium
+
+  [ Marco Trevisan (Treviño) ]
+  * debian/patches: Cherry-pick upstream fixes targeting 42.1
+  * debian/patches: Ensure repick happens on actors visibility changed
+    (LP: #1964545)
+
+  [ Jeremy Bicha ]
+  * Release to unstable
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Mon, 28 Mar 2022 09:34:27 -0400
+
 mutter (42.0-1ubuntu1) jammy; urgency=medium
 
   [ Jeremy Bicha ]
