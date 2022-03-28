@@ -30,7 +30,7 @@ index 984338c..7be30ea 100644
  
        meta_startup_notification_add_sequence (sn, seq);
 diff --git a/src/wayland/meta-wayland-activation.c b/src/wayland/meta-wayland-activation.c
-index d30fbd3..8be7f9e 100644
+index 5741b95..ca39197 100644
 --- a/src/wayland/meta-wayland-activation.c
 +++ b/src/wayland/meta-wayland-activation.c
 @@ -146,7 +146,7 @@ token_commit (struct wl_client   *client,

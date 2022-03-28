@@ -514,10 +514,10 @@ index 66d15bd..32f3b92 100644
          settings,
          META_EXPERIMENTAL_FEATURE_SCALE_MONITOR_FRAMEBUFFER))
 diff --git a/src/backends/meta-monitor-manager-private.h b/src/backends/meta-monitor-manager-private.h
-index 443ad14..ff7da97 100644
+index 12bb840..2e78b77 100644
 --- a/src/backends/meta-monitor-manager-private.h
 +++ b/src/backends/meta-monitor-manager-private.h
-@@ -45,7 +45,9 @@ typedef enum _MetaMonitorManagerCapability
+@@ -48,7 +48,9 @@ typedef enum _MetaMonitorManagerCapability
  {
    META_MONITOR_MANAGER_CAPABILITY_NONE = 0,
    META_MONITOR_MANAGER_CAPABILITY_LAYOUT_MODE = (1 << 0),
@@ -528,7 +528,7 @@ index 443ad14..ff7da97 100644
  } MetaMonitorManagerCapability;
  
  /* Equivalent to the 'method' enum in org.gnome.Mutter.DisplayConfig */
-@@ -60,7 +62,8 @@ typedef enum _MetaMonitorsConfigMethod
+@@ -63,7 +65,8 @@ typedef enum _MetaMonitorsConfigMethod
  typedef enum _MetaLogicalMonitorLayoutMode
  {
    META_LOGICAL_MONITOR_LAYOUT_MODE_LOGICAL = 1,
@@ -538,7 +538,7 @@ index 443ad14..ff7da97 100644
  } MetaLogicalMonitorLayoutMode;
  
  /* The source the privacy screen change has been triggered */
-@@ -82,6 +85,7 @@ struct _MetaCrtcAssignment
+@@ -85,6 +88,7 @@ struct _MetaCrtcAssignment
    MetaCrtc                 *crtc;
    MetaCrtcMode             *mode;
    graphene_rect_t           layout;
@@ -546,7 +546,7 @@ index 443ad14..ff7da97 100644
    MetaMonitorTransform      transform;
    GPtrArray                *outputs;
  };
-@@ -143,6 +147,7 @@ struct _MetaMonitorManager
+@@ -146,6 +150,7 @@ struct _MetaMonitorManager
    int screen_height;
  
    GList *monitors;
@@ -554,16 +554,16 @@ index 443ad14..ff7da97 100644
  
    GList *logical_monitors;
    MetaLogicalMonitor *primary_logical_monitor;
-@@ -157,6 +162,8 @@ struct _MetaMonitorManager
- 
+@@ -162,6 +167,8 @@ struct _MetaMonitorManager
    GnomePnpIds *pnp_ids;
+ #endif
  
 +  gulong experimental_features_changed_handler_id;
 +
    MetaMonitorSwitchConfigType current_switch_config;
  
    MetaPrivacyScreenChangeState privacy_screen_change_state;
-@@ -174,6 +181,9 @@ struct _MetaMonitorManager
+@@ -179,6 +186,9 @@ struct _MetaMonitorManager
   * @apply_monitors_config: Tries to apply the given config using the given
   *   method. Throws an error if something went wrong.
   *
@@ -573,7 +573,7 @@ index 443ad14..ff7da97 100644
   * @set_power_save_mode: Sets the #MetaPowerSave mode (for all displays).
   *
   * @change_backlight: Changes the backlight intensity to the given value (in
-@@ -243,6 +253,9 @@ struct _MetaMonitorManagerClass
+@@ -248,6 +258,9 @@ struct _MetaMonitorManagerClass
    gboolean (* set_privacy_screen_enabled) (MetaMonitorManager *manager,
                                             gboolean            enabled);
  
@@ -583,7 +583,7 @@ index 443ad14..ff7da97 100644
    void (* tiled_monitor_added) (MetaMonitorManager *manager,
                                  MetaMonitor        *monitor);
  
-@@ -397,6 +410,11 @@ gboolean           meta_monitor_manager_is_scale_supported (MetaMonitorManager
+@@ -403,6 +416,11 @@ gboolean           meta_monitor_manager_is_scale_supported (MetaMonitorManager
                                                              MetaMonitorMode             *monitor_mode,
                                                              float                        scale);
  
@@ -596,7 +596,7 @@ index 443ad14..ff7da97 100644
                     meta_monitor_manager_get_capabilities (MetaMonitorManager *manager);
  
 diff --git a/src/backends/meta-monitor-manager.c b/src/backends/meta-monitor-manager.c
-index 2f7cfe2..b31312c 100644
+index 83fe107..109d165 100644
 --- a/src/backends/meta-monitor-manager.c
 +++ b/src/backends/meta-monitor-manager.c
 @@ -124,6 +124,15 @@ static gboolean
@@ -1519,7 +1519,7 @@ index 2826ff9..b203818 100644
      g_signal_new ("experimental-features-changed",
                    G_TYPE_FROM_CLASS (object_class),
 diff --git a/src/backends/native/meta-monitor-manager-native.c b/src/backends/native/meta-monitor-manager-native.c
-index 92d6877..7da9154 100644
+index ac53e6d..ae6de38 100644
 --- a/src/backends/native/meta-monitor-manager-native.c
 +++ b/src/backends/native/meta-monitor-manager-native.c
 @@ -609,6 +609,7 @@ get_monitor_scale_constraints_from_layout_mode (MetaLogicalMonitorLayoutMode lay
@@ -2889,7 +2889,7 @@ index 614bec6..ffd8ba7 100644
  out:
    set_unredirected_window (compositor_x11, window_to_unredirect);
 diff --git a/src/core/window.c b/src/core/window.c
-index 4a0c624..7b01242 100644
+index 2545a1b..d1272f4 100644
 --- a/src/core/window.c
 +++ b/src/core/window.c
 @@ -218,6 +218,7 @@ enum
