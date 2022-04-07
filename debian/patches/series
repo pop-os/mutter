@@ -3,6 +3,7 @@ clutter-Pass-target-actor-of-events-to-event-filter-funct.patch
 events-Use-the-event-target-actor-to-determine-window-for.patch
 wayland-surface-Disable-WL_SURFACE_ERROR_INVALID_SIZE-che.patch
 clutter-stage-Repick-when-pointer-actor-goes-unmapped.patch
+core-Account-ClutterStage-grabs-on-Wayland-key-focus-sync.patch
 theme-use-gtk_render_icon_suface-to-paint-button-icon.patch
 theme-load-icons-as-Gtk-does-with-fallback-and-RTL-suppor.patch
 meson-add-back-default_driver-option.patch
