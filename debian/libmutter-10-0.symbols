@@ -652,6 +652,7 @@ libmutter-10.so.0 libmutter-10-0 #MINVER#
  (arch=linux-any)meta_wayland_client_spawn@Base 3.37.91
  (arch=linux-any)meta_wayland_client_spawnv@Base 3.37.91
  (arch=linux-any)meta_wayland_compositor_get_default@Base 3.28.2
+ (arch=linux-any)meta_wayland_compositor_get_xwayland_manager@Base 42.0-3ubuntu1
  (arch=linux-any)meta_wayland_get_public_xwayland_display_name@Base 40.0
  (arch=linux-any)meta_wayland_get_wayland_display_name@Base 3.28.2
  (arch=linux-any)meta_wayland_override_display_name@Base 3.28.2
@@ -831,6 +832,7 @@ libmutter-10.so.0 libmutter-10-0 #MINVER#
  meta_x11_error_trap_push@Base 3.29.4
  meta_x11_init_gdk_display@Base 3.29.4
  (arch=linux-any)meta_xwayland_override_display_number@Base 3.31.90
+ (arch=linux-any)meta_xwayland_signal@Base 42.0-3ubuntu1
 libmutter-clutter-10.so.0 libmutter-10-0 #MINVER#
 * Build-Depends-Package: libmutter-10-dev
  _clutter_backend_translate_event@Base 3.33.92
@@ -1490,8 +1492,10 @@ libmutter-clutter-10.so.0 libmutter-10-0 #MINVER#
  clutter_image_set_data@Base 3.29.4
  clutter_input_axis_flags_get_type@Base 40.0
  clutter_input_axis_get_type@Base 3.29.4
+ clutter_input_capabilities_get_type@Base 42.0-3ubuntu1
  clutter_input_content_hint_flags_get_type@Base 3.29.4
  clutter_input_content_purpose_get_type@Base 3.29.4
+ clutter_input_device_get_capabilities@Base 42.0-3ubuntu1
  clutter_input_device_get_device_mode@Base 3.29.4
  clutter_input_device_get_device_name@Base 3.29.4
  clutter_input_device_get_device_node@Base 3.29.4
