@@ -31,7 +31,7 @@ index 83aa7a0..f0c57cb 100644
      is_parallel: false,
    )
 diff --git a/src/tests/meson.build b/src/tests/meson.build
-index a197032..132bb4c 100644
+index 3e89ade..bea8c9d 100644
 --- a/src/tests/meson.build
 +++ b/src/tests/meson.build
 @@ -177,6 +177,7 @@ test_cases += [
@@ -42,7 +42,7 @@ index a197032..132bb4c 100644
      'suite': 'compositor',
      'sources': [ 'stage-view-tests.c', ],
    },
-@@ -289,7 +290,8 @@ if have_native_tests
+@@ -296,7 +297,8 @@ if have_native_tests
      )
  
      test(test_case['name'], test_executable,

@@ -1,0 +1,56 @@
+From: =?utf-8?q?Jonas_=C3=85dahl?= <jadahl@gmail.com>
+Date: Tue, 5 Apr 2022 23:45:51 +0200
+Subject: xwayland: Only warn on X IO errors when X11 is mandatory
+
+This avoids warnings when we're just slightly unlucky when Xwayland went
+away due to inactivity.
+
+Origin: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2364
+---
+ src/wayland/meta-wayland-private.h |  2 ++
+ src/wayland/meta-xwayland.c        | 12 +++++++++++-
+ 2 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/src/wayland/meta-wayland-private.h b/src/wayland/meta-wayland-private.h
+index 67510d5..ecef32f 100644
+--- a/src/wayland/meta-wayland-private.h
++++ b/src/wayland/meta-wayland-private.h
+@@ -54,6 +54,8 @@ typedef struct
+ 
+ struct _MetaXWaylandManager
+ {
++  MetaWaylandCompositor *compositor;
++
+   MetaXWaylandConnection private_connection;
+   MetaXWaylandConnection public_connection;
+ 
+diff --git a/src/wayland/meta-xwayland.c b/src/wayland/meta-xwayland.c
+index dc96b60..06f059f 100644
+--- a/src/wayland/meta-xwayland.c
++++ b/src/wayland/meta-xwayland.c
+@@ -478,7 +478,16 @@ static void
+ x_io_error_exit (Display *display,
+                  void    *data)
+ {
+-  g_warning ("Xwayland just died, attempting to recover");
++  MetaXWaylandManager *manager = data;
++  MetaX11DisplayPolicy x11_display_policy;
++
++  x11_display_policy =
++    meta_context_get_x11_display_policy (manager->compositor->context);
++
++  if (x11_display_policy == META_X11_DISPLAY_POLICY_MANDATORY)
++    g_warning ("X Wayland crashed (X IO error)");
++  else
++    meta_topic (META_DEBUG_WAYLAND, "Xwayland disappeared during a Xlib call");
+ }
+ 
+ static void
+@@ -1033,6 +1042,7 @@ meta_xwayland_init (MetaXWaylandManager    *manager,
+              manager->public_connection.name,
+              manager->private_connection.name);
+ 
++  manager->compositor = compositor;
+   manager->wayland_display = wl_display;
+   policy = meta_context_get_x11_display_policy (context);
+ 

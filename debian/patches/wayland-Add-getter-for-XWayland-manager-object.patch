@@ -1,0 +1,72 @@
+From: =?utf-8?q?Jonas_=C3=85dahl?= <jadahl@gmail.com>
+Date: Tue, 5 Apr 2022 23:43:38 +0200
+Subject: wayland: Add getter for XWayland manager object
+
+Origin: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2364
+---
+ src/wayland/meta-wayland-private.h | 4 ++--
+ src/wayland/meta-wayland-types.h   | 2 ++
+ src/wayland/meta-wayland.c         | 6 ++++++
+ src/wayland/meta-wayland.h         | 3 +++
+ 4 files changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/src/wayland/meta-wayland-private.h b/src/wayland/meta-wayland-private.h
+index 613dc21..67510d5 100644
+--- a/src/wayland/meta-wayland-private.h
++++ b/src/wayland/meta-wayland-private.h
+@@ -52,7 +52,7 @@ typedef struct
+   char *name;
+ } MetaXWaylandConnection;
+ 
+-typedef struct
++struct _MetaXWaylandManager
+ {
+   MetaXWaylandConnection private_connection;
+   MetaXWaylandConnection public_connection;
+@@ -73,7 +73,7 @@ typedef struct
+   gboolean has_xrandr;
+   int rr_event_base;
+   int rr_error_base;
+-} MetaXWaylandManager;
++};
+ 
+ struct _MetaWaylandCompositor
+ {
+diff --git a/src/wayland/meta-wayland-types.h b/src/wayland/meta-wayland-types.h
+index b2c8615..541636e 100644
+--- a/src/wayland/meta-wayland-types.h
++++ b/src/wayland/meta-wayland-types.h
+@@ -65,4 +65,6 @@ typedef struct _MetaWaylandActivation MetaWaylandActivation;
+ 
+ typedef struct _MetaWaylandDmaBufManager MetaWaylandDmaBufManager;
+ 
++typedef struct _MetaXWaylandManager MetaXWaylandManager;
++
+ #endif
+diff --git a/src/wayland/meta-wayland.c b/src/wayland/meta-wayland.c
+index 6e2b56d..dcf6fba 100644
+--- a/src/wayland/meta-wayland.c
++++ b/src/wayland/meta-wayland.c
+@@ -801,3 +801,9 @@ meta_wayland_compositor_notify_surface_id (MetaWaylandCompositor *compositor,
+       meta_wayland_compositor_remove_surface_association (compositor, id);
+     }
+ }
++
++MetaXWaylandManager *
++meta_wayland_compositor_get_xwayland_manager (MetaWaylandCompositor *compositor)
++{
++  return &compositor->xwayland_manager;
++}
+diff --git a/src/wayland/meta-wayland.h b/src/wayland/meta-wayland.h
+index bee2ef4..6528a02 100644
+--- a/src/wayland/meta-wayland.h
++++ b/src/wayland/meta-wayland.h
+@@ -94,5 +94,8 @@ void                    meta_wayland_compositor_notify_surface_id (MetaWaylandCo
+                                                                    int                    id,
+                                                                    MetaWaylandSurface    *surface);
+ 
++META_EXPORT_TEST
++MetaXWaylandManager *   meta_wayland_compositor_get_xwayland_manager (MetaWaylandCompositor *compositor);
++
+ #endif
+ 

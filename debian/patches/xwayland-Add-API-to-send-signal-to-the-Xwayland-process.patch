@@ -1,0 +1,50 @@
+From: =?utf-8?q?Jonas_=C3=85dahl?= <jadahl@gmail.com>
+Date: Tue, 5 Apr 2022 23:46:42 +0200
+Subject: xwayland: Add API to send signal to the Xwayland process
+
+Will be used for test cases to fake-crash the Xwayland process.
+
+Origin: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2364
+---
+ src/wayland/meta-xwayland.c | 16 ++++++++++++++++
+ src/wayland/meta-xwayland.h |  5 +++++
+ 2 files changed, 21 insertions(+)
+
+diff --git a/src/wayland/meta-xwayland.c b/src/wayland/meta-xwayland.c
+index 06f059f..a21cc9b 100644
+--- a/src/wayland/meta-xwayland.c
++++ b/src/wayland/meta-xwayland.c
+@@ -1276,3 +1276,19 @@ meta_xwayland_handle_xevent (XEvent *event)
+ 
+   return FALSE;
+ }
++
++gboolean
++meta_xwayland_signal (MetaXWaylandManager  *manager,
++                      int                   signum,
++                      GError              **error)
++{
++  if (!manager->proc)
++    {
++      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
++                   "Can't send signal, Xwayland not running");
++      return FALSE;
++    }
++
++  g_subprocess_send_signal (manager->proc, signum);
++  return TRUE;
++}
+diff --git a/src/wayland/meta-xwayland.h b/src/wayland/meta-xwayland.h
+index dac9c68..cbe27b1 100644
+--- a/src/wayland/meta-xwayland.h
++++ b/src/wayland/meta-xwayland.h
+@@ -50,4 +50,9 @@ void
+ meta_xwayland_associate_window_with_surface (MetaWindow          *window,
+                                              MetaWaylandSurface  *surface);
+ 
++META_EXPORT_TEST
++gboolean meta_xwayland_signal (MetaXWaylandManager  *manager,
++                               int                   signum,
++                               GError              **error);
++
+ #endif /* META_XWAYLAND_H */

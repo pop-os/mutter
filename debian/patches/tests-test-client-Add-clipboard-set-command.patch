@@ -1,0 +1,100 @@
+From: =?utf-8?q?Jonas_=C3=85dahl?= <jadahl@gmail.com>
+Date: Tue, 5 Apr 2022 23:42:55 +0200
+Subject: tests/test-client: Add clipboard-set command
+
+To be used for clipboard testing.
+
+Origin: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2364
+---
+ src/tests/test-client.c | 47 +++++++++++++++++++++++++++++++++++++++++++++++
+ src/tests/test-runner.c | 12 ++++++++++++
+ 2 files changed, 59 insertions(+)
+
+diff --git a/src/tests/test-client.c b/src/tests/test-client.c
+index 0007d61..7e4235f 100644
+--- a/src/tests/test-client.c
++++ b/src/tests/test-client.c
+@@ -260,6 +260,22 @@ calculate_titlebar_height (GtkWindow *window)
+   return gtk_widget_get_allocated_height (titlebar);
+ }
+ 
++static void
++text_get_func (GtkClipboard     *clipboard,
++               GtkSelectionData *selection_data,
++               unsigned int      info,
++               gpointer          data)
++{
++  gtk_selection_data_set_text (selection_data, data, -1);
++}
++
++static void
++text_clear_func (GtkClipboard *clipboard,
++                 gpointer      data)
++{
++  g_free (data);
++}
++
+ static void
+ process_line (const char *line)
+ {
+@@ -845,6 +861,37 @@ process_line (const char *line)
+ 
+       sync_after_lines = -1;
+     }
++  else if (strcmp (argv[0], "clipboard-set") == 0)
++    {
++      GdkDisplay *display = gdk_display_get_default ();
++      GtkClipboard *clipboard;
++      GdkAtom atom;
++      GtkTargetList *target_list;
++      GtkTargetEntry *targets;
++      int n_targets;
++
++      if (argc != 3)
++        {
++          g_print ("usage: clipboard-set <mimetype> <text>\n");
++          goto out;
++        }
++
++      clipboard = gtk_clipboard_get_for_display (display,
++                                                 GDK_SELECTION_CLIPBOARD);
++
++      atom = gdk_atom_intern (argv[1], FALSE);
++      target_list = gtk_target_list_new (NULL, 0);
++      gtk_target_list_add (target_list, atom, 0, 0);
++
++      targets = gtk_target_table_new_from_list (target_list, &n_targets);
++      gtk_target_list_unref (target_list);
++
++      gtk_clipboard_set_with_data (clipboard,
++                                   targets, n_targets,
++                                   text_get_func, text_clear_func,
++                                   g_strdup (argv[2]));
++      gtk_target_table_free (targets, n_targets);
++    }
+   else
+     {
+       g_print ("Unknown command %s\n", argv[0]);
+diff --git a/src/tests/test-runner.c b/src/tests/test-runner.c
+index 6a2e5a2..1386df0 100644
+--- a/src/tests/test-runner.c
++++ b/src/tests/test-runner.c
+@@ -973,6 +973,18 @@ test_case_do (TestCase *test,
+       if (!meta_test_client_do (client, error, argv[0], NULL))
+         return FALSE;
+     }
++  else if (strcmp (argv[0], "clipboard-set") == 0)
++    {
++      if (argc != 4)
++        BAD_COMMAND("usage: %s <client-id> <mimetype> <text>", argv[0]);
++
++      MetaTestClient *client = test_case_lookup_client (test, argv[1], error);
++      if (!client)
++        return FALSE;
++
++      if (!meta_test_client_do (client, error, argv[0], argv[2], argv[3], NULL))
++        return FALSE;
++    }
+   else
+     {
+       BAD_COMMAND("Unknown command %s", argv[0]);

@@ -1,0 +1,30 @@
+From: =?utf-8?q?Corentin_No=C3=ABl?= <corentin.noel@collabora.com>
+Date: Tue, 5 Apr 2022 12:40:12 +0200
+Subject: cogl/context: Add transfer full annotation to destroy timestamp
+ query
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2362>
+
+Origin: https://gitlab.gnome.org/GNOME/mutter/-/commit/e4c8125c
+---
+ cogl/cogl/cogl-context.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/cogl/cogl/cogl-context.c b/cogl/cogl/cogl-context.c
+index 2766175..1f2ebed 100644
+--- a/cogl/cogl/cogl-context.c
++++ b/cogl/cogl/cogl-context.c
+@@ -501,6 +501,13 @@ cogl_context_get_named_pipeline (CoglContext     *context,
+   return g_hash_table_lookup (context->named_pipelines, key);
+ }
+ 
++/**
++ * cogl_context_free_timestamp_query:
++ * @context: a #CoglContext object
++ * @query: (transfer full): the #CoglTimestampQuery to free
++ *
++ * Free the #CoglTimestampQuery
++ */
+ void
+ cogl_context_free_timestamp_query (CoglContext        *context,
+                                    CoglTimestampQuery *query)

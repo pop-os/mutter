@@ -1,0 +1,69 @@
+From: Daniel van Vugt <daniel.van.vugt@canonical.com>
+Date: Fri, 11 Mar 2022 17:23:55 +0800
+Subject: onscreen/native: Fall back if COPY_MODE_SECONDARY_GPU fails to init
+
+This can happen if we've got a GBM driver that is incomplete or
+buggy for any reason. Currently this includes the Nvidia driver
+when used as a secondary GPU, and as soon as they fix that it will
+use the fast path instead.
+
+Falling back means we can still use it as a KMS device with all rendering
+done on the primary GPU instead. Just like a DisplayLink.
+
+It's slow, but at least the screens all light up now and you get a
+usable desktop. Surprisingly it's still a better experience than using
+Xorg, maybe because we can flip the outputs independently with the
+native backend.
+
+Fixes: https://gitlab.gnome.org/GNOME/mutter/-/issues/2166,
+       https://gitlab.gnome.org/GNOME/mutter/-/issues/2182,
+       https://launchpad.net/bugs/1959888,
+       https://launchpad.net/bugs/1964037
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2341>
+
+Origin: https://gitlab.gnome.org/GNOME/mutter/-/commit/83542896
+---
+ src/backends/native/meta-onscreen-native.c | 22 ++++++++++++++++------
+ 1 file changed, 16 insertions(+), 6 deletions(-)
+
+diff --git a/src/backends/native/meta-onscreen-native.c b/src/backends/native/meta-onscreen-native.c
+index f2c2090..43b9549 100644
+--- a/src/backends/native/meta-onscreen-native.c
++++ b/src/backends/native/meta-onscreen-native.c
+@@ -2063,6 +2063,7 @@ init_secondary_gpu_state (MetaRendererNative  *renderer_native,
+   MetaOnscreenNative *onscreen_native = META_ONSCREEN_NATIVE (onscreen);
+   MetaGpu *gpu = meta_crtc_get_gpu (onscreen_native->crtc);
+   MetaRendererNativeGpuData *renderer_gpu_data;
++  g_autoptr (GError) local_error = NULL;
+ 
+   renderer_gpu_data = meta_renderer_native_get_gpu_data (renderer_native,
+                                                          META_GPU_KMS (gpu));
+@@ -2070,12 +2071,21 @@ init_secondary_gpu_state (MetaRendererNative  *renderer_native,
+   switch (renderer_gpu_data->secondary.copy_mode)
+     {
+     case META_SHARED_FRAMEBUFFER_COPY_MODE_SECONDARY_GPU:
+-      if (!init_secondary_gpu_state_gpu_copy_mode (renderer_native,
+-                                                   onscreen,
+-                                                   renderer_gpu_data,
+-                                                   error))
+-        return FALSE;
+-      break;
++      if (init_secondary_gpu_state_gpu_copy_mode (renderer_native,
++                                                  onscreen,
++                                                  renderer_gpu_data,
++                                                  &local_error))
++        return TRUE;
++
++      g_warning ("Secondary GPU initialization failed (%s). "
++                 "Falling back to GPU-less mode instead, so the "
++                 "the secondary monitor may be slow to update.",
++                 local_error->message);
++
++      renderer_gpu_data->secondary.copy_mode =
++        META_SHARED_FRAMEBUFFER_COPY_MODE_ZERO;
++
++      G_GNUC_FALLTHROUGH;
+     case META_SHARED_FRAMEBUFFER_COPY_MODE_ZERO:
+       /*
+        * Initialize also the primary copy mode, so that if zero-copy
