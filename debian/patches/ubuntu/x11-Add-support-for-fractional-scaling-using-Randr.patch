@@ -596,7 +596,7 @@ index 12bb840..2e78b77 100644
                     meta_monitor_manager_get_capabilities (MetaMonitorManager *manager);
  
 diff --git a/src/backends/meta-monitor-manager.c b/src/backends/meta-monitor-manager.c
-index 83fe107..109d165 100644
+index 67361ad..edb45e1 100644
 --- a/src/backends/meta-monitor-manager.c
 +++ b/src/backends/meta-monitor-manager.c
 @@ -124,6 +124,15 @@ static gboolean
