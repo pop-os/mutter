@@ -818,7 +818,7 @@ index df5862c..606fcad 100644
      return;
  
 diff --git a/src/backends/native/meta-kms-crtc.c b/src/backends/native/meta-kms-crtc.c
-index 685a373..45c7eb7 100644
+index ab83b5a..88651c5 100644
 --- a/src/backends/native/meta-kms-crtc.c
 +++ b/src/backends/native/meta-kms-crtc.c
 @@ -32,6 +32,12 @@ typedef struct _MetaKmsCrtcPropTable
@@ -843,7 +843,7 @@ index 685a373..45c7eb7 100644
  };
  
  G_DEFINE_TYPE (MetaKmsCrtc, meta_kms_crtc, G_TYPE_OBJECT)
-@@ -441,20 +449,91 @@ meta_kms_crtc_new (MetaKmsImplDevice  *impl_device,
+@@ -448,20 +456,91 @@ meta_kms_crtc_new (MetaKmsImplDevice  *impl_device,
    return crtc;
  }
  
@@ -935,7 +935,7 @@ index 685a373..45c7eb7 100644
  }
  
  static void
-@@ -462,5 +541,6 @@ meta_kms_crtc_class_init (MetaKmsCrtcClass *klass)
+@@ -469,5 +548,6 @@ meta_kms_crtc_class_init (MetaKmsCrtcClass *klass)
  {
    GObjectClass *object_class = G_OBJECT_CLASS (klass);
  
