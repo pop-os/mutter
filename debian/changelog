@@ -1,4 +1,4 @@
-mutter (42.0-3ubuntu1) UNRELEASED; urgency=medium
+mutter (42.0-3ubuntu1) jammy; urgency=medium
 
   [ Marco Trevisan (Treviño) ]
   * debian/patches: Cherry-pick various upstream commits for 42.1:
@@ -24,7 +24,7 @@ mutter (42.0-3ubuntu1) UNRELEASED; urgency=medium
     - ubuntu/wayland-data-device-Allow-any-drag-timestamp-as-drag-star.patch:
       + handle DnD for old (snapped) gtk apps that used wrong wayland serials
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 13 Apr 2022 02:09:33 +0200
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 13 Apr 2022 03:30:39 +0200
 
 mutter (42.0-3) unstable; urgency=medium
 
