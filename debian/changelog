@@ -1,3 +1,31 @@
+mutter (42.0-3ubuntu1) UNRELEASED; urgency=medium
+
+  [ Marco Trevisan (Treviño) ]
+  * debian/patches: Cherry-pick various upstream commits for 42.1:
+    + onscreen/native: Fall back if COPY_MODE_SECONDARY_GPU fails to init
+      (LP: #1964037, #1959888)
+  * debian/patches: Allow any drag timestamp as drag start serial (LP: #1964541)
+  * debian/patches: Move x11-fractional scaling under ubuntu namespace
+  * debian/patches: Account ClutterStage grabs on Wayland key focus sync
+    (LP: #1964442)
+  * debian/libmutter-10-0.symbols: Update including new internal symbols
+  * debian/patches: Avoid memory errors when comparing gamma values
+  * debian/patches: Fix privacy-screen and connectors updates with
+    triple-buffering (LP: #1966178)
+  * debian/patches: Ensure privacy screen settings are applied on startup
+    (LP: #1966178)
+
+  [ Jeremy Bicha ]
+  * Merge from Debian unstable. Remaining changes:
+    - debian/patches/x11-Add-support-for-fractional-scaling-using-Randr.patch:
+      + X11: Add support for fractional scaling using Randr
+    - Add triple-buffering patch
+    - debian/libmutter-10-0.symbols: Add symbols for triple buffering patch
+    - ubuntu/wayland-data-device-Allow-any-drag-timestamp-as-drag-star.patch:
+      + handle DnD for old (snapped) gtk apps that used wrong wayland serials
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Wed, 13 Apr 2022 02:09:33 +0200
+
 mutter (42.0-3) unstable; urgency=medium
 
   [ Marco Trevisan (Treviño) ]
