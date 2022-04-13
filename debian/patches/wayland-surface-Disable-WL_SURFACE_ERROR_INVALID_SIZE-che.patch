@@ -6,12 +6,10 @@ The check was introduces in ab17c98c947aa9a53eecf27d7242c18c5dccbbfc
 but turned out to trigger client crashes in common cases.
 Turn it into a warning for now until clients are fixed.
 
-Closes https://gitlab.gnome.org/GNOME/mutter/-/issues/2083
-Closes https://gitlab.gnome.org/GNOME/mutter/-/issues/2163
-
+Bug: https://gitlab.gnome.org/GNOME/mutter/-/issues/2083
+Bug: https://gitlab.gnome.org/GNOME/mutter/-/issues/2163
 Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2335>
-
-Origin: https://gitlab.gnome.org/GNOME/mutter/-/commit/f9857cb8
+Origin: upstream, 42.1, commit:f9857cb8bd7af20e819283917ae165fa40c19f07
 ---
  src/wayland/meta-wayland-surface.c | 16 ++++++++++------
  1 file changed, 10 insertions(+), 6 deletions(-)

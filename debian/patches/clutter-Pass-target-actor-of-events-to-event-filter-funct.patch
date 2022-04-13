@@ -6,9 +6,8 @@ We'll need the additional context of which actor the event will be
 emitted to in mutters event filter (see next commit), so pass that
 target actor to the event filters that are installed.
 
-Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2321>
-
-Origin: https://gitlab.gnome.org/GNOME/mutter/-/commit/2aad56b9
+Forwarded: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2321
+Origin: upstream, 42.1, commit:2aad56b949b86b4f1d0eab6d3d3b0d5491e8515b
 ---
  clutter/clutter/clutter-event-private.h |  3 ++-
  clutter/clutter/clutter-event.c         |  5 +++--

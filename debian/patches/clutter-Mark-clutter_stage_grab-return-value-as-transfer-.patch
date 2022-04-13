@@ -6,10 +6,9 @@ The caller is expected to unref the returned grab and all C code already
 does this, but grabs requested from js were resulting in the memory
 getting leaked due to it being annotated as transfer none.
 
-Fixes: https://gitlab.gnome.org/GNOME/mutter/-/issues/2189
-Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2345>
-
-Origin: https://gitlab.gnome.org/GNOME/mutter/-/commit/703d8a77
+Bug: https://gitlab.gnome.org/GNOME/mutter/-/issues/2189
+Forwarded: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2345
+Origin: upstream, 42.1, commit:703d8a77f15efeb2c5ad2dea420ef4f39c725d60
 ---
  clutter/clutter/clutter-stage.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)

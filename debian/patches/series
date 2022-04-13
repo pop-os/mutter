@@ -1,7 +1,12 @@
+Update-Hungarian-translation.patch
+Update-French-translation.patch
+Update-Italian-translation.patch
+Update-Serbian-translation.patch
 clutter-Mark-clutter_stage_grab-return-value-as-transfer-.patch
 clutter-Pass-target-actor-of-events-to-event-filter-funct.patch
 events-Use-the-event-target-actor-to-determine-window-for.patch
 wayland-surface-Disable-WL_SURFACE_ERROR_INVALID_SIZE-che.patch
+Update-Dutch-translation.patch
 clutter-stage-Repick-when-pointer-actor-goes-unmapped.patch
 theme-use-gtk_render_icon_suface-to-paint-button-icon.patch
 theme-load-icons-as-Gtk-does-with-fallback-and-RTL-suppor.patch

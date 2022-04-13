@@ -19,8 +19,7 @@ the target actor to them, so use this context now to determine whether
 we're on top of a window or not.
 
 Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2321>
-
-Origin: https://gitlab.gnome.org/GNOME/mutter/-/commit/0280b0aa
+Origin: upstream, 42.1, commit:0280b0aaa563db65bf79a3643f6a9e8e76bfe458
 ---
  src/core/events.c | 11 ++++-------
  1 file changed, 4 insertions(+), 7 deletions(-)
