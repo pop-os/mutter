@@ -33,12 +33,12 @@ Origin: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/1441
  src/backends/native/meta-kms-page-flip.c          |   3 +
  src/backends/native/meta-kms-update-private.h     |   6 +
  src/backends/native/meta-kms-update.c             |  29 +-
- src/backends/native/meta-kms.c                    | 104 ++++-
+ src/backends/native/meta-kms.c                    | 103 ++++-
  src/backends/native/meta-kms.h                    |  10 +
  src/backends/native/meta-onscreen-native.c        | 486 ++++++++++++++--------
  src/backends/native/meta-onscreen-native.h        |   2 +
  src/backends/native/meta-renderer-native.c        |  34 +-
- 24 files changed, 819 insertions(+), 361 deletions(-)
+ 24 files changed, 818 insertions(+), 361 deletions(-)
 
 diff --git a/clutter/clutter/clutter-frame-clock.c b/clutter/clutter/clutter-frame-clock.c
 index 6fa2b25..7a6444e 100644
@@ -1296,7 +1296,7 @@ index 53fc92e..1e43f3f 100644
                      (GDestroyNotify) meta_kms_result_listener_free);
    g_list_free_full (update->plane_assignments,
 diff --git a/src/backends/native/meta-kms.c b/src/backends/native/meta-kms.c
-index 052ec8a..a79b246 100644
+index 052ec8a..9acc17b 100644
 --- a/src/backends/native/meta-kms.c
 +++ b/src/backends/native/meta-kms.c
 @@ -23,6 +23,7 @@
@@ -1319,7 +1319,7 @@ index 052ec8a..a79b246 100644
  void
  meta_kms_discard_pending_updates (MetaKms *kms)
  {
-@@ -247,12 +253,106 @@ meta_kms_take_pending_update (MetaKms       *kms,
+@@ -247,12 +253,105 @@ meta_kms_take_pending_update (MetaKms       *kms,
    return NULL;
  }
  
@@ -1362,8 +1362,7 @@ index 052ec8a..a79b246 100644
 +    {
 +      update = l->data;
 +      if (meta_kms_update_get_device (update) == device &&
-+          (meta_kms_update_get_mode_sets (update) ||
-+           meta_kms_update_get_connector_updates (update)))
++          meta_kms_update_get_mode_sets (update))
 +        goto found;
 +    }
 +
@@ -1426,7 +1425,7 @@ index 052ec8a..a79b246 100644
    MetaKmsFeedback *feedback;
    GList *result_listeners;
    GList *l;
-@@ -260,10 +360,6 @@ meta_kms_post_pending_update_sync (MetaKms           *kms,
+@@ -260,10 +359,6 @@ meta_kms_post_pending_update_sync (MetaKms           *kms,
    COGL_TRACE_BEGIN_SCOPED (MetaKmsPostUpdateSync,
                             "KMS (post update)");
  
