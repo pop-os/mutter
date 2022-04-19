@@ -25,7 +25,7 @@ Bug-Ubuntu: https://launchpad.net/bugs/1964545
  3 files changed, 69 insertions(+), 57 deletions(-)
 
 diff --git a/clutter/clutter/clutter-actor.c b/clutter/clutter/clutter-actor.c
-index 59345a7..184ed69 100644
+index 23ef03d..efb7d22 100644
 --- a/clutter/clutter/clutter-actor.c
 +++ b/clutter/clutter/clutter-actor.c
 @@ -1695,6 +1695,13 @@ clutter_actor_real_unmap (ClutterActor *self)

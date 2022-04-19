@@ -1,0 +1,52 @@
+From: =?utf-8?q?Jonas_=C3=85dahl?= <jadahl@gmail.com>
+Date: Tue, 29 Mar 2022 19:03:08 +0200
+Subject: wayland/shm: Add support for ABGR8888 and XBGR8888 formats
+
+This avoids shuffling bits for clients drawing in these formats.
+
+Bug: https://gitlab.gnome.org/GNOME/mutter/-/issues/2200
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2352>
+Origin: upstream, 42.1, commit:47375897a5be9694590622b145485324ed0b0554
+---
+ src/wayland/meta-wayland-buffer.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/src/wayland/meta-wayland-buffer.c b/src/wayland/meta-wayland-buffer.c
+index 8b354e7..e6d4df9 100644
+--- a/src/wayland/meta-wayland-buffer.c
++++ b/src/wayland/meta-wayland-buffer.c
+@@ -207,6 +207,12 @@ shm_format_to_cogl_pixel_format (enum wl_shm_format     shm_format,
+       format = COGL_PIXEL_FORMAT_ARGB_8888;
+       components = COGL_TEXTURE_COMPONENTS_RGB;
+       break;
++    case WL_SHM_FORMAT_XBGR8888:
++      components = COGL_TEXTURE_COMPONENTS_RGB;
++      G_GNUC_FALLTHROUGH;
++    case WL_SHM_FORMAT_ABGR8888:
++      format = COGL_PIXEL_FORMAT_ABGR_8888_PRE;
++      break;
+ #elif G_BYTE_ORDER == G_LITTLE_ENDIAN
+     case WL_SHM_FORMAT_RGB565:
+       format = COGL_PIXEL_FORMAT_RGB_565;
+@@ -219,6 +225,12 @@ shm_format_to_cogl_pixel_format (enum wl_shm_format     shm_format,
+       format = COGL_PIXEL_FORMAT_BGRA_8888;
+       components = COGL_TEXTURE_COMPONENTS_RGB;
+       break;
++    case WL_SHM_FORMAT_XBGR8888:
++      components = COGL_TEXTURE_COMPONENTS_RGB;
++      G_GNUC_FALLTHROUGH;
++    case WL_SHM_FORMAT_ABGR8888:
++      format = COGL_PIXEL_FORMAT_RGBA_8888_PRE;
++      break;
+     case WL_SHM_FORMAT_XRGB2101010:
+       components = COGL_TEXTURE_COMPONENTS_RGB;
+       G_GNUC_FALLTHROUGH;
+@@ -813,6 +825,8 @@ meta_wayland_init_shm (MetaWaylandCompositor *compositor)
+     clutter_backend_get_cogl_context (clutter_backend);
+ 
+   static const enum wl_shm_format shm_formats[] = {
++    WL_SHM_FORMAT_ABGR8888,
++    WL_SHM_FORMAT_XBGR8888,
+ #if G_BYTE_ORDER == G_LITTLE_ENDIAN
+     WL_SHM_FORMAT_RGB565,
+     WL_SHM_FORMAT_ARGB2101010,

@@ -1,0 +1,38 @@
+From: =?utf-8?q?Jonas_=C3=85dahl?= <jadahl@gmail.com>
+Date: Wed, 9 Feb 2022 10:35:53 +0100
+Subject: tests/build: Set up test environment using a dict()
+
+This will allow us to reuse the keys and values more easily, as later
+commits will rely on being able to iterate over the keys and values to
+construct explict env strings for passing into special test cases.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2152>
+Origin: upstream, 42.1, commit:189068d465b635be897429a28cb517ddda047619
+---
+ src/tests/meson.build | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/src/tests/meson.build b/src/tests/meson.build
+index a197032..2cb05d9 100644
+--- a/src/tests/meson.build
++++ b/src/tests/meson.build
+@@ -90,9 +90,16 @@ if have_installed_tests
+ endif
+ 
+ test_env = environment()
+-test_env.set('G_TEST_SRCDIR', join_paths(mutter_srcdir, 'src'))
+-test_env.set('G_TEST_BUILDDIR', mutter_builddir)
+-test_env.set('MUTTER_TEST_PLUGIN_PATH', '@0@'.format(default_plugin.full_path()))
++
++test_env_variables = {
++  'G_TEST_SRCDIR': join_paths(mutter_srcdir, 'src'),
++  'G_TEST_BUILDDIR': mutter_builddir,
++  'MUTTER_TEST_PLUGIN_PATH': '@0@'.format(default_plugin.full_path()),
++}
++
++foreach name, value: test_env_variables
++  test_env.set(name, value)
++endforeach
+ 
+ test_client = executable('mutter-test-client',
+   sources: ['test-client.c'],

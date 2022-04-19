@@ -1,0 +1,62 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Wed, 30 Mar 2022 20:59:37 +0200
+Subject: clutter: Refactor code marking actors dirty for paint()
+
+Simplify the function arguments (the origin is just the actor that
+the function is originally called from), and make it also handle
+marking as dirty the actor that got the redraw queued up explicitly.
+
+This makes it a single place where priv->is_dirty is being enabled.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2353>
+Origin: upstream, 42.1, commit:ce7f606d48f1a422465fd597c33047727993988a
+---
+ clutter/clutter/clutter-actor.c | 16 +++++++---------
+ 1 file changed, 7 insertions(+), 9 deletions(-)
+
+diff --git a/clutter/clutter/clutter-actor.c b/clutter/clutter/clutter-actor.c
+index 59345a7..2e4b30e 100644
+--- a/clutter/clutter/clutter-actor.c
++++ b/clutter/clutter/clutter-actor.c
+@@ -2646,9 +2646,10 @@ _clutter_actor_queue_redraw_on_clones (ClutterActor *self)
+ }
+ 
+ static void
+-_clutter_actor_propagate_queue_redraw (ClutterActor *self,
+-                                       ClutterActor *origin)
++_clutter_actor_propagate_queue_redraw (ClutterActor *self)
+ {
++  ClutterActor *origin = self;
++
+   while (self)
+     {
+       /* no point in queuing a redraw on a destroyed actor */
+@@ -2657,13 +2658,12 @@ _clutter_actor_propagate_queue_redraw (ClutterActor *self,
+ 
+       _clutter_actor_queue_redraw_on_clones (self);
+ 
++      self->priv->is_dirty = TRUE;
++
+       /* If the queue redraw is coming from a child then the actor has
+          become dirty and any queued effect is no longer valid */
+       if (self != origin)
+-        {
+-          self->priv->is_dirty = TRUE;
+-          self->priv->effect_to_redraw = NULL;
+-        }
++        self->priv->effect_to_redraw = NULL;
+ 
+       /* If the actor isn't visible, we still had to emit the signal
+        * to allow for a ClutterClone, but the appearance of the parent
+@@ -8105,10 +8105,8 @@ _clutter_actor_queue_redraw_full (ClutterActor             *self,
+       priv->effect_to_redraw = NULL;
+     }
+ 
+-  priv->is_dirty = TRUE;
+-
+   if (!priv->propagated_one_redraw)
+-    _clutter_actor_propagate_queue_redraw (self, self);
++    _clutter_actor_propagate_queue_redraw (self);
+ }
+ 
+ /**

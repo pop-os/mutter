@@ -1,0 +1,115 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Tue, 8 Mar 2022 17:04:40 +0100
+Subject: clutter: Add ClutterInputDevice::capabilities property
+
+This is construct-only, and assigned by the backend.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2331>
+Origin: upstream, 42.1, commit:15d4402d08748c85345d28b5594ac660467cbf64
+---
+ clutter/clutter/clutter-input-device.c | 42 ++++++++++++++++++++++++++++++++++
+ clutter/clutter/clutter-input-device.h |  3 +++
+ 2 files changed, 45 insertions(+)
+
+diff --git a/clutter/clutter/clutter-input-device.c b/clutter/clutter/clutter-input-device.c
+index a37886e..c3fed10 100644
+--- a/clutter/clutter/clutter-input-device.c
++++ b/clutter/clutter/clutter-input-device.c
+@@ -56,6 +56,7 @@ enum
+   PROP_NAME,
+ 
+   PROP_DEVICE_TYPE,
++  PROP_CAPABILITIES,
+   PROP_SEAT,
+   PROP_DEVICE_MODE,
+ 
+@@ -80,6 +81,7 @@ typedef struct _ClutterInputDevicePrivate ClutterInputDevicePrivate;
+ struct _ClutterInputDevicePrivate
+ {
+   ClutterInputDeviceType device_type;
++  ClutterInputCapabilities capabilities;
+   ClutterInputMode device_mode;
+ 
+   char *device_name;
+@@ -136,6 +138,10 @@ clutter_input_device_set_property (GObject      *gobject,
+       priv->device_type = g_value_get_enum (value);
+       break;
+ 
++    case PROP_CAPABILITIES:
++      priv->capabilities = g_value_get_flags (value);
++      break;
++
+     case PROP_SEAT:
+       priv->seat = g_value_get_object (value);
+       break;
+@@ -206,6 +212,10 @@ clutter_input_device_get_property (GObject    *gobject,
+       g_value_set_enum (value, priv->device_type);
+       break;
+ 
++    case PROP_CAPABILITIES:
++      g_value_set_flags (value, priv->capabilities);
++      break;
++
+     case PROP_SEAT:
+       g_value_set_object (value, priv->seat);
+       break;
+@@ -296,6 +306,19 @@ clutter_input_device_class_init (ClutterInputDeviceClass *klass)
+                        CLUTTER_PARAM_READWRITE |
+                        G_PARAM_CONSTRUCT_ONLY);
+ 
++  /**
++   * ClutterInputDevice:capabilities:
++   *
++   * The capabilities of the device
++   */
++  obj_props[PROP_CAPABILITIES] =
++    g_param_spec_flags ("capabilities",
++                        P_("Capabilities"),
++                        P_("The capabilities of the device"),
++                        CLUTTER_TYPE_INPUT_CAPABILITIES, 0,
++                        CLUTTER_PARAM_READWRITE |
++                        G_PARAM_CONSTRUCT_ONLY);
++
+   /**
+    * ClutterInputDevice:seat:
+    *
+@@ -451,6 +474,25 @@ clutter_input_device_get_device_type (ClutterInputDevice *device)
+   return priv->device_type;
+ }
+ 
++/**
++ * clutter_input_device_get_capabilities:
++ * @device: a #ClutterInputDevice
++ *
++ * Retrieves the capabilities of @device
++ *
++ * Return value: the capabilities of the device
++ */
++ClutterInputCapabilities
++clutter_input_device_get_capabilities (ClutterInputDevice *device)
++{
++  ClutterInputDevicePrivate *priv =
++    clutter_input_device_get_instance_private (device);
++
++  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), 0);
++
++  return priv->capabilities;
++}
++
+ /**
+  * clutter_input_device_get_device_name:
+  * @device: a #ClutterInputDevice
+diff --git a/clutter/clutter/clutter-input-device.h b/clutter/clutter/clutter-input-device.h
+index 1a82ac9..d6fd62a 100644
+--- a/clutter/clutter/clutter-input-device.h
++++ b/clutter/clutter/clutter-input-device.h
+@@ -121,6 +121,9 @@ int clutter_input_device_get_pad_feature_group (ClutterInputDevice           *de
+                                                 ClutterInputDevicePadFeature  feature,
+                                                 int                           n_feature);
+ 
++CLUTTER_EXPORT
++ClutterInputCapabilities clutter_input_device_get_capabilities (ClutterInputDevice *device);
++
+ G_END_DECLS
+ 
+ #endif /* __CLUTTER_INPUT_DEVICE_H__ */

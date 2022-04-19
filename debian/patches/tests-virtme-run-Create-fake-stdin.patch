@@ -1,0 +1,30 @@
+From: =?utf-8?q?Bart=C5=82omiej_Piotrowski?= <bpiotrowski@gnome.org>
+Date: Wed, 9 Feb 2022 10:50:43 +0100
+Subject: tests/virtme-run: Create fake stdin
+
+When running in CI, the stdin may be /dev/null, which causes issues
+for qemu. Avoid this issue by creating our own fake stdin.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2152>
+Origin: upstream, 42.1, commit:4ce233b89ef9986f8c164ae31b88e2b2e0e5e3ba
+---
+ src/tests/kvm/virtme-run.sh | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/tests/kvm/virtme-run.sh b/src/tests/kvm/virtme-run.sh
+index ec05f91..3b9fda63 100755
+--- a/src/tests/kvm/virtme-run.sh
++++ b/src/tests/kvm/virtme-run.sh
+@@ -20,6 +20,12 @@ XDG_DATA_DIRS=$XDG_DATA_DIRS \
+ $VM_ENV \
+ "
+ 
++if [[ "$(stat -c '%t:%T' -L /proc/$$/fd/0)" == "0:0" ]]; then
++  mkfifo $XDG_RUNTIME_DIR/fake-stdin.$$
++  exec 0<> $XDG_RUNTIME_DIR/fake-stdin.$$
++  rm -f $XDG_RUNTIME_DIR/fake-stdin.$$
++fi
++
+ virtme-run \
+   --memory=256M \
+   --rw \

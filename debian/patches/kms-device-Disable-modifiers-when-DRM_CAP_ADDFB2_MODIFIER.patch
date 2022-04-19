@@ -1,0 +1,25 @@
+From: Daniel van Vugt <daniel.van.vugt@canonical.com>
+Date: Tue, 5 Apr 2022 17:06:21 +0800
+Subject: kms/device: Disable modifiers when !DRM_CAP_ADDFB2_MODIFIERS
+
+Bug: https://gitlab.gnome.org/GNOME/mutter/-/issues/2210
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2359>
+Origin: upstream, 42.1, commit:dd94c448e94b1033b90749d77c5dc587c3b8f9f4
+---
+ src/backends/native/meta-kms-device.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/backends/native/meta-kms-device.c b/src/backends/native/meta-kms-device.c
+index bef1e20..7c84f14 100644
+--- a/src/backends/native/meta-kms-device.c
++++ b/src/backends/native/meta-kms-device.c
+@@ -490,6 +490,9 @@ meta_kms_device_new (MetaKms            *kms,
+   free (device->path);
+   device->path = data.out_path;
+ 
++  if (!device->caps.addfb2_modifiers)
++    device->flags |= META_KMS_DEVICE_FLAG_DISABLE_MODIFIERS;
++
+   return device;
+ }
+ 

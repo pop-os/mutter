@@ -1,0 +1,32 @@
+From: Daniel van Vugt <daniel.van.vugt@canonical.com>
+Date: Wed, 13 Apr 2022 16:04:22 +0800
+Subject: kms/crtc: Fix typo s/proporties/properties/
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2360>
+Origin: upstream, 42.1, commit:e3cba9f2d8e8331001326f8501b56f7d11c3a881
+---
+ src/backends/native/meta-kms-crtc.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/backends/native/meta-kms-crtc.c b/src/backends/native/meta-kms-crtc.c
+index 685a373..6706e16 100644
+--- a/src/backends/native/meta-kms-crtc.c
++++ b/src/backends/native/meta-kms-crtc.c
+@@ -362,7 +362,7 @@ parse_active (MetaKmsImplDevice  *impl_device,
+ }
+ 
+ static void
+-init_proporties (MetaKmsCrtc       *crtc,
++init_properties (MetaKmsCrtc       *crtc,
+                  MetaKmsImplDevice *impl_device,
+                  drmModeCrtc       *drm_crtc)
+ {
+@@ -432,7 +432,7 @@ meta_kms_crtc_new (MetaKmsImplDevice  *impl_device,
+   crtc->id = drm_crtc->crtc_id;
+   crtc->idx = idx;
+ 
+-  init_proporties (crtc, impl_device, drm_crtc);
++  init_properties (crtc, impl_device, drm_crtc);
+ 
+   meta_kms_crtc_read_state (crtc, impl_device, drm_crtc, drm_props);
+ 

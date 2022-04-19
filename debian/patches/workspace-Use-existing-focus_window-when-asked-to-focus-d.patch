@@ -1,0 +1,56 @@
+From: =?utf-8?q?Jonas_Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Mon, 7 Mar 2022 16:33:16 +0100
+Subject: workspace: Use existing focus_window when asked to focus default
+ window
+
+We use meta_workpace_focus_default_window() to sync the input focus back
+to a window after it was on shell UI, this is not really necessary on
+Wayland, but it is on X11. What this function does internally is ask
+MetaWindowStack about the topmost window and focus+raise that window.
+
+In gnome-shell we set the input focus to the default window every time
+the key-focus changes to NULL (see shell-global.c ->
+sync_stage_window_focus()). Now when closing the alt-tab switcher and
+activating a window while there's an always-on-top window on the
+workspace, meta_workspace_focus_default_window() will focus that
+always-on-top window right after closing the alt-tab switcher, making it
+impossible to focus another window using alt-tab.
+
+To fix this, make meta_workspace_focus_default_window() check if there's
+an existing focus_window first, if there is, use that, and if there
+isn't, resort to just focusing the topmost one.
+
+Fixes: https://gitlab.gnome.org/GNOME/gnome-shell/-/issues/5162
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2328>
+Origin: upstream, 42.1, commit:d0de671c1d23a4869f35bd7b832871bacdfeb212
+---
+ src/core/workspace.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/src/core/workspace.c b/src/core/workspace.c
+index 3bd517f..357e37d 100644
+--- a/src/core/workspace.c
++++ b/src/core/workspace.c
+@@ -1332,10 +1332,22 @@ meta_workspace_focus_default_window (MetaWorkspace *workspace,
+                                      MetaWindow    *not_this_one,
+                                      guint32        timestamp)
+ {
++  MetaWindow *current_focus;
++
+   if (timestamp == META_CURRENT_TIME)
+     meta_warning ("META_CURRENT_TIME used to choose focus window; "
+                   "focus window may not be correct.");
+ 
++  current_focus = workspace->display->focus_window;
++
++  if (current_focus &&
++      current_focus != not_this_one &&
++      meta_window_located_on_workspace (current_focus, workspace))
++    {
++      meta_window_focus (current_focus, timestamp);
++      return;
++    }
++
+   if (meta_prefs_get_focus_mode () == G_DESKTOP_FOCUS_MODE_CLICK ||
+       !workspace->display->mouse_mode)
+     focus_ancestor_or_top_window (workspace, not_this_one, timestamp);

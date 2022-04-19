@@ -1,0 +1,39 @@
+From: Daniel van Vugt <daniel.van.vugt@canonical.com>
+Date: Tue, 12 Apr 2022 18:37:29 +0800
+Subject: crtc/kms: Don't add gamma to the update if unsupported by the CRTC
+
+Bug: https://gitlab.gnome.org/GNOME/mutter/-/issues/2197
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2360>
+Origin: upstream, 42.1, commit:be9deeba09712df0a8a32769380f3f8618825cee
+---
+ src/backends/native/meta-crtc-kms.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/backends/native/meta-crtc-kms.c b/src/backends/native/meta-crtc-kms.c
+index 584a780..ad72dba 100644
+--- a/src/backends/native/meta-crtc-kms.c
++++ b/src/backends/native/meta-crtc-kms.c
+@@ -213,10 +213,14 @@ meta_crtc_kms_maybe_set_gamma (MetaCrtcKms   *crtc_kms,
+   MetaKms *kms = meta_kms_device_get_kms (kms_device);
+   MetaKmsUpdate *kms_update;
+   MetaKmsCrtcGamma *gamma;
++  MetaKmsCrtc *kms_crtc = meta_crtc_kms_get_kms_crtc (crtc_kms);
+ 
+   if (crtc_kms->is_gamma_valid)
+     return;
+ 
++  if (!meta_kms_crtc_has_gamma (kms_crtc))
++    return;
++
+   gamma = meta_monitor_manager_native_get_cached_crtc_gamma (monitor_manager_native,
+                                                              crtc_kms);
+   if (!gamma)
+@@ -224,7 +228,7 @@ meta_crtc_kms_maybe_set_gamma (MetaCrtcKms   *crtc_kms,
+ 
+   kms_update = meta_kms_ensure_pending_update (kms, kms_device);
+   meta_kms_update_set_crtc_gamma (kms_update,
+-                                  meta_crtc_kms_get_kms_crtc (crtc_kms),
++                                  kms_crtc,
+                                   gamma->size,
+                                   gamma->red,
+                                   gamma->green,

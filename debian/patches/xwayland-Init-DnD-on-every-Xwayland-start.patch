@@ -1,0 +1,56 @@
+From: Olivier Fourdan <ofourdan@redhat.com>
+Date: Tue, 15 Mar 2022 14:33:22 +0100
+Subject: xwayland: Init DnD on every Xwayland start
+
+Currently, meta_xwayland_shutdown_dnd() is called from the handler
+on_x11_display_closing() triggered from the signal "x11-display-closing"
+hooked up from meta_xwayland_init_display().
+
+Once the signal has been triggered, on_x11_display_closing() removes the
+signal handler, disconnecting from the signal.
+
+As meta_xwayland_init_display() is called from meta_display_new() which
+is issued only once, the signal handler is not restored again.
+
+As a result, meta_xwayland_shutdown_dnd() is not called anymore after
+Xwayland has been restarted, but meta_xwayland_init_dnd() will check and
+assert that the manager's DND object is NULL.
+
+Basically, restarting Xwayland more that once will trigger an assertion
+failure in mutter. That's even more of a problem with autoclose-xwayland
+where Xwayland is expected to terminate when there is no meaningful X11
+client remaining, which can happen multiple times during the lifetime
+of a user session.
+
+To make sure that meta_xwayland_init_display() is called for every new
+instance of Xwayland, simply keep the signal hooked in place by not
+disconnecting it when triggered.
+
+This reverts commit 9a10b8ff94cc9506a4ecd8ade7489fa9a5af406a.
+
+Even though, originally, this issue was first introduced with commit
+b4fe1fdd95d52e8625c66ded1ec7162371dcf32b ("xwayland: Make setup/teardown
+a bit more symmetrical") which didn't actually kept 'x11-display-setup'
+and 'x11-display-closing' connected.
+
+Bug: https://gitlab.gnome.org/GNOME/mutter/-/issues/2168
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2339>
+Origin: upstream, 42.1, commit:de8927e075b43419e0ab7246e1c305af8d6532b2
+---
+ src/wayland/meta-xwayland.c | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/src/wayland/meta-xwayland.c b/src/wayland/meta-xwayland.c
+index 33058fc..dc96b60 100644
+--- a/src/wayland/meta-xwayland.c
++++ b/src/wayland/meta-xwayland.c
+@@ -1067,9 +1067,6 @@ on_x11_display_closing (MetaDisplay         *display,
+   g_signal_handlers_disconnect_by_func (meta_monitor_manager_get (),
+                                         monitors_changed_cb,
+                                         NULL);
+-  g_signal_handlers_disconnect_by_func (display,
+-                                        on_x11_display_closing,
+-                                        manager);
+ }
+ 
+ static void
