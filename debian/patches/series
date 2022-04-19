@@ -52,6 +52,7 @@ kms-crtc-Add-debug-logging-of-supported-vs-unsupported-pr.patch
 kms-crtc-Add-function-meta_kms_crtc_has_gamma.patch
 crtc-kms-Don-t-add-gamma-to-the-update-if-unsupported-by-.patch
 clutter-stage-Repick-when-pointer-actor-goes-unmapped.patch
+core-Account-ClutterStage-grabs-on-Wayland-key-focus-sync.patch
 theme-use-gtk_render_icon_suface-to-paint-button-icon.patch
 theme-load-icons-as-Gtk-does-with-fallback-and-RTL-suppor.patch
 meson-add-back-default_driver-option.patch

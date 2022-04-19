@@ -1,0 +1,36 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Wed, 6 Apr 2022 16:07:07 +0200
+Subject: core: Account ClutterStage grabs on Wayland key focus
+ synchronization
+
+When switching between the existence and not of a stage ClutterGrab, we
+would correctly attempt to synchronize key focus from the perspective of
+the Wayland clients.
+
+But this synchronization should do its own checks about existing stage
+grabs before determining a client window has key focus or not.
+
+Add that check, so that grabs correctly unfocus the keyboard in Wayland
+clients, in addition to pointers and touch.
+
+Bug: https://gitlab.gnome.org/GNOME/mutter/-/issues/2194
+Bug-Debian: https://bugs.debian.org/1008998
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/gnome-shell/+bug/1964442
+Forwarded: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2366
+---
+ src/core/display.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/core/display.c b/src/core/display.c
+index 5f99578..a1c5c2d 100644
+--- a/src/core/display.c
++++ b/src/core/display.c
+@@ -1431,6 +1431,8 @@ meta_display_sync_wayland_input_focus (MetaDisplay *display)
+     focus_window = NULL;
+   else if (is_no_focus_xwindow)
+     focus_window = NULL;
++  else if (clutter_stage_get_grab_actor (CLUTTER_STAGE (stage)))
++    focus_window = NULL;
+   else if (display->focus_window && display->focus_window->surface)
+     focus_window = display->focus_window;
+   else
