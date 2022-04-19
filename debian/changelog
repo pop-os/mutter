@@ -1,3 +1,18 @@
+mutter (42.0-4) unstable; urgency=medium
+
+  * Team upload
+  * d/patches: Update to upstream commit 42.0-55-gbe9deeba0
+    - Update translations
+    - Update upstream status of cherry-picked patches
+    - Add various bug fixes including LP: #1959888, LP: #1964037
+  * d/p/core-Account-ClutterStage-grabs-on-Wayland-key-focus-sync.patch:
+    Add patch proposed upstream to fix grabs vs. system-modal prompts.
+    This is particularly annoying when using pkexec, or when using gcr as
+    a passphrase prompt for PGP, ssh and/or sudo.
+    (Closes: #1008998, LP: #1964442)
+
+ -- Simon McVittie <smcv@debian.org>  Tue, 19 Apr 2022 11:54:56 +0100
+
 mutter (42.0-3) unstable; urgency=medium
 
   [ Marco Trevisan (Treviño) ]
