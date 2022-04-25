@@ -842,6 +842,7 @@ libmutter-clutter-10.so.0 libmutter-10-0 #MINVER#
  _clutter_event_set_pointer_emulated@Base 3.33.92
  _clutter_event_set_state_full@Base 3.33.92
  _clutter_input_pointer_a11y_add_device@Base 3.33.92
+ _clutter_input_pointer_a11y_maybe_handle_event@Base 42.0-5~
  _clutter_input_pointer_a11y_on_button_event@Base 3.33.92
  _clutter_input_pointer_a11y_on_motion_event@Base 3.33.92
  _clutter_input_pointer_a11y_remove_device@Base 3.33.92
