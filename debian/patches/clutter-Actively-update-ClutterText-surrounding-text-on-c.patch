@@ -1,0 +1,47 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Fri, 22 Apr 2022 18:00:24 +0200
+Subject: clutter: Actively update ClutterText surrounding text on changes
+
+Right now we have a bit of a mixed bag between an active model where
+input foci set the surrounding text without being asked for (e.g.
+wayland's text_input), and a passive model where the IM engines ask
+for content.
+
+Make ClutterText take the same side than text_input, so that dealing
+with those is at least consistent.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2384>
+Origin: upstream, 42.1, commit:a9a890164a7bc8af94037e589dd72ed63a123b29
+---
+ clutter/clutter/clutter-text.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/clutter/clutter/clutter-text.c b/clutter/clutter/clutter-text.c
+index 5ca5fa4..aa06c37 100644
+--- a/clutter/clutter/clutter-text.c
++++ b/clutter/clutter/clutter-text.c
+@@ -375,6 +375,8 @@ clutter_text_input_focus_delete_surrounding (ClutterInputFocus *focus,
+     }
+   if (clutter_text_get_editable (clutter_text))
+     clutter_text_delete_text (clutter_text, start, start + len);
++
++  clutter_text_input_focus_request_surrounding (focus);
+ }
+ 
+ static void
+@@ -389,6 +391,7 @@ clutter_text_input_focus_commit_text (ClutterInputFocus *focus,
+       clutter_text_insert_text (clutter_text, text,
+                                 clutter_text_get_cursor_position (clutter_text));
+       clutter_text_set_preedit_string (clutter_text, NULL, NULL, 0);
++      clutter_text_input_focus_request_surrounding (focus);
+     }
+ }
+ 
+@@ -1336,6 +1339,7 @@ update_cursor_location (ClutterText *self)
+   clutter_actor_get_transformed_position (CLUTTER_ACTOR (self), &x, &y);
+   graphene_rect_offset (&rect, x, y);
+   clutter_input_focus_set_cursor_location (priv->input_focus, &rect);
++  clutter_text_input_focus_request_surrounding (priv->input_focus);
+ }
+ 
+ static inline void

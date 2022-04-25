@@ -1,0 +1,100 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Fri, 22 Apr 2022 18:11:36 +0200
+Subject: clutter: Shuffle handling of IM reset on button presses
+
+Unfortunately we cannot do this generically since the target of the
+button/touch press does matter, e.g. tapping on the OSK, or clicking
+the IBus candidates window. These situations should not trigger a
+reset.
+
+So be more selective about the situations where button/touch presses
+trigger an IM reset, in the case of ClutterText these are still clicks
+inside the actor, for Wayland's text-input it is when clicking the
+surface that has text_input focus.
+
+For all other situations where clicking anywhere else might make
+sense to trigger an IM reset are covered by the focus changing paths,
+that also ensure a reset before changing focus between surfaces/actors.
+
+Bug: https://gitlab.gnome.org/GNOME/mutter/-/issues/1961
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2384>
+Origin: upstream, 42.1, commit:cd0c47a25a6d3e4d8205b8d27aaf369a5ad15703
+---
+ clutter/clutter/clutter-input-focus.c |  8 --------
+ clutter/clutter/clutter-text.c        |  1 +
+ src/wayland/meta-wayland-text-input.c | 24 +++++++++++++++++++++++-
+ 3 files changed, 24 insertions(+), 9 deletions(-)
+
+diff --git a/clutter/clutter/clutter-input-focus.c b/clutter/clutter/clutter-input-focus.c
+index 117bab7..bf4f15a 100644
+--- a/clutter/clutter/clutter-input-focus.c
++++ b/clutter/clutter/clutter-input-focus.c
+@@ -210,14 +210,6 @@ clutter_input_focus_filter_event (ClutterInputFocus  *focus,
+                                             event->im.offset);
+       return TRUE;
+     }
+-  else if (event->type == CLUTTER_TOUCH_BEGIN ||
+-           (event->type == CLUTTER_BUTTON_PRESS &&
+-            event->button.button == CLUTTER_BUTTON_PRIMARY))
+-    {
+-      clutter_input_focus_reset (focus);
+-      /* pointing events are not consumed by IMs */
+-      return FALSE;
+-    }
+ 
+   return FALSE;
+ }
+diff --git a/clutter/clutter/clutter-text.c b/clutter/clutter/clutter-text.c
+index 3fab98b..a437afb 100644
+--- a/clutter/clutter/clutter-text.c
++++ b/clutter/clutter/clutter-text.c
+@@ -2232,6 +2232,7 @@ clutter_text_press (ClutterActor *actor,
+     return CLUTTER_EVENT_PROPAGATE;
+ 
+   clutter_actor_grab_key_focus (actor);
++  clutter_input_focus_reset (priv->input_focus);
+   clutter_input_focus_set_input_panel_state (priv->input_focus,
+                                              CLUTTER_INPUT_PANEL_STATE_TOGGLE);
+ 
+diff --git a/src/wayland/meta-wayland-text-input.c b/src/wayland/meta-wayland-text-input.c
+index f1fdc70..17e0b68 100644
+--- a/src/wayland/meta-wayland-text-input.c
++++ b/src/wayland/meta-wayland-text-input.c
+@@ -25,6 +25,7 @@
+ 
+ #include <wayland-server.h>
+ 
++#include "compositor/meta-surface-actor-wayland.h"
+ #include "wayland/meta-wayland-private.h"
+ #include "wayland/meta-wayland-seat.h"
+ #include "wayland/meta-wayland-versions.h"
+@@ -788,7 +789,28 @@ meta_wayland_text_input_handle_event (MetaWaylandTextInput *text_input,
+ 
+   if (event->type == CLUTTER_BUTTON_PRESS ||
+       event->type == CLUTTER_TOUCH_BEGIN)
+-    meta_wayland_text_input_focus_flush_done (text_input->input_focus);
++    {
++      MetaWaylandSurface *surface = NULL;
++      ClutterActor *actor;
++
++      actor = clutter_stage_get_device_actor (clutter_event_get_stage (event),
++                                              clutter_event_get_device (event),
++                                              clutter_event_get_event_sequence (event));
++
++      if (META_IS_SURFACE_ACTOR_WAYLAND (actor))
++        {
++          MetaSurfaceActorWayland *actor_wayland =
++            META_SURFACE_ACTOR_WAYLAND (actor);
++
++          surface = meta_surface_actor_wayland_get_surface (actor_wayland);
++
++          if (surface == text_input->surface)
++            {
++              clutter_input_focus_reset (text_input->input_focus);
++              meta_wayland_text_input_focus_flush_done (text_input->input_focus);
++            }
++        }
++    }
+ 
+   return retval;
+ }

@@ -16,7 +16,8 @@ clients, in addition to pointers and touch.
 Bug: https://gitlab.gnome.org/GNOME/mutter/-/issues/2194
 Bug-Debian: https://bugs.debian.org/1008998
 Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/gnome-shell/+bug/1964442
-Forwarded: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2366
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2366>
+Origin: upstream, 42.1, commit:91ae72acd
 ---
  src/core/display.c | 2 ++
  1 file changed, 2 insertions(+)

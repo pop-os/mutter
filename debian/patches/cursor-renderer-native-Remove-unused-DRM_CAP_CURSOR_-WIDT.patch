@@ -1,0 +1,28 @@
+From: Daniel van Vugt <daniel.van.vugt@canonical.com>
+Date: Tue, 5 Apr 2022 17:57:34 +0800
+Subject: cursor-renderer/native: Remove unused DRM_CAP_CURSOR_{WIDTH,HEIGHT}
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2361>
+Origin: upstream, 42.1, commit:af7e116b9
+---
+ src/backends/native/meta-cursor-renderer-native.c | 7 -------
+ 1 file changed, 7 deletions(-)
+
+diff --git a/src/backends/native/meta-cursor-renderer-native.c b/src/backends/native/meta-cursor-renderer-native.c
+index df5862c..c969743 100644
+--- a/src/backends/native/meta-cursor-renderer-native.c
++++ b/src/backends/native/meta-cursor-renderer-native.c
+@@ -57,13 +57,6 @@
+ #include "wayland/meta-wayland-buffer.h"
+ #endif
+ 
+-#ifndef DRM_CAP_CURSOR_WIDTH
+-#define DRM_CAP_CURSOR_WIDTH 0x8
+-#endif
+-#ifndef DRM_CAP_CURSOR_HEIGHT
+-#define DRM_CAP_CURSOR_HEIGHT 0x9
+-#endif
+-
+ /* When animating a cursor, we usually call drmModeSetCursor2 once per frame.
+  * Though, testing shows that we need to triple buffer the cursor buffer in
+  * order to avoid glitches when animating the cursor, at least when running on

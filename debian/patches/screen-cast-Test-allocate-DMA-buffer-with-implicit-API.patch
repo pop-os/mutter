@@ -1,0 +1,63 @@
+From: =?utf-8?q?Jonas_=C3=85dahl?= <jadahl@gmail.com>
+Date: Fri, 22 Apr 2022 11:23:07 +0200
+Subject: screen-cast: Test allocate DMA buffer with implicit API
+
+DMA buffers might be allocatable, but it doesn't mean the driver doesn't
+fail when we try to allocate a buffer with an implicit modifier. Using
+the proprietary NVIDIA driver for example, it will fail. Lets catch this
+up front and avoid advertising DMA buffer support when we know it won't
+work.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2383>
+Origin: upstream, 42.1, commit:2b4a24132bc5e5d0ed8dd097ef155d083e302187
+---
+ cogl/cogl/cogl-dma-buf-handle.h           |  2 ++
+ src/backends/native/meta-backend-native.c | 17 +++++++++++++++++
+ 2 files changed, 19 insertions(+)
+
+diff --git a/cogl/cogl/cogl-dma-buf-handle.h b/cogl/cogl/cogl-dma-buf-handle.h
+index c505ff7..4081566 100644
+--- a/cogl/cogl/cogl-dma-buf-handle.h
++++ b/cogl/cogl/cogl-dma-buf-handle.h
+@@ -141,4 +141,6 @@ cogl_dma_buf_handle_get_offset (CoglDmaBufHandle *dmabuf_handle);
+ COGL_EXPORT int
+ cogl_dma_buf_handle_get_bpp (CoglDmaBufHandle *dmabuf_handle);
+ 
++G_DEFINE_AUTOPTR_CLEANUP_FUNC (CoglDmaBufHandle, cogl_dma_buf_handle_free)
++
+ #endif /* __COGL_DMA_BUF_HANDLE_H__ */
+diff --git a/src/backends/native/meta-backend-native.c b/src/backends/native/meta-backend-native.c
+index 5a59d7d..2245387 100644
+--- a/src/backends/native/meta-backend-native.c
++++ b/src/backends/native/meta-backend-native.c
+@@ -160,6 +160,13 @@ maybe_disable_screen_cast_dma_bufs (MetaBackendNative *native)
+   MetaBackend *backend = META_BACKEND (native);
+   MetaRenderer *renderer = meta_backend_get_renderer (backend);
+   MetaScreenCast *screen_cast = meta_backend_get_screen_cast (backend);
++  ClutterBackend *clutter_backend =
++    meta_backend_get_clutter_backend (backend);
++  CoglContext *cogl_context =
++    clutter_backend_get_cogl_context (clutter_backend);
++  CoglRenderer *cogl_renderer = cogl_context_get_renderer (cogl_context);
++  g_autoptr (GError) error = NULL;
++  g_autoptr (CoglDmaBufHandle) dmabuf_handle = NULL;
+ 
+   if (!meta_renderer_is_hardware_accelerated (renderer))
+     {
+@@ -167,6 +174,16 @@ maybe_disable_screen_cast_dma_bufs (MetaBackendNative *native)
+                  "(not hardware accelerated)");
+       meta_screen_cast_disable_dma_bufs (screen_cast);
+     }
++
++  dmabuf_handle = cogl_renderer_create_dma_buf (cogl_renderer,
++                                                1, 1,
++                                                &error);
++  if (!dmabuf_handle)
++    {
++      g_message ("Disabling DMA buffer screen sharing "
++                 "(implicit modifiers not supported)");
++      meta_screen_cast_disable_dma_bufs (screen_cast);
++    }
+ }
+ #endif /* HAVE_REMOTE_DESKTOP */
+ 

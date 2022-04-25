@@ -1,0 +1,108 @@
+From: =?utf-8?q?Jonas_Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Tue, 29 Mar 2022 13:19:24 +0200
+Subject: clutter: Remove device/sequence entry when TOUCH_END get filtered
+ out
+
+Mutters event filter can prevent events from getting processed by
+Clutter, this can also happen for TOUCH_END/CANCEL events. Processing
+these events in Clutter is crucial for proper tracking of touch
+sequences though, that's because Clutter adds a PointerDeviceEntry to
+the stage on a TOUCH_BEGIN *before* going through the event filter, but
+removes that entry on a TOUCH_END *after* going through the filter. So
+Clutter really needs to see those TOUCH_END events, or else there will
+be a stale PointerDeviceEntry on the ClutterStage.
+
+Make sure those TOUCH_END/CANCEL events always get seen by Clutter by
+removing the device entry immediately when those get filtered out.
+
+Because there might still be events belonging to this sequence in the
+event queue of the stage, we need to flush the queue before removing the
+entry, too.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2350>
+Origin: upstream, 42.1, commit:6c17aa66c6d76d496d3a7614d84eeefe25647a16
+---
+ clutter/clutter/clutter-main.c | 56 +++++++++++++++++++++++-------------------
+ 1 file changed, 31 insertions(+), 25 deletions(-)
+
+diff --git a/clutter/clutter/clutter-main.c b/clutter/clutter/clutter-main.c
+index 239d368..a2ee338 100644
+--- a/clutter/clutter/clutter-main.c
++++ b/clutter/clutter/clutter-main.c
+@@ -724,6 +724,30 @@ update_device_for_event (ClutterStage *stage,
+                                                time_ms);
+ }
+ 
++static void
++remove_device_for_event (ClutterStage *stage,
++                         ClutterEvent *event,
++                         gboolean      emit_crossing)
++{
++  ClutterInputDevice *device = clutter_event_get_device (event);
++  ClutterEventSequence *sequence = clutter_event_get_event_sequence (event);
++  graphene_point_t point;
++  uint32_t time;
++
++  clutter_event_get_coords (event, &point.x, &point.y);
++  time = clutter_event_get_time (event);
++
++  clutter_stage_update_device (stage,
++                               device, sequence,
++                               point,
++                               time,
++                               NULL,
++                               NULL,
++                               TRUE);
++
++  clutter_stage_remove_device_entry (stage, device, sequence);
++}
++
+ /**
+  * clutter_do_event:
+  * @event: a #ClutterEvent.
+@@ -784,6 +808,13 @@ clutter_do_event (ClutterEvent *event)
+       context->current_event =
+         g_slist_delete_link (context->current_event, context->current_event);
+ 
++      if (event->type == CLUTTER_TOUCH_END ||
++          event->type == CLUTTER_TOUCH_CANCEL)
++        {
++          _clutter_stage_process_queued_events (event->any.stage);
++          remove_device_for_event (event->any.stage, event, TRUE);
++        }
++
+       return;
+     }
+ 
+@@ -799,31 +830,6 @@ clutter_do_event (ClutterEvent *event)
+   _clutter_stage_queue_event (event->any.stage, event, TRUE);
+ }
+ 
+-static void
+-remove_device_for_event (ClutterStage *stage,
+-                         ClutterEvent *event,
+-                         gboolean      emit_crossing)
+-{
+-  ClutterInputDevice *device = clutter_event_get_device (event);
+-  ClutterEventSequence *sequence = clutter_event_get_event_sequence (event);
+-  graphene_point_t point;
+-  uint32_t time;
+-
+-  clutter_event_get_coords (event, &point.x, &point.y);
+-  time = clutter_event_get_time (event);
+-
+-  clutter_stage_update_device (stage,
+-                               device, sequence,
+-                               point,
+-                               time,
+-                               NULL,
+-                               NULL,
+-                               TRUE);
+-
+-  clutter_stage_remove_device_entry (stage, device, sequence);
+-}
+-
+-
+ static void
+ _clutter_process_event_details (ClutterActor        *stage,
+                                 ClutterMainContext  *context,

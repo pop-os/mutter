@@ -1,0 +1,28 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Fri, 22 Apr 2022 18:04:10 +0200
+Subject: clutter: Reset ClutterInputFocus on focus_out
+
+Focus changes should trigger an IM reset, as some engines do want
+to maybe commit the preedit buffer before changing focus. Since
+the preedit string is also cleared on reset(), we can do without
+that explicit call.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2384>
+Origin: upstream, 42.1, commit:b4952c1199ccfbaabc934840988c4fd1846da79f
+---
+ clutter/clutter/clutter-text.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/clutter/clutter/clutter-text.c b/clutter/clutter/clutter-text.c
+index aa06c37..3fab98b 100644
+--- a/clutter/clutter/clutter-text.c
++++ b/clutter/clutter/clutter-text.c
+@@ -3193,7 +3193,7 @@ clutter_text_key_focus_out (ClutterActor *actor)
+ 
+   if (priv->editable && clutter_input_focus_is_focused (priv->input_focus))
+     {
+-      clutter_text_set_preedit_string (CLUTTER_TEXT (actor), NULL, NULL, 0);
++      clutter_input_focus_reset (priv->input_focus);
+       clutter_input_method_focus_out (method);
+     }
+ 

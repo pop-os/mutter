@@ -1,0 +1,152 @@
+From: =?utf-8?q?Jonas_Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Tue, 8 Mar 2022 20:39:51 +0100
+Subject: clutter: Pass events to pointer a11y before going through filters
+
+We want all pointer events to be passed through the pointer a11y
+processing before going through event filters: Once we go through event
+filters, events might be dispatched to Wayland and get filtered out.
+
+With the changes to immediately dispatch events to wayland, this changed
+and the pointer a11y is now no longer seeing any events going to wayland
+clients. Fix it by shuffling things around a bit and letting pointer
+a11y take a peek at events earlier.
+
+Bug: https://gitlab.gnome.org/GNOME/gnome-shell/-/issues/5192
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2332>
+Origin: upstream, 42.1, commit:6e458f946
+---
+ .../clutter/clutter-input-pointer-a11y-private.h   |  3 ++
+ clutter/clutter/clutter-input-pointer-a11y.c       | 38 ++++++++++++++++++++++
+ clutter/clutter/clutter-main.c                     | 29 +----------------
+ 3 files changed, 42 insertions(+), 28 deletions(-)
+
+diff --git a/clutter/clutter/clutter-input-pointer-a11y-private.h b/clutter/clutter/clutter-input-pointer-a11y-private.h
+index fbbe041..a66ddea 100644
+--- a/clutter/clutter/clutter-input-pointer-a11y-private.h
++++ b/clutter/clutter/clutter-input-pointer-a11y-private.h
+@@ -42,6 +42,9 @@ void _clutter_input_pointer_a11y_on_button_event (ClutterInputDevice   *device,
+ CLUTTER_EXPORT
+ gboolean _clutter_is_input_pointer_a11y_enabled  (ClutterInputDevice     *device);
+ 
++CLUTTER_EXPORT
++void _clutter_input_pointer_a11y_maybe_handle_event (ClutterEvent *event);
++
+ G_END_DECLS
+ 
+ #endif /* __CLUTTER_INPUT_POINTER_A11Y_H__ */
+diff --git a/clutter/clutter/clutter-input-pointer-a11y.c b/clutter/clutter/clutter-input-pointer-a11y.c
+index 365b85f..cfee58e 100644
+--- a/clutter/clutter/clutter-input-pointer-a11y.c
++++ b/clutter/clutter/clutter-input-pointer-a11y.c
+@@ -25,11 +25,13 @@
+ 
+ #include "clutter-build-config.h"
+ 
++#include "clutter-backend-private.h"
+ #include "clutter-enum-types.h"
+ #include "clutter-input-device.h"
+ #include "clutter-input-device-private.h"
+ #include "clutter-input-pointer-a11y-private.h"
+ #include "clutter-main.h"
++#include "clutter-private.h"
+ #include "clutter-virtual-input-device.h"
+ 
+ static gboolean
+@@ -726,3 +728,39 @@ _clutter_is_input_pointer_a11y_enabled (ClutterInputDevice *device)
+ 
+   return (is_secondary_click_enabled (device) || is_dwell_click_enabled (device));
+ }
++
++void
++_clutter_input_pointer_a11y_maybe_handle_event (ClutterEvent *event)
++{
++
++  ClutterInputDevice *device = clutter_event_get_device (event);
++  ClutterMainContext *clutter_context;
++  ClutterBackend *backend;
++
++  if (!_clutter_is_input_pointer_a11y_enabled (device))
++    return;
++
++  if ((event->any.flags & CLUTTER_EVENT_FLAG_SYNTHETIC) != 0)
++    return;
++
++  clutter_context = _clutter_context_get_default ();
++  backend = clutter_context->backend;
++
++  if (!clutter_backend_is_display_server (backend))
++    return;
++
++  if (event->type == CLUTTER_MOTION)
++    {
++      float x, y;
++
++      clutter_event_get_coords (event, &x, &y);
++      _clutter_input_pointer_a11y_on_motion_event (device, x, y);
++    }
++  else if (event->type == CLUTTER_BUTTON_PRESS ||
++           event->type == CLUTTER_BUTTON_RELEASE)
++    {
++      _clutter_input_pointer_a11y_on_button_event (device,
++                                                   event->button.button,
++                                                   event->type == CLUTTER_BUTTON_PRESS);
++    }
++}
+diff --git a/clutter/clutter/clutter-main.c b/clutter/clutter/clutter-main.c
+index df872bd..239d368 100644
+--- a/clutter/clutter/clutter-main.c
++++ b/clutter/clutter/clutter-main.c
+@@ -778,6 +778,7 @@ clutter_do_event (ClutterEvent *event)
+ 
+   context->current_event = g_slist_prepend (context->current_event, event);
+ 
++  _clutter_input_pointer_a11y_maybe_handle_event (event);
+   if (_clutter_event_process_filters (event, event_actor))
+     {
+       context->current_event =
+@@ -830,13 +831,8 @@ _clutter_process_event_details (ClutterActor        *stage,
+ {
+   ClutterInputDevice *device = clutter_event_get_device (event);
+   ClutterEventSequence *sequence = clutter_event_get_event_sequence (event);
+-  ClutterMainContext *clutter_context;
+-  ClutterBackend *backend;
+   ClutterActor *target;
+ 
+-  clutter_context = _clutter_context_get_default ();
+-  backend = clutter_context->backend;
+-
+   switch (event->type)
+     {
+       case CLUTTER_NOTHING:
+@@ -878,31 +874,8 @@ _clutter_process_event_details (ClutterActor        *stage,
+         break;
+ 
+       case CLUTTER_MOTION:
+-        if (clutter_backend_is_display_server (backend) &&
+-            !(event->any.flags & CLUTTER_EVENT_FLAG_SYNTHETIC))
+-          {
+-            if (_clutter_is_input_pointer_a11y_enabled (device))
+-              {
+-                gfloat x, y;
+-
+-                clutter_event_get_coords (event, &x, &y);
+-                _clutter_input_pointer_a11y_on_motion_event (device, x, y);
+-              }
+-          }
+-        G_GNUC_FALLTHROUGH;
+       case CLUTTER_BUTTON_PRESS:
+       case CLUTTER_BUTTON_RELEASE:
+-        if (clutter_backend_is_display_server (backend))
+-          {
+-            if (_clutter_is_input_pointer_a11y_enabled (device) && (event->type != CLUTTER_MOTION))
+-              {
+-                _clutter_input_pointer_a11y_on_button_event (device,
+-                                                             event->button.button,
+-                                                             event->type == CLUTTER_BUTTON_PRESS);
+-              }
+-          }
+-
+-        G_GNUC_FALLTHROUGH;
+       case CLUTTER_SCROLL:
+       case CLUTTER_TOUCHPAD_PINCH:
+       case CLUTTER_TOUCHPAD_SWIPE:

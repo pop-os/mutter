@@ -1,0 +1,30 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Wed, 6 Apr 2022 13:32:32 +0200
+Subject: wayland: Always acknowledge state changing .commit() events with
+ .done()
+
+As of currently, we only emit .done() on actual changes coming from the
+ClutterInputMethod/ClutterInputFocus. With the recent changes in the
+interpretation of serials, it becomes more important now that the
+compositor acknowledges every .commit done by the client, in order to
+keep them feeding future IM state updates.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2365>
+Origin: upstream, 42.1, commit:f5f49dfa46c00c93fdfa91d9523c5427dfdbd249
+---
+ src/wayland/meta-wayland-text-input.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/wayland/meta-wayland-text-input.c b/src/wayland/meta-wayland-text-input.c
+index b407fb2..fc3d061 100644
+--- a/src/wayland/meta-wayland-text-input.c
++++ b/src/wayland/meta-wayland-text-input.c
+@@ -639,6 +639,8 @@ text_input_commit_state (struct wl_client   *client,
+ 
+   if (enable_panel)
+     clutter_input_focus_set_input_panel_state (focus, CLUTTER_INPUT_PANEL_STATE_ON);
++
++  meta_wayland_text_input_focus_defer_done (focus);
+ }
+ 
+ static struct zwp_text_input_v3_interface meta_text_input_interface = {

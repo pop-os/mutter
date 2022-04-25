@@ -1,0 +1,45 @@
+From: Carlos Garnacho <carlosg@gnome.org>
+Date: Fri, 22 Apr 2022 17:56:00 +0200
+Subject: clutter: Fix ClutterText ::delete-surrounding IM implementation
+
+The clutter_text_delete_text() function used underneath expects character
+offsets for both start/end position. Fix the end position passed an offset
+instead of that, and compesnate for the cursor position being always -1
+when the caret is at the end of the string.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2384>
+Origin: upstream, 42.1, commit:b4cdf5e098ba84d3aab35e6caa3a66f8d8d8edf8
+---
+ clutter/clutter/clutter-text.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/clutter/clutter/clutter-text.c b/clutter/clutter/clutter-text.c
+index 432ddba..5ca5fa4 100644
+--- a/clutter/clutter/clutter-text.c
++++ b/clutter/clutter/clutter-text.c
+@@ -356,10 +356,16 @@ clutter_text_input_focus_delete_surrounding (ClutterInputFocus *focus,
+                                              guint              len)
+ {
+   ClutterText *clutter_text = CLUTTER_TEXT_INPUT_FOCUS (focus)->text;
++  ClutterTextBuffer *buffer;
+   int cursor;
+   int start;
+ 
++  buffer = get_buffer (clutter_text);
++
+   cursor = clutter_text_get_cursor_position (clutter_text);
++  if (cursor < 0)
++    cursor = clutter_text_buffer_get_length (buffer);
++
+   start = cursor + offset;
+   if (start < 0)
+     {
+@@ -368,7 +374,7 @@ clutter_text_input_focus_delete_surrounding (ClutterInputFocus *focus,
+       return;
+     }
+   if (clutter_text_get_editable (clutter_text))
+-    clutter_text_delete_text (clutter_text, start, len);
++    clutter_text_delete_text (clutter_text, start, start + len);
+ }
+ 
+ static void

@@ -1,0 +1,31 @@
+From: =?utf-8?q?Jonas_=C3=85dahl?= <jadahl@gmail.com>
+Date: Fri, 22 Apr 2022 11:31:48 +0200
+Subject: screen-cast/src: Always allow MemFd buffer types to be selected
+
+Just because the PipeWire client can handle DMA buffers, doesnt mean we
+should not advertise support for MemFd.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2383>
+Origin: upstream, 42.1, commit:358df1c569888b2990a31f2aa32bdb3db27ed616
+---
+ src/backends/meta-screen-cast-stream-src.c | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/src/backends/meta-screen-cast-stream-src.c b/src/backends/meta-screen-cast-stream-src.c
+index 539cd99..1e00907 100644
+--- a/src/backends/meta-screen-cast-stream-src.c
++++ b/src/backends/meta-screen-cast-stream-src.c
+@@ -789,10 +789,9 @@ on_stream_param_changed (void                 *data,
+ 
+   pod_builder = SPA_POD_BUILDER_INIT (params_buffer, sizeof (params_buffer));
+ 
+-  if (!spa_pod_find_prop (format, NULL, SPA_FORMAT_VIDEO_modifier))
+-    buffer_types = 1 << SPA_DATA_MemFd;
+-  else
+-    buffer_types = 1 << SPA_DATA_DmaBuf;
++  buffer_types = 1 << SPA_DATA_MemFd;
++  if (spa_pod_find_prop (format, NULL, SPA_FORMAT_VIDEO_modifier))
++    buffer_types |= 1 << SPA_DATA_DmaBuf;
+ 
+   params[0] = spa_pod_builder_add_object (
+     &pod_builder,

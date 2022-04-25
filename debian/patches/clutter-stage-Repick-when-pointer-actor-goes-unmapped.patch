@@ -14,10 +14,10 @@ It can lead to the stage receiving a notify::mapped with mapped = true
 for a pointer actor, which really shouldn't happen (just like
 notify::reactive with reactive = true shouldn't happen).
 
-Fixes: https://gitlab.gnome.org/GNOME/gnome-shell/-/issues/5124
-
-Origin: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2333
+Bug: https://gitlab.gnome.org/GNOME/gnome-shell/-/issues/5124
 Bug-Ubuntu: https://launchpad.net/bugs/1964545
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2333>
+Origin: upstream, 42.1, commit:cfdca246f26e2d6f73f0459a049421f926b21ec1
 ---
  clutter/clutter/clutter-actor.c         |  18 ++++++
  clutter/clutter/clutter-stage-private.h |   3 +
@@ -25,10 +25,10 @@ Bug-Ubuntu: https://launchpad.net/bugs/1964545
  3 files changed, 69 insertions(+), 57 deletions(-)
 
 diff --git a/clutter/clutter/clutter-actor.c b/clutter/clutter/clutter-actor.c
-index 23ef03d..efb7d22 100644
+index 4279d34..b31a4d0 100644
 --- a/clutter/clutter/clutter-actor.c
 +++ b/clutter/clutter/clutter-actor.c
-@@ -1695,6 +1695,13 @@ clutter_actor_real_unmap (ClutterActor *self)
+@@ -1701,6 +1701,13 @@ clutter_actor_real_unmap (ClutterActor *self)
     */
    g_object_notify_by_pspec (G_OBJECT (self), obj_props[PROP_MAPPED]);
  
@@ -36,13 +36,13 @@ index 23ef03d..efb7d22 100644
 +    {
 +      ClutterActor *stage = _clutter_actor_get_stage_internal (self);
 +
-+      clutter_stage_pointer_actor_unreactive (CLUTTER_STAGE (stage), self);
++      clutter_stage_invalidate_focus (CLUTTER_STAGE (stage), self);
 +    }
 +
    /* relinquish keyboard focus if we were unmapped while owning it */
    if (!CLUTTER_ACTOR_IS_TOPLEVEL (self))
      maybe_unset_key_focus (self);
-@@ -12434,8 +12441,12 @@ void
+@@ -12440,8 +12447,12 @@ void
  clutter_actor_set_reactive (ClutterActor *actor,
                              gboolean      reactive)
  {
@@ -55,7 +55,7 @@ index 23ef03d..efb7d22 100644
    if (reactive == CLUTTER_ACTOR_IS_REACTIVE (actor))
      return;
  
-@@ -12445,6 +12456,13 @@ clutter_actor_set_reactive (ClutterActor *actor,
+@@ -12451,6 +12462,13 @@ clutter_actor_set_reactive (ClutterActor *actor,
      CLUTTER_ACTOR_UNSET_FLAGS (actor, CLUTTER_ACTOR_REACTIVE);
  
    g_object_notify_by_pspec (G_OBJECT (actor), obj_props[PROP_REACTIVE]);
@@ -64,27 +64,27 @@ index 23ef03d..efb7d22 100644
 +    {
 +      ClutterActor *stage = _clutter_actor_get_stage_internal (actor);
 +
-+      clutter_stage_pointer_actor_unreactive (CLUTTER_STAGE (stage), actor);
++      clutter_stage_invalidate_focus (CLUTTER_STAGE (stage), actor);
 +    }
  }
  
  /**
 diff --git a/clutter/clutter/clutter-stage-private.h b/clutter/clutter/clutter-stage-private.h
-index efa341c..8610e9a 100644
+index efa341c..e9ba570 100644
 --- a/clutter/clutter/clutter-stage-private.h
 +++ b/clutter/clutter/clutter-stage-private.h
 @@ -154,6 +154,9 @@ ClutterActor * clutter_stage_pick_and_update_device (ClutterStage             *s
  void clutter_stage_unlink_grab (ClutterStage *self,
                                  ClutterGrab  *grab);
  
-+void clutter_stage_pointer_actor_unreactive (ClutterStage *self,
-+                                             ClutterActor *actor);
++void clutter_stage_invalidate_focus (ClutterStage *self,
++                                     ClutterActor *actor);
 +
  G_END_DECLS
  
  #endif /* __CLUTTER_STAGE_PRIVATE_H__ */
 diff --git a/clutter/clutter/clutter-stage.c b/clutter/clutter/clutter-stage.c
-index 5cd09a2..0ed157e 100644
+index 5cd09a2..705bd92 100644
 --- a/clutter/clutter/clutter-stage.c
 +++ b/clutter/clutter/clutter-stage.c
 @@ -3150,53 +3150,62 @@ clutter_stage_set_actor_needs_immediate_relayout (ClutterStage *stage)
@@ -96,8 +96,8 @@ index 5cd09a2..0ed157e 100644
 -                                  GParamSpec         *pspec,
 -                                  PointerDeviceEntry *entry)
 +void
-+clutter_stage_pointer_actor_unreactive (ClutterStage *self,
-+                                        ClutterActor *actor)
++clutter_stage_invalidate_focus (ClutterStage *self,
++                                ClutterActor *actor)
  {
 -  ClutterStage *self = entry->stage;
 +  ClutterStagePrivate *priv = self->priv;
