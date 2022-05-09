@@ -1541,6 +1541,7 @@ libmutter-clutter-10.so.0 libmutter-10-0 #MINVER#
  clutter_input_method_set_preedit_text@Base 3.29.4
  clutter_input_mode_get_type@Base 3.29.4
  clutter_input_panel_state_get_type@Base 3.29.4
+ clutter_input_pointer_a11y_update@Base 42.1
  clutter_interpolation_get_type@Base 3.29.4
  clutter_interval_clone@Base 3.29.4
  clutter_interval_compute@Base 3.29.4
