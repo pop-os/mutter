@@ -9,15 +9,17 @@ by KMS, however drmModeCrtcGetGamma may not set those values, leaving
 the gamma values not initialized.
 
 And this may lead meta_kms_crtc_state_changes() to return wrong values.
+
+Origin: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2371
 ---
  src/backends/native/meta-kms-crtc.c | 7 +++++++
  1 file changed, 7 insertions(+)
 
 diff --git a/src/backends/native/meta-kms-crtc.c b/src/backends/native/meta-kms-crtc.c
-index 685a373..ab83b5a 100644
+index 8c2f8d7..9943562 100644
 --- a/src/backends/native/meta-kms-crtc.c
 +++ b/src/backends/native/meta-kms-crtc.c
-@@ -111,6 +111,13 @@ read_gamma_state (MetaKmsCrtc       *crtc,
+@@ -118,6 +118,13 @@ read_gamma_state (MetaKmsCrtc       *crtc,
        crtc_state->gamma.blue = g_realloc_n (crtc_state->gamma.blue,
                                              drm_crtc->gamma_size,
                                              sizeof (uint16_t));

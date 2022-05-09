@@ -398,6 +398,14 @@ meta_startup_sequence_get_workspace (MetaStartupSequence *seq)
   return priv->workspace;
 }
 
+/**
+ * meta_startup_sequence_get_icon_name:
+ * @seq: a #MetaStartupSequence
+ *
+ * Get the icon name of the startup sequence.
+ *
+ * Returns: (nullable): the icon name or %NULL.
+ **/
 const char *
 meta_startup_sequence_get_icon_name (MetaStartupSequence *seq)
 {
@@ -409,6 +417,14 @@ meta_startup_sequence_get_icon_name (MetaStartupSequence *seq)
   return priv->icon_name;
 }
 
+/**
+ * meta_startup_sequence_get_application_id:
+ * @seq: a #MetaStartupSequence
+ *
+ * Get the application id of the startup sequence.
+ *
+ * Returns: (nullable): the application id or %NULL.
+ **/
 const char *
 meta_startup_sequence_get_application_id (MetaStartupSequence *seq)
 {
@@ -420,6 +436,14 @@ meta_startup_sequence_get_application_id (MetaStartupSequence *seq)
   return priv->application_id;
 }
 
+/**
+ * meta_startup_sequence_get_wmclass:
+ * @seq: a #MetaStartupSequence
+ *
+ * Get the wmclass of the startup sequence.
+ *
+ * Returns: (nullable): the wmclass or %NULL.
+ **/
 const char *
 meta_startup_sequence_get_wmclass (MetaStartupSequence *seq)
 {
@@ -658,7 +682,7 @@ meta_startup_notification_class_init (MetaStartupNotificationClass *klass)
                   META_TYPE_STARTUP_NOTIFICATION,
                   G_SIGNAL_RUN_LAST,
                   0, NULL, NULL, NULL,
-                  G_TYPE_NONE, 1, G_TYPE_POINTER);
+                  G_TYPE_NONE, 1, META_TYPE_STARTUP_SEQUENCE);
 
   g_object_class_install_properties (object_class, N_PROPS, sn_props);
 }
@@ -671,6 +695,15 @@ meta_startup_notification_new (MetaDisplay *display)
                        NULL);
 }
 
+/**
+ * meta_startup_notification_get_sequences:
+ * @sn: a #MetaStartupNotification
+ *
+ * Get the list of startup sequences arrived in the startup notification object.
+ *
+ * Returns: (element-type MetaStartupSequence) (transfer none): a #GSList of
+ * #MetaStartupSequence in the #MetaStartupNotification.
+ **/
 GSList *
 meta_startup_notification_get_sequences (MetaStartupNotification *sn)
 {

@@ -356,10 +356,16 @@ clutter_text_input_focus_delete_surrounding (ClutterInputFocus *focus,
                                              guint              len)
 {
   ClutterText *clutter_text = CLUTTER_TEXT_INPUT_FOCUS (focus)->text;
+  ClutterTextBuffer *buffer;
   int cursor;
   int start;
 
+  buffer = get_buffer (clutter_text);
+
   cursor = clutter_text_get_cursor_position (clutter_text);
+  if (cursor < 0)
+    cursor = clutter_text_buffer_get_length (buffer);
+
   start = cursor + offset;
   if (start < 0)
     {
@@ -368,7 +374,9 @@ clutter_text_input_focus_delete_surrounding (ClutterInputFocus *focus,
       return;
     }
   if (clutter_text_get_editable (clutter_text))
-    clutter_text_delete_text (clutter_text, start, len);
+    clutter_text_delete_text (clutter_text, start, start + len);
+
+  clutter_text_input_focus_request_surrounding (focus);
 }
 
 static void
@@ -383,6 +391,7 @@ clutter_text_input_focus_commit_text (ClutterInputFocus *focus,
       clutter_text_insert_text (clutter_text, text,
                                 clutter_text_get_cursor_position (clutter_text));
       clutter_text_set_preedit_string (clutter_text, NULL, NULL, 0);
+      clutter_text_input_focus_request_surrounding (focus);
     }
 }
 
@@ -1330,6 +1339,7 @@ update_cursor_location (ClutterText *self)
   clutter_actor_get_transformed_position (CLUTTER_ACTOR (self), &x, &y);
   graphene_rect_offset (&rect, x, y);
   clutter_input_focus_set_cursor_location (priv->input_focus, &rect);
+  clutter_text_input_focus_request_surrounding (priv->input_focus);
 }
 
 static inline void
@@ -2222,6 +2232,7 @@ clutter_text_press (ClutterActor *actor,
     return CLUTTER_EVENT_PROPAGATE;
 
   clutter_actor_grab_key_focus (actor);
+  clutter_input_focus_reset (priv->input_focus);
   clutter_input_focus_set_input_panel_state (priv->input_focus,
                                              CLUTTER_INPUT_PANEL_STATE_TOGGLE);
 
@@ -3183,7 +3194,7 @@ clutter_text_key_focus_out (ClutterActor *actor)
 
   if (priv->editable && clutter_input_focus_is_focused (priv->input_focus))
     {
-      clutter_text_set_preedit_string (CLUTTER_TEXT (actor), NULL, NULL, 0);
+      clutter_input_focus_reset (priv->input_focus);
       clutter_input_method_focus_out (method);
     }
 
