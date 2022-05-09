@@ -38,7 +38,10 @@ libmutter_test = shared_library(libmutter_test_name,
                                 mutter_test_sources,
                                 gnu_symbol_visibility: 'hidden',
                                 include_directories: tests_includes,
-                                c_args: tests_c_args,
+                                c_args: [
+                                  tests_c_args,
+                                  '-DG_LOG_DOMAIN="libmutter-test"',
+                                ],
                                 dependencies: tests_deps,
                                 install_rpath: pkglibdir,
                                 install_dir: libdir,
@@ -90,14 +93,24 @@ if have_installed_tests
 endif
 
 test_env = environment()
-test_env.set('G_TEST_SRCDIR', join_paths(mutter_srcdir, 'src'))
-test_env.set('G_TEST_BUILDDIR', mutter_builddir)
-test_env.set('MUTTER_TEST_PLUGIN_PATH', '@0@'.format(default_plugin.full_path()))
+
+test_env_variables = {
+  'G_TEST_SRCDIR': join_paths(mutter_srcdir, 'src'),
+  'G_TEST_BUILDDIR': mutter_builddir,
+  'MUTTER_TEST_PLUGIN_PATH': '@0@'.format(default_plugin.full_path()),
+}
+
+foreach name, value: test_env_variables
+  test_env.set(name, value)
+endforeach
 
 test_client = executable('mutter-test-client',
   sources: ['test-client.c'],
   include_directories: tests_includes,
-  c_args: tests_c_args,
+  c_args: [
+    tests_c_args,
+    '-DG_LOG_DOMAIN="mutter-test-client"',
+  ],
   dependencies: [
     gtk3_dep,
     gio_unix_dep,
@@ -113,7 +126,10 @@ test_runner = executable('mutter-test-runner',
     'test-runner.c',
   ],
   include_directories: tests_includes,
-  c_args: tests_c_args,
+  c_args: [
+    tests_c_args,
+    '-DG_LOG_DOMAIN="mutter-test-runner"',
+  ],
   dependencies: libmutter_test_dep,
   install: have_installed_tests,
   install_dir: mutter_installed_tests_libexecdir,
@@ -195,7 +211,10 @@ if have_native_tests
       dbus_screen_cast_built_sources,
     ],
     include_directories: tests_includes,
-    c_args: tests_c_args,
+    c_args: [
+      tests_c_args,
+      '-DG_LOG_DOMAIN="mutter-screen-cast-client"',
+    ],
     dependencies: [
       gio_dep,
       libpipewire_dep,
@@ -282,7 +301,10 @@ if have_native_tests
     test_executable = executable('mutter-' + test_case['name'],
       sources: test_case['sources'],
       include_directories: tests_includes,
-      c_args: tests_c_args,
+      c_args: [
+        tests_c_args,
+        '-DG_LOG_DOMAIN="mutter-@0@-test"'.format(test_case['name']),
+      ],
       dependencies: libmutter_test_dep,
       install: have_installed_tests,
       install_dir: mutter_installed_tests_libexecdir,
@@ -345,7 +367,10 @@ if have_kvm_tests or have_tty_tests
     test_executable = executable('mutter-' + test_case['name'],
       sources: test_case['sources'],
       include_directories: tests_includes,
-      c_args: tests_c_args,
+      c_args: [
+        tests_c_args,
+        '-DG_LOG_DOMAIN="mutter-@0@-test"'.format(test_case['name']),
+      ],
       dependencies: libmutter_test_dep,
       install: have_installed_tests,
       install_dir: mutter_installed_tests_libexecdir,

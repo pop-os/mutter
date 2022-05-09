@@ -56,6 +56,7 @@ enum
   PROP_NAME,
 
   PROP_DEVICE_TYPE,
+  PROP_CAPABILITIES,
   PROP_SEAT,
   PROP_DEVICE_MODE,
 
@@ -80,6 +81,7 @@ typedef struct _ClutterInputDevicePrivate ClutterInputDevicePrivate;
 struct _ClutterInputDevicePrivate
 {
   ClutterInputDeviceType device_type;
+  ClutterInputCapabilities capabilities;
   ClutterInputMode device_mode;
 
   char *device_name;
@@ -101,6 +103,53 @@ struct _ClutterInputDevicePrivate
 };
 
 G_DEFINE_TYPE_WITH_PRIVATE (ClutterInputDevice, clutter_input_device, G_TYPE_OBJECT);
+
+static void
+clutter_input_device_constructed (GObject *gobject)
+{
+  ClutterInputDevice *device = CLUTTER_INPUT_DEVICE (gobject);
+  ClutterInputDevicePrivate *priv =
+    clutter_input_device_get_instance_private (device);
+
+  if (priv->capabilities == 0)
+    {
+      ClutterInputCapabilities capabilities = 0;
+
+      switch (priv->device_type)
+        {
+        case CLUTTER_POINTER_DEVICE:
+          capabilities = CLUTTER_INPUT_CAPABILITY_POINTER;
+          break;
+        case CLUTTER_KEYBOARD_DEVICE:
+          capabilities = CLUTTER_INPUT_CAPABILITY_KEYBOARD;
+          break;
+        case CLUTTER_TOUCHPAD_DEVICE:
+          capabilities = CLUTTER_INPUT_CAPABILITY_POINTER |
+            CLUTTER_INPUT_CAPABILITY_TOUCHPAD;
+          break;
+        case CLUTTER_TOUCHSCREEN_DEVICE:
+          capabilities = CLUTTER_INPUT_CAPABILITY_TOUCH;
+          break;
+        case CLUTTER_TABLET_DEVICE:
+        case CLUTTER_PEN_DEVICE:
+        case CLUTTER_ERASER_DEVICE:
+        case CLUTTER_CURSOR_DEVICE:
+          capabilities = CLUTTER_INPUT_CAPABILITY_TABLET_TOOL;
+          break;
+        case CLUTTER_PAD_DEVICE:
+          capabilities = CLUTTER_INPUT_CAPABILITY_TABLET_PAD;
+          break;
+        case CLUTTER_EXTENSION_DEVICE:
+        case CLUTTER_JOYSTICK_DEVICE:
+          break;
+        case CLUTTER_N_DEVICE_TYPES:
+          g_assert_not_reached ();
+          break;
+        }
+
+      priv->capabilities = capabilities;
+    }
+}
 
 static void
 clutter_input_device_dispose (GObject *gobject)
@@ -134,6 +183,10 @@ clutter_input_device_set_property (GObject      *gobject,
     {
     case PROP_DEVICE_TYPE:
       priv->device_type = g_value_get_enum (value);
+      break;
+
+    case PROP_CAPABILITIES:
+      priv->capabilities = g_value_get_flags (value);
       break;
 
     case PROP_SEAT:
@@ -204,6 +257,10 @@ clutter_input_device_get_property (GObject    *gobject,
     {
     case PROP_DEVICE_TYPE:
       g_value_set_enum (value, priv->device_type);
+      break;
+
+    case PROP_CAPABILITIES:
+      g_value_set_flags (value, priv->capabilities);
       break;
 
     case PROP_SEAT:
@@ -295,6 +352,19 @@ clutter_input_device_class_init (ClutterInputDeviceClass *klass)
                        CLUTTER_POINTER_DEVICE,
                        CLUTTER_PARAM_READWRITE |
                        G_PARAM_CONSTRUCT_ONLY);
+
+  /**
+   * ClutterInputDevice:capabilities:
+   *
+   * The capabilities of the device
+   */
+  obj_props[PROP_CAPABILITIES] =
+    g_param_spec_flags ("capabilities",
+                        P_("Capabilities"),
+                        P_("The capabilities of the device"),
+                        CLUTTER_TYPE_INPUT_CAPABILITIES, 0,
+                        CLUTTER_PARAM_READWRITE |
+                        G_PARAM_CONSTRUCT_ONLY);
 
   /**
    * ClutterInputDevice:seat:
@@ -414,6 +484,7 @@ clutter_input_device_class_init (ClutterInputDeviceClass *klass)
                          NULL,
                          CLUTTER_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY);
 
+  gobject_class->constructed = clutter_input_device_constructed;
   gobject_class->dispose = clutter_input_device_dispose;
   gobject_class->set_property = clutter_input_device_set_property;
   gobject_class->get_property = clutter_input_device_get_property;
@@ -449,6 +520,25 @@ clutter_input_device_get_device_type (ClutterInputDevice *device)
                         CLUTTER_POINTER_DEVICE);
 
   return priv->device_type;
+}
+
+/**
+ * clutter_input_device_get_capabilities:
+ * @device: a #ClutterInputDevice
+ *
+ * Retrieves the capabilities of @device
+ *
+ * Return value: the capabilities of the device
+ */
+ClutterInputCapabilities
+clutter_input_device_get_capabilities (ClutterInputDevice *device)
+{
+  ClutterInputDevicePrivate *priv =
+    clutter_input_device_get_instance_private (device);
+
+  g_return_val_if_fail (CLUTTER_IS_INPUT_DEVICE (device), 0);
+
+  return priv->capabilities;
 }
 
 /**
