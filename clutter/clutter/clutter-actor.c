@@ -1264,6 +1264,10 @@ clutter_actor_set_mapped (ClutterActor *self,
   if (CLUTTER_ACTOR_IS_MAPPED (self) == mapped)
     return;
 
+  g_return_if_fail (!CLUTTER_ACTOR_IN_MAP_UNMAP (self));
+
+  CLUTTER_SET_PRIVATE_FLAGS (self, CLUTTER_IN_MAP_UNMAP);
+
   if (mapped)
     {
       CLUTTER_ACTOR_GET_CLASS (self)->map (self);
@@ -1274,6 +1278,8 @@ clutter_actor_set_mapped (ClutterActor *self,
       CLUTTER_ACTOR_GET_CLASS (self)->unmap (self);
       g_assert (!CLUTTER_ACTOR_IS_MAPPED (self));
     }
+
+  CLUTTER_UNSET_PRIVATE_FLAGS (self, CLUTTER_IN_MAP_UNMAP);
 }
 
 /* this function updates the mapped and realized states according to
@@ -1694,6 +1700,13 @@ clutter_actor_real_unmap (ClutterActor *self)
    * children, so apps see a bottom-up notification.
    */
   g_object_notify_by_pspec (G_OBJECT (self), obj_props[PROP_MAPPED]);
+
+  if (priv->has_pointer)
+    {
+      ClutterActor *stage = _clutter_actor_get_stage_internal (self);
+
+      clutter_stage_invalidate_focus (CLUTTER_STAGE (stage), self);
+    }
 
   /* relinquish keyboard focus if we were unmapped while owning it */
   if (!CLUTTER_ACTOR_IS_TOPLEVEL (self))
@@ -2646,9 +2659,10 @@ _clutter_actor_queue_redraw_on_clones (ClutterActor *self)
 }
 
 static void
-_clutter_actor_propagate_queue_redraw (ClutterActor *self,
-                                       ClutterActor *origin)
+_clutter_actor_propagate_queue_redraw (ClutterActor *self)
 {
+  ClutterActor *origin = self;
+
   while (self)
     {
       /* no point in queuing a redraw on a destroyed actor */
@@ -2657,13 +2671,12 @@ _clutter_actor_propagate_queue_redraw (ClutterActor *self,
 
       _clutter_actor_queue_redraw_on_clones (self);
 
+      self->priv->is_dirty = TRUE;
+
       /* If the queue redraw is coming from a child then the actor has
          become dirty and any queued effect is no longer valid */
       if (self != origin)
-        {
-          self->priv->is_dirty = TRUE;
-          self->priv->effect_to_redraw = NULL;
-        }
+        self->priv->effect_to_redraw = NULL;
 
       /* If the actor isn't visible, we still had to emit the signal
        * to allow for a ClutterClone, but the appearance of the parent
@@ -3840,8 +3853,10 @@ clutter_actor_paint (ClutterActor        *self,
   clutter_paint_node_paint (root_node, paint_context);
 
   /* If we make it here then the actor has run through a complete
-     paint run including all the effects so it's no longer dirty */
-  priv->is_dirty = FALSE;
+   * paint run including all the effects so it's no longer dirty,
+   * unless a new redraw was queued up.
+   */
+  priv->is_dirty = priv->propagated_one_redraw;
 }
 
 /**
@@ -8105,10 +8120,8 @@ _clutter_actor_queue_redraw_full (ClutterActor             *self,
       priv->effect_to_redraw = NULL;
     }
 
-  priv->is_dirty = TRUE;
-
   if (!priv->propagated_one_redraw)
-    _clutter_actor_propagate_queue_redraw (self, self);
+    _clutter_actor_propagate_queue_redraw (self);
 }
 
 /**
@@ -12434,7 +12447,11 @@ void
 clutter_actor_set_reactive (ClutterActor *actor,
                             gboolean      reactive)
 {
+  ClutterActorPrivate *priv;
+
   g_return_if_fail (CLUTTER_IS_ACTOR (actor));
+
+  priv = actor->priv;
 
   if (reactive == CLUTTER_ACTOR_IS_REACTIVE (actor))
     return;
@@ -12445,6 +12462,13 @@ clutter_actor_set_reactive (ClutterActor *actor,
     CLUTTER_ACTOR_UNSET_FLAGS (actor, CLUTTER_ACTOR_REACTIVE);
 
   g_object_notify_by_pspec (G_OBJECT (actor), obj_props[PROP_REACTIVE]);
+
+  if (!CLUTTER_ACTOR_IS_REACTIVE (actor) && priv->has_pointer)
+    {
+      ClutterActor *stage = _clutter_actor_get_stage_internal (actor);
+
+      clutter_stage_invalidate_focus (CLUTTER_STAGE (stage), actor);
+    }
 }
 
 /**

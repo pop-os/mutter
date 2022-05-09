@@ -25,6 +25,7 @@
 
 #include <wayland-server.h>
 
+#include "compositor/meta-surface-actor-wayland.h"
 #include "wayland/meta-wayland-private.h"
 #include "wayland/meta-wayland-seat.h"
 #include "wayland/meta-wayland-versions.h"
@@ -72,6 +73,14 @@ struct _MetaWaylandTextInput
   uint32_t content_type_purpose;
   uint32_t text_change_cause;
   gboolean enabled;
+
+  struct
+  {
+    char *string;
+    uint32_t cursor;
+    uint32_t anchor;
+    gboolean changed;
+  } preedit;
 
   guint done_idle_id;
 };
@@ -128,6 +137,15 @@ clutter_input_focus_send_done (ClutterInputFocus *focus)
 
   wl_resource_for_each (resource, &text_input->focus_resource_list)
     {
+      if (text_input->preedit.string || text_input->preedit.changed)
+        {
+          zwp_text_input_v3_send_preedit_string (resource,
+                                                 text_input->preedit.string,
+                                                 text_input->preedit.cursor,
+                                                 text_input->preedit.anchor);
+          text_input->preedit.changed = FALSE;
+        }
+
       zwp_text_input_v3_send_done (resource,
                                    lookup_serial (text_input, resource));
     }
@@ -233,7 +251,6 @@ meta_wayland_text_input_focus_set_preedit_text (ClutterInputFocus *focus,
                                                 guint              cursor)
 {
   MetaWaylandTextInput *text_input;
-  struct wl_resource *resource;
   gsize pos = 0;
 
   text_input = META_WAYLAND_TEXT_INPUT_FOCUS (focus)->text_input;
@@ -241,10 +258,15 @@ meta_wayland_text_input_focus_set_preedit_text (ClutterInputFocus *focus,
   if (text)
     pos = g_utf8_offset_to_pointer (text, cursor) - text;
 
-  wl_resource_for_each (resource, &text_input->focus_resource_list)
-    {
-      zwp_text_input_v3_send_preedit_string (resource, text, pos, pos);
-    }
+  g_clear_pointer (&text_input->preedit.string, g_free);
+  text_input->preedit.string = g_strdup (text);
+
+  if (text)
+    pos = g_utf8_offset_to_pointer (text, cursor) - text;
+
+  text_input->preedit.cursor = pos;
+  text_input->preedit.anchor = pos;
+  text_input->preedit.changed = TRUE;
 
   meta_wayland_text_input_focus_defer_done (focus);
 }
@@ -329,6 +351,8 @@ meta_wayland_text_input_set_focus (MetaWaylandTextInput *text_input,
           if (clutter_input_focus_is_focused (focus))
             {
               input_method = clutter_backend_get_input_method (clutter_get_default_backend ());
+              clutter_input_focus_reset (focus);
+              meta_wayland_text_input_focus_flush_done (focus);
               clutter_input_method_focus_out (input_method);
             }
 
@@ -625,6 +649,8 @@ text_input_commit_state (struct wl_client   *client,
 
   if (enable_panel)
     clutter_input_focus_set_input_panel_state (focus, CLUTTER_INPUT_PANEL_STATE_ON);
+
+  meta_wayland_text_input_focus_defer_done (focus);
 }
 
 static struct zwp_text_input_v3_interface meta_text_input_interface = {
@@ -662,6 +688,8 @@ meta_wayland_text_input_destroy (MetaWaylandTextInput *text_input)
   meta_wayland_text_input_set_focus (text_input, NULL);
   g_object_unref (text_input->input_focus);
   g_hash_table_destroy (text_input->resource_serials);
+  g_clear_pointer (&text_input->preedit.string, g_free);
+  g_clear_pointer (&text_input->surrounding.text, g_free);
   g_free (text_input);
 }
 
@@ -768,7 +796,28 @@ meta_wayland_text_input_handle_event (MetaWaylandTextInput *text_input,
 
   if (event->type == CLUTTER_BUTTON_PRESS ||
       event->type == CLUTTER_TOUCH_BEGIN)
-    meta_wayland_text_input_focus_flush_done (text_input->input_focus);
+    {
+      MetaWaylandSurface *surface = NULL;
+      ClutterActor *actor;
+
+      actor = clutter_stage_get_device_actor (clutter_event_get_stage (event),
+                                              clutter_event_get_device (event),
+                                              clutter_event_get_event_sequence (event));
+
+      if (META_IS_SURFACE_ACTOR_WAYLAND (actor))
+        {
+          MetaSurfaceActorWayland *actor_wayland =
+            META_SURFACE_ACTOR_WAYLAND (actor);
+
+          surface = meta_surface_actor_wayland_get_surface (actor_wayland);
+
+          if (surface == text_input->surface)
+            {
+              clutter_input_focus_reset (text_input->input_focus);
+              meta_wayland_text_input_focus_flush_done (text_input->input_focus);
+            }
+        }
+    }
 
   return retval;
 }

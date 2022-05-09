@@ -724,60 +724,6 @@ update_device_for_event (ClutterStage *stage,
                                                time_ms);
 }
 
-/**
- * clutter_do_event:
- * @event: a #ClutterEvent.
- *
- * Processes an event.
- *
- * The @event must be a valid #ClutterEvent and have a #ClutterStage
- * associated to it.
- *
- * This function is only useful when embedding Clutter inside another
- * toolkit, and it should never be called by applications.
- *
- * Since: 0.4
- */
-void
-clutter_do_event (ClutterEvent *event)
-{
-  /* we need the stage for the event */
-  if (event->any.stage == NULL)
-    {
-      g_warning ("%s: Event does not have a stage: discarding.", G_STRFUNC);
-      return;
-    }
-
-  /* stages in destruction do not process events */
-  if (CLUTTER_ACTOR_IN_DESTRUCTION (event->any.stage))
-    return;
-
-  switch (event->any.type)
-    {
-    case CLUTTER_ENTER:
-    case CLUTTER_MOTION:
-    case CLUTTER_BUTTON_PRESS:
-    case CLUTTER_TOUCH_BEGIN:
-    case CLUTTER_TOUCH_UPDATE:
-      update_device_for_event (event->any.stage, event, TRUE);
-      break;
-    default:
-      break;
-    }
-
-  if (_clutter_event_process_filters (event))
-    return;
-
-  /* Instead of processing events when received, we queue them up to
-   * handle per-frame before animations, layout, and drawing.
-   *
-   * This gives us the chance to reliably compress motion events
-   * because we've "looked ahead" and know all motion events that
-   * will occur before drawing the frame.
-   */
-  _clutter_stage_queue_event (event->any.stage, event, TRUE);
-}
-
 static void
 remove_device_for_event (ClutterStage *stage,
                          ClutterEvent *event,
@@ -802,6 +748,86 @@ remove_device_for_event (ClutterStage *stage,
   clutter_stage_remove_device_entry (stage, device, sequence);
 }
 
+/**
+ * clutter_do_event:
+ * @event: a #ClutterEvent.
+ *
+ * Processes an event.
+ *
+ * The @event must be a valid #ClutterEvent and have a #ClutterStage
+ * associated to it.
+ *
+ * This function is only useful when embedding Clutter inside another
+ * toolkit, and it should never be called by applications.
+ *
+ * Since: 0.4
+ */
+void
+clutter_do_event (ClutterEvent *event)
+{
+  ClutterContext *context = _clutter_context_get_default();
+  ClutterActor *event_actor = NULL;
+
+  /* we need the stage for the event */
+  if (event->any.stage == NULL)
+    {
+      g_warning ("%s: Event does not have a stage: discarding.", G_STRFUNC);
+      return;
+    }
+
+  /* stages in destruction do not process events */
+  if (CLUTTER_ACTOR_IN_DESTRUCTION (event->any.stage))
+    return;
+
+  switch (event->any.type)
+    {
+    case CLUTTER_ENTER:
+    case CLUTTER_MOTION:
+    case CLUTTER_BUTTON_PRESS:
+    case CLUTTER_TOUCH_BEGIN:
+    case CLUTTER_TOUCH_UPDATE:
+      update_device_for_event (event->any.stage, event, TRUE);
+      break;
+    default:
+      break;
+    }
+
+  if (event->any.type != CLUTTER_DEVICE_ADDED &&
+      event->any.type != CLUTTER_DEVICE_REMOVED &&
+      event->any.type != CLUTTER_NOTHING &&
+      event->any.type != CLUTTER_EVENT_LAST)
+    {
+      event_actor = clutter_stage_get_event_actor (event->any.stage, event);
+    }
+
+  context->current_event = g_slist_prepend (context->current_event, event);
+
+  if (_clutter_event_process_filters (event, event_actor))
+    {
+      context->current_event =
+        g_slist_delete_link (context->current_event, context->current_event);
+
+      if (event->type == CLUTTER_TOUCH_END ||
+          event->type == CLUTTER_TOUCH_CANCEL)
+        {
+          _clutter_stage_process_queued_events (event->any.stage);
+          remove_device_for_event (event->any.stage, event, TRUE);
+        }
+
+      return;
+    }
+
+  context->current_event = g_slist_delete_link (context->current_event, context->current_event);
+
+  /* Instead of processing events when received, we queue them up to
+   * handle per-frame before animations, layout, and drawing.
+   *
+   * This gives us the chance to reliably compress motion events
+   * because we've "looked ahead" and know all motion events that
+   * will occur before drawing the frame.
+   */
+  _clutter_stage_queue_event (event->any.stage, event, TRUE);
+}
 
 static void
 _clutter_process_event_details (ClutterActor        *stage,
@@ -810,12 +836,7 @@ _clutter_process_event_details (ClutterActor        *stage,
 {
   ClutterInputDevice *device = clutter_event_get_device (event);
   ClutterEventSequence *sequence = clutter_event_get_event_sequence (event);
-  ClutterMainContext *clutter_context;
-  ClutterBackend *backend;
   ClutterActor *target;
-
-  clutter_context = _clutter_context_get_default ();
-  backend = clutter_context->backend;
 
   switch (event->type)
     {
@@ -858,31 +879,8 @@ _clutter_process_event_details (ClutterActor        *stage,
         break;
 
       case CLUTTER_MOTION:
-        if (clutter_backend_is_display_server (backend) &&
-            !(event->any.flags & CLUTTER_EVENT_FLAG_SYNTHETIC))
-          {
-            if (_clutter_is_input_pointer_a11y_enabled (device))
-              {
-                gfloat x, y;
-
-                clutter_event_get_coords (event, &x, &y);
-                _clutter_input_pointer_a11y_on_motion_event (device, x, y);
-              }
-          }
-        G_GNUC_FALLTHROUGH;
       case CLUTTER_BUTTON_PRESS:
       case CLUTTER_BUTTON_RELEASE:
-        if (clutter_backend_is_display_server (backend))
-          {
-            if (_clutter_is_input_pointer_a11y_enabled (device) && (event->type != CLUTTER_MOTION))
-              {
-                _clutter_input_pointer_a11y_on_button_event (device,
-                                                             event->button.button,
-                                                             event->type == CLUTTER_BUTTON_PRESS);
-              }
-          }
-
-        G_GNUC_FALLTHROUGH;
       case CLUTTER_SCROLL:
       case CLUTTER_TOUCHPAD_PINCH:
       case CLUTTER_TOUCHPAD_SWIPE:

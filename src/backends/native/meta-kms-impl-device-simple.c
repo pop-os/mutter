@@ -1210,14 +1210,10 @@ process_cursor_plane_assignment (MetaKmsImplDevice       *impl_device,
 
       if (plane_assignment->buffer)
         {
-          MetaDrmBufferGbm *buffer_gbm =
-            META_DRM_BUFFER_GBM (plane_assignment->buffer);
-          struct gbm_bo *bo;
-          union gbm_bo_handle handle;
+          if (!meta_drm_buffer_ensure_fb_id (plane_assignment->buffer, error))
+            return FALSE;
 
-          bo = meta_drm_buffer_gbm_get_bo (buffer_gbm);
-          handle = gbm_bo_get_handle (bo);
-          handle_u32 = handle.u32;
+          handle_u32 = meta_drm_buffer_get_handle (plane_assignment->buffer);
         }
       else
         {

@@ -829,12 +829,12 @@ MetaDisplay *
 meta_display_new (MetaContext  *context,
                   GError      **error)
 {
+  MetaBackend *backend = meta_context_get_backend (context);
   MetaDisplay *display;
   MetaDisplayPrivate *priv;
   int i;
   guint32 timestamp;
   Window old_active_xwindow = None;
-  MetaBackend *backend = meta_get_backend ();
   MetaMonitorManager *monitor_manager;
   MetaSettings *settings;
 
@@ -1430,6 +1430,8 @@ meta_display_sync_wayland_input_focus (MetaDisplay *display)
   if (!meta_display_windows_are_interactable (display))
     focus_window = NULL;
   else if (is_no_focus_xwindow)
+    focus_window = NULL;
+  else if (clutter_stage_get_grab_actor (CLUTTER_STAGE (stage)))
     focus_window = NULL;
   else if (display->focus_window && display->focus_window->surface)
     focus_window = display->focus_window;

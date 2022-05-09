@@ -92,6 +92,13 @@ meta_kms_crtc_is_active (MetaKmsCrtc *crtc)
   return crtc->current_state.is_active;
 }
 
+
+gboolean
+meta_kms_crtc_has_gamma (MetaKmsCrtc *crtc)
+{
+  return !!meta_kms_crtc_get_prop_id (crtc, META_KMS_CRTC_PROP_GAMMA_LUT);
+}
+
 static void
 read_gamma_state (MetaKmsCrtc       *crtc,
                   MetaKmsCrtcState  *crtc_state,
@@ -362,13 +369,14 @@ parse_active (MetaKmsImplDevice  *impl_device,
 }
 
 static void
-init_proporties (MetaKmsCrtc       *crtc,
+init_properties (MetaKmsCrtc       *crtc,
                  MetaKmsImplDevice *impl_device,
                  drmModeCrtc       *drm_crtc)
 {
   MetaKmsCrtcPropTable *prop_table = &crtc->prop_table;
   int fd;
   drmModeObjectProperties *drm_props;
+  int i;
 
   *prop_table = (MetaKmsCrtcPropTable) {
     .props = {
@@ -405,6 +413,17 @@ init_proporties (MetaKmsCrtc       *crtc,
                                         crtc);
 
   drmModeFreeObjectProperties (drm_props);
+
+  for (i = 0; i < META_KMS_CRTC_N_PROPS; i++)
+    {
+      meta_topic (META_DEBUG_KMS,
+                  "%s (%s) CRTC %u property '%s' is %s",
+                  meta_kms_impl_device_get_path (impl_device),
+                  meta_kms_impl_device_get_driver_name (impl_device),
+                  drm_crtc->crtc_id,
+                  prop_table->props[i].name,
+                  prop_table->props[i].prop_id ? "supported" : "unsupported");
+    }
 }
 
 MetaKmsCrtc *
@@ -432,7 +451,7 @@ meta_kms_crtc_new (MetaKmsImplDevice  *impl_device,
   crtc->id = drm_crtc->crtc_id;
   crtc->idx = idx;
 
-  init_proporties (crtc, impl_device, drm_crtc);
+  init_properties (crtc, impl_device, drm_crtc);
 
   meta_kms_crtc_read_state (crtc, impl_device, drm_crtc, drm_props);
 
