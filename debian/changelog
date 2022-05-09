@@ -1,8 +1,15 @@
-mutter (42.1-1) UNRELEASED; urgency=medium
+mutter (42.1-1) unstable; urgency=medium
 
   * New upstream release
+    (LP: #1972726, #1967274, #1965557, #1969574, #1948410, #1967219, #1971693)
+  * Drop patches applied in new release
+  * debian/libmutter-10-0.symbols: Add new symbol
+  * debian/libmutter-10-0.symbols: Drop a symbol that was only in experimental
+  * Add Breaks against old gtk3 & gtk4 versions.
+    See Ubuntu bug 1972721
+  * Release to unstable
 
- -- Jeremy Bicha <jbicha@ubuntu.com>  Mon, 09 May 2022 11:16:45 -0400
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Mon, 09 May 2022 16:51:12 -0400
 
 mutter (42.0-5) experimental; urgency=medium
 
