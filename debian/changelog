@@ -1,3 +1,9 @@
+mutter (42.1-1ubuntu1pop1) jammy; urgency=medium
+
+  * Pop!_OS patches
+
+ -- Michael Aaron Murphy <mmstick@pm.me>  Fri, 13 May 2022 17:50:34 +0200
+
 mutter (42.1-1ubuntu1) kinetic; urgency=medium
 
   [ Jeremy Bicha ]
