@@ -1492,10 +1492,10 @@ libmutter-clutter-10.so.0 libmutter-10-0 #MINVER#
  clutter_image_set_data@Base 3.29.4
  clutter_input_axis_flags_get_type@Base 40.0
  clutter_input_axis_get_type@Base 3.29.4
- clutter_input_capabilities_get_type@Base 42.0-4~
+ clutter_input_capabilities_get_type@Base 42.0-3ubuntu1
  clutter_input_content_hint_flags_get_type@Base 3.29.4
  clutter_input_content_purpose_get_type@Base 3.29.4
- clutter_input_device_get_capabilities@Base 42.0-4~
+ clutter_input_device_get_capabilities@Base 42.0-3ubuntu1
  clutter_input_device_get_device_mode@Base 3.29.4
  clutter_input_device_get_device_name@Base 3.29.4
  clutter_input_device_get_device_node@Base 3.29.4
