@@ -34,7 +34,7 @@ index a197032..3e89ade 100644
    foreach test_case: test_cases
 diff --git a/src/tests/xwayland-tests.c b/src/tests/xwayland-tests.c
 new file mode 100644
-index 0000000..de11680
+index 0000000..9cdce37
 --- /dev/null
 +++ b/src/tests/xwayland-tests.c
 @@ -0,0 +1,190 @@
@@ -170,9 +170,9 @@ index 0000000..de11680
 +                        NULL);
 +  test_client_wait_check (test_client);
 +
-+  g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_WARNING,
++  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
 +                         "*Connection to xwayland lost*");
-+  g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_WARNING,
++  g_test_expect_message ("libmutter", G_LOG_LEVEL_WARNING,
 +                         "X Wayland crashed*; attempting to recover");
 +
 +  if (!meta_xwayland_signal (xwayland_manager, SIGKILL, &error))
