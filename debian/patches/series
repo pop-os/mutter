@@ -24,3 +24,4 @@ ubuntu/wayland-data-device-Allow-any-drag-timestamp-as-drag-star.patch
 
 # Pop!_OS patches
 pop-cosmic-keyboard-shortcuts.patch
+onscreen-keyboard-regression.patch
