@@ -107,6 +107,7 @@ typedef struct _MetaCompositorPrivate
   gulong stage_presented_id;
   gulong before_paint_handler_id;
   gulong after_paint_handler_id;
+  gulong window_visibility_updated_id;
 
   int64_t server_time_query_time;
   int64_t server_time_offset;
@@ -757,12 +758,13 @@ sync_actor_stacking (MetaCompositor *compositor)
  * this is to avoid offscreen windows that isn't actually part of the visible
  * desktop (such as the UI frames override redirect window).
  */
-static MetaWindowActor *
-get_top_visible_window_actor (MetaCompositor *compositor)
+static void
+update_top_window_actor (MetaCompositor *compositor)
 {
   MetaCompositorPrivate *priv =
     meta_compositor_get_instance_private (compositor);
   GList *l;
+  MetaWindowActor *top_window_actor = NULL;
 
   for (l = g_list_last (priv->windows); l; l = l->prev)
     {
@@ -779,10 +781,27 @@ get_top_visible_window_actor (MetaCompositor *compositor)
                              &display_rect.width, &display_rect.height);
 
       if (meta_rectangle_overlap (&display_rect, &buffer_rect))
-        return window_actor;
+        {
+          top_window_actor = window_actor;
+          break;
+        }
     }
 
-  return NULL;
+  if (priv->top_window_actor == top_window_actor)
+    return;
+
+  g_clear_signal_handler (&priv->top_window_actor_destroy_id,
+                          priv->top_window_actor);
+
+  priv->top_window_actor = top_window_actor;
+
+  if (priv->top_window_actor)
+    {
+      priv->top_window_actor_destroy_id =
+        g_signal_connect (priv->top_window_actor, "destroy",
+                          G_CALLBACK (on_top_window_actor_destroyed),
+                          compositor);
+    }
 }
 
 static void
@@ -805,7 +824,6 @@ meta_compositor_sync_stack (MetaCompositor  *compositor,
 {
   MetaCompositorPrivate *priv =
     meta_compositor_get_instance_private (compositor);
-  MetaWindowActor *top_window_actor;
   GList *old_stack;
 
   /* This is painful because hidden windows that we are in the process
@@ -889,21 +907,7 @@ meta_compositor_sync_stack (MetaCompositor  *compositor,
 
   sync_actor_stacking (compositor);
 
-  top_window_actor = get_top_visible_window_actor (compositor);
-
-  if (priv->top_window_actor == top_window_actor)
-    return;
-
-  g_clear_signal_handler (&priv->top_window_actor_destroy_id,
-                          priv->top_window_actor);
-
-  priv->top_window_actor = top_window_actor;
-
-  if (priv->top_window_actor)
-    priv->top_window_actor_destroy_id =
-      g_signal_connect (priv->top_window_actor, "destroy",
-                        G_CALLBACK (on_top_window_actor_destroyed),
-                        compositor);
+  update_top_window_actor (compositor);
 }
 
 void
@@ -1040,6 +1044,16 @@ on_after_paint (ClutterStage     *stage,
 }
 
 static void
+on_window_visibility_updated (MetaDisplay    *display,
+                              GList          *unplaced,
+                              GList          *should_show,
+                              GList          *should_hide,
+                              MetaCompositor *compositor)
+{
+  update_top_window_actor (compositor);
+}
+
+static void
 meta_compositor_set_property (GObject      *object,
                               guint         prop_id,
                               const GValue *value,
@@ -1113,6 +1127,12 @@ meta_compositor_constructed (GObject *object)
                             G_CALLBACK (on_after_paint),
                             compositor);
 
+  priv->window_visibility_updated_id =
+    g_signal_connect (priv->display,
+                      "window-visibility-updated",
+                      G_CALLBACK (on_window_visibility_updated),
+                      compositor);
+
   priv->laters = meta_laters_new (compositor);
 
   G_OBJECT_CLASS (meta_compositor_parent_class)->constructed (object);
@@ -1131,6 +1151,7 @@ meta_compositor_dispose (GObject *object)
   g_clear_signal_handler (&priv->stage_presented_id, stage);
   g_clear_signal_handler (&priv->before_paint_handler_id, stage);
   g_clear_signal_handler (&priv->after_paint_handler_id, stage);
+  g_clear_signal_handler (&priv->window_visibility_updated_id, priv->display);
 
   g_clear_pointer (&priv->windows, g_list_free);
 
