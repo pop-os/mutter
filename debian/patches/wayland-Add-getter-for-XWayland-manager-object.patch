@@ -3,6 +3,7 @@ Date: Tue, 5 Apr 2022 23:43:38 +0200
 Subject: wayland: Add getter for XWayland manager object
 
 Origin: https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2364
+(cherry picked from commit e1033951ef687839245d94fb58393af9a66d9ce0)
 ---
  src/wayland/meta-wayland-private.h | 4 ++--
  src/wayland/meta-wayland-types.h   | 2 ++
@@ -44,12 +45,12 @@ index b2c8615..541636e 100644
 +
  #endif
 diff --git a/src/wayland/meta-wayland.c b/src/wayland/meta-wayland.c
-index 6e2b56d..dcf6fba 100644
+index 856b819..14d0cff 100644
 --- a/src/wayland/meta-wayland.c
 +++ b/src/wayland/meta-wayland.c
-@@ -801,3 +801,9 @@ meta_wayland_compositor_notify_surface_id (MetaWaylandCompositor *compositor,
-       meta_wayland_compositor_remove_surface_association (compositor, id);
-     }
+@@ -820,3 +820,9 @@ meta_wayland_compositor_is_egl_display_bound (MetaWaylandCompositor *compositor)
+ 
+   return priv->is_wayland_egl_display_bound;
  }
 +
 +MetaXWaylandManager *
