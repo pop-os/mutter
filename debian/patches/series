@@ -13,7 +13,6 @@ meson-add-back-default_driver-option.patch
 tests-Mark-view-verification-tests-as-incomplete-in-big-e.patch
 Consistently-pass-timestamp-as-uint64-when-creating-MetaS.patch
 backends-native-kms-crtc-Don-t-compare-gamma-values-on-un.patch
-monitor-manager-Ensure-monitors-settings-after-backend-ha.patch
 Support-Dynamic-triple-double-buffering.patch
 debian/tests-Tag-unstable-tests-as-flaky.patch
 debian/tests-Do-not-run-screencast-tests.patch
