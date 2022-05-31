@@ -1,9 +1,9 @@
-mutter (42.2-1) UNRELEASED; urgency=medium
+mutter (42.2-1) unstable; urgency=medium
 
   * New upstream release (LP: #1976381)
     - Fix crash when restarting GNOME Shell on Xorg (LP: #1969893)
 
- -- Jeremy Bicha <jbicha@ubuntu.com>  Tue, 31 May 2022 10:01:18 -0400
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Tue, 31 May 2022 10:10:28 -0400
 
 mutter (42.1-1) unstable; urgency=medium
 
