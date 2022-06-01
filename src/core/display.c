@@ -121,6 +121,12 @@ typedef struct
   guint       ping_timeout_id;
 } MetaPingData;
 
+typedef struct
+{
+  MetaDisplay *display;
+  int queue_idx;
+} MetaQueueRunData;
+
 typedef struct _MetaDisplayPrivate
 {
   MetaContext *context;
@@ -1132,9 +1138,8 @@ meta_display_close (MetaDisplay *display,
 
   g_signal_emit (display, display_signals[CLOSING], 0);
 
-  meta_compositor_unmanage (display->compositor);
-
   meta_display_unmanage_windows (display, timestamp);
+  meta_compositor_unmanage (display->compositor);
 
   meta_prefs_remove_listener (prefs_changed_callback, display);
 
@@ -3975,13 +3980,10 @@ warn_on_incorrectly_unmanaged_window (MetaWindow *window)
   g_warn_if_fail (!window->unmanaging);
 }
 
-static gboolean
-update_window_visibilities_idle (gpointer user_data)
+static void
+update_window_visibilities (MetaDisplay *display,
+                            GList       *windows)
 {
-  MetaDisplay *display = META_DISPLAY (user_data);
-  MetaDisplayPrivate *priv = meta_display_get_instance_private (display);
-  int queue_idx;
-  g_autoptr (GList) windows = NULL;
   g_autoptr (GList) unplaced = NULL;
   g_autoptr (GList) should_show = NULL;
   g_autoptr (GList) should_hide = NULL;
@@ -3989,11 +3991,6 @@ update_window_visibilities_idle (gpointer user_data)
 
   COGL_TRACE_BEGIN_SCOPED (MetaDisplayUpdateVisibility,
                            "Display: Update visibility");
-
-  queue_idx = __builtin_ctz (META_QUEUE_CALC_SHOWING);
-
-  windows = g_steal_pointer (&priv->queue_windows[queue_idx]);
-  priv->queue_later_ids[queue_idx] = 0;
 
   for (l = windows; l; l = l->next)
     {
@@ -4038,25 +4035,39 @@ update_window_visibilities_idle (gpointer user_data)
                  unplaced, should_show, should_hide);
 
   g_list_foreach (windows, (GFunc) warn_on_incorrectly_unmanaged_window, NULL);
-
-  return G_SOURCE_REMOVE;
 }
 
-static gboolean
-move_resize_idle (gpointer user_data)
+static void
+move_resize (MetaDisplay *display,
+             GList       *windows)
 {
-  MetaDisplay *display = META_DISPLAY (user_data);
-  MetaDisplayPrivate *priv = meta_display_get_instance_private (display);
-  int queue_idx;
-  g_autoptr (GList) windows = NULL;
-
-  queue_idx = __builtin_ctz (META_QUEUE_MOVE_RESIZE);
-
-  windows = g_steal_pointer (&priv->queue_windows[queue_idx]);
-  priv->queue_later_ids[queue_idx] = 0;
-
   g_list_foreach (windows, (GFunc) meta_window_update_layout, NULL);
   g_list_foreach (windows, (GFunc) warn_on_incorrectly_unmanaged_window, NULL);
+}
+
+typedef void (* WindowQueueFunc) (MetaDisplay *display,
+                                  GList       *windows);
+
+static const WindowQueueFunc window_queue_func[META_N_QUEUE_TYPES] =
+{
+  update_window_visibilities,
+  move_resize,
+};
+
+static gboolean
+window_queue_run_later_func (gpointer user_data)
+{
+  MetaQueueRunData *run_data = user_data;
+  MetaDisplay *display = run_data->display;
+  MetaDisplayPrivate *priv = meta_display_get_instance_private (display);
+  g_autoptr (GList) windows = NULL;
+  int queue_idx = run_data->queue_idx;
+
+  windows = g_steal_pointer (&priv->queue_windows[queue_idx]);
+
+  priv->queue_later_ids[queue_idx] = 0;
+
+  window_queue_func[queue_idx] (display, windows);
 
   return G_SOURCE_REMOVE;
 }
@@ -4079,12 +4090,6 @@ meta_display_queue_window (MetaDisplay   *display,
           META_LATER_RESIZE,
         };
 
-      const GSourceFunc window_queue_later_handler[META_N_QUEUE_TYPES] =
-        {
-          update_window_visibilities_idle,
-          move_resize_idle,
-        };
-
       if (!(queue_types & 1 << queue_idx))
         continue;
 
@@ -4098,11 +4103,16 @@ meta_display_queue_window (MetaDisplay   *display,
 
       if (!priv->queue_later_ids[queue_idx])
         {
-          meta_laters_add (laters,
-                           window_queue_later_when[queue_idx],
-                           window_queue_later_handler[queue_idx],
-                           display, NULL);
+          MetaQueueRunData *run_data;
 
+          run_data = g_new0 (MetaQueueRunData, 1);
+          run_data->display = display;
+          run_data->queue_idx = queue_idx;
+          priv->queue_later_ids[queue_idx] =
+            meta_laters_add (laters,
+                             window_queue_later_when[queue_idx],
+                             window_queue_run_later_func,
+                             run_data, g_free);
         }
     }
 }
@@ -4136,5 +4146,31 @@ meta_display_unqueue_window (MetaDisplay   *display,
                               priv->queue_later_ids[queue_idx]);
           priv->queue_later_ids[queue_idx] = 0;
         }
+    }
+}
+
+void
+meta_display_flush_queued_window (MetaDisplay   *display,
+                                  MetaWindow    *window,
+                                  MetaQueueType  queue_types)
+{
+  g_autoptr (GList) windows = NULL;
+  int queue_idx;
+
+  meta_display_unqueue_window (display, window, queue_types);
+
+  windows = g_list_prepend (windows, window);
+
+  for (queue_idx = 0; queue_idx < META_N_QUEUE_TYPES; queue_idx++)
+    {
+      if (!(queue_types & 1 << queue_idx))
+        continue;
+
+      meta_topic (META_DEBUG_WINDOW_STATE,
+                  "Running %s for window '%s'",
+                  meta_window_queue_names[queue_idx],
+                  window->desc);
+
+      window_queue_func[queue_idx] (display, windows);
     }
 }

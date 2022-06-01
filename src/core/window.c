@@ -1800,11 +1800,13 @@ meta_window_flush_calc_showing (MetaWindow *window)
 {
   MetaWindowPrivate *priv = meta_window_get_instance_private (window);
 
-  if (priv->queued_types & META_QUEUE_CALC_SHOWING)
-    {
-      meta_window_unqueue (window, META_QUEUE_CALC_SHOWING);
-      meta_window_update_visibility (window);
-    }
+  if (!(priv->queued_types & META_QUEUE_CALC_SHOWING))
+    return;
+
+  meta_display_flush_queued_window (window->display, window,
+                                    META_QUEUE_CALC_SHOWING);
+
+  priv->queued_types &= ~META_QUEUE_CALC_SHOWING;
 }
 
 void
@@ -4500,6 +4502,8 @@ meta_window_focus (MetaWindow  *window,
 {
   MetaWorkspaceManager *workspace_manager = window->display->workspace_manager;
   MetaWindow *modal_transient;
+  MetaBackend *backend;
+  ClutterStage *stage;
 
   g_return_if_fail (!window->override_redirect);
 
@@ -4546,12 +4550,12 @@ meta_window_focus (MetaWindow  *window,
 
   META_WINDOW_GET_CLASS (window)->focus (window, timestamp);
 
-  if (window->display->event_route == META_EVENT_ROUTE_NORMAL)
-    {
-      MetaBackend *backend = meta_get_backend ();
-      ClutterStage *stage = CLUTTER_STAGE (meta_backend_get_stage (backend));
-      clutter_stage_set_key_focus (stage, NULL);
-    }
+  backend = meta_get_backend ();
+  stage = CLUTTER_STAGE (meta_backend_get_stage (backend));
+
+  if (window->display->event_route == META_EVENT_ROUTE_NORMAL &&
+      clutter_stage_get_grab_actor (stage) == NULL)
+    clutter_stage_set_key_focus (stage, NULL);
 
   if (window->close_dialog &&
       meta_close_dialog_is_visible (window->close_dialog))
