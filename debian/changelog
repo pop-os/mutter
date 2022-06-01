@@ -1,3 +1,10 @@
+mutter (42.2-0ubuntu1) UNRELEASED; urgency=medium
+
+  * New upstream release (LP: #1976381)
+     - Fix crash when restarting GNOME Shell on Xorg (LP: #1969893)
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Wed, 01 Jun 2022 08:12:18 -0400
+
 mutter (42.1-0ubuntu1) jammy; urgency=medium
 
   [ Jeremy Bicha ]
