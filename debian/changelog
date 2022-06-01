@@ -1,4 +1,4 @@
-mutter (42.2-1ubuntu1) UNRELEASED; urgency=medium
+mutter (42.2-1ubuntu1) kinetic; urgency=medium
 
   * Merge from Debian unstable. Remaining changes:
     - Add triple-buffering patch
@@ -13,8 +13,10 @@ mutter (42.2-1ubuntu1) UNRELEASED; urgency=medium
     - Add patches from GNOME !2364
       + Fix X11 selection related crash when Xwayland died
     - debian/libmutter-10-0.symbols: Add symbols for triple buffering patch
+  * Refresh patches
+  * Drop privacy screen settings patch: applied in new release
 
- -- Jeremy Bicha <jbicha@ubuntu.com>  Fri, 13 May 2022 09:14:41 -0400
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Wed, 01 Jun 2022 08:08:58 -0400
 
 mutter (42.2-1) unstable; urgency=medium
 
