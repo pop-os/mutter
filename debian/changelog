@@ -1,9 +1,10 @@
-mutter (42.2-0ubuntu1) UNRELEASED; urgency=medium
+mutter (42.2-0ubuntu1) jammy; urgency=medium
 
   * New upstream release (LP: #1976381)
      - Fix crash when restarting GNOME Shell on Xorg (LP: #1969893)
+  * Refresh patches. Drop privacy screen settings patch: applied in new release
 
- -- Jeremy Bicha <jbicha@ubuntu.com>  Wed, 01 Jun 2022 08:12:18 -0400
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Tue, 07 Jun 2022 14:53:49 -0400
 
 mutter (42.1-0ubuntu1) jammy; urgency=medium
 
