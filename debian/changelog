@@ -1,3 +1,9 @@
+mutter (42.2-0ubuntu1pop1) jammy; urgency=medium
+
+  * Upstream release
+
+ -- Michael Aaron Murphy <mmstick@pm.me>  Mon, 27 Jun 2022 23:46:12 +0200
+
 mutter (42.2-0ubuntu1) jammy; urgency=medium
 
   * New upstream release (LP: #1976381)
