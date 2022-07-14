@@ -1,12 +1,3 @@
-x11-selection-Unset-selection-ownership-on-shutdown.patch
-tests-test-client-Add-clipboard-set-command.patch
-wayland-Add-getter-for-XWayland-manager-object.patch
-xwayland-Only-warn-on-X-IO-errors-when-X11-is-mandatory.patch
-xwayland-Add-API-to-send-signal-to-the-Xwayland-process.patch
-selection-Return-an-error-if-trying-to-transfer-from-NULL.patch
-x11-input-selection-stream-Handle-Xwayland-going-away.patch
-tests-async-waiter-Keep-track-of-X11-display-it-was-creat.patch
-tests-Check-that-X11-selections-handle-Xwayland-disappear.patch
 theme-use-gtk_render_icon_suface-to-paint-button-icon.patch
 theme-load-icons-as-Gtk-does-with-fallback-and-RTL-suppor.patch
 meson-add-back-default_driver-option.patch
