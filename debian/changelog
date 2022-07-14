@@ -1,3 +1,10 @@
+mutter (42.3-0ubuntu1) jammy; urgency=medium
+
+  * New upstream release (LP: #1981724)
+  * Drop patches applied in new release
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Thu, 14 Jul 2022 17:46:27 +0200
+
 mutter (42.2-0ubuntu1) jammy; urgency=medium
 
   * New upstream release (LP: #1976381)
