@@ -1,6 +1,6 @@
-mutter (42.3-1ubuntu1) UNRELEASED; urgency=medium
+mutter (42.3-1ubuntu1) kinetic; urgency=medium
 
-  * Merge from Debian unstable. Remaining changes:
+  * Merge from Debian unstable (LP: #1981724). Remaining changes:
     - Add triple-buffering patch
     - Add x11-Add-support-for-fractional-scaling-using-Randr.patch:
       + X11: Add support for fractional scaling using Randr
@@ -13,9 +13,9 @@ mutter (42.3-1ubuntu1) UNRELEASED; urgency=medium
     - Add patches from GNOME !2364
       + Fix X11 selection related crash when Xwayland died
     - debian/libmutter-10-0.symbols: Add symbols for triple buffering patch
-  * Refresh patches
+  * Drop patches applied in new release
 
- -- Jeremy Bicha <jbicha@ubuntu.com>  Wed, 01 Jun 2022 08:08:58 -0400
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Thu, 14 Jul 2022 17:26:15 +0200
 
 mutter (42.3-1) unstable; urgency=medium
 
