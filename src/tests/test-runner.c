@@ -73,7 +73,7 @@ on_x11_display_opened (MetaDisplay *display,
 {
   meta_x11_display_set_alarm_filter (display->x11_display,
                                      test_case_alarm_filter, test);
-  test->waiter = meta_async_waiter_new ();
+  test->waiter = meta_async_waiter_new (display->x11_display);
 }
 
 static TestCase *
@@ -971,6 +971,18 @@ test_case_do (TestCase *test,
         return FALSE;
 
       if (!meta_test_client_do (client, error, argv[0], NULL))
+        return FALSE;
+    }
+  else if (strcmp (argv[0], "clipboard-set") == 0)
+    {
+      if (argc != 4)
+        BAD_COMMAND("usage: %s <client-id> <mimetype> <text>", argv[0]);
+
+      MetaTestClient *client = test_case_lookup_client (test, argv[1], error);
+      if (!client)
+        return FALSE;
+
+      if (!meta_test_client_do (client, error, argv[0], argv[2], argv[3], NULL))
         return FALSE;
     }
   else

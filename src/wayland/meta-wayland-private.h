@@ -52,8 +52,10 @@ typedef struct
   char *name;
 } MetaXWaylandConnection;
 
-typedef struct
+struct _MetaXWaylandManager
 {
+  MetaWaylandCompositor *compositor;
+
   MetaXWaylandConnection private_connection;
   MetaXWaylandConnection public_connection;
 
@@ -73,7 +75,7 @@ typedef struct
   gboolean has_xrandr;
   int rr_event_base;
   int rr_error_base;
-} MetaXWaylandManager;
+};
 
 struct _MetaWaylandCompositor
 {
