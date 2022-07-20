@@ -1,3 +1,9 @@
+mutter (42.3-1ubuntu1pop1) jammy; urgency=medium
+
+  * Pop Patches 
+
+ -- Michael Aaron Murphy <mmstick@gaze15.lan>  Wed, 20 Jul 2022 16:20:15 +0200
+
 mutter (42.3-1ubuntu1) kinetic; urgency=medium
 
   * Merge from Debian unstable (LP: #1981724). Remaining changes:
