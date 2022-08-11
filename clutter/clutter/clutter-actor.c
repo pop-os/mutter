@@ -803,6 +803,8 @@ struct _ClutterActorPrivate
   GList *stage_views;
   GList *grabs;
 
+  unsigned int n_pointers;
+
   /* bitfields: KEEP AT THE END */
 
   /* fixed position and sizes */
@@ -822,7 +824,6 @@ struct _ClutterActorPrivate
   guint clip_to_allocation          : 1;
   guint enable_model_view_transform : 1;
   guint enable_paint_unmapped       : 1;
-  guint has_pointer                 : 1;
   guint has_key_focus               : 1;
   guint propagated_one_redraw       : 1;
   guint paint_volume_valid          : 1;
@@ -1701,7 +1702,7 @@ clutter_actor_real_unmap (ClutterActor *self)
    */
   g_object_notify_by_pspec (G_OBJECT (self), obj_props[PROP_MAPPED]);
 
-  if (priv->has_pointer)
+  if (priv->n_pointers > 0)
     {
       ClutterActor *stage = _clutter_actor_get_stage_internal (self);
 
@@ -1770,6 +1771,18 @@ clutter_actor_real_show (ClutterActor *self)
    * and the branch of the scene graph is in a stable state
    */
   clutter_actor_update_map_state (self, MAP_STATE_CHECK);
+
+  if (clutter_actor_has_mapped_clones (self))
+    {
+      ClutterActorPrivate *priv = self->priv;
+
+      /* Avoid the early return in clutter_actor_queue_relayout() */
+      priv->needs_width_request = FALSE;
+      priv->needs_height_request = FALSE;
+      priv->needs_allocation = FALSE;
+
+      clutter_actor_queue_relayout (self);
+    }
 }
 
 static inline void
@@ -5403,7 +5416,7 @@ clutter_actor_get_property (GObject    *object,
       break;
 
     case PROP_HAS_POINTER:
-      g_value_set_boolean (value, priv->has_pointer);
+      g_value_set_boolean (value, priv->n_pointers > 0);
       break;
 
     case PROP_LAYOUT_MANAGER:
@@ -5753,7 +5766,9 @@ clutter_actor_update_default_paint_volume (ClutterActor       *self,
            * allocation, because apparently some code above Clutter allows
            * them.
            */
-          if (!CLUTTER_ACTOR_IS_MAPPED (child) || !clutter_actor_has_allocation (child))
+          if ((!CLUTTER_ACTOR_IS_MAPPED (child) &&
+               !clutter_actor_has_mapped_clones (child)) ||
+              !clutter_actor_has_allocation (child))
             continue;
 
           child_volume = clutter_actor_get_transformed_paint_volume (child, self);
@@ -11551,7 +11566,7 @@ clutter_actor_add_child_internal (ClutterActor              *self,
   if (self == child)
     {
       g_warning ("Cannot add the actor '%s' to itself.",
-                  _clutter_actor_get_debug_name (self));
+                 _clutter_actor_get_debug_name (self));
       return;
     }
 
@@ -11703,6 +11718,18 @@ clutter_actor_add_child_internal (ClutterActor              *self,
    */
   if (CLUTTER_ACTOR_IS_MAPPED (child))
     clutter_actor_queue_redraw (child);
+
+  if (clutter_actor_has_mapped_clones (self))
+    {
+      ClutterActorPrivate *priv = self->priv;
+
+      /* Avoid the early return in clutter_actor_queue_relayout() */
+      priv->needs_width_request = FALSE;
+      priv->needs_height_request = FALSE;
+      priv->needs_allocation = FALSE;
+
+      clutter_actor_queue_relayout (self);
+    }
 
   if (emit_actor_added)
     _clutter_container_emit_actor_added (CLUTTER_CONTAINER (self), child);
@@ -12463,11 +12490,35 @@ clutter_actor_set_reactive (ClutterActor *actor,
 
   g_object_notify_by_pspec (G_OBJECT (actor), obj_props[PROP_REACTIVE]);
 
-  if (!CLUTTER_ACTOR_IS_REACTIVE (actor) && priv->has_pointer)
+  if (!CLUTTER_ACTOR_IS_REACTIVE (actor) && priv->n_pointers > 0)
     {
       ClutterActor *stage = _clutter_actor_get_stage_internal (actor);
 
       clutter_stage_invalidate_focus (CLUTTER_STAGE (stage), actor);
+    }
+  else if (CLUTTER_ACTOR_IS_REACTIVE (actor))
+    {
+      ClutterActor *parent;
+
+      /* Check whether the closest parent has pointer focus,
+       * and whether it should move to this actor.
+       */
+      parent = priv->parent;
+
+      while (parent)
+        {
+          if (CLUTTER_ACTOR_IS_REACTIVE (parent))
+            break;
+
+          parent = parent->priv->parent;
+        }
+
+      if (parent && parent->priv->n_pointers > 0)
+        {
+          ClutterActor *stage = _clutter_actor_get_stage_internal (actor);
+
+          clutter_stage_maybe_invalidate_focus (CLUTTER_STAGE (stage), parent);
+        }
     }
 }
 
@@ -14670,12 +14721,21 @@ _clutter_actor_set_has_pointer (ClutterActor *self,
 {
   ClutterActorPrivate *priv = self->priv;
 
-  if (priv->has_pointer != has_pointer)
+  if (has_pointer)
     {
-      priv->has_pointer = has_pointer;
+      g_assert (CLUTTER_IS_STAGE (self) || CLUTTER_ACTOR_IS_MAPPED (self));
 
-      g_object_notify_by_pspec (G_OBJECT (self), obj_props[PROP_HAS_POINTER]);
+      priv->n_pointers++;
     }
+  else
+    {
+      g_assert (priv->n_pointers > 0);
+
+      priv->n_pointers--;
+    }
+
+  if (priv->n_pointers == 0 || priv->n_pointers == 1)
+    g_object_notify_by_pspec (G_OBJECT (self), obj_props[PROP_HAS_POINTER]);
 }
 
 void
@@ -14746,7 +14806,7 @@ clutter_actor_has_pointer (ClutterActor *self)
 {
   g_return_val_if_fail (CLUTTER_IS_ACTOR (self), FALSE);
 
-  return self->priv->has_pointer;
+  return self->priv->n_pointers > 0;
 }
 
 /**
@@ -16010,7 +16070,8 @@ clutter_actor_finish_layout (ClutterActor *self,
   ClutterActorPrivate *priv = self->priv;
   ClutterActor *child;
 
-  if (!CLUTTER_ACTOR_IS_MAPPED (self) ||
+  if ((!CLUTTER_ACTOR_IS_MAPPED (self) &&
+       !clutter_actor_has_mapped_clones (self)) ||
       CLUTTER_ACTOR_IN_DESTRUCTION (self))
     return;
 
