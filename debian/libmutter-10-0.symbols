@@ -638,6 +638,7 @@ libmutter-10.so.0 libmutter-10-0 #MINVER#
  meta_verify_monitor_spec@Base 3.28.2
  meta_verify_monitors_config@Base 3.28.2
  meta_virtual_modifier_get_type@Base 3.28.2
+ meta_virtual_monitor_get_crtc_mode@Base 42.4
  meta_virtual_monitor_get_output@Base 40.0
  meta_virtual_monitor_info_free@Base 40.0
  meta_virtual_monitor_info_new@Base 40.0
@@ -675,7 +676,6 @@ libmutter-10.so.0 libmutter-10-0 #MINVER#
  meta_window_allows_resize@Base 3.28.2
  meta_window_appears_focused@Base 3.28.2
  meta_window_begin_grab_op@Base 3.28.2
- meta_window_calculate_main_logical_monitor@Base 3.37.91
  meta_window_can_close@Base 3.28.2
  meta_window_can_maximize@Base 3.28.2
  meta_window_can_minimize@Base 3.28.2
@@ -687,6 +687,7 @@ libmutter-10.so.0 libmutter-10-0 #MINVER#
  meta_window_client_type_get_type@Base 3.28.2
  meta_window_compute_group@Base 3.28.2
  meta_window_delete@Base 3.28.2
+ meta_window_find_monitor_from_frame_rect@Base 42.4
  meta_window_find_root_ancestor@Base 3.28.2
  meta_window_focus@Base 3.28.2
  meta_window_foreach_ancestor@Base 3.28.2
