@@ -798,7 +798,7 @@ index 96c54ba..f80f31a 100644
      return;
  
 diff --git a/src/backends/native/meta-kms-crtc.c b/src/backends/native/meta-kms-crtc.c
-index 9943562..0ae3050 100644
+index d19db04..19299d2 100644
 --- a/src/backends/native/meta-kms-crtc.c
 +++ b/src/backends/native/meta-kms-crtc.c
 @@ -32,6 +32,12 @@ typedef struct _MetaKmsCrtcPropTable
@@ -823,7 +823,7 @@ index 9943562..0ae3050 100644
  };
  
  G_DEFINE_TYPE (MetaKmsCrtc, meta_kms_crtc, G_TYPE_OBJECT)
-@@ -467,20 +475,91 @@ meta_kms_crtc_new (MetaKmsImplDevice  *impl_device,
+@@ -461,20 +469,91 @@ meta_kms_crtc_new (MetaKmsImplDevice  *impl_device,
    return crtc;
  }
  
@@ -915,7 +915,7 @@ index 9943562..0ae3050 100644
  }
  
  static void
-@@ -488,5 +567,6 @@ meta_kms_crtc_class_init (MetaKmsCrtcClass *klass)
+@@ -482,5 +561,6 @@ meta_kms_crtc_class_init (MetaKmsCrtcClass *klass)
  {
    GObjectClass *object_class = G_OBJECT_CLASS (klass);
  
@@ -2515,10 +2515,10 @@ index 3a85ace..676c4c4 100644
                                                              MetaDrmBuffer *fb);
  
 diff --git a/src/backends/native/meta-renderer-native.c b/src/backends/native/meta-renderer-native.c
-index d538cc2..6ad3dba 100644
+index f5f22c7..d896114 100644
 --- a/src/backends/native/meta-renderer-native.c
 +++ b/src/backends/native/meta-renderer-native.c
-@@ -661,12 +661,18 @@ static gboolean
+@@ -677,12 +677,18 @@ static gboolean
  dummy_power_save_page_flip_cb (gpointer user_data)
  {
    MetaRendererNative *renderer_native = user_data;
@@ -2539,7 +2539,7 @@ index d538cc2..6ad3dba 100644
    renderer_native->power_save_page_flip_source_id = 0;
  
    return G_SOURCE_REMOVE;
-@@ -678,6 +684,9 @@ meta_renderer_native_queue_power_save_page_flip (MetaRendererNative *renderer_na
+@@ -694,6 +700,9 @@ meta_renderer_native_queue_power_save_page_flip (MetaRendererNative *renderer_na
  {
    const unsigned int timeout_ms = 100;
  
@@ -2549,7 +2549,7 @@ index d538cc2..6ad3dba 100644
    if (!renderer_native->power_save_page_flip_source_id)
      {
        renderer_native->power_save_page_flip_source_id =
-@@ -1386,6 +1395,26 @@ meta_renderer_native_create_view (MetaRenderer       *renderer,
+@@ -1402,6 +1411,26 @@ meta_renderer_native_create_view (MetaRenderer       *renderer,
    return view;
  }
  
@@ -2576,7 +2576,7 @@ index d538cc2..6ad3dba 100644
  static void
  keep_current_onscreens_alive (MetaRenderer *renderer)
  {
-@@ -1414,6 +1443,7 @@ meta_renderer_native_rebuild_views (MetaRenderer *renderer)
+@@ -1430,6 +1459,7 @@ meta_renderer_native_rebuild_views (MetaRenderer *renderer)
    MetaRendererClass *parent_renderer_class =
      META_RENDERER_CLASS (meta_renderer_native_parent_class);
  
