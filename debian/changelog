@@ -1,3 +1,11 @@
+mutter (42.4-0ubuntu0.22.04.1) UNRELEASED; urgency=medium
+
+  * New upstream release (LP: #1985856)
+  * debian/patches: Refresh
+  * debian/libmutter-10-0.symbols: Sync with new and removed internal symbols
+
+ -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Thu, 11 Aug 2022 20:16:46 -0400
+
 mutter (42.3-0ubuntu1) jammy; urgency=medium
 
   * New upstream release (LP: #1981724)
