@@ -1,10 +1,16 @@
 mutter (42.4-0ubuntu0.22.04.1) UNRELEASED; urgency=medium
 
+  [ Marco Trevisan (Treviño) ]
   * New upstream release (LP: #1985856)
   * debian/patches: Refresh
   * debian/libmutter-10-0.symbols: Sync with new and removed internal symbols
 
- -- Marco Trevisan (Treviño) <marco@ubuntu.com>  Thu, 11 Aug 2022 20:16:46 -0400
+  [ Daniel van Vugt ]
+  * Update Support-Dynamic-triple-double-buffering.patch.
+    Dual-GPUs crash in gbm_surface_release_buffer (LP: #1969422)
+    Leftover mouse pointer when moving between monitors (LP: #1988625)
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Thu, 13 Oct 2022 14:08:35 -0400
 
 mutter (42.3-0ubuntu1) jammy; urgency=medium
 
