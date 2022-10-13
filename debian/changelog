@@ -1,4 +1,4 @@
-mutter (42.5-1) UNRELEASED; urgency=medium
+mutter (42.5-0ubuntu1) UNRELEASED; urgency=medium
 
   [ Marco Trevisan (Treviño) ]
   * New upstream release (LP: #1985856)
@@ -10,10 +10,10 @@ mutter (42.5-1) UNRELEASED; urgency=medium
     Dual-GPUs crash in gbm_surface_release_buffer (LP: #1969422)
     Leftover mouse pointer when moving between monitors (LP: #1988625)
 
-  [ zoe ]
+  [ Zoe Spellman ]
   * New upstream release
 
- -- zoe <zoe.spellman@canonical.com>  Thu, 13 Oct 2022 12:08:14 -0700
+ -- Zoe Spellman <zoe.spellman@canonical.com>  Thu, 13 Oct 2022 12:08:14 -0700
 
 mutter (42.3-0ubuntu1) jammy; urgency=medium
 
