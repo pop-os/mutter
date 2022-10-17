@@ -1,4 +1,4 @@
-mutter (42.5-0ubuntu1) UNRELEASED; urgency=medium
+mutter (42.5-0ubuntu1) jammy; urgency=medium
 
   [ Marco Trevisan (Treviño) ]
   * New upstream release (LP: #1985856)
