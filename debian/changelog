@@ -1,3 +1,9 @@
+mutter (42.9-0ubuntu1) UNRELEASED; urgency=medium
+
+  * New upstream release (LP: #1998286)
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Tue, 13 Jun 2023 16:07:13 -0400
+
 mutter (42.5-0ubuntu1) jammy; urgency=medium
 
   [ Marco Trevisan (Treviño) ]
