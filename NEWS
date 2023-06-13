@@ -1,3 +1,64 @@
+42.9
+====
+* Do not overwrite previously set offsets on attach [Matthias; !2843]
+* Don't disable KMS modifiers on newer i915 systems [Sameer; !2641]
+* Reduce memory bandwidth usage in some GPUs [Erico; !2091]
+* Fix pointer constrains with subsurfaces [Robert; !2717]
+* Fix partial updates on offscreen rotated screens [Robert; !2860]
+* Do not require a physical device to update pointer visibility [Carlos; !2766]
+* Fix Xwayland focus regressions [Carlos; !2878]
+
+Contributors:
+  Matthias Clasen, Carlos Garnacho, Sameer Lattannavar, Robert Mader,
+  Erico Nunes
+
+42.8
+====
+* Skip resize effects for tiled windows during user grabs [Michael; !2579]
+* Disable direct scanout during drag-n-drop operations [Robert; !2677]
+* Ignore unmapped subsurfaces in direct scanout check [Robert; !2671]
+* Fix cursor disappearing over windows during grabs [Carlos; !2754]
+* Fix cursor position in window screencasts [Georges; !2737]
+* Fix initialization of keyboard accessibility [Carlos; !2750, !2778]
+* Don't allow window activation to break global grabs
+  [Florian, Carlos; !2776, !2832]
+* Fixed crashes [Georges, Jonas; !2736, !2609]
+* Plugged leak [Niels; !2799]
+* Misc. bug fixes and cleanups [Jonas, Georges, Carlos; !2707, !2762, !2767]
+
+Contributors:
+  Carlos Garnacho, Niels De Graef, Robert Mader, Florian Müllner,
+  Georges Basile Stavracas Neto, Nart Tlisha, Michael Webster, Jonas Ådahl
+
+Translators:
+  Nart Tlisha [ab]
+
+42.7
+====
+* Always send modifiers to clients if supported [Jonas Å.; !2546]
+* Make NVIDIA + gbm use atomic mode setting [Jonas Å.; !2578]
+* Disable client modifiers with amdgpu driver [Michel; !2637]
+* Handle stage view updates without allocation more gracefully [Jonas D.; !2694]
+* Fix window screenshots being cut off at the bottom right [Sebastian K.; !2720]
+* Implement wl_output v3 and v4 [Robert; !2692]
+* Fix recalculating viewport after window resize [Sebastian Kr.; !2689]
+* Fixed crashes [Jonas Å., msizanoen1, Jonas D.; !2553, !2711, !2690, !2691]
+* Misc. bug fixes and cleanups [Jonas Å., Bram; !2716, !2724, !2645, !2704]
+
+Contributors:
+  Jonas Dreßler, Michel Dänzer, Sebastian Keller, Sebastian Krzyszkowiak,
+  Robert Mader, Bram Stolk, msizanoen1, Jonas Ådahl
+
+42.6
+====
+* Add quirk to work around issue with Mali GPUs [Daniel; #2354]
+* Stop sending frame callbacks to minimized clients [Robert; !2662]
+* Fixed crashes [Jonas, Carlos, Max; !2646, !2592, !2661, !2655]
+* Misc. bug fixes and cleanups [Carlos; !2594]
+
+Contributors:
+  Carlos Garnacho, Robert Mader, Daniel van Vugt, Max Zhao, Jonas Ådahl
+
 42.5
 ====
 * Improve heuristics for adding fallback monitor modes [Mario; !2586]

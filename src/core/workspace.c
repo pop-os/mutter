@@ -501,7 +501,7 @@ workspace_switch_sound(MetaWorkspace *from,
 
   if (i >= nw)
     {
-      meta_bug("Failed to find destination workspace in layout");
+      g_warning ("Failed to find destination workspace in layout");
       goto finish;
     }
 
@@ -525,7 +525,7 @@ workspace_switch_sound(MetaWorkspace *from,
     e = "desktop-switch-down";
   else
     {
-      meta_bug("Uh, origin and destination workspace at same logic position!");
+      g_warn_if_reached ();
       goto finish;
     }
 
@@ -566,6 +566,9 @@ meta_workspace_activate_with_focus (MetaWorkspace *workspace,
   MetaWorkspaceLayout layout1, layout2;
   gint num_workspaces, current_space, new_space;
   MetaMotionDirection direction;
+
+  g_return_if_fail (META_IS_WORKSPACE (workspace));
+  g_return_if_fail (meta_workspace_index (workspace) != -1);
 
   meta_verbose ("Activating workspace %d",
                 meta_workspace_index (workspace));

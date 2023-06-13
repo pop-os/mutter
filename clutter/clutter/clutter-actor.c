@@ -4295,7 +4295,7 @@ clutter_actor_remove_child_internal (ClutterActor                 *self,
    * cleared as the child and its children leave the actor tree.
    */
   if (clear_stage_views && !CLUTTER_ACTOR_IN_DESTRUCTION (child))
-    clutter_actor_clear_stage_views_recursive (child);
+    clutter_actor_clear_stage_views_recursive (child, stop_transitions);
 
   if (emit_parent_set && !CLUTTER_ACTOR_IN_DESTRUCTION (child))
     g_signal_emit (child, actor_signals[PARENT_SET], 0, self);
@@ -15838,7 +15838,11 @@ clear_stage_views_cb (ClutterActor *actor,
                       int           depth,
                       gpointer      user_data)
 {
+  gboolean stop_transitions = GPOINTER_TO_INT (user_data);
   g_autoptr (GList) old_stage_views = NULL;
+
+  if (stop_transitions)
+    _clutter_actor_stop_transitions (actor);
 
   actor->priv->needs_update_stage_views = TRUE;
 
@@ -15865,13 +15869,14 @@ maybe_emit_stage_views_changed_cb (ClutterActor *actor,
 }
 
 void
-clutter_actor_clear_stage_views_recursive (ClutterActor *self)
+clutter_actor_clear_stage_views_recursive (ClutterActor *self,
+                                           gboolean      stop_transitions)
 {
   _clutter_actor_traverse (self,
                            CLUTTER_ACTOR_TRAVERSE_DEPTH_FIRST,
                            clear_stage_views_cb,
                            NULL,
-                           NULL);
+                           GINT_TO_POINTER (stop_transitions));
   _clutter_actor_traverse (self,
                            CLUTTER_ACTOR_TRAVERSE_DEPTH_FIRST,
                            maybe_emit_stage_views_changed_cb,
@@ -16006,17 +16011,18 @@ update_stage_views (ClutterActor *self)
   ClutterStage *stage;
   graphene_rect_t bounding_rect;
 
+  stage = CLUTTER_STAGE (_clutter_actor_get_stage_internal (self));
+  g_return_if_fail (stage);
+
   old_stage_views = g_steal_pointer (&priv->stage_views);
 
   if (priv->needs_allocation)
     {
       g_warning ("Can't update stage views actor %s is on because it needs an "
                  "allocation.", _clutter_actor_get_debug_name (self));
+      priv->stage_views = g_list_copy (clutter_stage_peek_stage_views (stage));
       goto out;
     }
-
-  stage = CLUTTER_STAGE (_clutter_actor_get_stage_internal (self));
-  g_return_if_fail (stage);
 
   clutter_actor_get_transformed_extents (self, &bounding_rect);
 
@@ -16129,6 +16135,10 @@ clutter_actor_is_effectively_on_stage_view (ClutterActor     *self,
 
   g_return_val_if_fail (CLUTTER_IS_ACTOR (self), FALSE);
 
+  if (!CLUTTER_ACTOR_IS_MAPPED (self) &&
+      !clutter_actor_has_mapped_clones (self))
+    return FALSE;
+
   if (g_list_find (self->priv->stage_views, view))
     return TRUE;
 
@@ -16145,11 +16155,21 @@ clutter_actor_is_effectively_on_stage_view (ClutterActor     *self,
               ClutterActor *clone = key;
               GList *clone_views;
 
+              if (!CLUTTER_ACTOR_IS_MAPPED (clone))
+                continue;
+
               clone_views = clutter_actor_peek_stage_views (clone);
               if (g_list_find (clone_views, view))
                 return TRUE;
             }
         }
+
+      /* Clones will force-show their own source actor but not children of
+       * it, so if we're hidden and an actor up the hierarchy has a clone,
+       * we won't be visible.
+       */
+      if (!CLUTTER_ACTOR_IS_VISIBLE (actor))
+        return FALSE;
     }
 
   return FALSE;

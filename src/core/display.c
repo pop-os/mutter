@@ -826,9 +826,11 @@ meta_display_shutdown_x11 (MetaDisplay *display)
   if (!display->x11_display)
     return;
 
+  meta_stack_freeze (display->stack);
   g_signal_emit (display, display_signals[X11_DISPLAY_CLOSING], 0);
   g_object_run_dispose (G_OBJECT (display->x11_display));
   g_clear_object (&display->x11_display);
+  meta_stack_thaw (display->stack);
 }
 
 MetaDisplay *
@@ -1276,6 +1278,12 @@ meta_grab_op_is_moving (MetaGrabOp op)
 gboolean
 meta_display_windows_are_interactable (MetaDisplay *display)
 {
+  MetaBackend *backend = meta_get_backend ();
+  MetaStage *stage = META_STAGE (meta_backend_get_stage (backend));
+
+  if (clutter_stage_get_grab_actor (CLUTTER_STAGE (stage)))
+    return FALSE;
+
   switch (display->event_route)
     {
     case META_EVENT_ROUTE_NORMAL:
@@ -1435,8 +1443,6 @@ meta_display_sync_wayland_input_focus (MetaDisplay *display)
   if (!meta_display_windows_are_interactable (display))
     focus_window = NULL;
   else if (is_no_focus_xwindow)
-    focus_window = NULL;
-  else if (clutter_stage_get_grab_actor (CLUTTER_STAGE (stage)))
     focus_window = NULL;
   else if (display->focus_window && display->focus_window->surface)
     focus_window = display->focus_window;
