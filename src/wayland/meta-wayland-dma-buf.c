@@ -56,6 +56,7 @@
 
 #ifdef HAVE_NATIVE_BACKEND
 #include "backends/native/meta-drm-buffer-gbm.h"
+#include "backends/native/meta-kms-device.h"
 #include "backends/native/meta-kms-utils.h"
 #include "backends/native/meta-onscreen-native.h"
 #include "backends/native/meta-renderer-native.h"
@@ -155,22 +156,18 @@ static GQuark quark_dma_buf_surface_feedback;
 static gboolean
 should_send_modifiers (MetaBackend *backend)
 {
-  MetaSettings *settings = meta_backend_get_settings (backend);
+  MetaRendererNative *renderer_native;
+  MetaGpuKms *gpu_kms;
 
-  if (meta_settings_is_experimental_feature_enabled (
-        settings, META_EXPERIMENTAL_FEATURE_KMS_MODIFIERS))
+  if (!META_IS_BACKEND_NATIVE (backend))
+    return FALSE;
+
+  renderer_native = META_RENDERER_NATIVE (meta_backend_get_renderer (backend));
+  gpu_kms = meta_renderer_native_get_primary_gpu (renderer_native);
+  if (!gpu_kms)
     return TRUE;
 
-#ifdef HAVE_NATIVE_BACKEND
-  if (META_IS_BACKEND_NATIVE (backend))
-    {
-      MetaRenderer *renderer = meta_backend_get_renderer (backend);
-      MetaRendererNative *renderer_native = META_RENDERER_NATIVE (renderer);
-      return meta_renderer_native_use_modifiers (renderer_native);
-    }
-#endif
-
-  return FALSE;
+  return meta_renderer_native_send_modifiers (renderer_native);
 }
 
 static gint
@@ -331,7 +328,9 @@ static gboolean
 meta_wayland_dma_buf_realize_texture (MetaWaylandBuffer  *buffer,
                                       GError            **error)
 {
-  MetaBackend *backend = meta_get_backend ();
+  MetaContext *context =
+    meta_wayland_compositor_get_context (buffer->compositor);
+  MetaBackend *backend = meta_context_get_backend (context);
   MetaEgl *egl = meta_backend_get_egl (backend);
   ClutterBackend *clutter_backend = meta_backend_get_clutter_backend (backend);
   CoglContext *cogl_context = clutter_backend_get_cogl_context (clutter_backend);
@@ -550,7 +549,9 @@ meta_wayland_dma_buf_try_acquire_scanout (MetaWaylandDmaBufBuffer *dma_buf,
                                           CoglOnscreen            *onscreen)
 {
 #ifdef HAVE_NATIVE_BACKEND
-  MetaBackend *backend = meta_get_backend ();
+  MetaContext *context =
+    meta_wayland_compositor_get_context (dma_buf->manager->compositor);
+  MetaBackend *backend = meta_context_get_backend (context);
   MetaRenderer *renderer = meta_backend_get_renderer (backend);
   MetaRendererNative *renderer_native = META_RENDERER_NATIVE (renderer);
   int n_planes;
@@ -967,6 +968,9 @@ ensure_scanout_tranche (MetaWaylandDmaBufSurfaceFeedback *surface_feedback,
                         MetaCrtc                         *crtc)
 {
   MetaWaylandDmaBufManager *dma_buf_manager = surface_feedback->dma_buf_manager;
+  MetaContext *context =
+    meta_wayland_compositor_get_context (dma_buf_manager->compositor);
+  MetaBackend *backend = meta_context_get_backend (context);
   MetaWaylandDmaBufFeedback *feedback = surface_feedback->feedback;
   MetaCrtcKms *crtc_kms;
   MetaWaylandDmaBufTranche *tranche;
@@ -992,7 +996,7 @@ ensure_scanout_tranche (MetaWaylandDmaBufSurfaceFeedback *surface_feedback,
     }
 
   formats = g_array_new (FALSE, FALSE, sizeof (MetaWaylandDmaBufFormat));
-  if (should_send_modifiers (meta_get_backend ()))
+  if (should_send_modifiers (backend))
     {
       for (i = 0; i < dma_buf_manager->formats->len; i++)
         {
@@ -1455,7 +1459,9 @@ MetaWaylandDmaBufManager *
 meta_wayland_dma_buf_manager_new (MetaWaylandCompositor  *compositor,
                                   GError                **error)
 {
-  MetaBackend *backend = meta_get_backend ();
+  MetaContext *context =
+    meta_wayland_compositor_get_context (compositor);
+  MetaBackend *backend = meta_context_get_backend (context);
   MetaEgl *egl = meta_backend_get_egl (backend);
   ClutterBackend *clutter_backend = meta_backend_get_clutter_backend (backend);
   CoglContext *cogl_context = clutter_backend_get_cogl_context (clutter_backend);

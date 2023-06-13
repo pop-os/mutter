@@ -433,8 +433,8 @@ meta_screen_cast_stream_src_set_cursor_sprite_metadata (MetaScreenCastStreamSrc 
 
   texture_width = cogl_texture_get_width (cursor_texture);
   texture_height = cogl_texture_get_height (cursor_texture);
-  bitmap_width = texture_width * scale;
-  bitmap_height = texture_height * scale;
+  bitmap_width = ceilf (texture_width * scale);
+  bitmap_height = ceilf (texture_height * scale);
 
   spa_meta_bitmap->size.width = bitmap_width;
   spa_meta_bitmap->size.height = bitmap_height;
@@ -610,8 +610,8 @@ meta_screen_cast_stream_src_maybe_record_frame (MetaScreenCastStreamSrc  *src,
       int64_t time_since_last_frame_us;
 
       min_interval_us =
-        ((G_USEC_PER_SEC * priv->video_format.max_framerate.denom) /
-         priv->video_format.max_framerate.num);
+        ((G_USEC_PER_SEC * ((int64_t) priv->video_format.max_framerate.denom)) /
+         ((int64_t) priv->video_format.max_framerate.num));
 
       time_since_last_frame_us = now_us - priv->last_frame_timestamp_us;
       if (time_since_last_frame_us < min_interval_us)

@@ -1237,24 +1237,36 @@ meta_window_actor_transform_cursor_position (MetaScreenCastWindow *screen_cast_w
       meta_cursor_sprite_get_cogl_texture (cursor_sprite) &&
       out_cursor_scale)
     {
-      MetaShapedTexture *stex;
-      double texture_scale;
+      MetaLogicalMonitor *logical_monitor;
+      float view_scale;
       float cursor_texture_scale;
 
-      stex = meta_surface_actor_get_texture (priv->surface);
-      texture_scale = meta_shaped_texture_get_buffer_scale (stex);
+      logical_monitor = meta_window_get_main_logical_monitor (window);
+
+      if (meta_is_stage_views_scaled ())
+        view_scale = meta_logical_monitor_get_scale (logical_monitor);
+      else
+        view_scale = 1.0;
+
       cursor_texture_scale = meta_cursor_sprite_get_texture_scale (cursor_sprite);
 
-      *out_cursor_scale = texture_scale / cursor_texture_scale;
+      *out_cursor_scale = view_scale * cursor_texture_scale;
     }
 
   if (out_relative_cursor_position)
     {
+      float resource_scale;
+
       clutter_actor_transform_stage_point (CLUTTER_ACTOR (priv->surface),
                                            cursor_position->x,
                                            cursor_position->y,
                                            &out_relative_cursor_position->x,
                                            &out_relative_cursor_position->y);
+
+      resource_scale =
+        clutter_actor_get_resource_scale (CLUTTER_ACTOR (window_actor));
+      out_relative_cursor_position->x *= resource_scale;
+      out_relative_cursor_position->y *= resource_scale;
     }
 
   return TRUE;
