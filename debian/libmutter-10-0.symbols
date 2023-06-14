@@ -274,6 +274,7 @@ libmutter-10.so.0 libmutter-10-0 #MINVER#
  meta_key_binding_is_builtin@Base 3.28.2
  meta_key_binding_is_reversed@Base 3.28.2
  meta_keybindings_set_custom_handler@Base 3.28.2
+ meta_keyboard_a11y_flags_get_type@Base 42.9
  meta_kms_connector_get_current_state@Base 42~beta
  meta_kms_connector_get_device@Base 42~beta
  meta_kms_connector_get_preferred_mode@Base 42~beta
