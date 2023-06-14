@@ -1,8 +1,13 @@
-mutter (42.9-0ubuntu1) UNRELEASED; urgency=medium
+mutter (42.9-0ubuntu1) jammy; urgency=medium
 
   * New upstream release (LP: #1998286)
+    - Fix high memory and lagginess when resizing side-by-side
+      tiled windows (LP: #1985089)
+  * Cherry-pick patch to fix dialog for enabling or disabling
+    accessibility features with keyboard shortcuts
+  * debian/libmutter-10-0.symbols: Add symbol from patch
 
- -- Jeremy Bícha <jbicha@ubuntu.com>  Tue, 13 Jun 2023 16:07:13 -0400
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Wed, 14 Jun 2023 15:25:14 -0400
 
 mutter (42.5-0ubuntu1) jammy; urgency=medium
 
