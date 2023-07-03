@@ -12,3 +12,4 @@ debian/tests-skip-monitor-width-size-check-as-it-may-lead-to-une.patch
 ubuntu/x11-Add-support-for-fractional-scaling-using-Randr.patch
 ubuntu/wayland-data-device-Allow-any-drag-timestamp-as-drag-star.patch
 backends-Move-MetaKeyboardA11yFlags-to-a-public-header.patch
+clutter-frame-clock-Avoid-rapidly-toggling-dynamic-max-re.patch
