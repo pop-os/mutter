@@ -1,3 +1,14 @@
+mutter (42.9-0ubuntu2) jammy; urgency=medium
+
+  * Add clutter-frame-clock-Avoid-rapidly-toggling-dynamic-max-re.patch to
+    avoid cursor stutter (LP: #2023766)
+  * Add backends-x11-Return-zero-Hz-instead-of-nan-Hz-for-incompl.patch
+    so that incomplete graphics mode definitions are reported as having a
+    refresh rate of 0 Hz instead of -nan Hz. This also fixes the behaviour
+    of the 'Revert Settings' button (LP: #2020782)
+
+ -- Daniel van Vugt <daniel.van.vugt@canonical.com>  Wed, 12 Jul 2023 07:49:16 -0400
+
 mutter (42.9-0ubuntu1) jammy; urgency=medium
 
   * New upstream release (LP: #1998286)
