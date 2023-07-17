@@ -1,9 +1,8 @@
-mutter (42.9-0ubuntu3) jammy; urgency=medium
+mutter (42.9-0ubuntu4) jammy; urgency=medium
 
   * Add Revert-data-udev-Don-t-disable-KMS-modifiers-on-newer-i91.patch
     to fix rendering failures on older kernels (5.15) when run on newer
-    hardware (Intel Alder Lake). This was a regression introduced by Intel
-    in 42.9! (LP: #2026887)
+    hardware (Intel Alder Lake). (LP: #2026887)
 
  -- Daniel van Vugt <daniel.van.vugt@canonical.com>  Thu, 13 Jul 2023 08:15:36 -0400
 
