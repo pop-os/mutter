@@ -1,3 +1,9 @@
+mutter (42.9-0ubuntu4pop0) jammy; urgency=medium
+
+  * Backport to Pop
+
+ -- Jeremy Soller <jeremy@system76.com>  Wed, 06 Sep 2023 10:29:02 -0600
+
 mutter (42.9-0ubuntu4) jammy; urgency=medium
 
   * Add Revert-data-udev-Don-t-disable-KMS-modifiers-on-newer-i91.patch
