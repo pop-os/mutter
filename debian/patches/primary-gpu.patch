@@ -1,0 +1,70 @@
+Index: mutter/src/backends/native/meta-kms-device.c
+===================================================================
+--- mutter.orig/src/backends/native/meta-kms-device.c	2025-09-11 10:26:33.166903835 -0600
++++ mutter/src/backends/native/meta-kms-device.c	2025-09-11 10:45:13.827174528 -0600
+@@ -540,3 +540,27 @@
+ 
+   object_class->finalize = meta_kms_device_finalize;
+ }
++
++gboolean
++meta_kms_device_has_connected_builtin_panel (MetaKmsDevice *device)
++{
++  GList *l;
++
++  for (l = device->connectors; l; l = l->next)
++    {
++      MetaKmsConnector *connector = META_KMS_CONNECTOR (l->data);
++
++      if (!meta_kms_connector_get_current_state (connector))
++        continue;
++
++      switch (meta_kms_connector_get_connector_type (connector))
++        {
++        case DRM_MODE_CONNECTOR_LVDS:
++        case DRM_MODE_CONNECTOR_eDP:
++        case DRM_MODE_CONNECTOR_DSI:
++          return TRUE;
++        }
++    }
++
++  return FALSE;
++}
+Index: mutter/src/backends/native/meta-kms-device.h
+===================================================================
+--- mutter.orig/src/backends/native/meta-kms-device.h	2025-09-11 10:26:33.166903835 -0600
++++ mutter/src/backends/native/meta-kms-device.h	2025-09-11 10:44:43.115919661 -0600
+@@ -85,4 +85,6 @@
+                                      MetaKmsDeviceFlag   flags,
+                                      GError            **error);
+ 
++gboolean meta_kms_device_has_connected_builtin_panel (MetaKmsDevice *device);
++
+ #endif /* META_KMS_DEVICE_H */
+Index: mutter/src/backends/native/meta-renderer-native.c
+===================================================================
+--- mutter.orig/src/backends/native/meta-renderer-native.c	2025-09-11 10:40:07.204638398 -0600
++++ mutter/src/backends/native/meta-renderer-native.c	2025-09-11 10:45:56.346527381 -0600
+@@ -2051,6 +2051,22 @@
+           }
+       }
+ 
++      /* Then prefer a GPU with a builtin panel connected to it. */
++      for (l = gpus; l; l = l->next)
++        {
++          MetaGpuKms *gpu_kms = META_GPU_KMS (l->data);
++          MetaKmsDevice *kms_device = meta_gpu_kms_get_kms_device (gpu_kms);
++
++          if (meta_kms_device_has_connected_builtin_panel (kms_device) &&
++              (allow_sw == 1 ||
++               gpu_kms_is_hardware_rendering (renderer_native, gpu_kms)))
++            {
++              g_message ("GPU %s selected primary from builtin panel presence",
++                         meta_gpu_kms_get_file_path (gpu_kms));
++              return gpu_kms;
++            }
++        }
++
+     /* Prefer a platform device */
+     for (l = gpus; l; l = l->next)
+       {

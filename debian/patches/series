@@ -25,3 +25,4 @@ screen-cast-stream-src-Do-not-try-to-create-a-0-sized-tex.patch
 
 # Pop!_OS patches
 pop-cosmic-keyboard-shortcuts.patch
+primary-gpu.patch
